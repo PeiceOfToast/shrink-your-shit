@@ -227,7 +227,7 @@ func (c *Client) workOne(ctx context.Context, cv Converter) (did bool, err error
 		if leaseGone(err) || ctx.Err() != nil {
 			return true, err
 		}
-		return true, c.report(ctx, l, map[string]any{"ok": false, "message": err.Error(), "stderr": stderr, "args": ran})
+		return true, c.report(ctx, l, failureReport(err, stderr, ran))
 	}
 	// The main video is judged by the encoder this worker ran (a card makes another depth than the
 	// processor for the same plan); the server judges the uploaded file by the same one, from the
@@ -267,6 +267,17 @@ func (c *Client) workOne(ctx context.Context, cv Converter) (did bool, err error
 	}
 	log.Printf("job %s: converted and checked; the server puts it in place", l.Job.ID)
 	return true, c.report(ctx, l, map[string]any{"ok": true, "sha256": sum, "bytes": size, "subs": subSums, "stderr": stderr, "steps": steps, "args": ran})
+}
+
+// failureReport is what a failed conversion sends: its words, ffmpeg's lines and the arguments that ran, and
+// the file-type refusal's code when ffmpeg says what the new file's type supports (slice 15), so the server
+// stores settings_rejected. A worker built before this sends the same report without a code.
+func failureReport(err error, stderr string, ran []string) map[string]any {
+	body := map[string]any{"ok": false, "message": err.Error(), "stderr": stderr, "args": ran}
+	if _, ok := jobs.HeaderSupport(stderr); ok {
+		body["code"] = jobs.ReasonSettingsRejected
+	}
+	return body
 }
 
 // checkSteps is the job's check step for a report: the picture score when the check ran, none otherwise.

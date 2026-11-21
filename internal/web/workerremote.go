@@ -278,6 +278,7 @@ func remoteRoutes(mux *http.ServeMux, store *jobs.Store, gate func(http.Response
 			Kept    string            // its checks said no (the words)
 			Message string            // it failed: why
 			Stderr  string
+			Code    string   // its failure's code, when not the general one (slice 15); "" from an older worker
 			Args    []string // the ffmpeg arguments it ran
 			Steps   []jobs.RunStep
 			Failure *jobs.FailureSummary
@@ -285,8 +286,14 @@ func remoteRoutes(mux *http.ServeMux, store *jobs.Store, gate func(http.Response
 		if !readJSON(w, r, &in) {
 			return
 		}
+		switch in.Code {
+		case "", jobs.ReasonSettingsRejected:
+		default:
+			apiError(w, http.StatusBadRequest, "invalid", "Unknown failure code.")
+			return
+		}
 		pl, _ := rj.Plan()
-		res := worker.RemoteResult{Stderr: in.Stderr, Command: in.Args}
+		res := worker.RemoteResult{Stderr: in.Stderr, Command: in.Args, Code: in.Code}
 		switch {
 		case in.Kept != "":
 			res.Kept = in.Kept

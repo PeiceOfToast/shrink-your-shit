@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
@@ -117,6 +118,41 @@ func TestHeaderRefusalIsNotDamage(t *testing.T) {
 	}
 	if !strings.Contains(j.Error, "Only VP8 or VP9 or AV1 video") || strings.Contains(j.Error, "damaged") {
 		t.Errorf("the job's message: %q", j.Error)
+	}
+}
+
+// Slice 15: a file-type refusal is the workflow's settings, not the graphics card's machine. The job
+// fails once, with the header sentence; the card is not tried again on the processor and does not count
+// as failing. Before the settings_rejected code existed the job fell back and counted.
+func TestHeaderRefusalIsNotAnEncoderFailure(t *testing.T) {
+	s := newScenario(t)
+	w := s.worker(Replace)
+	w.Encoder = func(string, bool, *rules.HDR) (string, string) { return "hevc_qsv", "" }
+	s.failEncoder = "hevc_qsv"
+	s.fullGPUStderr = "[webm @ 0x1] Only VP8 or VP9 or AV1 video and Vorbis or Opus audio and WebVTT subtitles are supported for WebM.\n" +
+		"[out#0/webm @ 0x2] Could not write header (incorrect codec parameters ?): Invalid argument"
+	if _, err := w.RunOne(context.Background()); err == nil {
+		t.Errorf("RunOne: want the refusal to fail the job")
+	}
+	j, _ := s.store.Get(s.id)
+	if j.Status != jobs.Failed {
+		t.Errorf("status %s, error %q", j.Status, j.Error)
+	}
+	if enc := encodeCalls(s); len(enc) != 1 || !strings.Contains(enc[0], "hevc_qsv") {
+		t.Errorf("encodes, want the graphics encoder once and no processor retry:\n%s", strings.Join(enc, "\n"))
+	}
+	if falls, err := s.store.EncoderFallbacksSince(time.Unix(0, 0)); err != nil || len(falls) != 0 {
+		t.Errorf("fall-backs %+v, %v: want none", falls, err)
+	}
+	if enc, _, err := s.store.EncoderLastFell(w.ID); err != nil || enc != "" {
+		t.Errorf("last fall %q, %v: want none", enc, err)
+	}
+	if !strings.Contains(j.Error, "Only VP8 or VP9 or AV1 video") || !strings.HasSuffix(j.Error, "Your original was not touched.") {
+		t.Errorf("the job's message: %q", j.Error)
+	}
+	ev, _ := s.store.JobEvents(s.id)
+	if len(ev) == 0 || ev[len(ev)-1].Reason != "settings_rejected" {
+		t.Errorf("events %+v, want the last to be settings_rejected", ev)
 	}
 }
 

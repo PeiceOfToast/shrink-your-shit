@@ -583,21 +583,23 @@ const userStoppedWords = "You stopped this file. It is left as it is until you p
 // Reason codes (V3, the contract's list): a job's reason is always one of these, with its sentence
 // beside it. The scan's skip codes (rules.Skip*) come from the file decision; these come from the job.
 const (
-	ReasonConvertFailed = "convert_failed"  // the conversion did not finish (the general case)
-	ReasonDiskFull      = "disk_full"       // the disk filled up while converting
-	ReasonCannotRead    = "cannot_read"     // not allowed to read the file
-	ReasonCannotWrite   = "cannot_write"    // not allowed to write in its folder
-	ReasonStalled       = "stalled"         // the converter stopped reporting progress
-	ReasonLowDiskSpace  = "low_disk_space"  // not enough free space next to the file to convert it safely
-	ReasonKeptOriginal  = "kept_original"   // a safety check refused the result; the original stays
-	ReasonNewFileBigger = "new_file_bigger" // the new file was bigger and the flow keeps originals: the file is left alone
-	ReasonRetryLater    = "retry_later"     // a failure that may pass, from before codes were kept (migration 23)
-	ReasonRemoved       = "removed"         // the job was removed (its library went, or a clean-up)
-	ReasonWorkerLost    = "worker_lost"     // its worker stopped answering (its lease ran out, V7a)
-	ReasonShareDropped  = "share_dropped"   // its share stopped answering mid-convert: back in the queue, never failed (D4c)
-	ReasonShareOffline  = "share_offline"   // shown on a waiting file whose library is paused by its share (not stored)
+	ReasonConvertFailed    = "convert_failed"    // the conversion did not finish (the general case)
+	ReasonDiskFull         = "disk_full"         // the disk filled up while converting
+	ReasonCannotRead       = "cannot_read"       // not allowed to read the file
+	ReasonCannotWrite      = "cannot_write"      // not allowed to write in its folder
+	ReasonStalled          = "stalled"           // the converter stopped reporting progress
+	ReasonLowDiskSpace     = "low_disk_space"    // not enough free space next to the file to convert it safely
+	ReasonKeptOriginal     = "kept_original"     // a safety check refused the result; the original stays
+	ReasonNewFileBigger    = "new_file_bigger"   // the new file was bigger and the flow keeps originals: the file is left alone
+	ReasonRetryLater       = "retry_later"       // a failure that may pass, from before codes were kept (migration 23)
+	ReasonRemoved          = "removed"           // the job was removed (its library went, or a clean-up)
+	ReasonWorkerLost       = "worker_lost"       // its worker stopped answering (its lease ran out, V7a)
+	ReasonSettingsRejected = "settings_rejected" // the new file's type can't hold a track as the workflow maps it (slice 15)
+	ReasonShareDropped     = "share_dropped"     // its share stopped answering mid-convert: back in the queue, never failed (D4c)
+	ReasonShareOffline     = "share_offline"     // shown on a waiting file whose library is paused by its share (not stored)
 )
 
 // JobReasonCodes are the codes a job's own reason can have (besides the skip codes and user_stopped).
 var JobReasonCodes = []string{ReasonConvertFailed, ReasonDiskFull, ReasonCannotRead, ReasonCannotWrite, ReasonStalled,
-	ReasonLowDiskSpace, ReasonKeptOriginal, ReasonNewFileBigger, ReasonRetryLater, ReasonRemoved, UserStoppedReason, ReasonWorkerLost, ReasonShareDropped}
+	ReasonLowDiskSpace, ReasonKeptOriginal, ReasonNewFileBigger, ReasonRetryLater, ReasonRemoved, UserStoppedReason, ReasonWorkerLost,
+	ReasonSettingsRejected, ReasonShareDropped}

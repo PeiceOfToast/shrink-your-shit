@@ -34,6 +34,12 @@ func TestFailureCodes(t *testing.T) {
 		{ReasonConvertFailed, []string{"/media/Movie.mkv: No such file or directory"}, "source_missing"},
 		{ReasonConvertFailed, []string{"/mnt/out/Movie.mkv: Permission denied"}, "output_not_writable"},
 		{ReasonConvertFailed, []string{"Error writing trailer: No space left on device"}, "no_space"},
+		// slice 15: s4's WebM refusal is the file type refusing the workflow's map, not a damage or encoder fault
+		{ReasonSettingsRejected, nil, "settings_rejected"},
+		{ReasonConvertFailed, []string{"[webm @ 0x1] Only VP8 or VP9 or AV1 video and Vorbis or Opus audio and WebVTT subtitles are supported for WebM.",
+			"[out#0/webm @ 0x2] Could not write header (incorrect codec parameters ?): Invalid argument"}, "settings_rejected"},
+		// a bare header stop is not the file type's limit: ffmpeg's own words must say what it supports
+		{ReasonConvertFailed, []string{"[out#0/webm @ 0x2] Could not write header (incorrect codec parameters ?): Invalid argument"}, "ffmpeg_error"},
 		{ReasonConvertFailed, []string{"Conversion failed!"}, "ffmpeg_error"},
 		{ReasonConvertFailed, nil, "ffmpeg_error"},
 		{"cannot_read", nil, "cannot_read"},
@@ -70,6 +76,38 @@ func TestFailureWords(t *testing.T) {
 	}
 	if msg, _ := FailureWords("ffmpeg_error", FailureFacts{ExitCode: -1}); msg != "ffmpeg stopped with an error." {
 		t.Errorf("no exit code: %q", msg)
+	}
+}
+
+// Slice 15: the job keeps the worker's own sentence (ffmpeg's line and what was not touched), and the next
+// step is design's: change the workflow, retrying won't help.
+func TestSettingsRejectedWords(t *testing.T) {
+	stored := "ffmpeg couldn't write the new file: Only VP8 or VP9 or AV1 video and Vorbis or Opus audio and WebVTT subtitles are supported for WebM. Your original was not touched."
+	msg, hint := FailureWords("settings_rejected", FailureFacts{Stored: stored})
+	if msg != stored {
+		t.Errorf("message %q, want the worker's sentence %q", msg, stored)
+	}
+	if want := "Change the workflow: this file type can't hold a track the way the workflow maps it. Retrying gives the same result."; hint != want {
+		t.Errorf("hint %q, want %q", hint, want)
+	}
+	if msg, _ := FailureWords("settings_rejected", FailureFacts{}); msg != "ffmpeg couldn't write the new file. Your original was not touched." {
+		t.Errorf("no stored words: %q", msg)
+	}
+}
+
+// Slice 15: ffmpeg's sentence about what the new file's type supports, only when it also stopped at the header.
+func TestHeaderSupport(t *testing.T) {
+	s4 := "[webm @ 0x1] Only VP8 or VP9 or AV1 video and Vorbis or Opus audio and WebVTT subtitles are supported for WebM.\n" +
+		"[out#0/webm @ 0x2] Could not write header (incorrect codec parameters ?): Invalid argument"
+	if line, ok := HeaderSupport(s4); !ok || line != "Only VP8 or VP9 or AV1 video and Vorbis or Opus audio and WebVTT subtitles are supported for WebM." {
+		t.Errorf("s4: %q %v", line, ok)
+	}
+	bare := "[out#0/webm @ 0x2] Could not write header (incorrect codec parameters ?): Invalid argument"
+	if line, ok := HeaderSupport(bare); ok || line != "" {
+		t.Errorf("a bare header stop: %q %v", line, ok)
+	}
+	if line, ok := HeaderSupport("[mov,mp4 @ 0x3] moov atom not found"); ok || line != "" {
+		t.Errorf("a damaged source: %q %v", line, ok)
 	}
 }
 
@@ -161,10 +199,13 @@ func TestReasonConditionMatchesFailureCode(t *testing.T) {
 		lines []string
 	}{
 		{ReasonDiskFull, nil}, {ReasonCannotWrite, nil}, {ReasonKeptOriginal, nil}, {ReasonStalled, nil}, {ReasonWorkerLost, nil},
+		{ReasonSettingsRejected, nil},
 		{ReasonConvertFailed, []string{"[AVEncoder @ 0x1] Unknown encoder 'h264_qsv'"}},
 		{ReasonConvertFailed, []string{"/mnt/out/Movie.mkv: Permission denied"}},
 		{ReasonConvertFailed, []string{"/media/Movie.mkv: No such file or directory"}},
 		{ReasonConvertFailed, []string{"[mov,mp4 @ 0x3] moov atom not found"}},
+		{ReasonConvertFailed, []string{"[webm @ 0x1] Only VP8 or VP9 or AV1 video and Vorbis or Opus audio and WebVTT subtitles are supported for WebM.",
+			"[out#0/webm @ 0x2] Could not write header (incorrect codec parameters ?): Invalid argument"}},
 		{ReasonConvertFailed, []string{"Conversion failed!"}},
 		{ReasonConvertFailed, nil},
 	} {
@@ -176,7 +217,7 @@ func TestReasonConditionMatchesFailureCode(t *testing.T) {
 		s.Fail(id, c.code, "x")
 	}
 	for _, want := range []string{"no_space", "output_not_writable", "check_failed", "stalled", "worker_lost",
-		"encoder_unavailable", "source_missing", "source_damaged", "ffmpeg_error"} {
+		"settings_rejected", "encoder_unavailable", "source_missing", "source_damaged", "ffmpeg_error"} {
 		cond, args, ok := ReasonCondition(want)
 		if !ok {
 			t.Fatalf("no condition for %s", want)
