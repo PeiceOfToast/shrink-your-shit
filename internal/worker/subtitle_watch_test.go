@@ -24,6 +24,7 @@ type subExec struct {
 	file   string // the path that grows
 	hang   bool
 	frames bool
+	silent bool // no progress block at all: ffmpeg prints nothing while the file grows
 
 	mu      sync.Mutex
 	sizes   map[string]int64
@@ -71,7 +72,9 @@ func (x *subExec) Stream(ctx context.Context, onLine func(string), name string, 
 		x.sizes[x.file] += n
 		x.mu.Unlock()
 		x.clock.add(growStep)
-		x.report(onLine)
+		if !x.silent {
+			x.report(onLine)
+		}
 	}
 	if !x.hang {
 		return x.FakeExec.Stream(ctx, onLine, name, args...)
@@ -83,7 +86,7 @@ func (x *subExec) Stream(ctx context.Context, onLine func(string), name string, 
 		case <-time.After(100 * time.Millisecond):
 		}
 		x.clock.add(growStep)
-		if x.frames {
+		if x.frames && !x.silent {
 			x.report(onLine)
 		}
 	}
@@ -209,5 +212,19 @@ func TestRunawayTempFileIsStoppedWhileGrowing(t *testing.T) {
 	}
 	if n := logCount(t, s, "more than twice the original's size"); n == 0 {
 		t.Errorf("no over-size stop while the output grew (err %v)", err)
+	}
+}
+
+// A silent encode (no progress block at all) whose temp file grows past twice the source is stopped by the watchdog's
+// own limit, with the "more than twice" reason. Here nothing reaches the progress callback, so only the watchdog's
+// outputWithin check can stop it; under `if true` in place of that check it runs on and this test fails.
+func TestSilentEncodeGrowingPastTwiceTheSourceIsStopped(t *testing.T) {
+	x := &subExec{file: "/data/movie.hevc.tmp.mkv", grow: []int64{1000, 1000, 1000}, hang: true, silent: true}
+	s, err := runSubtitleEncode(t, x, 14)
+	if err == nil {
+		t.Fatal("a silent encode whose temp file grew to 3000 bytes from a 14-byte source finished")
+	}
+	if n := logCount(t, s, "more than twice the original's size"); n == 0 {
+		t.Errorf("no over-size stop for a silent runaway (err %v)", err)
 	}
 }
