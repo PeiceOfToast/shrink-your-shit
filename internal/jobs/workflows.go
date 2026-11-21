@@ -829,11 +829,16 @@ type HourOfWork struct {
 	SavedBytes int64  `json:"savedBytes"`
 }
 
-// Throughput are the hours since at with jobs done, oldest first (V3c).
+// Throughput are the hours since at with jobs done, oldest first (V3c). Each file counts once, in the hour
+// of its latest 'done' event (the day rule savedByDay uses), and its saving is the shared clamped one, so
+// the hourly figures add up to the overview's for the same window (foundation slice 8).
 func (s *Store) Throughput(at string) ([]HourOfWork, error) {
-	rows, err := s.db.Query(`SELECT substr(e.at,1,13) || ':00:00Z', COUNT(*), COALESCE(SUM(MAX(j.size_before - COALESCE(j.size_after,0), 0)),0)
-FROM events e LEFT JOIN jobs j ON j.id = e.job_id
-WHERE e.kind='job' AND e.to_status='done' AND e.at >= ? AND `+notRestoredSQL("e.job_id")+` GROUP BY substr(e.at,1,13) ORDER BY 1`, at)
+	hour := `(SELECT substr(e.at,1,13) || ':00:00Z' FROM events e
+  WHERE e.kind='job' AND e.job_id=jobs.id AND e.to_status='` + string(Done) + `' ORDER BY e.seq DESC LIMIT 1)`
+	rows, err := s.db.Query(`SELECT h, COUNT(*), COALESCE(SUM(saved),0) FROM (
+  SELECT `+hour+` AS h, `+savedNowSQL+` AS saved
+  FROM jobs WHERE `+convertedNow("jobs")+` AND `+newestSQL+`
+) WHERE h >= ? GROUP BY h ORDER BY 1`, at)
 	if err != nil {
 		return nil, err
 	}

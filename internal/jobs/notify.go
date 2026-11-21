@@ -64,10 +64,13 @@ type Batch struct {
 // BatchSince reports the batch since the given time (RFC3339, UTC).
 func (s *Store) BatchSince(since string) (Batch, error) {
 	var b Batch
+	// Converted and Saved count a file once, by its newest conversion, and the saving is the shared
+	// clamped one (foundation slice 8): a grown file adds nothing, an unknown new size adds nothing, and an
+	// earlier conversion of the same file does not count again.
 	err := s.db.QueryRow(`SELECT
-  COALESCE(SUM(CASE WHEN `+convertedNow("jobs")+` AND updated>=? THEN 1 ELSE 0 END),0),
+  COALESCE(SUM(CASE WHEN `+convertedNow("jobs")+` AND `+newestSQL+` AND updated>=? THEN 1 ELSE 0 END),0),
   COALESCE(SUM(CASE WHEN status='failed' AND updated>=? THEN 1 ELSE 0 END),0),
-  COALESCE(SUM(CASE WHEN `+convertedNow("jobs")+` AND updated>=? THEN size_before-size_after ELSE 0 END),0),
+  COALESCE(SUM(CASE WHEN updated>=? THEN `+savedNowSQL+` END),0),
   COALESCE(SUM(CASE WHEN status='done' AND `+leftSQL+` THEN 1 ELSE 0 END),0),
   COALESCE(SUM(CASE WHEN status IN ('queued','running') THEN 1 ELSE 0 END),0)
 FROM jobs`, since, since, since).Scan(&b.Converted, &b.Failed, &b.Saved, &b.Waiting, &b.Active)
