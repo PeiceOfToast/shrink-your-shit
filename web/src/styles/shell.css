@@ -420,7 +420,7 @@ label.chk{cursor:pointer}
 @media (max-width:900px){ /* clean pass 2 (7.4): tables become stacked rows below 900 px (was 640) */
   .tbl .sub.phone{display:block}
   .list .tbl,.list .tbl tbody{display:block}
-  .list .tbl thead{display:none}
+  .list .tbl thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap} /* the column names stay for screen readers */
   .list .tbl tr{display:flex;align-items:center;gap:8px;min-height:60px;padding:8px 24px 8px 0;border-bottom:1px solid var(--border);position:relative}
   .list .tbl tr:last-child{border-bottom:0}
   .list .tbl tr::after{content:"\203A";position:absolute;right:6px;top:50%;transform:translateY(-50%);color:var(--text-2);font-size:20px;line-height:1}
@@ -448,6 +448,7 @@ label.chk{cursor:pointer}
   .list .tbl.jobs td.sizec{flex:0 0 100%;padding:0 0 0 48px;text-align:left;width:auto}
 }
 @media (min-width:901px){.list.rows .tbl.jobs td.selc{display:table-cell}} /* desktop Jobs keeps its row checkboxes; the Libraries rule hides them */
+@media (min-width:901px){.list .tbl.jobs td.idc{max-width:0;width:100%}} /* a long name shrinks to its ellipsis instead of widening the table past the page */
 .pagehead .btn.help{width:24px;min-height:24px;height:24px}.pagehead .btn.help .ic{width:16px;height:16px}
 /* the favourite star: a fixed 32 px column, the icon centred, colour only (no pressed box), so names line up (design, step 2) */
 .tbl .btn.star{width:24px;min-width:24px;height:24px;min-height:24px;flex:none;justify-content:center;border-color:transparent;background:none;padding:0}
@@ -795,6 +796,7 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 .ov .libhelp{margin-top:8px}.ov .libhelp p{margin:4px 0 0}
 .ov .ovt .prog{flex-direction:row;align-items:center;gap:8px;min-width:160px}.ov .ovt .prog .bar{flex:1 1 120px}
 .ov .fname{display:block;overflow-wrap:anywhere}
+.ov .sub.live>span{white-space:nowrap} /* each stat stays on one line: a wrapped Speed box used to cover Time left */
 @media (min-width:901px){.ov .list .tbl td.sizec{min-width:9rem}} /* the saving cell keeps its width without nowrap (Dashboard only; Jobs keeps its own) */
 /* pass 1 (row e8c7e61d): the day charts lead the page, two side by side; dataviz marks (see DayBars) */
 .ov .charts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:32px}
@@ -818,7 +820,7 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
   .ov .tiles{grid-template-columns:minmax(0,1fr)}.ov .tiles .tile{grid-template-columns:minmax(0,1fr) 96px}.ov .tiles .tile .spark{width:96px;height:40px}
   .ov .charts{grid-template-columns:minmax(0,1fr);gap:24px}
   .ov .legend.ph{display:none}
-  .ov .ovt,.ov .ovt tbody{display:block}.ov .ovt thead{display:none}
+  .ov .ovt,.ov .ovt tbody{display:block}.ov .ovt thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
   .ov .ovt tr{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;padding:10px 0;border-bottom:1px solid var(--border)}
   .ov .ovt td{display:block;border:0;height:auto;padding:0;text-align:left}
   .ov .ovt td.full,.ov .ovt td.nm{grid-column:1/-1}
