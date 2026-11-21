@@ -260,6 +260,32 @@ func TestGraphicsJobStartsBesideBusyFilesAtOnce(t *testing.T) {
 	}
 }
 
+// Slice 18: an attempt clears the plain words the queue row carried when it started (the remote lease clears
+// them the same way, in web), so a handed-back job can put them back and a running job shows no earlier
+// attempt's failure. Mutation: with the SetError clear in runClaimed removed, they stay while it runs.
+func TestAttemptStartsWithTheRowsEarlierWordsCleared(t *testing.T) {
+	s := newScenario(t)
+	if err := s.store.SetError(s.id, "The disk was full when it last ran.", "disk_full"); err != nil {
+		t.Fatal(err)
+	}
+	s.hang = func(name string, args []string) bool { return name == "ffmpeg" && s.has(args, "libx265") }
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	done := make(chan struct{})
+	go func() { s.worker(Replace).RunOne(ctx); close(done) }()
+	// The plan line is written after the clear, so it proves the assertions below are about a started attempt.
+	waitForLog(t, s, s.id, "Chosen:")
+	if j, _ := s.store.Get(s.id); j.Status != jobs.Running || j.Error != "" || j.ErrorCode != "" {
+		t.Errorf("while the attempt runs: %s %q %q, want running with the earlier words cleared", j.Status, j.Error, j.ErrorCode)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(60 * time.Second):
+		t.Fatal("the attempt did not stop")
+	}
+}
+
 // Slice 18, the setting off (today): the same queue and the same extra worker, and the graphics job still
 // waits: no job takes a Files at once place, so nothing is handed back and the third processor job runs.
 func TestGraphicsJobWaitsWhenTheSettingIsOff(t *testing.T) {
