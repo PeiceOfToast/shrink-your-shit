@@ -16,7 +16,7 @@ import { getPublishedDoc, getWorkflow, listWorkflows as listWorkflowDocs } from 
 import { bytes, clock, count, duration, plural } from "../format";
 import { useData } from "../useData";
 import type { FirstFiles, FolderReport, LibraryItem } from "../types/v1";
-import type { Library } from "../types/v2";
+import type { Library, Variable } from "../types/v2";
 
 function lastScan(t: string | null): string {
   if (!t) return "Not yet";
@@ -351,6 +351,7 @@ function Form({ l, v, workflows, reload, taken }: { l: LibraryItem | null; v: Li
             </div>
           </form>
         </section>
+        {l && v && <LibraryVars v={v} reload={reload} />}
         <FirstFive f={f} scanned={!!v?.scan.lastScanAt && f.checked === l?.path} />
         {l && v && <RemoveSection l={l} v={v} />}
       </div>}
@@ -502,4 +503,99 @@ function Output({ v, reload }: { v: Library; reload: () => void }) {
         </form>}
       </div>
     </section>);
+}
+
+// W3 (design): "Settings this library can change". The workflow's variables with templateParam, read from its published
+// revision (the one the server checks). A library's own value wins; a row with none uses the workflow's value. Saving sends
+// the whole list (PATCH variables), so a cleared row is simply left out.
+type Draft = string | boolean | null; // null: the workflow's value
+const WORKFLOW_VALUE = (x: Variable) => (x.value === undefined || x.value === null || x.value === "" ? "empty" : typeof x.value === "boolean" ? (x.value ? "yes" : "no") : String(x.value));
+const draftOf = (value: unknown): Draft => (value === undefined ? null : typeof value === "boolean" ? value : String(value));
+// the value to send: null when the row uses the workflow's value (an empty text box says the same); a number that doesn't
+// parse goes as text, so the server refuses it as variable_wrong_type by the field
+function valueOf(x: Variable, d: Draft): unknown {
+  if (d === null) return null;
+  if (typeof d === "boolean") return d;
+  const t = d.trim();
+  if (t === "") return null;
+  return x.type === "number" && /^-?\d+(\.\d+)?$/.test(t) ? Number(t) : t;
+}
+const sortedJSON = (l: { name: string; value: unknown }[]) => JSON.stringify([...l].sort((a, b) => a.name.localeCompare(b.name)));
+
+function LibraryVars({ v, reload }: { v: Library; reload: () => void }) {
+  const noWf = v.status === "no_workflow";
+  const pub = useData(() => (noWf ? Promise.resolve(null) : getPublishedDoc(v.workflowId)), [v.workflowId, noWf]);
+  const head = <div className="hd"><h2 id="lv-h">Settings this library can change</h2></div>;
+  if (noWf) return <section className="card" aria-labelledby="lv-h">{head}<div className="bd"><p className="muted">Pick a workflow first.</p></div></section>;
+  if (!pub.loaded) return <section className="card" aria-labelledby="lv-h">{head}<div className="bd"><p className="muted">Loading…</p></div></section>;
+  if (pub.error && !pub.data) return <section className="card" aria-labelledby="lv-h">{head}<div className="bd"><p className="st bad" role="alert"><Icon id="i-alert" /><span>{pub.error.message}</span></p></div></section>;
+  const vars = (pub.data?.variables ?? []).filter((x) => x.templateParam);
+  if (!vars.length) return <section className="card" aria-labelledby="lv-h">{head}<div className="bd"><p className="muted">This library's workflow has nothing a library can change.</p></div></section>;
+  // keyed by the saved values: a successful save remounts from the list the server answered with
+  return <LibraryVarsForm key={v.workflowId + sortedJSON(v.variables)} v={v} vars={vars} reload={reload} />;
+}
+
+function LibraryVarsForm({ v, vars, reload }: { v: Library; vars: Variable[]; reload: () => void }) {
+  const [draft, setDraft] = useState<Record<string, Draft>>(() => Object.fromEntries(vars.map((x) => [x.name, draftOf(v.variables.find((o) => o.name === x.name)?.value)])));
+  const [errs, setErrs] = useState<Record<string, string>>({}), [error, setError] = useState(""), [said, setSaid] = useState(""), [busy, setBusy] = useState(false);
+  const set = (name: string, d: Draft) => setDraft((all) => ({ ...all, [name]: d }));
+  const toSend = vars.flatMap((x) => { const val = valueOf(x, draft[x.name] ?? null); return val === null ? [] : [{ name: x.name, value: val }]; });
+  const changed = sortedJSON(toSend) !== sortedJSON(v.variables.map((o) => ({ name: o.name, value: o.value })));
+  const save = async () => {
+    setSaid(""); setError(""); setErrs({}); setBusy(true);
+    try {
+      const r = await patchLibraryV2(v.id, { variables: toSend });
+      if (failed(r)) {
+        const issues = (r.error as { issues?: { name?: string; message: string }[] }).issues ?? [];
+        const byField: Record<string, string> = {}, rest: string[] = [];
+        for (const i of issues) (i.name && vars.some((x) => x.name === i.name) ? (byField[i.name] ??= i.message) : rest.push(i.message));
+        setErrs(byField); setError(rest.length || !Object.keys(byField).length ? [...rest, ...(Object.keys(byField).length ? [] : [r.error.message])].join(" ") : "");
+        const first = vars.find((x) => byField[x.name]);
+        if (first) document.getElementById("lv-" + first.name)?.focus();
+        return;
+      }
+      setSaid(toSend.length ? "Saved." : "Saved. " + v.name + " uses the workflow's values.");
+      reload();
+    } catch (e) { if (e instanceof SignedOut) return; throw e; }
+    finally { setBusy(false); }
+  };
+  return (
+    <section className="card" aria-labelledby="lv-h">
+      <div className="hd"><h2 id="lv-h">Settings this library can change</h2></div>
+      <form className="bd stack" onSubmit={(e) => (e.preventDefault(), save())}>
+        {vars.map((x) => {
+          const d = draft[x.name] ?? null, id = "lv-" + x.name, hint = id + "-h", err = id + "-err";
+          const describedBy = [hint, errs[x.name] ? err : ""].filter(Boolean).join(" ");
+          const label = <>{x.description ? x.description + " " : ""}<span className="mono">{"{{" + x.name + "}}"}</span></>;
+          const input = x.type === "bool" ? (
+            <label className="row" style={{ gap: 8, alignItems: "center" }}>
+              <input id={id} type="checkbox" role="switch" checked={typeof d === "boolean" ? d : !!x.value} onChange={(e) => set(x.name, e.target.checked)} aria-describedby={describedBy} />
+              <span>{typeof d === "boolean" ? (d ? "Yes" : "No") : "Workflow's value"}</span>
+            </label>
+          ) : x.type === "enum" ? (
+            <select id={id} className="input" value={typeof d === "string" ? d : ""} onChange={(e) => set(x.name, e.target.value || null)} aria-describedby={describedBy} aria-invalid={!!errs[x.name]}>
+              <option value="">Workflow's value</option>
+              {(x.options ?? []).map((o) => <option key={o} value={o}>{o}</option>)}
+            </select>
+          ) : (
+            <input id={id} className={"input" + (x.type === "path" ? " mono" : "")} type="text" inputMode={x.type === "number" ? "numeric" : undefined}
+              value={typeof d === "string" ? d : typeof d === "boolean" ? String(d) : ""} placeholder={WORKFLOW_VALUE(x)}
+              onChange={(e) => set(x.name, e.target.value)} aria-describedby={describedBy} aria-invalid={!!errs[x.name]} />
+          );
+          return (
+            <div className="field" key={x.name}>
+              {x.type === "bool" ? <span className="lab">{label}</span> : <label htmlFor={id}>{label}</label>}
+              {input}
+              <span className="hint" id={hint}>Workflow's value: {WORKFLOW_VALUE(x)}.{x.type === "bool" || x.type === "enum" ? "" : " Leave it empty to use the workflow's value."}</span>
+              {errs[x.name] && <p className="st bad" id={err} role="alert"><Icon id="i-alert" /><span>{errs[x.name]}</span></p>}
+              <div><button className="btn sm" type="button" disabled={busy || d === null} onClick={() => set(x.name, null)}>Use the workflow's value</button></div>
+            </div>
+          );
+        })}
+        {error && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{error}</span></p>}
+        <p className="muted" role="status">{said}</p>
+        <div className="row" style={{ gap: 8 }}><button className="btn primary" type="submit" disabled={busy || !changed}>Save settings</button></div>
+      </form>
+    </section>
+  );
 }

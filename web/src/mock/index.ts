@@ -18,6 +18,7 @@ const unwritable = new URLSearchParams(location.search).has("unwritable"); // TV
 function library(id: ID, name: string, path: string, freed: number, waitingToFree: number, files: number): Library {
   return {
     id, name, paths: [path], fileType: "video", enabled: true, workflowId: "w1", workflowName: "Shrink videos", priority: 0,
+    variables: [],
     scan: { state: "idle", progress: null, lastScanAt: ago(90), nextScanAt: ago(-270), scheduleLabel: "Every 6 hours" },
     counts: { files, waiting: Math.round(files * 0.4), running: 0, completed: Math.round(files * 0.5), skipped: 12, failed: 1 },
     bytes: { freed, waitingToFree, grew: 0 },
@@ -457,7 +458,7 @@ export function getLibrary(id: ID): Answer<Library> {
   const l = state.libraries.find((x) => x.id === id);
   return l ? structuredClone(l) : { error: { code: "not_found", message: "There is no such library." } };
 }
-export function patchLibraryV2(id: ID, p: { enabled?: boolean; priority?: number; overrideFolder?: string | null }): Answer<Library> {
+export function patchLibraryV2(id: ID, p: { enabled?: boolean; priority?: number; overrideFolder?: string | null; variables?: { name: string; value: unknown }[] }): Answer<Library> {
   const l = state.libraries.find((x) => x.id === id);
   if (!l) return { error: { code: "not_found", message: "There is no such library." } };
   if (p.enabled && l.status === "no_workflow") return { error: { code: "no_workflow", message: NO_WORKFLOW } };
@@ -468,6 +469,8 @@ export function patchLibraryV2(id: ID, p: { enabled?: boolean; priority?: number
     const x = s.libraries.find((y) => y.id === id)!;
     if (p.enabled !== undefined) { x.enabled = p.enabled; x.status = p.enabled ? "ok" : "disabled"; }
     if (p.priority !== undefined) x.priority = p.priority;
+    // the mock takes any value (no kind or template checks): enough to show the section; the real server checks both
+    if (p.variables) x.variables = p.variables.map((v) => ({ name: v.name, value: v.value, type: typeof v.value === "number" ? "number" : typeof v.value === "boolean" ? "bool" : "string" }));
     if (p.overrideFolder !== undefined) x.output = { ...x.output, overrideFolder: dir || null, folder: x.output.policy === "separate_folder" ? dir || x.paths[0] + " (shrunk)" : x.output.folder };
   });
   return getLibrary(id);
