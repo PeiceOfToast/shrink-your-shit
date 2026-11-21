@@ -2,7 +2,6 @@
 // (#109: step definitions, the draft, validate, publish), or the mock with ?mock=1 (mock/steps.ts mirrors V1). The step
 // words and problems come from the server's validate, asked again shortly after each change. Not here: drag to reorder
 // (W11's handle, behind a flag) and the graph's keyboard moves, Test run (V5), History, Export, Open graph (V4).
-import { PageHead } from "../PageHead";
 import { Component, Fragment, createContext, useContext, useEffect, useRef, useState, type FormEvent, type ReactNode, type RefObject } from "react";
 import { Icon } from "../Icon";
 import { SignedOut, failed, type Answer } from "../api";
@@ -740,9 +739,13 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
   const issues = checked || !dirty ? live.issues : [];
   // the variable problems to show on their rows: the last refused save's, else the server's live check of the document
   const nameIssues = refused.length ? refused : issues.filter((i) => VAR_CODES.includes(i.code));
-  const tools = <>
+  // U11 (ui-review C10): the steps view shares the graph's toolbar: undo/redo beside the view switch in the middle,
+  // Check and Save draft on the right beside the one primary, Publish
+  const undoRedo = <>
     <button className="btn sm icon ghost" type="button" title="Undo" aria-label="Undo" disabled={hist.at === 0} onClick={() => setHist({ ...hist, at: hist.at - 1 })}><Icon id="i-undo" /></button>
     <button className="btn sm icon ghost" type="button" title="Redo" aria-label="Redo" disabled={hist.at === hist.docs.length - 1} onClick={() => setHist({ ...hist, at: hist.at + 1 })}><Icon id="i-redo" /></button>
+  </>;
+  const tools = <>
     <button className="btn sm ghost" type="button" onClick={async () => { if (await ask(doc)) setChecked(true); }}><Icon id="i-checks" />Check</button>
     <button className="btn sm" type="button" disabled={!dirty} onClick={save}><Icon id="i-save" />Save draft</button>
   </>;
@@ -762,25 +765,32 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
   return (
     <Reg.Provider value={{ defs, words: live.stepSummaries, libs, wf: id }}>
     <OwnVars.Provider value={doc.variables ?? []}>
-    <div className="stack">
-      {/* the workflow's header row (clean pass W2) */}
-      <PageHead icon="i-workflow" crumbs={[["Workflows", "/workflows"]]}
-        title={renaming ? <form className="row" onSubmit={(e) => { e.preventDefault(); const v = (e.currentTarget.elements.namedItem("nm") as HTMLInputElement).value.trim(); if (v) rename(v); else setRenaming(false); }}>
+    <div className="editor stackpage">
+      {/* U11 (flow-builder.md 4.2, ui-review C10): the steps view is the same workspace as the graph: a 48 px toolbar
+          (name, status, the view switch and undo/redo in the middle, Check, Save draft and the one primary on the
+          right), then a frame that scrolls inside the window */}
+      <div className="edbar" role="toolbar" aria-label={"Editing " + w.name}>
+        <span className="muted crumb"><Link to="/workflows">Workflows</Link> /</span>
+        {renaming ? <form className="row" onSubmit={(e) => { e.preventDefault(); const v = (e.currentTarget.elements.namedItem("nm") as HTMLInputElement).value.trim(); if (v) rename(v); else setRenaming(false); }}>
             <label className="sr" htmlFor="wf-rename">Name</label><input id="wf-rename" name="nm" className="input" defaultValue={w.name} autoFocus style={{ width: "auto" }} />
-            <button className="btn sm" type="submit">Rename</button><button className="btn sm ghost" type="button" onClick={() => setRenaming(false)}>Cancel</button></form> : w.name}
-        after={<>
-          {!renaming && <button className="btn sm ghost" type="button" onClick={() => setRenaming(true)} aria-label={"Rename " + w.name}>Rename</button>}
-          <span className="pill">{w.version == null || w.draftDiffers || dirty ? "Draft" : "Published"}</span>
-          <span className="muted sm">{w.version == null ? "Not published yet" : "v" + w.version + " published" + (w.draftDiffers || dirty ? " · v" + (w.version + 1) + " draft" : "")}</span>
-        </>}>
-        {simple ? <Link className="btn sm ghost vlink" to={"/workflows/" + id}>All steps</Link> : <Link className="btn sm ghost vlink" to={"/workflows/" + id + "?view=simple"}>Simple view</Link>}
-        <Link className="btn sm ghost" to={"/workflows/" + id + "/graph"}>Graph</Link>
+            <button className="btn sm" type="submit">Rename</button><button className="btn sm ghost" type="button" onClick={() => setRenaming(false)}>Cancel</button></form>
+          : <><span className="nm">{w.name}</span><button className="btn sm ghost" type="button" onClick={() => setRenaming(true)} aria-label={"Rename " + w.name}>Rename</button></>}
+        <span className="pill">{w.version == null || w.draftDiffers || dirty ? "Draft" : "Published"}</span>
+        <span className="muted nowrap desk edver">{w.version == null ? "Not published yet" : "v" + w.version + " published" + (w.draftDiffers || dirty ? " · v" + (w.version + 1) + " draft" : "")}</span>
+        <div className="mid">
+          <div className="edsegs" role="group" aria-label="View">
+            {simple ? <Link to={"/workflows/" + id} aria-pressed="false">Steps</Link> : <button type="button" aria-pressed="true">Steps</button>}
+            {simple ? <button type="button" aria-pressed="true">Simple</button> : <Link to={"/workflows/" + id + "?view=simple"} aria-pressed="false">Simple</Link>}
+            <Link to={"/workflows/" + id + "/graph"} aria-pressed="false">Graph</Link>
+          </div>
+          {canStack && <><span className="vr" aria-hidden="true" />{undoRedo}</>}
+        </div>
         {canStack && <>
-          <span className="desk">{tools}</span>
-          <details className="menu phone"><summary className="btn sm icon ghost" aria-label="More actions"><Icon id="i-more" /></summary><div className="pop" role="menu">{tools}</div></details>
+          {tools}
           <button className="btn sm primary" type="button" disabled={varBad.length > 0} title={varBad.length ? "Fix the variable names first" : undefined} onClick={openPublish}>Publish</button>
         </>}
-      </PageHead>
+      </div>
+      <div className="edframe stackframe"><div className="stackbody">
       {canStack && (checked || !dirty) && (issues.length === 0 ? <p className="st ok checkline"><Icon id="i-check-c" /><span>Check: no problems</span></p>
         : <p className="st bad checkline"><Icon id="i-alert" /><span>Check: {issues.length === 1 ? "1 problem" : issues.length + " problems"}. Publish waits until {issues.length === 1 ? "it's" : "they're"} fixed. <button className="linkbtn" type="button" onClick={() => setOpen(issues[0].nodeId ?? null)}>Show</button></span></p>)}
       {canStack && varBad.length > 0 && <p className="st bad" role="alert"><Icon id="i-alert" /><span>Fix {varBad.length === 1 ? "1 field" : varBad.length + " fields"} before publishing. <button className="linkbtn" type="button" onClick={() => setOpen(varBad[0].nodeId)}>{varBad[0].title}</button></span></p>}
@@ -827,6 +837,7 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
         {gone && hist.at === gone.at && <div className="note" onPointerEnter={() => setHold(true)} onPointerLeave={() => setHold(false)} onFocus={() => setHold(true)} onBlur={() => setHold(false)}>
           <Icon id="i-undo" /><span className="sp">{gone.text}</span><button className="btn sm ghost" type="button" onClick={undoGone}>Undo</button></div>}
       </> : <ReadOnly doc={doc} id={id} />}
+      </div></div>
     </div>
     </OwnVars.Provider>
     </Reg.Provider>);

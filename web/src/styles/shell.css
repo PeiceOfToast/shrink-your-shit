@@ -920,4 +920,14 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 .gnode .gport{font-size:12.5px}
 .gnode .goff{font-size:12.5px}
 .gnode .gprob{font-size:12.5px;top:-11px}
+/* U11 (ui-review C10): nothing in a node under 12.5 px, the unlinked-port pill included; edge labels the same */
+.gnode .gpill,.gnode .gpill.inrow{font-size:var(--fs-sm)}
+.gcanvas .react-flow__edge-text{font-size:var(--fs-sm)}
+/* U11: the steps view is the same workspace: the toolbar, then a frame that scrolls inside the window, so the
+   page itself never scrolls at a desk; on a phone the frame is the page (the 900 px rule above) */
+.editor.stackpage .edframe.stackframe{display:block;overflow:auto;padding:var(--pad) var(--page-pad) 48px;background:var(--bg)}
+.stackframe>.stackbody{display:flex;flex-direction:column;gap:calc(var(--gap)*1.4);min-width:0}
+.edbar .crumb{white-space:nowrap}
+.edbar form.row{gap:6px}
+@media (max-width:900px){.editor.stackpage .edframe.stackframe{overflow:visible}}
 .gpi small{font-size:12.5px}.gpi .tt{font-size:12.5px}
