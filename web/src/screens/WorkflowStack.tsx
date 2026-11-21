@@ -55,7 +55,7 @@ function SrtFiles() {
 // other problem. The flow builder owns this screen (manager, 02:10Z).
 const isRef = (v: unknown) => typeof v === "string" && /^\{\{[a-z][a-z0-9_]*\}\}$/.test(v);
 const refName = (v: unknown) => (isRef(v) ? (v as string).slice(2, -2) : "");
-function RefPick({ fid, title, value, wf, set, back, selectRef }: { fid: string; title: string; value: unknown; wf: string; set: (v: unknown) => void; back: () => void; selectRef: RefObject<HTMLSelectElement | null> }) {
+function RefPick({ fid, title, value, wf, set, back, selectRef, none }: { fid: string; title: string; value: unknown; wf: string; set: (v: unknown) => void; back: () => void; selectRef: RefObject<HTMLSelectElement | null>; none: unknown }) {
   const vl = useData(() => varListFor(wf, true), [wf]).data, own = useContext(OwnVars);
   const vars = vl ? withOwn(vl.variables, own) : [], groups = [...new Set(vars.map((v) => v.group))], cur = refName(value);
   const known = vars.some((v) => v.name === cur);
@@ -63,7 +63,7 @@ function RefPick({ fid, title, value, wf, set, back, selectRef }: { fid: string;
     <div className="field">
       <label htmlFor={fid}>{title}</label>
       <div className="row nw" style={{ gap: 8 }}>
-        <select ref={selectRef} id={fid} className="input" value={cur} aria-describedby={fid + "-ref"} onChange={(e) => { const next = e.target.value ? "{{" + e.target.value + "}}" : ""; if (next !== value) set(next); }}>
+        <select ref={selectRef} id={fid} className="input" value={cur} aria-describedby={fid + "-ref"} onChange={(e) => { const next = e.target.value ? "{{" + e.target.value + "}}" : none; if (next !== value) set(next); }}>
           <option value="">Choose a variable…</option>
           {cur && !known && <option value={cur}>{"{{" + cur + "}}"} · not a variable here</option>}
           {groups.map((g) => <optgroup key={g} label={g}>{vars.filter((v) => v.group === g).map((v) => <option key={v.name} value={v.name}>{"{{" + v.name + "}}"}{v.value != null && v.value !== "" ? " · " + v.value : ""}</option>)}</optgroup>)}
@@ -85,10 +85,12 @@ function Field(props: { id: string; name: string; s: JSONSchema; value: unknown;
   useEffect(() => { if (refMode) pick.current?.focus(); }, [refMode]);
   useEffect(() => { if (focusTyped) (document.getElementById(fid) as HTMLElement | null ?? link.current)?.focus(); }, [focusTyped, fid]);
   const inRef = typed && (refMode || isRef(value));
-  if (inRef) return <RefPick fid={fid} title={title} value={value} wf={wf} set={set} selectRef={pick} back={() => {
+  // "Choose a variable…" picked again puts the typed value back (never "" into a number or a choice: ui-shop N1)
+  const none = typedValue.current !== undefined ? typedValue.current : s.default;
+  if (inRef) return <RefPick fid={fid} title={title} value={value} wf={wf} set={set} selectRef={pick} none={none} back={() => {
     const restore = typedValue.current !== undefined ? typedValue.current : s.default;
     setRefMode(false); setFocusTyped((n) => n + 1);
-    if (isRef(value) || value === "") { if (restore !== value) set(restore); } // a plain value already there is left as it is
+    if (isRef(value)) { if (restore !== value) set(restore); } // a plain value already there is left as it is
   }} />;
   return (
     <>
