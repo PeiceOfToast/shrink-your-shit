@@ -137,9 +137,16 @@ func chain(nodes []Node, prev *Doc) []Edge {
 // is the flow's template now: when d means the same, it is returned unchanged, so a Basic flow stays a
 // Basic flow. A Doc this version can't run gives an issue instead (it can still be saved as a draft).
 func ToTemplate(d Doc, current rules.Template) (rules.Template, []Issue) {
+	return ToTemplateWith(d, current, Scopes{})
+}
+
+// ToTemplateWith is ToTemplate with the other scopes (W2). With s.LeaveFile a file.* or source.*
+// reference stays in the doc: a published workflow has no file yet, and the job compiles it again
+// with the file it has before running it.
+func ToTemplateWith(d Doc, current rules.Template, sc Scopes) (rules.Template, []Issue) {
 	// W1: the compile sees resolved settings only. A reference that can't be resolved is the workflow's
 	// to fix, so it comes back as an issue rather than compiling at whatever the literal would default to.
-	resolved, refIssues := Resolve(d)
+	resolved, refIssues, _ := resolveOnce(d, sc)
 	if len(refIssues) > 0 {
 		return rules.Template{}, refIssues
 	}
@@ -163,7 +170,7 @@ func ToTemplate(d Doc, current rules.Template) (rules.Template, []Issue) {
 	if !slices.Equal(types, PresetOrder) {
 		return rules.Template{}, []Issue{chainIssue(order)}
 	}
-	s, issues := selectorsOf(order)
+	s, issues := selectorsOf(order, sc.LeaveFile)
 	if len(issues) > 0 {
 		return rules.Template{}, issues
 	}
@@ -179,7 +186,7 @@ func ToTemplate(d Doc, current rules.Template) (rules.Template, []Issue) {
 
 // selectorsOf reads the preset chain's configs (missing keys take their defaults; a turned-off audio,
 // subtitles or file type step passes the original's through).
-func selectorsOf(order []Node) (rules.Selectors, []Issue) {
+func selectorsOf(order []Node, leaveFile bool) (rules.Selectors, []Issue) {
 	s := rules.DefaultSelectors(3)
 	s.Ignore = []string{}
 	by := map[string]Node{}
@@ -208,6 +215,12 @@ func selectorsOf(order []Node) (rules.Selectors, []Issue) {
 	}
 	if s.RateControl == "vbr" || s.RateControl == "vbr_legacy" {
 		s.VBRMaxKbps = intOf(cv, "vbrMaxKbps", 0)
+		if leaveFile && s.VBRMaxKbps == 0 && keptFileRef(cv["vbrMaxKbps"]) {
+			// W2: the limit comes from the file, so there is no number yet; the job compiles this
+			// template again with the file's value, so only a value rules.Selectors.Validate accepts
+			// matters here (the schema's minimum).
+			s.VBRMaxKbps = 100
+		}
 	}
 	if a := by[TypeAudio]; a.Enabled {
 		s.Audio, s.OnlyMyLanguages = strOf(a.Config, "audio", s.Audio), boolOf(a.Config, "onlyMyLanguages", s.OnlyMyLanguages)

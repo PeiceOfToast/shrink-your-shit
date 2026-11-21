@@ -769,6 +769,9 @@ type RunVariable struct {
 	End       string `json:"end,omitempty"`
 	ChangedBy string `json:"changedBy,omitempty"`
 	Secret    bool   `json:"secret,omitempty"`
+	// Origin is where a value the workflow's settings used came from (W2): "workflow", "library",
+	// "global", or the file's own "file"/"source". Empty for the run's built-in names.
+	Origin string `json:"origin,omitempty"`
 }
 
 // Verification are the program-wide settings that judge a result (the flags -min-ssim, -decode-check).

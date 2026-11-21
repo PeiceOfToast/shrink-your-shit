@@ -295,9 +295,9 @@ func TestAnUnopenableSecretStopsTheJob(t *testing.T) {
 	}
 	w.RunOne(context.Background()) // the failure is the job's, checked below
 	j := s.job()
-	// like the other unreadable-setting failures it waits for a retry (the person can enter the secret in
-	// the meantime), and the job says why meanwhile
-	if j.Status != jobs.Queued || !strings.Contains(j.Error, "The workflow secret “api_key” can't be opened on this computer") ||
+	// A retry can't pass until someone enters the secret again (review-561 2a), so the job fails and says
+	// why; it does not go back to the queue to fail the same way three times.
+	if j.Status != jobs.Failed || !strings.Contains(j.Error, "The workflow secret “api_key” can't be opened on this computer") ||
 		!strings.Contains(j.Error, "Enter it again in the workflow, then press Retry.") {
 		t.Fatalf("status %s, error %q", j.Status, j.Error)
 	}

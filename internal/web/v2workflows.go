@@ -286,7 +286,12 @@ func v2Workflows(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			storeErr(w, err)
 			return
 		}
-		writeJSON(w, revisionView(policyFor(store), d))
+		sc, err := workflowScopes(store)
+		if err != nil {
+			serverError(w, err)
+			return
+		}
+		writeJSON(w, revisionView(d, sc))
 	})
 	api.HandleFunc("PUT /api/v2/workflows/{id}/draft", func(w http.ResponseWriter, r *http.Request) {
 		id, ok := wfID(w, r)
@@ -319,7 +324,12 @@ func v2Workflows(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			storeErr(w, err)
 			return
 		}
-		writeJSON(w, revisionView(policyFor(store), d))
+		sc, err := workflowScopes(store)
+		if err != nil {
+			serverError(w, err)
+			return
+		}
+		writeJSON(w, revisionView(d, sc))
 	})
 	api.HandleFunc("POST /api/v2/workflows/{id}/validate", func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := wfID(w, r); !ok {
@@ -329,7 +339,12 @@ func v2Workflows(api *http.ServeMux, store *jobs.Store, eng Engine) {
 		if !readJSON(w, r, &in) {
 			return
 		}
-		writeJSON(w, workflow.ValidateWith(in.Workflow, policyFor(store))) // FB2b: the Safety switch counts here
+		sc, err := workflowScopes(store) // FB2b: the Safety switch counts here too
+		if err != nil {
+			serverError(w, err)
+			return
+		}
+		writeJSON(w, workflow.ValidateWith(in.Workflow, sc))
 	})
 	api.HandleFunc("GET /api/v2/workflows/{id}/publish-preview", func(w http.ResponseWriter, r *http.Request) {
 		id, ok := wfID(w, r)
@@ -351,9 +366,14 @@ func v2Workflows(api *http.ServeMux, store *jobs.Store, eng Engine) {
 		if has {
 			next, before = *latest.Number+1, &latest.Doc
 		}
+		sc, err := workflowScopes(store)
+		if err != nil {
+			serverError(w, err)
+			return
+		}
 		changes := []map[string]string{}
 		if !fresh {
-			changes = docChanges(before, d.Doc)
+			changes = docChanges(before, d.Doc, sc)
 		}
 		v, err := workflowView(store, id)
 		if err != nil {
@@ -361,7 +381,7 @@ func v2Workflows(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			return
 		}
 		writeJSON(w, map[string]any{"nextNumber": next, "changes": changes, "libraries": v["libraries"],
-			"changesOriginals": commitPolicy(d.Doc) == "replace", "validation": workflow.ValidateWith(d.Doc, policyFor(store)).Issues})
+			"changesOriginals": commitPolicy(d.Doc, sc) == "replace", "validation": workflow.ValidateWith(d.Doc, sc).Issues})
 	})
 	api.HandleFunc("POST /api/v2/workflows/{id}/publish", func(w http.ResponseWriter, r *http.Request) {
 		id, ok := wfID(w, r)
@@ -381,9 +401,14 @@ func v2Workflows(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			storeErr(w, jobs.ErrStaleDraft)
 			return
 		}
-		if res := workflow.ValidateWith(d.Doc, policyFor(store)); res.Errors() { // FB2b: Run a command needs the Safety switch
-			// A {{name}} template problem names its setting in the error itself (the page keys on the code and
-			// shows the field); every other problem keeps the general answer, with all the issues listed.
+		sc, err := workflowScopes(store)
+		if err != nil {
+			serverError(w, err)
+			return
+		}
+		if res := workflow.ValidateWith(d.Doc, sc); res.Errors() { // FB2b: Run a command needs the Safety switch
+			// A {{name}} problem names its setting in the error itself (the page keys on the code and shows
+			// the field); every other problem keeps the general answer, with all the issues listed.
 			code, message := "has_errors", "This workflow has problems to fix before it can be published. Nothing was changed."
 			more := map[string]any{"issues": res.Issues}
 			for _, i := range res.Issues {
@@ -404,7 +429,7 @@ func v2Workflows(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			storeErr(w, err)
 			return
 		}
-		t, issues := workflow.ToTemplate(d.Doc, f.Template)
+		t, issues := workflow.ToTemplateWith(d.Doc, f.Template, sc)
 		if len(issues) > 0 {
 			writeErrorWith(w, http.StatusBadRequest, "has_errors", issues[0].Message+" Nothing was changed.", map[string]any{"issues": issues})
 			return
@@ -431,7 +456,11 @@ func v2Workflows(api *http.ServeMux, store *jobs.Store, eng Engine) {
 		if eng.ScanNow != nil {
 			eng.ScanNow() // its libraries' files are looked at again, as after the old Save (review acace8e)
 		}
-		writeJSON(w, revisionView(policyFor(store), v))
+		if sc, serr := workflowScopes(store); serr == nil {
+			writeJSON(w, revisionView(v, sc))
+		} else {
+			serverError(w, serr)
+		}
 	})
 	api.HandleFunc("GET /api/v2/workflows/{id}/revisions", func(w http.ResponseWriter, r *http.Request) {
 		id, ok := wfID(w, r)
@@ -476,7 +505,12 @@ func v2Workflows(api *http.ServeMux, store *jobs.Store, eng Engine) {
 	}
 	api.HandleFunc("GET /api/v2/workflows/{id}/revisions/{rev}", func(w http.ResponseWriter, r *http.Request) {
 		if _, v, ok := revision(w, r); ok {
-			writeJSON(w, revisionView(policyFor(store), v))
+			sc, err := workflowScopes(store)
+			if err != nil {
+				serverError(w, err)
+				return
+			}
+			writeJSON(w, revisionView(v, sc))
 		}
 	})
 	api.HandleFunc("POST /api/v2/workflows/{id}/revisions/{rev}/restore", func(w http.ResponseWriter, r *http.Request) {
@@ -499,8 +533,24 @@ func v2Workflows(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			storeErr(w, err)
 			return
 		}
-		writeJSON(w, revisionView(policyFor(store), d))
+		sc, err := workflowScopes(store)
+		if err != nil {
+			serverError(w, err)
+			return
+		}
+		writeJSON(w, revisionView(d, sc))
 	})
+}
+
+// workflowScopes are the values a workflow's typed settings resolve with on these pages (W2): the
+// server's global variables, file.*/source.* left as references until a job has a file, and what this
+// install allows (FB2b: the Safety switch for Run a command).
+func workflowScopes(store *jobs.Store) (workflow.Scopes, error) {
+	g, err := store.GlobalVariables()
+	if err != nil {
+		return workflow.Scopes{}, err
+	}
+	return workflow.Scopes{Global: workflow.VariableMap(g), LeaveFile: true, Policy: policyFor(store)}, nil
 }
 
 // workflowView is a workflow as the contract's Workflow.
@@ -543,7 +593,11 @@ func workflowViewWith(store *jobs.Store, id int64, libs []jobs.Library) (map[str
 		return nil, err
 	}
 	shown := draft.Doc // the draft, or the published revision when there's none (Draft makes it from that)
-	res := workflow.ValidateWith(shown, policyFor(store))
+	sc, err := workflowScopes(store)
+	if err != nil {
+		return nil, err
+	}
+	res := workflow.ValidateWith(shown, sc) // FB2b: the Safety switch counts in what the editor shows
 	errs, warns := 0, 0
 	for _, i := range res.Issues {
 		if i.Severity == "error" {
@@ -561,18 +615,18 @@ func workflowViewWith(store *jobs.Store, id int64, libs []jobs.Library) (map[str
 	if latest.ID != 0 {
 		v["publishedRevisionId"], v["version"] = strconv.FormatInt(latest.ID, 10), latest.Number
 		v["draftDiffers"] = !fresh && draft.LogicHash != latest.LogicHash
-		v["changesOriginals"] = commitPolicy(latest.Doc) == "replace"
+		v["changesOriginals"] = commitPolicy(latest.Doc, sc) == "replace"
 		if types := stepTypes(latest.Doc); slices.Equal(types, workflow.PresetOrder) {
 			v["presetId"] = "shrink_videos" // still the preset's steps (lead, Q3: detached once edited away)
 		}
 	} else { // never published: the same fields, from its draft (review 109)
 		v["draftDiffers"] = true
-		v["changesOriginals"] = commitPolicy(draft.Doc) == "replace"
+		v["changesOriginals"] = commitPolicy(draft.Doc, sc) == "replace"
 		if slices.Equal(stepTypes(draft.Doc), workflow.PresetOrder) {
 			v["presetId"] = "shrink_videos"
 		}
 		v["summaryTag"] = ""
-		if t, issues := workflow.ToTemplate(draft.Doc, rules.Template{}); len(issues) == 0 {
+		if t, issues := workflow.ToTemplateWith(draft.Doc, rules.Template{}, sc); len(issues) == 0 {
 			v["summaryTag"] = t.Tag()
 		}
 	}
@@ -580,8 +634,8 @@ func workflowViewWith(store *jobs.Store, id int64, libs []jobs.Library) (map[str
 }
 
 // revisionView is a revision as the contract's WorkflowRevision.
-func revisionView(p workflow.Policy, r jobs.Revision) map[string]any {
-	res := workflow.ValidateWith(r.Doc, p) // FB2b: the Safety switch counts in what the editor shows
+func revisionView(r jobs.Revision, sc workflow.Scopes) map[string]any {
+	res := workflow.ValidateWith(r.Doc, sc) // FB2b: the Safety switch counts in what the editor shows
 	id := any(nil)
 	if r.ID != 0 {
 		id = strconv.FormatInt(r.ID, 10)
@@ -609,8 +663,8 @@ func stepNames(d workflow.Doc) []string {
 	return out
 }
 
-func commitPolicy(d workflow.Doc) string {
-	d, _ = workflow.Resolve(d) // W1: the policy may be a whole {{name}}, and the page's warning must read its value
+func commitPolicy(d workflow.Doc, sc workflow.Scopes) string {
+	d, _, _ = workflow.ResolveWith(d, sc) // W1/W2: the policy may be a whole {{name}}, and the page's warning must read its value
 	for _, n := range d.Nodes {
 		if n.Type == workflow.TypeCommit {
 			if p, ok := n.Config["policy"].(string); ok {
@@ -630,7 +684,7 @@ func commitPolicy(d workflow.Doc) string {
 }
 
 // docChanges says what publishing would change, step by step (design's Publish panel).
-func docChanges(before *workflow.Doc, after workflow.Doc) []map[string]string {
+func docChanges(before *workflow.Doc, after workflow.Doc, sc workflow.Scopes) []map[string]string {
 	out := []map[string]string{}
 	old := map[string]workflow.Node{}
 	if before != nil {
@@ -638,7 +692,7 @@ func docChanges(before *workflow.Doc, after workflow.Doc) []map[string]string {
 			old[n.ID] = n
 		}
 	}
-	summaries := workflow.Validate(after).StepSummaries
+	summaries := workflow.ValidateWith(after, sc).StepSummaries
 	for _, n := range after.Nodes {
 		name := n.Type
 		if def, ok := workflow.Definition(n.Type); ok {

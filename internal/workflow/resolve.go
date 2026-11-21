@@ -53,19 +53,38 @@ func HasRefs(d Doc) bool {
 // it still marshals to the same logic hash). Issues are errors: a reference that can't be resolved
 // leaves the setting's own value in place, and Publish refuses the workflow.
 func Resolve(d Doc) (Doc, []Issue) {
-	own := map[string]Variable{}
-	var names []string
-	for _, v := range d.Variables {
-		own[v.Name] = v
-		names = append(names, v.Name)
+	out, issues, _ := resolveOnce(d, Scopes{})
+	return out, issues
+}
+
+// ResolveWith is Resolve with the other scopes (W2): the workflow's own variable wins, then the
+// library's, then a server-wide one, then the file's reserved names. It also says which names the
+// settings used and where each value came from, for the job log's variables table.
+func ResolveWith(d Doc, s Scopes) (Doc, []Issue, []Usage) {
+	return resolveOnce(d, s)
+}
+
+func resolveOnce(d Doc, sc Scopes) (Doc, []Issue, []Usage) {
+	own := VariableMap(d.Variables)
+	names := make([]string, 0, len(own)+len(sc.Library)+len(sc.Global)+len(ReservedNames))
+	for n := range own {
+		names = append(names, n)
 	}
-	slices.Sort(names)
+	for n := range sc.Library {
+		names = append(names, n)
+	}
+	for n := range sc.Global {
+		names = append(names, n)
+	}
+	names = append(names, reservedNames()...)
+	slices.Sort(names) // one suggestion order, whichever order the maps answer in
 	defs := map[string]StepDefinition{}
 	for _, def := range Definitions() {
 		defs[def.Type] = def
 	}
 	var out *Doc
 	var issues []Issue
+	var used []Usage
 	for i, n := range d.Nodes {
 		def, ok := defs[n.Type]
 		if !ok {
@@ -91,43 +110,12 @@ func Resolve(d Doc) (Doc, []Issue) {
 				issues = append(issues, Issue{Code: code, Severity: "error", NodeID: n.ID, ConfigPath: "/" + k,
 					Field: k, Name: wholeRefName(s), Message: "In “" + title + "”, " + msg})
 			}
-			name, whole := wholeRef(s)
-			if !whole {
-				bad("variable_ref_not_whole", "put one whole variable here, like {{quality}}, not text around it: "+
-					"a number or a choice is one value. Put the reference on its own, or move the text to a field that takes text.")
-				continue
-			}
-			v, known := own[name]
-			switch {
-			case !known:
-				i := Issue{Code: "unknown_variable", Severity: "error", NodeID: n.ID, ConfigPath: "/" + k, Field: k, Name: name,
-					Message: "In “" + title + "”, {{" + name + "}} is not a variable of this workflow. Add that variable, or fix the name."}
-				if s := closestName(name, names); s != "" {
-					i.Suggest = s
-					i.Message = "In “" + title + "”, {{" + name + "}} is not a variable of this workflow. Did you mean {{" + s + "}}?"
-				}
-				issues = append(issues, i)
-			case v.Type == "secret":
-				bad("variable_wrong_type", "{{"+name+"}} is a secret, and a secret can't set this setting.")
-			case v.Value == nil:
-				bad("variable_wrong_type", "{{"+name+"}} has no value yet, so this setting would have nothing. Give it a value, or remove the variable.")
-			default:
-				// W1 fix: a value typed into a variable is text ("4"), and Quality's choices are the
-				// numbers 1-5; a setting that wants a number takes exactly a number written as text.
-				val := v.Value
-				if n, ok := numberFor(p, val); ok {
-					val = n
-				}
-				if msg := valueProblem(p, val, title); msg != "" {
-					bad("variable_wrong_type", "{{"+name+"}} doesn't fit: "+msg)
-					continue
-				}
+			set := func(val any) { // the doc copy, and this one setting in it
 				if out == nil {
 					cp := d
 					cp.Nodes = append([]Node(nil), d.Nodes...)
 					out = &cp
 				}
-				// a copy of this step's settings, the ones resolved before this kept
 				cfg := make(map[string]any, len(n.Config))
 				for ck, cv := range out.Nodes[i].Config {
 					cfg[ck] = cv
@@ -135,12 +123,71 @@ func Resolve(d Doc) (Doc, []Issue) {
 				cfg[k] = val
 				out.Nodes[i].Config = cfg
 			}
+			check := func(name string, val any) (any, bool) {
+				// W1 fix: a value typed into a variable is text ("4"), and Quality's choices are the
+				// numbers 1-5; a setting that wants a number takes exactly a number written as text.
+				if num, ok := numberFor(p, val); ok {
+					val = num
+				}
+				if msg := valueProblem(p, val, title); msg != "" {
+					bad("variable_wrong_type", "{{"+name+"}} doesn't fit: "+msg)
+					return nil, false
+				}
+				return val, true
+			}
+			name, whole := wholeRef(s)
+			if !whole {
+				bad("variable_ref_not_whole", "put one whole variable here, like {{quality}}, not text around it: "+
+					"a number or a choice is one value. Put the reference on its own, or move the text to a field that takes text.")
+				continue
+			}
+			v, origin, known := sc.lookup(name, own)
+			if !known {
+				// the file's own name: the job fills it; here its kind has to fit
+				if r, ok := ReservedNames[name]; ok {
+					if sc.LeaveFile {
+						if msg := reservedProblem(r, p, title); msg != "" {
+							bad("variable_wrong_type", "{{"+name+"}} "+msg)
+						}
+						continue
+					}
+					val, has := sc.File[name]
+					if !has {
+						bad("variable_wrong_type", "{{"+name+"}} has no value for this file.")
+						continue
+					}
+					if val, ok := check(name, val); ok {
+						set(val)
+						used = append(used, Usage{Name: name, Value: val, Origin: strings.SplitN(name, ".", 2)[0]})
+					}
+					continue
+				}
+				i := Issue{Code: "unknown_variable", Severity: "error", NodeID: n.ID, ConfigPath: "/" + k, Field: k, Name: name,
+					Message: "In “" + title + "”, {{" + name + "}} is not a variable of this workflow, its library or the server. Add that variable, or fix the name."}
+				if s := closestName(name, names); s != "" {
+					i.Suggest = s
+					i.Message = "In “" + title + "”, {{" + name + "}} is not a variable of this workflow, its library or the server. Did you mean {{" + s + "}}?"
+				}
+				issues = append(issues, i)
+				continue
+			}
+			switch {
+			case v.Type == "secret":
+				bad("variable_wrong_type", "{{"+name+"}} is a secret, and a secret can't set this setting.")
+			case v.Value == nil:
+				bad("variable_wrong_type", "{{"+name+"}} has no value yet, so this setting would have nothing. Give it a value, or remove the variable.")
+			default:
+				if val, ok := check(name, v.Value); ok {
+					set(val)
+					used = append(used, Usage{Name: name, Value: val, Origin: origin})
+				}
+			}
 		}
 	}
 	if out == nil {
-		return d, issues
+		return d, issues, used
 	}
-	return *out, issues
+	return *out, issues, used
 }
 
 // numberFor is v as a number when the setting wants one and v is text that is exactly a number: the

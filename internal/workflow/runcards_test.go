@@ -475,7 +475,7 @@ func TestCommandNeedsTheSafetySwitch(t *testing.T) {
 	if r := Validate(d); r.Errors() {
 		t.Fatalf("allowed: %+v", r.Issues)
 	}
-	r := ValidateWith(d, Policy{})
+	r := ValidateWith(d, Scopes{Policy: Policy{}})
 	if !hasIssue(r.Issues, "commands_off", cmd.ID) || !r.Errors() {
 		t.Errorf("off: %+v", r.Issues)
 	}
@@ -484,7 +484,7 @@ func TestCommandNeedsTheSafetySwitch(t *testing.T) {
 			t.Errorf("the issue should name the switch: %q", i.Message)
 		}
 	}
-	if r := ValidateWith(d, Policy{CommandsAllowed: true}); r.Errors() {
+	if r := ValidateWith(d, Scopes{Policy: Policy{CommandsAllowed: true}}); r.Errors() {
 		t.Errorf("on: %+v", r.Issues)
 	}
 	tm, issues := ToTemplate(d, rules.Template{})
