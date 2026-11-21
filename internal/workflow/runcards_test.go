@@ -756,3 +756,29 @@ func TestHandToAnotherWorkflow(t *testing.T) {
 		t.Errorf("without a lookup: %+v", res.Issues)
 	}
 }
+
+// review2-579 P3-2: HasFileRefs reads a reference the way the resolver does, spaces and all.
+func TestHasFileRefsAgreesWithTheResolver(t *testing.T) {
+	for _, v := range []string{"{{file.size}}", " {{file.size}}", "{{ file.size }}", "{{source.height}} "} {
+		d := FromTemplate(rules.SliderTemplate(3), nil)
+		for i := range d.Nodes {
+			if d.Nodes[i].Type == TypeConvert {
+				d.Nodes[i].Config["quality"] = v
+			}
+		}
+		if !HasFileRefs(d) {
+			t.Errorf("%q is a whole file reference", v)
+		}
+	}
+	for _, v := range []string{"{{q}}", "{{file.size}} and more", "3", "{{file.nothing}}"} {
+		d := FromTemplate(rules.SliderTemplate(3), nil)
+		for i := range d.Nodes {
+			if d.Nodes[i].Type == TypeConvert {
+				d.Nodes[i].Config["quality"] = v
+			}
+		}
+		if HasFileRefs(d) {
+			t.Errorf("%q is not a whole file reference", v)
+		}
+	}
+}

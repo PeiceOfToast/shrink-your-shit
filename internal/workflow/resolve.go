@@ -67,9 +67,11 @@ func HasFileRefs(d Doc) bool {
 			if prop["x-variableRef"] != true {
 				continue
 			}
-			if s, ok := n.Config[k].(string); ok && strings.HasPrefix(s, "{{") && strings.HasSuffix(s, "}}") {
-				if _, reserved := ReservedNames[strings.TrimSuffix(strings.TrimPrefix(s, "{{"), "}}")]; reserved {
-					return true
+			if s, ok := n.Config[k].(string); ok { // the resolver's own reader, so whitespace reads the same (review2-579 P3-2)
+				if name, whole := wholeRef(s); whole {
+					if _, reserved := ReservedNames[name]; reserved {
+						return true
+					}
 				}
 			}
 		}
