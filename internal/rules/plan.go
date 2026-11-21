@@ -351,6 +351,7 @@ func (p Plan) FFmpegArgsFullGPU(in, out, enc string) ([]string, bool) {
 // the "converting to" line: convertingTo names the depth of the encoder that runs.
 var tenBitTargets = map[string]bool{"libx265": true, "libsvtav1": true}
 
+// EncodeTenBit answers a different question from NeedsTenBit: whether the target's encoder arguments make 10 bits.
 // EncodeTenBit says whether a graphics encoder makes a 10-bit video: HDR (S3), or a 10-bit source kept at its depth
 // by a target whose card encoder has one (tenBitTargets). It is a card's arguments' 10-bit flags and its "converting
 // to" line that read it; on the processor libx264 and libvpx-vp9 keep 10 bits too, which convertingTo names.
@@ -416,7 +417,7 @@ func (p Plan) ffmpegArgs(in, out, gpu string, full bool) []string {
 			args = append(args, "-profile:"+v, "main10",
 				"-color_primaries:"+v, h.Primaries, "-color_trc:"+v, h.Transfer, "-colorspace:"+v, h.Matrix)
 			if fam != "vaapi" && !full { // VAAPI's frames are made p010 by its filter instead; the full path's come from the decoder
-				args = append(args, "-pix_fmt:"+v, "p010le")
+				args = append(args, "-pix_fmt:"+v, pixFmt10(fam))
 			}
 		}
 	} else if ten10 && gpu != "" { // a 10-bit SDR source keeps its depth on a graphics encoder: main10 and p010
@@ -425,7 +426,7 @@ func (p Plan) ffmpegArgs(in, out, gpu string, full bool) []string {
 			args = append(args, "-profile:"+v, "main10")
 		}
 		if fam != "vaapi" && !full { // VAAPI's frames are made p010 by its filter instead; the full path's come from the decoder
-			args = append(args, "-pix_fmt:"+v, "p010le")
+			args = append(args, "-pix_fmt:"+v, pixFmt10(fam))
 		}
 	}
 	var vf []string
@@ -495,10 +496,11 @@ func gpuScale(fam string, h int, tenBit bool) string {
 // gpuQuality is a graphics family's constant-quality arguments at crf, in its encoders' names. The same
 // family's H.264 and AV1 encoders take the same options as its HEVC one.
 func gpuQuality(fam string, crf int) []string {
+	if p, ok := profiles[fam]; ok && p.quality != nil {
+		return p.quality(crf)
+	}
 	n := strconv.Itoa(crf)
 	switch fam {
-	case "nvenc":
-		return []string{"-rc", "vbr", "-cq", n}
 	case "qsv":
 		return []string{"-global_quality", n}
 	case "vaapi":
@@ -642,30 +644,18 @@ func (p Plan) Expect(src media.Info, packets int64) Expect {
 			n++
 		}
 	}
-	// A phone video's Display Matrix: ffmpeg encodes the picture upright, so a ±90° file's new picture
-	// has width and height swapped (before any scaling, which applies to the upright picture).
-	// (Not when the video is copied: it keeps its coded size and its Display Matrix.)
-	if vs := src.ByType("video"); !p.Video.Copy && p.Video.Index < len(vs) && vs[p.Video.Index].Quarter() {
+	// The picture the plan makes (plannedPicture): a phone video's Display Matrix means ffmpeg encodes
+	// the upright picture, so a ±90° file's new picture has width and height swapped, and a scaled plan's
+	// is the new height with the original's shape. (Not when the video is copied: it keeps its coded size
+	// and its Display Matrix.) The check's main-video rules read the same function.
+	if w, h, scaled := p.plannedPicture(src); w > 0 {
 		n := 0
 		for k := range e.Streams {
 			if e.Streams[k].Type != "video" {
 				continue
 			}
 			if n == p.Video.Index {
-				e.Streams[k].Width, e.Streams[k].Height = e.Streams[k].Height, e.Streams[k].Width
-			}
-			n++
-		}
-	}
-	if p.Video.Height > 0 { // scaled down: the encoded stream's picture size is the new one
-		n := 0
-		for k := range e.Streams {
-			if e.Streams[k].Type != "video" {
-				continue
-			}
-			if n == p.Video.Index {
-				e.Streams[k].Width, e.Streams[k].Height = ScaledWidth(e.Streams[k].Width, e.Streams[k].Height, p.Video.Height), p.Video.Height
-				e.Streams[k].PlannedSize = true
+				e.Streams[k].Width, e.Streams[k].Height, e.Streams[k].PlannedSize = w, h, scaled
 			}
 			n++
 		}

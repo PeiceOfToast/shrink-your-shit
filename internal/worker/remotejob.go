@@ -59,6 +59,7 @@ type RemoteJob struct {
 	frames  int64     // the most frames it reported (-1 when it sends none: an older worker)
 	wrote   int64     // the most bytes it reported written (0 when it sends none)
 	movedAt time.Time // when that position last moved on (or the encode started)
+	posAt   time.Time // when out_time last moved forward (or the encode started): the frozen-position ceiling's clock, which frames and bytes do not move
 	finish  bool      // that position is the file's length: the worker is finishing the file (its own allowance)
 }
 
@@ -77,7 +78,7 @@ func (r *RemoteJob) ConvertingFrames(pos float64, frame, wrote, sizeBefore int64
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if !r.judging {
-		r.judging, r.pos, r.frames, r.wrote, r.movedAt = true, pos, frame, wrote, now
+		r.judging, r.pos, r.frames, r.wrote, r.movedAt, r.posAt = true, pos, frame, wrote, now, now
 		r.finish = reachedEnd(pos, durationSec)
 		return
 	}
@@ -92,6 +93,7 @@ func (r *RemoteJob) ConvertingFrames(pos float64, frame, wrote, sizeBefore int64
 	}
 	if posMoved {
 		r.pos = pos
+		r.posAt = now
 		r.finish = reachedEnd(pos, durationSec)
 	}
 	if posMoved || (outputOK && grew) {
@@ -129,6 +131,14 @@ func (r *RemoteJob) stillFor(now time.Time) (time.Duration, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return now.Sub(r.movedAt), r.judging
+}
+
+// posStillFor is how long the encode's out_time has not moved forward (frames and bytes do not count); false while
+// it isn't being judged.
+func (r *RemoteJob) posStillFor(now time.Time) (time.Duration, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return now.Sub(r.posAt), r.judging
 }
 
 // NewRemoteJob is the join for lease.

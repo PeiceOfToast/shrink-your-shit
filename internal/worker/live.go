@@ -121,13 +121,6 @@ func codecName(c string) string {
 	return strings.ToUpper(c)
 }
 
-// tenBitSource is true when the file is 10-bit: an HDR plan, or a plan Compile marked from a 10-bit source
-// (VideoEncode.TenBit). One rule, read from the plan, so the encoder choice, the decode probe and the arguments
-// cannot disagree about the file's depth.
-func tenBitSource(plan rules.Plan) bool {
-	return plan.Video.HDR != nil || plan.Video.TenBit
-}
-
 // convertingTo says what the new file will be: "HEVC · 10-bit · MKV" ("repackaged as MKV" when the
 // video is copied). gpu is the graphics encoder that runs, or "" for the processor: the depth is the
 // one that encoder's arguments make.
@@ -157,11 +150,7 @@ func convertingTo(plan rules.Plan, src media.Info, gpu string) string {
 		return "repackaged as " + kind
 	}
 	depth := "8-bit"
-	if gpu != "" {
-		if plan.EncodeTenBit() { // the card's arguments are EncodeTenBit's
-			depth = "10-bit"
-		}
-	} else if tenBitSource(plan) { // the processor keeps the source's depth on every target
+	if rules.OutputDepth(plan, &src, gpu) == 10 { // the encoder that runs makes this depth (outputdepth.go)
 		depth = "10-bit"
 	}
 	name := "HEVC" // a Plan from before S6 has no Format

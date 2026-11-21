@@ -137,6 +137,13 @@ func chain(nodes []Node, prev *Doc) []Edge {
 // is the flow's template now: when d means the same, it is returned unchanged, so a Basic flow stays a
 // Basic flow. A Doc this version can't run gives an issue instead (it can still be saved as a draft).
 func ToTemplate(d Doc, current rules.Template) (rules.Template, []Issue) {
+	// W1: the compile sees resolved settings only. A reference that can't be resolved is the workflow's
+	// to fix, so it comes back as an issue rather than compiling at whatever the literal would default to.
+	resolved, refIssues := Resolve(d)
+	if len(refIssues) > 0 {
+		return rules.Template{}, refIssues
+	}
+	d = resolved
 	order, ok := straightChain(d)
 	if !ok || hasOnError(d) || hasRunCards(d) { // V6a: checks; V6b: a step's own failure choice; FB1b: actions and ends on the chain
 		return branchTemplate(d)
