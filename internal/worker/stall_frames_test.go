@@ -141,11 +141,25 @@ func TestFrozenOutTimeStopsPastTheOutputBound(t *testing.T) {
 	go func() { w.RunOne(context.Background()); close(done) }()
 	waitDone(t, done)
 	j := s.job()
-	if j.Status != jobs.Failed || !strings.Contains(j.Error, "no progress for 300ms") {
-		t.Fatalf("status %s %q, want failed with no progress for 300ms", j.Status, j.Error)
+	// Past the bound the stop says why: the new file is over twice the original, so the words are not "no progress".
+	if j.Status != jobs.Failed || !strings.Contains(j.Error, "more than twice the original's size") || strings.Contains(j.Error, "no progress") {
+		t.Fatalf("status %s %q, want failed: the new file is more than twice the original's size", j.Status, j.Error)
 	}
 	if warn, _ := encodeLines(t, s); warn != 1 {
 		t.Fatalf("%d 'has not moved' warnings, want 1", warn)
+	}
+	lines, _ := s.store.LogLines(s.id)
+	said := false
+	for _, l := range lines {
+		if l.Section == "encode" && strings.Contains(l.Text, "more than twice the original's size") && strings.Contains(l.Text, "stopping it") {
+			said = true
+		}
+		if l.Section == "encode" && strings.Contains(l.Text, "no progress for") {
+			t.Errorf("past the bound the log says %q; it should say the output is over twice the original", l.Text)
+		}
+	}
+	if !said {
+		t.Error("no log line says the stop was because the output passed twice the original's size")
 	}
 	s.assertOriginalSafe()
 }
