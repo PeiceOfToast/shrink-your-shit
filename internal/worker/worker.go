@@ -1192,11 +1192,11 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			return "", &laterError{at: w.now().Add(wait), words: "Convert again later: try " + strconv.Itoa(job.Attempts+1) + " of " + strconv.Itoa(plan.Requeue.MaxTries)}
 		}
 		w.Queue.AddStep(job.ID, "failed", false, plan.Skip+" (tried "+strconv.Itoa(plan.Requeue.MaxTries)+" times).")
-		return "", failed(plan.Skip+". Tried "+strconv.Itoa(plan.Requeue.MaxTries)+" times; the original is untouched.", errors.New("stopped by its workflow after its tries: "+plan.Skip))
+		return "", failedWithCode(jobs.ReasonWorkflowStopped, plan.Skip+". Tried "+strconv.Itoa(plan.Requeue.MaxTries)+" times; the original is untouched.", errors.New("stopped by its workflow after its tries: "+plan.Skip))
 	}
-	if plan.Skip != "" && plan.Fail { // FB1c: the path ended in "Stop as failed": the job fails with its words, the original untouched
+	if plan.Skip != "" && plan.Fail { // FB1c: the path ended in "Stop as failed": the job fails with its words and its own code, the original untouched
 		w.Queue.AddStep(job.ID, "failed", false, plan.Skip+".")
-		return "", failed(plan.Skip+". The original is untouched.", errors.New("stopped by its workflow: "+plan.Skip))
+		return "", failedWithCode(jobs.ReasonWorkflowStopped, plan.Skip+". The original is untouched.", errors.New("stopped by its workflow: "+plan.Skip))
 	}
 	if plan.Skip != "" {
 		w.writeStepSections(job.ID, plan.Steps) // the step that left it alone still says so (L2, R4)

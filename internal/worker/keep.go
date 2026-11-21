@@ -286,9 +286,9 @@ func (w *Worker) compareRule(job jobs.Job, cards []rules.Card, newPath string, o
 	if len(notes) > 0 {
 		why = notes[len(notes)-1].Words
 	}
-	if v.Fail {
+	if v.Fail { // the workflow's own stop: it gets its own code, not a generic failure (ui-shop QA of #612)
 		w.Queue.AddStep(job.ID, "failed", false, v.Words+" ("+why+").")
-		return failed(v.Words+" ("+why+"). The original is untouched.", errors.New("stopped by its workflow after the check: "+v.Words))
+		return failedWithCode(jobs.ReasonWorkflowStopped, v.Words+" ("+why+"). The original is untouched.", errors.New("stopped by its workflow after the check: "+v.Words))
 	}
 	reason := v.Words
 	if reason == "" {

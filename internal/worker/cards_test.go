@@ -49,6 +49,20 @@ func noteOnTimeline(s *scenario, words string) bool {
 	return false
 }
 
+// assertWorkflowStopped checks a "Stop as failed" ending: the job fails with its own code, not the generic
+// convert_failed (no conversion went wrong: the workflow stopped it), and its sentence keeps the workflow's
+// words, which is what the job detail serves (internal/web's test).
+func (s *scenario) assertWorkflowStopped(words string) {
+	s.t.Helper()
+	j := s.job()
+	if j.Status != jobs.Failed || j.ErrorCode != jobs.ReasonWorkflowStopped {
+		s.t.Errorf("a workflow stop: %s code %q, want failed code %q", j.Status, j.ErrorCode, jobs.ReasonWorkflowStopped)
+	}
+	if !strings.Contains(j.Error, words) {
+		s.t.Errorf("the workflow's words are gone: %q, want %q in it", j.Error, words)
+	}
+}
+
 // FB1c: a path's cards run before the conversion: the question is answered from the file's name, the
 // variable a card sets names the new file, the note is in the job log, and each card is on the timeline.
 func TestCardsRunBeforeTheConversion(t *testing.T) {
@@ -102,6 +116,7 @@ func TestStopAsFailedEndsTheRun(t *testing.T) {
 	if j.Status != jobs.Failed || !strings.Contains(j.Error, "Not a remux: nothing to gain") || !strings.Contains(j.Error, "original is untouched") {
 		t.Errorf("%s %q", j.Status, j.Error)
 	}
+	s.assertWorkflowStopped("Not a remux: nothing to gain")
 	if s.count("-c:v") != 0 {
 		t.Error("nothing should have been encoded")
 	}
@@ -434,6 +449,7 @@ func TestConvertAgainLaterAndWaitUntil(t *testing.T) {
 	if j3 := s3.job(); j3.Status != jobs.Failed || !strings.Contains(j3.Error, "The download never finished. Tried 1 times") {
 		t.Errorf("last try: %s %q", j3.Status, j3.Error)
 	}
+	s3.assertWorkflowStopped("The download never finished")
 	// Wait until a time of day: back in the queue until then
 	s2 := newScenarioNamed(t, "Harrow.Lane.2019.Remux.mkv")
 	tm2 := cardsTemplate()
@@ -583,6 +599,7 @@ func TestCompareBeforeTheSaveRunningTimeAndStop(t *testing.T) {
 	if j.Status != jobs.Failed || !strings.Contains(j.Error, "The length changed (No (running time 0:01:41 against the original's 0:01:40, 1 second off, asked for within 0.5 seconds))") || !strings.Contains(j.Error, "original is untouched") {
 		t.Errorf("%s %q", j.Status, j.Error)
 	}
+	s.assertWorkflowStopped("The length changed")
 	after, _ := os.Stat(s.src)
 	if after.Size() != before.Size() || !after.ModTime().Equal(before.ModTime()) {
 		t.Error("the original changed")
