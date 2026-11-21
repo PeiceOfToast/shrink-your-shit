@@ -18,7 +18,8 @@ import { WorkerPage, Workers } from "./screens/Workers";
 import { Workflows } from "./screens/Workflows";
 import { WorkflowStack } from "./screens/WorkflowStack";
 import { WorkflowGraph } from "./screens/WorkflowGraph";
-import { navigate, usePath } from "./router";
+import { Link, navigate, usePath } from "./router";
+import { SampleDataPage, ScreenGuard } from "./PageHead";
 import { Shell, ThemeMenu } from "./Shell";
 import { Icon } from "./Icon";
 import { WorkerHome } from "./screens/Enroll";
@@ -59,6 +60,14 @@ export function App() {
       <div dangerouslySetInnerHTML={{ __html: sprite }} />
       <header className="topbar"><span className="brand"><span className="logo"><Icon id="i-layers" /></span><span className="t">Shrink Your Shit</span></span><div className="sp" /><ThemeMenu /></header>
       <main className="content" id="main"><WorkerHome setup={su.data!} /></main>
+    </>
+  );
+  // U12: first run and sign-in are bare pages: no rail, menu, search or breadcrumb; the page sits in one 720 px column
+  if (start || signin) return (
+    <>
+      <div dangerouslySetInnerHTML={{ __html: sprite }} />
+      <header className="topbar"><Link className="brand" to="/"><span className="logo"><Icon id="i-layers" /></span><span className="t">Shrink Your Shit</span></Link><div className="sp" /><ThemeMenu /></header>
+      <main className="content bare" id="main"><SampleDataPage.Provider value={!real && start}><ScreenGuard key={path}>{start ? <Start /> : <SignIn />}</ScreenGuard></SampleDataPage.Provider></main>
     </>
   );
   return (
