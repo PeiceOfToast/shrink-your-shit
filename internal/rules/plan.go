@@ -1419,6 +1419,10 @@ func vp9Target(e VideoEncode) bool {
 	return e.Codec == "libvpx-vp9" && e.TargetKbps > 0
 }
 
+// IsVP9Target says the encode is a software VP9 target (see vp9Target). Its peak is kept only for the remux, so
+// the words about it (the step sentence, the preview) leave the peak out.
+func (e VideoEncode) IsVP9Target() bool { return vp9Target(e) }
+
 // extraArgs are the encoder's own arguments; with a VBR target, without VP9's "-b:v 0" (constant
 // quality); VP9 capped, with the cap as its -b:v (constrained quality).
 func extraArgs(e VideoEncode) []string {

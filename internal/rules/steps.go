@@ -87,7 +87,7 @@ func videoDecision(p Plan, info media.Info) StepDecision {
 	d += " becomes " + VideoFormats[target].Name
 	if p.Video.TargetKbps > 0 { // level: the encode aims at a bitrate (-b:v), so the sentence names it, not a CRF
 		d += " at about " + strconv.Itoa(p.Video.TargetKbps) + " kbps"
-		if p.Video.MaxRateKbps > 0 {
+		if p.Video.MaxRateKbps > 0 && !p.Video.IsVP9Target() {
 			d += ", peaks up to " + strconv.Itoa(p.Video.MaxRateKbps) + " kbps"
 		}
 	} else {

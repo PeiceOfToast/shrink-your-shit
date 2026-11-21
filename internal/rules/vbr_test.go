@@ -146,6 +146,24 @@ func TestVP9TargetIsConstrainedQuality(t *testing.T) {
 	}
 }
 
+// A9 follow-up (#610 review2 P3): a software VP9 target job keeps its MaxRateKbps for the remux, but no -maxrate is
+// passed, so the step sentence names the target only and makes no peak claim.
+func TestVP9TargetSentenceMakesNoPeakClaim(t *testing.T) {
+	SetAvailableFormats(map[string]bool{"libx265": true, "libvpx-vp9": true})
+	defer SetAvailableFormats(nil)
+	s := DefaultSelectors(3)
+	s.Format, s.FileType, s.Audio, s.Resolution, s.MaxBitrate, s.RateControl = "vp9", "webm", "stereo_opus", "720", "medium", "level"
+	info := h264(1920, 1080, 8000)
+	p := s.Template().Compile(info)
+	if p.Video.MaxRateKbps == 0 || !p.Video.IsVP9Target() {
+		t.Fatalf("want a VP9 target with a remux peak: %+v", p.Video)
+	}
+	d := videoDecision(p, info).Decision
+	if strings.Contains(d, "peaks") || !strings.Contains(d, "at about "+strconv.Itoa(p.Video.TargetKbps)+" kbps") {
+		t.Errorf("step sentence: %q", d)
+	}
+}
+
 // Review a772397 item 2: a saved AV1 VBR flow is skipped with the words that say what to change.
 func TestSavedAV1VBRSkipsWithItsWords(t *testing.T) {
 	SetAvailableFormats(map[string]bool{"libx265": true, "libsvtav1": true})
