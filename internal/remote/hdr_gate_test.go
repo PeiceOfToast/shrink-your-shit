@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
@@ -46,8 +47,9 @@ func TestRemoteHDR10ToAnUnprovenFamilyGetsProcessorArgs(t *testing.T) {
 		t.Errorf("ffmpeg args %v: want the processor (libx265)", x.calls)
 	}
 	want := "HDR10 with mastering data: using the processor, hevc_nvenc isn't on the list of encoders proven to keep that data"
-	if !slices.Equal(notes, []string{want}) || !slices.Equal(encs, []string{""}) {
-		t.Errorf("notes %q, encoders %q: want %q and the processor reported", notes, encs, want)
+	chosen := "Chosen: x265 (processor) — " + want + ". Settings: Encoder: libx265"
+	if len(notes) != 2 || notes[0] != want || !strings.HasPrefix(notes[1], chosen) || !slices.Equal(encs, []string{""}) {
+		t.Errorf("notes %q, encoders %q: want %q, then the Chosen line, and the processor reported", notes, encs, want)
 	}
 }
 
@@ -61,8 +63,9 @@ func TestRemoteHDR10ToAProvenFamilyKeepsTheGraphicsEncoder(t *testing.T) {
 	if len(x.calls) != 1 || !slices.Contains(x.calls[0], "hevc_qsv") {
 		t.Errorf("ffmpeg args %v: want hevc_qsv", x.calls)
 	}
-	if len(notes) != 0 || !slices.Equal(encs, []string{"hevc_qsv"}) {
-		t.Errorf("notes %q, encoders %q: want no note and hevc_qsv reported", notes, encs)
+	chosen := "Chosen: Intel Quick Sync (graphics), HEVC — hevc_qsv passed its test on this computer and can do this file. Settings: Encoder: hevc_qsv"
+	if len(notes) != 1 || !strings.HasPrefix(notes[0], chosen) || !slices.Equal(encs, []string{"hevc_qsv"}) {
+		t.Errorf("notes %q, encoders %q: want only the Chosen line and hevc_qsv reported", notes, encs)
 	}
 }
 

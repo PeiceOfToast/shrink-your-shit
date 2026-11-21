@@ -478,6 +478,13 @@ func (c *Client) convert(ctx context.Context, cv Converter, l *Lease, snap rules
 	if note != "" {
 		c.note(ctx, l, note)
 	}
+	if !snap.Plan.Video.Copy { // the same Chosen line the local worker logs (a copy is not encoded, so no line)
+		why := note // the processor was chosen, and why
+		if enc != "" {
+			why = enc + " passed its test on this computer and can do this file"
+		}
+		c.note(ctx, l, worker.ChosenLine(snap.Plan, enc, args, why))
+	}
 	if e := report(map[string]any{"stage": "converting", "outTimeUs": 0, "encoder": enc}); leaseGone(e) {
 		return "", args, e
 	}
@@ -515,6 +522,7 @@ func (c *Client) convert(ctx context.Context, cv Converter, l *Lease, snap rules
 			report(map[string]any{"stage": "converting", "outTimeUs": 0, "encoder": label})
 		},
 		Failed:  func(r worker.Rung, _ string, _ error) { failed = r.Encoder },
+		Note:    func(text string) { c.note(ctx, l, text) }, // the step-down lines, as the local job log has them
 		Stopped: func() bool { return gone != nil },
 	})
 	args = res.Args
