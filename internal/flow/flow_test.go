@@ -471,3 +471,36 @@ func TestWaitInsideTheSpringGapRecognisesItsReturn(t *testing.T) {
 		t.Error("isOwnTime")
 	}
 }
+
+// FB4b: a question after the save branches the chain: the cards on the port its answer picks run, the
+// others don't, and the timeline gets the answer in words. The sizes come from the run's values.
+func TestCompareTheResultBranchesTheAfterCards(t *testing.T) {
+	var tags [][]string
+	env := Env{Tag: func(add, remove []string) ([]string, error) { tags = append(tags, add); return add, nil }, Log: func(string) {}}
+	q := rules.Question{Kind: "result", Test: "saved_at_least", Percent: 30}
+	cards := []rules.Card{{NodeID: "q", Type: workflow.TypeCheckResult, Name: "Worth it?", Check: &q,
+		Yes: []rules.Card{{NodeID: "t1", Type: workflow.TypeTag, Config: map[string]any{"add": "big-win"}}},
+		No: []rules.Card{{NodeID: "n1", Type: workflow.TypeNote, Config: map[string]any{"text": "Only {{saved_percent}} saved"}},
+			{NodeID: "q2", Type: workflow.TypeCheckResult, Check: &rules.Question{Kind: "result", Test: "bigger"}, Yes: []rules.Card{{NodeID: "t2", Type: workflow.TypeTag, Config: map[string]any{"add": "grew"}}}}}}}
+	st := &State{Vars: map[string]string{"size_bytes": "1000", "new_size_bytes": "600", "saved_percent": "40"}}
+	notes, warnings := After(cards, st, env)
+	if len(warnings) != 0 || len(notes) != 2 || notes[0].NodeID != "q" || notes[0].Words != "Yes (40.0% saved, asked for at least 30%)" || notes[1].NodeID != "t1" {
+		t.Fatalf("yes: %+v %v", notes, warnings)
+	}
+	st.Vars["new_size_bytes"] = "1200"
+	notes, _ = After(cards, st, env)
+	var ids []string
+	for _, n := range notes {
+		ids = append(ids, n.NodeID)
+	}
+	if strings.Join(ids, ",") != "q,n1,q2,t2" || notes[2].Words != "Yes (20.0% bigger)" {
+		t.Errorf("no, then bigger: %v %+v", ids, notes)
+	}
+	if len(tags) != 2 || tags[0][0] != "big-win" || tags[1][0] != "grew" {
+		t.Errorf("tags: %v", tags)
+	}
+	delete(st.Vars, "size_bytes")
+	if notes, _ := After(cards, st, env); notes[0].Words != "No (the sizes aren't known)" {
+		t.Errorf("unknown sizes: %+v", notes[0])
+	}
+}

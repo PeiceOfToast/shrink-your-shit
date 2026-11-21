@@ -92,6 +92,19 @@ export function insertQuestion(d: WorkflowDoc, afterId: ID | undefined, node: No
   return setOtherwise(next, node, endDef);
 }
 
+// FB4b: a question after the save ("Compare the result") goes behind the save, or behind the last card there, with
+// nothing on its No: after the save a port left alone means nothing more happens.
+export function insertAfterSave(d: WorkflowDoc, afterId: ID | undefined, node: Node): WorkflowDoc {
+  const ids = order(d).map((n) => n.id), save = ids.findIndex((id) => d.nodes.find((n) => n.id === id)?.type === "output.commit");
+  let at = afterId == null ? -1 : ids.indexOf(afterId);
+  if (at < 0 || at < save) at = save >= 0 ? save : ids.length - 1;
+  ids.splice(Math.max(0, at) + 1, 0, node.id);
+  return relink({ ...d, nodes: [...d.nodes, node] }, ids);
+}
+
+// A step whose kind sits only after the save (an after action, or a question about the result: FB4b).
+export const afterOnly = (def?: StepDefinition) => !!def?.phase && !def.phase.includes("before") && def.phase.includes("after");
+
 // Add a step after the given step (or after the input when none is named) and link it into the chain.
 // An add never lands after the save step: a missing or save step as the anchor puts the new step just before it.
 export function insertAfter(d: WorkflowDoc, afterId: ID | undefined, node: Node): WorkflowDoc {

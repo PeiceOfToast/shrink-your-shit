@@ -46,6 +46,7 @@ const (
 	TypeTag      = "action.tag" // adds or removes tags on the file's record
 	// FB4: the remaining flow cards
 	TypeCheckRandom = "check.random" // a chosen share of files answers Yes
+	TypeCheckResult = "check.result" // after the save: how the new file compares with the original (FB4b)
 	TypeWait        = "action.wait"  // pauses the run for a while, or puts the file back in the queue until a time of day
 	TypeRequeue     = "flow.requeue" // the file goes back to the queue for later, at most so many times
 	TypeGoto        = "flow.goto"    // the file continues in another published workflow (FB4b)
@@ -54,7 +55,7 @@ const (
 // Questions are the step types that answer Yes or No (RunsQuestion); Actions the ones that do one thing
 // before the conversion (RunsAction); Ends the ones that end a run.
 var (
-	Questions = []string{TypeCheck, TypeCheckName, TypeCheckAge, TypeCheckVariable, TypeCheckLibrary, TypeCheckHardLinks, TypeCheckTag, TypeCheckRandom}
+	Questions = []string{TypeCheck, TypeCheckName, TypeCheckAge, TypeCheckVariable, TypeCheckLibrary, TypeCheckHardLinks, TypeCheckTag, TypeCheckRandom, TypeCheckResult}
 	Actions   = []string{TypeSetVariable, TypeNote, TypeTag, TypeWait, TypeLookupDownloader, TypeMediaServer, TypeDownloader, TypeNotify, TypeSidecar, TypeChecksum, TypeCopy, TypeCommand}
 	Ends      = []string{TypeEnd, TypeFail, TypeRequeue, TypeGoto}
 )
@@ -388,6 +389,14 @@ func Definitions() []StepDefinition {
 			ConfigSchema: object(map[string]any{
 				"share": withDefault(described(map[string]any{"type": "integer", "title": "Share of files (%)", "minimum": 1, "maximum": 99}, "Out of every 100 files, about this many answer Yes."), 10, "Share of files (%)", ""),
 			}, []string{"share"})}),
+		def(StepDefinition{Type: TypeCheckResult, RunsAs: RunsQuestion, Phase: []string{PhaseAfter}, AlwaysOn: true, Category: "filter", Name: "Compare the result", Icon: "branch", TypeLabel: "Check",
+			Description: "After the file is saved: sends it one of two ways by how the new file compares with the original, for a tag, a note or a message about the outcome. Whether a bigger file is kept at all is the Save step's choice.",
+			Inputs:      []Port{in}, Outputs: []Port{yesPort, noPort}, SideEffects: "none",
+			ConfigSchema: object(map[string]any{
+				"test": withDefault(hinted(enum([]any{"saved_at_least", "saved_less_than", "bigger"}, []string{"At least this much was saved", "Less than this much was saved", "The new file is bigger"}),
+					[]string{"Yes when the new file is smaller by at least the percent below.", "Yes when the new file saved less than the percent below (a bigger file counts too).", "Yes when the new file is larger than the original; the percent isn't used."}), "saved_at_least", "Compare", ""),
+				"percent": withDefault(described(map[string]any{"type": "integer", "title": "Percent of the original's size", "minimum": 1, "maximum": 100}, "What counts as saved: the original's size minus the new file's, as a share of the original."), 10, "Percent of the original's size", ""),
+			}, []string{"test"})}),
 		def(StepDefinition{Type: TypeCheckHardLinks, RunsAs: RunsQuestion, AlwaysOn: true, Category: "filter", Name: "Shares its data with another file", Icon: "branch", TypeLabel: "Check",
 			Description: "Yes when the original has another name on the same disk (a hard link), so converting it would free no space.",
 			Inputs:      []Port{in}, Outputs: []Port{yesPort, noPort}, SideEffects: "none"}),
