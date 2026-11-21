@@ -88,7 +88,7 @@ func compareMainVideo(m MainVideo, g media.Stream, n int) []string {
 	var p []string
 	name := fmt.Sprintf("video #%d", n)
 	if m.Format != "" && g.Codec != m.Format {
-		p = append(p, fmt.Sprintf("%s: the video format is %s; the plan makes %s", name, g.Codec, m.Format))
+		p = append(p, fmt.Sprintf("%s: the video format is %s, but the plan makes %s", name, g.Codec, m.Format))
 	}
 	// The height is exact (a picture of another height is another picture); the width has to be even and
 	// within widthTol of the shape the height predicts.
@@ -97,11 +97,11 @@ func compareMainVideo(m MainVideo, g media.Stream, n int) []string {
 		if g.Width%2 != 0 {
 			shape += ", an even width"
 		}
-		p = append(p, fmt.Sprintf("%s: the picture size changed to %dx%d; the plan makes it %d lines high with the original's shape (%s)",
+		p = append(p, fmt.Sprintf("%s: the picture size changed to %dx%d, but the plan makes it %d lines high with the original's shape (%s)",
 			name, g.Width, g.Height, m.Height, shape))
 	}
 	if m.Depth > 0 && g.BitDepth != m.Depth {
-		p = append(p, fmt.Sprintf("%s: the colour depth is %d-bit; %s makes %d-bit for this file",
+		p = append(p, fmt.Sprintf("%s: the colour depth is %d-bit, but %s makes %d-bit for this file",
 			name, g.BitDepth, ranEncoderWords(m.Encoder), m.Depth))
 	}
 	return p

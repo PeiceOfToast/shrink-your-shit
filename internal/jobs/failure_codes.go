@@ -398,6 +398,7 @@ func keyLinesCondition(code string) (cond string, args []any, ok bool) {
 // firstProblem is the first of a refusal's reasons (they are joined with "; "), without its full stop.
 func firstProblem(stored string) string {
 	first, _, _ := strings.Cut(stored, "; ")
+	first, _, _ = strings.Cut(first, ". ") // the next step says "Press Retry" and "Settings > About" itself
 	return strings.TrimSuffix(first, ".")
 }
 

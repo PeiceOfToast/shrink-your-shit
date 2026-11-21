@@ -56,9 +56,9 @@ func checkFailed(cctx context.Context, what string, err error) error {
 	log.Printf("check failed: %s: %v", what, err) // the technical detail, for the log and Settings > About
 	// both may pass (a slow or busy disk, a crash of the tool): tried again later (DD-2)
 	if errors.Is(cctx.Err(), context.DeadlineExceeded) {
-		return retryable(keptNotRun("%s took too long, so the original is kept. Press Retry later; a very slow disk or a damaged file can cause this", what), retryGeneral)
+		return retryable(keptNotRun("%s took too long. Press Retry later; a very slow disk or a damaged file can cause this", what), retryGeneral)
 	}
-	return retryable(keptNotRun("%s could not be done, so the original is kept. Press Retry; if it keeps failing, the file may be damaged", what), retryGeneral)
+	return retryable(keptNotRun("%s could not be done. Press Retry; if it keeps failing, the file may be damaged", what), retryGeneral)
 }
 
 // KeptError means a safety check refused the new file (or could not run): the original is kept.
@@ -413,7 +413,7 @@ func (w *Worker) decodeRun(ctx context.Context, tmp string, out media.Info, star
 
 // playedNothingKept is the refusal for a sampled playback test that decoded no frames.
 func playedNothingKept(progress []byte, start, length, fps float64) error {
-	ke := keptDamaged("the playback test of the new file played nothing from its sample, so the original is kept").(*KeptError)
+	ke := keptDamaged("the playback test of the new file played nothing from its sample").(*KeptError)
 	where := "Where: playback did not report how far it got"
 	if frame, ok := progressFrame(progress); ok {
 		where = fmt.Sprintf("Where: playback reached frame %d", frame)

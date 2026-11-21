@@ -15,6 +15,10 @@ func TestRefusalWordsSayWhy(t *testing.T) {
 			"Open the Check step in the Log to see what differs. Retrying gives the same result. If the workflow asks for something this encoder can't make, change its Convert step."},
 		{"output_damaged", "the new file is empty.", "The new file came out damaged: the new file is empty. The original is untouched.",
 			"Retry. If it happens again, convert this file on the processor."},
+		// job 48: the main video's width, as rules/mainvideo.go words it (its own "; " used to be cut here)
+		{"check_differs", "video #1: the picture size changed to 852x480, but the plan makes it 480 lines high with the original's shape (854x480, ±2)",
+			"The new file isn't what the workflow asked for: video #1: the picture size changed to 852x480, but the plan makes it 480 lines high with the original's shape (854x480, ±2). The original is untouched.",
+			"Open the Check step in the Log to see what differs. Retrying gives the same result. If the workflow asks for something this encoder can't make, change its Convert step."},
 		{"check_not_run", "the picture comparison at 0:00:00 gave no result",
 			"A check couldn't run, so the original is kept: the picture comparison at 0:00:00 gave no result.",
 			"Retry later. If it keeps happening, Settings > About says what is wrong."},
