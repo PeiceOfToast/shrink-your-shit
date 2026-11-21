@@ -1,7 +1,7 @@
 // The drawer's wording (dev: `npm test`, Node 22.6+ with --experimental-strip-types).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { afterHeader, queuedLine } from "./jobResult.ts";
+import { afterHeader, queuedLine, whyHeading } from "./jobResult.ts";
 
 test("a kept job's Result column says the new file was not kept", () => {
   assert.equal(afterHeader(true), "New file (not kept)");
@@ -18,4 +18,15 @@ test("a workflow changed after queueing shows the version line", () => {
 test("no queuedVersion, no line", () => {
   assert.equal(queuedLine({ version: 4 }), null);
   assert.equal(queuedLine(undefined), null);
+});
+
+test("a workflow's own stop is headed 'Stopped by its workflow'", () => {
+  assert.equal(whyHeading("workflow_stopped", true), "Stopped by its workflow");
+  assert.equal(whyHeading("workflow_stopped", false), "Stopped by its workflow");
+});
+
+test("any other failure stays 'Why it failed' (or 'Why' without a failure block)", () => {
+  assert.equal(whyHeading("ffmpeg_error", true), "Why it failed");
+  assert.equal(whyHeading("", true), "Why it failed");
+  assert.equal(whyHeading("ffmpeg_error", false), "Why");
 });

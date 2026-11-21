@@ -9,6 +9,7 @@ import { MOCK, SignedOut, failed, type Answer } from "../api";
 import { bytes, clock, clockS, count, elapsed, plural, stepTime } from "../format";
 import { type LogLine, type LogProbe, convertDoneAgain, fileJobs, findSkip, getJob, getJobLog, jobAction, listJobs, listKept, restoreKept, type JobLog, type LogMove, type LogStep, type LogVariable } from "../jobsApi";
 import { getWorkflow } from "../workflowApi";
+import { whyHeading } from "../jobResult";
 import { getHealth, getSettings } from "../libraryApi";
 import { onLive } from "../live";
 import { FileName } from "../FileName";
@@ -49,7 +50,7 @@ const libPaused = (j: PillJob) => j.state === "queued" && j.subState === "librar
 const keptOrig = (j: PillJob) => j.state === "failed" && (j.newFileRefused === true || j.reason?.code === "kept_original" || j.reason?.code === "check_failed");
 const words = (j: PillJob) => (libPaused(j) ? "Library paused" : keptOrig(j) ? "Original kept" : fell(j) ? "Done, with a warning" : j.state === "retry_wait" && j.retryAt ? "Retry at " + clock(j.retryAt) : WORD[j.state]);
 function Pill({ j }: { j: PillJob }) {
-  return <span className={"pill " + (libPaused(j) || fell(j) ? "warn" : keptOrig(j) ? "" : PILL[j.state] ?? "")} title={keptOrig(j) ? j.reason?.message ?? undefined : undefined}><Icon id={libPaused(j) ? "i-pause" : keptOrig(j) ? "i-info" : fell(j) ? "i-alert" : ICON[j.state] ?? "i-play"} />{words(j)}</span>;
+  return <span className={"pill " + (libPaused(j) || fell(j) ? "warn" : keptOrig(j) ? "" : PILL[j.state] ?? "")} title={keptOrig(j) ? j.reason?.message ?? undefined : j.reason?.code === "workflow_stopped" ? "Stopped by its workflow: " + (j.reason.message ?? "") : undefined}><Icon id={libPaused(j) ? "i-pause" : keptOrig(j) ? "i-info" : fell(j) ? "i-alert" : ICON[j.state] ?? "i-play"} />{words(j)}</span>;
 }
 const reasonText = (j: JobItem) => j.reason?.message ?? j.detail ?? ""; // #130: every row's reason is {code, message}
 const saved = (b?: number, a?: number) => {
@@ -294,8 +295,8 @@ function WhyFailed({ id, msg, code, worker, f, found = [] }: { id: string; msg: 
   // Copy summary: the plain text a bug report needs (V6b item 5): the job, its worker and the app version, then the box
   const copy = () => navigator.clipboard?.writeText("Job " + id + " · " + (worker ?? "no worker") + " · Shrink Your Shit " + (ver ?? "") + "\n" + (box.current?.innerText ?? "")).catch(() => {});
   return (
-    <section ref={box} className="note" role="region" aria-label="Why it failed" style={{ display: "block", borderLeft: "3px solid var(--error)" }}>
-      <h3><Icon id="i-alert" /> Why it failed <span className="pill bad">Failed</span></h3>
+    <section ref={box} className="note" role="region" aria-label={whyHeading(code, true)} style={{ display: "block", borderLeft: "3px solid var(--error)" }}>
+      <h3><Icon id="i-alert" /> {whyHeading(code, true)} <span className="pill bad">Failed</span></h3>
       <p style={{ fontSize: "var(--fs-lg)" }}>{msg}</p>
       <p className="sm muted mono">{code}</p>
       <p className="sm">In step {f.stepIndex + 1} of {f.stepCount}, <a href={"#job-step-" + (f.stepIndex + 1)}>{stepLabel(f.step, found)}</a>, after {t}{f.mediaTime ? " (at " + f.mediaTime + " in the video)" : ""}.</p>
@@ -669,7 +670,7 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
           {j?.removed && j.reason?.code === "removed" ? <div className="note"><Icon id="i-info" /><div>Its library was removed, so this file won't be converted.</div></div>
             : j?.failure ? <WhyFailed id={id} msg={reason} code={j.reason?.code ?? ""} worker={j.worker ?? null} f={j.failure} found={found.flatMap((st) => st.found!)} />
             : found.length ? <CheckFound lines={found.flatMap((st) => st.found!)} reason={reason} />
-            : reason && <section><h3>Why</h3><p>{reason}</p></section>}
+            : reason && <section><h3>{whyHeading(j?.reason?.code ?? "", false)}</h3><p>{reason}</p></section>}
           <section><h3>File</h3><dl className="kv">
             {(own?.path ?? j?.file?.path) && <><dt>Source</dt><dd className="mono sm">{slashWrap(own?.path ?? j?.file?.path ?? "")}</dd></>} {/* review 54ff228: no '-' when the server doesn't keep the path (a removed library's job) */}
             {(j?.library || own) && <><dt>Library</dt><dd>{j?.library?.name ?? own?.library}</dd></>}
