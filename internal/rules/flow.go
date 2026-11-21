@@ -3,6 +3,7 @@
 package rules
 
 import (
+	"strconv"
 	"strings"
 )
 
@@ -212,9 +213,12 @@ func (t Template) Tag() string {
 		} else {
 			parts = append(parts, "at most "+s.Resolution+"p")
 		}
-		if s.MaxBitrate == "none" || s.MaxBitrate == "" {
+		switch {
+		case s.RateControl == "vbr": // VBR: no target, the quality is kept steady under the person's peak (CRF 23)
+			parts = append(parts, "VBR up to "+strconv.Itoa(s.VBRMaxKbps)+" kbps")
+		case s.MaxBitrate == "none" || s.MaxBitrate == "":
 			parts = append(parts, "no bitrate limit")
-		} else {
+		default:
 			parts = append(parts, upperFirst(s.MaxBitrate)+" bitrate")
 		}
 		if a, _, _ := StandardAudio(s.Audio, s.OnlyMyLanguages); AudioWords[a] != "" {

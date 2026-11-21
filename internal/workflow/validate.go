@@ -170,7 +170,11 @@ func Validate(d Doc) Result {
 		r.Issues = append(r.Issues, i)
 	}
 	if d.SchemaVersion != SchemaVersion {
-		add(Issue{Code: "unknown_schema_version", Message: fmt.Sprintf("This workflow's format (version %d) is not one this version reads.", d.SchemaVersion)})
+		msg := fmt.Sprintf("This workflow is in format version %d, which is older than this version can upgrade. It is kept as it was stored.", d.SchemaVersion)
+		if d.SchemaVersion > SchemaVersion {
+			msg = fmt.Sprintf("This workflow is in format version %d, which is newer than this version reads (%d). Update shrink-your-shit to open it.", d.SchemaVersion, SchemaVersion)
+		}
+		add(Issue{Code: "unknown_schema_version", Message: msg})
 		return r
 	}
 	r.AddSteps = addSteps(d)

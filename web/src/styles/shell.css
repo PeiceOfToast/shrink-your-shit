@@ -8,7 +8,7 @@ a{color:var(--accent-text)}
 h1,h2,h3,h4{margin:0;line-height:1.25}
 h1{font-size:var(--fs-xl)} h2{font-size:var(--fs-lg)} h3{font-size:calc(15px*var(--font-scale))}
 p{margin:0 0 8px}
-code,.mono{font-family:var(--mono);font-size:.92em}
+code,.mono{font-family:var(--mono);font-size:max(.92em,var(--fs-sm))}
 .muted{color:var(--text-2)} .sm{font-size:var(--fs-sm)}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 :focus-visible{outline:2px solid var(--focus);outline-offset:2px}
@@ -30,16 +30,16 @@ code,.mono{font-family:var(--mono);font-size:.92em}
 .nav a:hover{background:color-mix(in srgb,var(--raised) 60%,transparent)}
 .nav a[aria-current=page]{background:var(--raised);font-weight:var(--fw-strong)}
 .nav a[aria-current=page]::before{content:"";position:absolute;left:-8px;top:8px;bottom:8px;width:3px;border-radius:0 3px 3px 0;background:var(--accent)}
-.badge{margin-left:auto;min-width:20px;height:20px;padding:0 6px;border-radius:10px;font-size:12px;font-weight:var(--fw-strong);display:inline-grid;place-items:center;background:var(--error);color:var(--on-accent)}
+.badge{margin-left:auto;min-width:20px;min-height:20px;padding:0 6px;border-radius:10px;font-size:var(--fs-sm);font-weight:var(--fw-strong);display:inline-grid;place-items:center;background:var(--error);color:var(--on-accent)}
 .badge.warn{background:var(--warning);color:var(--on-accent)}
 .badge.info{background:var(--accent);color:var(--on-accent)}
 .rail .foot{margin-top:auto;padding-top:10px;border-top:1px solid var(--border)}
 .rail .foot button{width:100%;justify-content:flex-start}
 .rail-collapsed .lbl,.rail-collapsed .grp,.rail-collapsed .brand span.t{display:none}
 .rail-collapsed .nav a{justify-content:center;padding:0}
-.rail-collapsed .badge{position:absolute;top:4px;right:6px;margin:0;min-width:16px;height:16px;font-size:11px;padding:0 3px}
+.rail-collapsed .badge{position:absolute;top:4px;right:6px;margin:0;min-width:16px;min-height:16px;font-size:var(--fs-sm);padding:0 3px}
 .badge.off{background:var(--raised);color:var(--text-2);box-shadow:inset 0 0 0 1px var(--border-strong);font-weight:500}
-.rail-collapsed .badge.off{min-width:8px;height:8px;padding:0;font-size:0;top:8px;right:10px;background:var(--text-2)} /* no room for the word: a grey dot */
+.rail-collapsed .badge.off{min-width:8px;height:8px;min-height:0;padding:0;font-size:0;top:8px;right:10px;background:var(--text-2)} /* no room for the word: a grey dot */
 .rail-collapsed .brand{justify-content:center;padding:0}
 .rail-collapsed .nav a[aria-current=page]::before{left:-8px}
 .main{min-width:0;display:flex;flex-direction:column}
@@ -49,12 +49,12 @@ code,.mono{font-family:var(--mono);font-size:.92em}
 .crumb a{color:var(--text-2);text-decoration:none;font-weight:400}
 .crumb .cur{overflow:hidden;text-overflow:ellipsis}
 .search{flex:1;max-width:420px;min-width:0;display:flex;align-items:center;gap:8px;height:36px;padding:0 10px;border:1px solid var(--border-strong);border-radius:var(--radius-sm);background:var(--surface);color:var(--text-2);cursor:text;font:inherit;text-align:left}
-.search .k{margin-left:auto;font-size:12px;border:1px solid var(--border-strong);border-radius:4px;padding:0 5px;white-space:nowrap}
+.search .k{margin-left:auto;font-size:var(--fs-sm);border:1px solid var(--border-strong);border-radius:4px;padding:0 5px;white-space:nowrap}
 .activity{display:inline-flex;align-items:center;gap:6px;color:var(--accent-text);text-decoration:none;font-weight:600;white-space:nowrap}
 .menu{position:relative}
 .menu>summary{list-style:none;cursor:pointer}
 .menu>summary::-webkit-details-marker{display:none}
-.menu .pop{position:absolute;right:0;top:calc(100% + 6px);min-width:220px;background:var(--raised);border:1px solid var(--border-strong);border-radius:var(--radius);box-shadow:0 8px 24px rgb(0 0 0/.35);padding:6px;z-index:50}
+.menu .pop{position:absolute;right:0;top:calc(100% + 6px);min-width:220px;background:var(--raised);border:1px solid var(--border-strong);border-radius:var(--radius);box-shadow:var(--shadow-pop);padding:6px;z-index:50}
 .pop .it{display:flex;align-items:center;gap:10px;width:100%;min-height:36px;padding:0 10px;border:0;background:none;color:var(--text);font:inherit;border-radius:var(--radius-sm);cursor:pointer;text-decoration:none;text-align:left}
 .pop .it:hover{background:var(--surface)}
 /* Unavailable item: muted, never red, no hover; stays focusable (aria-disabled, not disabled) so its hint is read out. */
@@ -74,13 +74,15 @@ body.conn-lost .connbar{display:flex}
 body.conn-lost .stale{color:var(--text-2)}
 .content{padding:var(--pad) var(--page-pad) 48px;display:flex;flex-direction:column;gap:calc(var(--gap)*1.4);min-width:0}
 .content.flush{padding:0;gap:0}
-.pagehead{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-height:36px}
-.pagehead>.ic{width:16px;height:16px;color:var(--text-2);flex:none}
+.pagehead{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-height:56px}
+.pagehead .ptile{width:32px;height:32px;border-radius:var(--radius-sm);background:var(--raised);color:var(--accent-text);display:grid;place-items:center;flex:none}
+.pagehead .ptile .ic{width:18px;height:18px}
+.pagehead .tt{display:flex;flex-direction:column;gap:2px;min-width:0}
 .pagehead h1{font-size:var(--fs-xl);font-weight:var(--fw-strong);min-width:0;overflow-wrap:anywhere}
 .pagehead .crumbl{font-size:var(--fs-xl);color:var(--text-2);text-decoration:none}.pagehead .crumbl:hover{text-decoration:underline}
 .pagehead .slash{color:var(--text-2);font-size:var(--fs-xl)}
 .pagehelp{margin:-6px 0 0}
-.pagehead .sub{color:var(--text-2);margin-top:2px}
+.pagehead .sub{color:var(--text-2);font-size:var(--fs-sm);font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 /* controls */
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:36px;padding:0 14px;border:1px solid var(--border-strong);border-radius:var(--radius-sm);background:var(--surface);color:var(--text);font:inherit;font-weight:500;cursor:pointer;text-decoration:none;white-space:nowrap}
@@ -125,10 +127,10 @@ textarea.input{min-height:72px;font-family:var(--mono);font-size:var(--fs-sm)}
 /* status pills (clean pass S1): neutral for normal states; colour only when active or needing attention */
 .pill{display:inline-flex;align-items:center;gap:4px;height:var(--chip-h);padding:0 8px;border-radius:calc(var(--chip-h)/2);background:var(--raised);color:var(--text-2);font-size:var(--fs-sm);font-weight:500;white-space:nowrap;flex:none}
 .pill .ic{width:12px;height:12px}
-.pill.run{background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent-text)}
-.pill.ok{background:color-mix(in srgb,var(--success) 14%,transparent);color:var(--success-text)}
-.pill.bad{background:color-mix(in srgb,var(--error) 14%,transparent);color:var(--error-text)}
-.pill.warn,.pill.sample{background:color-mix(in srgb,var(--warning) 14%,transparent);color:var(--warning-text)}
+.pill.run{background:var(--accent-soft);color:var(--accent-text)}
+.pill.ok{background:var(--ok-soft);color:var(--success-text)}
+.pill.bad{background:var(--bad-soft);color:var(--error-text)}
+.pill.warn,.pill.sample{background:var(--warn-soft);color:var(--warning-text)}
 .st.ok{color:var(--success-text)}.st.run{color:var(--accent-text)}.st.bad{color:var(--error-text)}.st.warn{color:var(--warning-text)}.st.wait{color:var(--text-2)}
 .st .ic{width:16px;height:16px}
 .st:has(>.fail){align-items:flex-start}.st:has(>.fail)>.ic{margin-top:2px}.st .fail{white-space:normal}.st .why{font-weight:400;color:var(--text)}
@@ -205,7 +207,7 @@ table.tbl{width:100%;border-collapse:collapse}
 .tl{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:0}
 .tl li{display:grid;grid-template-columns:22px minmax(0,1fr) auto;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);align-items:center}
 .tl li:last-child{border-bottom:0}
-.logbox{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 10px;font-family:var(--mono);font-size:12px;max-height:150px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}
+.logbox{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 10px;font-family:var(--mono);font-size:var(--fs-sm);max-height:150px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}
 .mockbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 
 @media (max-width:1100px){.cols3{grid-template-columns:repeat(2,minmax(0,1fr))}}
@@ -216,7 +218,7 @@ table.tbl{width:100%;border-collapse:collapse}
   .app.nav-open::after{content:"";position:fixed;inset:0;background:rgb(0 0 0/.5);z-index:25}
   .app.rail-collapsed .lbl,.app.rail-collapsed .grp,.app.rail-collapsed .brand span.t{display:revert}
   .app.rail-collapsed .nav a{justify-content:flex-start;padding:0 12px}
-  .app.rail-collapsed .badge{position:static;margin-left:auto;min-width:20px;height:20px;font-size:12px;padding:0 6px}
+  .app.rail-collapsed .badge{position:static;margin-left:auto;min-width:20px;min-height:20px;font-size:var(--fs-sm);padding:0 6px}
   .app.rail-collapsed .badge.off{background:var(--raised)}
   .btn.menubtn{display:inline-flex}
   .search{flex:none;width:36px;padding:0;justify-content:center}.search .txt,.search .k{display:none}
@@ -227,7 +229,7 @@ table.tbl{width:100%;border-collapse:collapse}
 @media (max-width:640px){
   .activity .txt,.menu .btn .txt{display:none}
   .topbar{gap:6px;padding:0 10px}
-  :root{--page-pad:12px}
+  :root{--page-pad:var(--s3)}
   .topbar .crumb{display:flex}
   .cols3{grid-template-columns:minmax(0,1fr)}
   .kv{grid-template-columns:minmax(0,1fr)}.kv dt{margin-top:6px}
@@ -361,7 +363,33 @@ label.chk{cursor:pointer}
 .tbl a{color:var(--text);font-weight:500}
 .tbl a.ttl,.tbl .ttl{font-weight:var(--fw-strong);color:var(--text)}
 .tbl td .sub{overflow-wrap:anywhere}
-.pathseg{display:inline-block;max-width:100%} /* Libraries: a path segment wraps whole; only one longer than the line breaks inside it */
+/* U3 (C1): a library row has no table header: a 40 px tile, the name with its folder, one chip line of facts, and one
+   status pill. The row stays 64 px or less at 1440. Checkboxes show only while selecting. */
+.list.rows .tbl td{height:auto;padding:6px 12px}
+.list.rows .tbl thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap} /* rows: the header is for screen readers only */
+.list.rows .tbl td.selc{display:none;padding-right:0}
+.list.rows.selecting .tbl td.selc{display:table-cell}
+.list.rows .tbl td.tile{width:40px;padding:6px 0 6px 12px}
+.ltile{min-width:40px;height:40px;padding:0 4px;border-radius:var(--radius-sm);background:var(--raised);color:var(--accent-text);display:grid;place-items:center;flex:none}
+.ltile .ic{width:20px;height:20px}
+.lname{display:flex;align-items:baseline;gap:8px;min-width:0}
+.lname .ttl{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lpath{flex:1 1 auto;min-width:0;font-size:var(--fs-sm);color:var(--text-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.list.rows .chips{margin-top:4px}
+.list.rows .mchip{text-decoration:none;color:var(--text-2)}
+.list.rows .mchip.warnchip{background:var(--warn-soft);color:var(--warning-text)}
+.list.rows .mchip.errchip{background:var(--bad-soft);color:var(--error-text);font-weight:600}
+.list.rows .tbl td.stc{width:1%}
+.selall{display:inline-flex;align-items:center;gap:4px;min-height:32px}
+/* Jobs (U4, C1): the size change is the right-hand fact; the 3 px underline runs along a live row's bottom edge */
+.list .tbl.jobs tr{position:relative}
+/* a long reason line is capped, or its nowrap text sets the name column wider than the screen at larger text sizes */
+.list .tbl.jobs .lpath{max-width:30em}
+.list .tbl td.sizec{width:1%;text-align:right;color:var(--text-2)}
+.uline{position:absolute;left:0;right:0;bottom:0;height:3px}
+.uline i{display:block;height:100%;background:var(--accent)}
+.ltile.codec{font-size:var(--fs-sm);line-height:1.15;text-align:center;font-variant-numeric:tabular-nums}
+.ltile.codec b{font-weight:var(--fw-strong)}
 .tbl td .failedlink{display:block;margin-top:2px;font-size:var(--fs-sm);font-weight:600;color:var(--error-text)} /* Libraries: "2 failed" under the Status chip */
 .ltools{display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-height:36px}
 .ltools .btn.sm{min-height:32px}
@@ -372,7 +400,7 @@ label.chk{cursor:pointer}
 .ltools .desk{display:contents}
 .ltools .pop .btn{width:100%;justify-content:flex-start}
 .chips{display:inline-flex;gap:4px;flex-wrap:wrap}
-.mchip{display:inline-flex;align-items:center;height:var(--chip-h);padding:0 6px;border-radius:4px;background:var(--raised);color:var(--text-2);font-size:calc(11.5px*var(--font-scale));white-space:nowrap}
+.mchip{display:inline-flex;align-items:center;height:var(--chip-h);padding:0 6px;border-radius:4px;background:var(--raised);color:var(--text-2);font-size:var(--fs-sm);white-space:nowrap}
 .phone,.tbl .sub.phone{display:none}
 @media (max-width:1100px){.tbl [data-p="6"],.tbl [data-p="7"]{display:none}}
 @media (max-width:900px){.tbl [data-p="4"],.tbl [data-p="5"]{display:none}}
@@ -393,18 +421,32 @@ label.chk{cursor:pointer}
   .list .tbl tr::after{content:"\203A";position:absolute;right:6px;top:50%;transform:translateY(-50%);color:var(--text-2);font-size:20px;line-height:1}
   .list .tbl td{display:none;height:auto;padding:0;border:0;background:none!important}
   .list .tbl td.idc{display:block;flex:1;min-width:0}
-  .list .tbl td.stc,.list .tbl td.actc,.list .tbl td.posc{display:block;flex:none}
+  .list .tbl td.stc,.list .tbl td.actc,.list .tbl td.posc,.list .tbl td.sizec{display:block;flex:none}
   .list .tbl td.posc{min-width:20px}
   .list.selecting .tbl td.selc{display:block;flex:none}
-  .list .tbl td.idc .sub:not(.phone){display:none}   /* phone rows: the title and one muted line */
+  .list .tbl td.idc .sub:not(.phone):not(.runs){display:none}   /* phone rows: the title and one muted line; Workflows' Recent runs line stays */
   .list .tbl .desk{display:none}
   .list .tbl .ttl::before{content:"";position:absolute;inset:0}   /* the whole row opens it */
   .list .tbl td.selc,.list .tbl td.actc,.list .tbl .over{position:relative;z-index:1}
   .list .tbl td.selc input{width:22px;height:22px}
+  .list.rows .tbl td.tile{display:block;flex:none;width:auto;padding:0}
+  .list.rows .tbl td.tile .ltile{min-width:40px;height:40px}
+  .list.rows .tbl td.stc{width:auto} /* the desktop 1% width would let the pill spill over the switch and menu */
 }
+@media (max-width:599px){ /* U3: on a phone the status pill moves to a third line under the chips, under the tile's column */
+  .list.rows .tbl tr{flex-wrap:wrap;row-gap:6px}
+  .list.rows .tbl td.stc{flex:0 0 100%;padding:0 0 0 48px}
+  .list.rows .tbl.wflist tr{flex-wrap:nowrap}
+  .list.rows .tbl.wflist td{padding:0} /* keep after the td.stc indent above: same weight, wins on order */
+  .list.rows .tbl.wflist td.stc{flex:none} /* Workflows keeps one line: name, check pill, switch, menu (as before U5) */
+  .list.rows .tbl.wflist td.idc .row>span:last-child{min-width:0}
+  .list .tbl.jobs td.sizec{flex:0 0 100%;padding:0 0 0 48px;text-align:left;width:auto}
+}
+@media (min-width:901px){.list.rows .tbl.jobs td.selc{display:table-cell}} /* desktop Jobs keeps its row checkboxes; the Libraries rule hides them */
 .pagehead .btn.help{width:24px;min-height:24px;height:24px}.pagehead .btn.help .ic{width:16px;height:16px}
 /* the favourite star: a fixed 32 px column, the icon centred, colour only (no pressed box), so names line up (design, step 2) */
-.tbl .btn.star{width:32px;min-width:32px;flex:none;justify-content:center;border-color:transparent;background:none}
+.tbl .btn.star{width:24px;min-width:24px;height:24px;min-height:24px;flex:none;justify-content:center;border-color:transparent;background:none;padding:0}
+.tbl .btn.star .ic{width:24px;height:24px}
 .tbl .btn.star:hover{background:var(--raised)}
 
 /* clean pass step 3 (DESIGN-DIRECTION-clean.md D1-D3): even KPI tiles, status in the header, panels as flat lists */
@@ -529,7 +571,7 @@ label.chk{cursor:pointer}
 .hit{display:inline-flex;align-items:center;position:relative;cursor:pointer}
 @media (pointer:coarse){
   .hit::before,.tbl .btn.star::before{content:"";position:absolute;left:50%;top:50%;width:44px;height:44px;transform:translate(-50%,-50%)}
-  .tbl .btn.star{position:relative;width:32px;min-width:32px;height:32px;min-height:32px}
+  .tbl .btn.star{position:relative;width:24px;min-width:24px;height:24px;min-height:24px}
   .hit input[type=checkbox]:not(.switch){width:20px;height:20px}
   .hit input.switch{width:38px;height:22px;border-radius:11px}.hit input.switch::after{width:14px;height:14px}.hit input.switch:checked::after{left:19px}
 }
@@ -551,22 +593,23 @@ label.chk{cursor:pointer}
 .tbl .posc{width:44px;text-align:right;color:var(--text-2);font-variant-numeric:tabular-nums;white-space:nowrap}
 @media (max-width:640px){.drawer{width:100vw;border-left:0}}
 .menu .pop{max-width:calc(100vw - 16px)}   /* never wider than the screen; Shell keeps it on the screen */
-.lang-opts{right:auto;left:0;min-width:100%;max-width:calc(100vw - 16px);max-height:280px;overflow:auto;display:flex;flex-direction:column;background:var(--raised);border:1px solid var(--border-strong);border-radius:var(--radius);box-shadow:0 8px 24px rgb(0 0 0/.35);padding:6px;z-index:50} /* review item B: under its field, never off the screen (left-anchored, max-width) */
+.lang-opts{right:auto;left:0;min-width:100%;max-width:calc(100vw - 16px);max-height:280px;overflow:auto;display:flex;flex-direction:column;background:var(--raised);border:1px solid var(--border-strong);border-radius:var(--radius);box-shadow:var(--shadow-pop);padding:6px;z-index:50} /* review item B: under its field, never off the screen (left-anchored, max-width) */
 .lang-opts .it{justify-content:space-between}
 .lang-opts .it.on{background:var(--surface)}
 .lang-opts .it .muted{color:var(--text-2);text-align:right}
 
 /* V7 Workers: cards, one column on phones */
 .wgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(340px,100%),1fr));gap:var(--gap)}
+.wgrid>.wcard:only-child{grid-column:1/-1} /* U5: one worker fills the content width */
 .wcard>.hd h2 a{color:var(--text);text-decoration:none}.wcard>.hd h2 a:hover{text-decoration:underline}
 .wcard.dim .bd,.wcard.dim h2 a,.wcard.dim h3 a{color:var(--text-2)}
 .btn.icon.gear{width:44px;height:44px;min-width:44px;min-height:44px} /* the worker settings link: a 44 px tap target at every width */
 .wcard dd a{display:block}
-/* Encoder cards (SCREENS V7, 11-13): lit = its test passed; dim (dashed, grey) = not there or failed. Words, not colour alone */
+/* Encoder cards (SCREENS V7, 11-13): lit = its test passed; dim (grey, with "(no)") = not there or failed. Words, not colour alone */
 .ec-h{margin:0 0 6px;font-weight:var(--fw-strong)}
 .ec-grid{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:8px}
 .ec-grid.big{grid-template-columns:repeat(auto-fill,minmax(200px,1fr))}
-.ec{min-width:0;display:flex;flex-direction:column;gap:2px;padding:8px 10px;border:1px dashed var(--border);border-radius:var(--radius-sm);color:var(--text-2);font-size:var(--fs-sm);overflow-wrap:anywhere}
+.ec{min-width:0;display:flex;flex-direction:column;gap:2px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-2);font-size:var(--fs-sm);overflow-wrap:anywhere}
 .ec.lit{color:var(--text);border:1px solid var(--accent);background:var(--surface)}
 .ec-lg{padding:12px 14px;font-size:var(--fs)}
 .ec-t{display:flex;align-items:center;flex-wrap:wrap;gap:4px 6px}
@@ -574,7 +617,7 @@ label.chk{cursor:pointer}
 .ec-ok{color:var(--success-text);font-weight:var(--fw-strong)}
 .ec-t input{margin:0;accent-color:var(--accent)}.ec.primary{box-shadow:inset 0 0 0 1px var(--accent)}.ec-wrap p{margin:6px 0 0}.ec-wrap p:empty{margin:0}
 /* formats on every tile (user bug 11-14): lit when tested, dim otherwise, like the Processor card */
-.ec-f{display:flex;flex-wrap:wrap;gap:2px 8px}.ec-f>span{color:var(--text-2);text-decoration:line-through}.ec-f>span.on{color:var(--text);text-decoration:none;font-weight:var(--fw-strong)}
+.ec-f{display:flex;flex-wrap:wrap;gap:2px 8px}.ec-f>span{color:var(--text-2)}.ec-f>span.on{color:var(--text);font-weight:var(--fw-strong)}
 .ec-meta{color:var(--text-2);margin-top:4px}
 @media (max-width:479px){.ec-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.ec-grid.big{grid-template-columns:minmax(0,1fr)}}
 @media (pointer:coarse){.wcard dd a{display:flex;align-items:center;min-height:44px}}
@@ -719,15 +762,16 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 .ginspect .ginform .input,.ginspect .ginform select{width:100%;max-width:100%;min-width:0} /* review 13f1c75 P3: no cut-off selects in the narrow panel */
 @media (pointer:coarse){.gfold>summary{min-height:44px;display:flex;align-items:center}.gpi{min-height:44px}}
 .fieldbad>.field .input,.fieldbad>.field select,.fieldbad>fieldset{border-color:var(--error);box-shadow:0 0 0 1px var(--error)} /* #165: a setting with a value it cannot use */
-/* user item 5 (design 7.3): the Dashboard as an overview: a headline band, flat sections, two small day charts */
-.ov .headline{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:24px;align-items:end;padding:8px 0 16px;border-bottom:1px solid var(--border)}
-.ov .big{font-size:44px;line-height:1.05;font-weight:var(--fw-strong);letter-spacing:-.02em;margin-bottom:8px}
-.ov .big small{font-size:var(--fs-lg);font-weight:400;color:var(--text-2);letter-spacing:0;margin-left:6px}
-.ov .stats{display:flex;gap:32px;flex-wrap:wrap}
-.ov .stats div{display:flex;flex-direction:column;gap:2px}
-.ov .stats b{font-size:var(--fs-xl);font-weight:var(--fw-strong)}
-.ov .stats span{color:var(--text-2);font-size:var(--fs-sm)}
-.ov .stats a{color:var(--text);text-decoration:none}.ov .stats a.bad b{color:var(--error-text)}
+/* user item 5 (design 7.3): the Dashboard as an overview: stat tiles with sparklines (U6), flat sections, two small day charts */
+.ov .tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--s4)}
+.ov .tile{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:var(--s4);display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-rows:auto auto auto;gap:4px var(--s3);align-content:start;min-width:0}
+.ov .tile .l{grid-column:1;color:var(--text-2);font-size:var(--fs-sm);font-weight:var(--fw-strong)}
+.ov .tile .v{grid-column:1;font-size:var(--fs-display);font-weight:var(--fw-strong);line-height:1.1;letter-spacing:-.01em;overflow-wrap:anywhere}
+.ov .tile .v small{font-size:var(--fs-lg);font-weight:400;color:var(--text-2);letter-spacing:0;margin-left:6px}
+.ov .tile .v.ok{color:var(--success-text)}
+.ov .tile .d{grid-column:1;color:var(--text-2);font-size:var(--fs-sm);overflow-wrap:anywhere}
+.ov .tile .d a{color:var(--text)}.ov .tile .d a.bad{color:var(--error-text)}
+.ov .tile .spark{grid-column:2;grid-row:1/4;width:128px;height:56px;align-self:end;overflow:visible}
 .ov .sec>h2{font-size:var(--fs-lg);font-weight:var(--fw-strong);margin:0 0 10px;display:flex;align-items:baseline;gap:12px}
 .ov .sec>h2 .more{margin-left:auto;font-size:var(--fs);font-weight:400;color:var(--text-2)}
 .ov .sec+.sec{margin-top:20px}
@@ -749,8 +793,12 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 .ov .chartfoot b{color:var(--text);margin-left:6px}.ov .chartfoot details{margin-left:auto}.ov .chartfoot details[open]{flex-basis:100%;margin-left:0;min-width:0/* a flex item is as wide as its table otherwise, so .daytbl never scrolls and the page does (390 px) */}
 .ov .quiet{margin:0;display:flex;align-items:center;justify-content:center;text-align:center;min-height:160px;padding:12px;border:1px solid var(--border);border-radius:var(--radius)}.ov .quiet.short{min-height:80px}
 
+/* U6 review2: at 901-1200 px the sparkline sits under the text, full tile width, so the figure keeps the whole tile */
+@media (min-width:901px) and (max-width:1280px){
+  .ov .tile{grid-template-columns:minmax(0,1fr)}.ov .tile .spark{grid-column:1 / -1;grid-row:auto;width:100%;height:40px;align-self:auto}
+}
 @media (max-width:900px){
-  .ov .headline{grid-template-columns:minmax(0,1fr);gap:8px}.ov .big{font-size:36px}.ov .stats{gap:20px}
+  .ov .tiles{grid-template-columns:minmax(0,1fr)}.ov .tile{grid-template-columns:minmax(0,1fr) 96px}.ov .tile .spark{width:96px;height:40px}
   .ov .charts{grid-template-columns:minmax(0,1fr);gap:24px}
   .ov .legend.ph{display:none}
   .ov .ovt,.ov .ovt tbody{display:block}.ov .ovt thead{display:none}
@@ -762,9 +810,8 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 }
 /* overview at phone widths (m7, overview-mock): the day table scrolls in its own box; links and the failed count are 44 px targets on touch */
 .ov .daytbl{overflow-x:auto;max-width:100%}.ov .daytbl td,.ov .daytbl th{white-space:nowrap}/* it scrolls now, so "567 MB" stays on one line */
-@media (pointer:coarse){.ov .sec>h2 .more,.ov .stats a,.ov a.fname,.ov td.nm a,.ov details>summary{display:inline-flex;align-items:center;min-height:44px}}
+@media (pointer:coarse){.ov .sec>h2 .more,.ov .tile .d a,.ov a.fname,.ov td.nm a,.ov details>summary{display:inline-flex;align-items:center;min-height:44px}}
 .ov .kv{grid-template-columns:auto minmax(0,1fr)} /* the 30-day totals keep label and figure on one line on phones */
-@media (max-width:640px){.ov .stats{gap:12px 20px}.ov .stats div{min-width:calc(50% - 10px)}} /* review a7d25ec P3: the four headline figures sit two by two on a phone */
 /* Settings > Connections (V9e): a folder row is "<app> sees" -> "Shrink Your Shit sees" x; at phone widths the two fields stack */
 .cfold>summary{cursor:pointer;overflow-wrap:anywhere}
 .cmap{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr) auto;gap:8px;align-items:end}

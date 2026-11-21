@@ -8,6 +8,13 @@ on:
 permissions:
   contents: read
 
+# A newer push to the same pull request cancels its older, now-pointless run. Pushes to dev and main are never
+# cancelled, so every merged commit keeps its own result.
+# (A push gets a group of its own commit: a shared group would still drop a waiting run when a third one queued.)
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('ci-pr-{0}', github.event.pull_request.number) || format('ci-push-{0}', github.sha) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 # Linux jobs run on ubuntu-latest (the distro ffmpeg); the real ffmpeg 8 job stays on ubuntu-24.04 with its pinned static build.
 jobs:
   # Code the tests do not look at: Go formatting. (The name keeps "UI JavaScript" in case it is a required
@@ -29,7 +36,9 @@ jobs:
   test:
     name: test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    # The ffmpeg install alone has taken over 14 minutes on a slow runner, so 15 cancelled the tests mid-run.
+    # 45 leaves room for that install plus go test's own 15-minute timeout, so the test's timeout always fires first.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -55,7 +64,10 @@ jobs:
         env:
           SYP_REQUIRE_FFMPEG: "1"
         run: |
-          go test -count=1 -v ./... > test.log 2>&1 || { cat test.log; exit 1; }
+          # The output streams into this step's log as it runs, so even a cancelled job shows where it was.
+          # go test's own timeout ends before the job's, so a hung test fails with every goroutine's stack.
+          set -o pipefail
+          go test -count=1 -timeout 15m -v ./... 2>&1 | tee test.log
           grep -E '^(ok|FAIL)[[:space:]]' test.log
           echo "Real-ffmpeg tests:"
           grep -E '^[[:space:]]*--- (PASS|FAIL|SKIP): TestReal' test.log
