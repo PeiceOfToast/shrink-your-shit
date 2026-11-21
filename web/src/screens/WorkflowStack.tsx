@@ -69,11 +69,10 @@ function RefPick({ fid, title, value, set, back, selectRef, none }: { fid: strin
           <option value="">Choose a variable…</option>
           {cur && !known && <option value={cur}>{"{{" + cur + "}}"} · not a variable of this workflow</option>}
           <optgroup label="Your variables">{vars.map((v) => <option key={v.name} value={v.name} disabled={v.secret}>{"{{" + v.name + "}}"}{v.secret ? " · a secret can't set this" : v.value != null && v.value !== "" ? " · " + v.value : ""}</option>)}</optgroup>
-          {vars.length === 0 && <option value="" disabled>This workflow has no variables yet: add one in Variables above</option>}
         </select>
         <button className="btn sm ghost nowrap" type="button" onClick={back}>Type a value instead</button>
       </div>
-      <span className="hint" id={fid + "-ref"}>One of this workflow's own variables sets this; its value must fit the setting. A secret can't be used here.</span>
+      <span className="hint" id={fid + "-ref"}>{vars.length === 0 ? "This workflow has no variables yet: add one in Variables above, then choose it here." : "One of this workflow's own variables sets this; its value must fit the setting. A secret can't be used here."}</span>
     </div>);
 }
 
