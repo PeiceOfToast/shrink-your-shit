@@ -542,6 +542,14 @@ ALTER TABLE jobs ADD COLUMN tags TEXT NOT NULL DEFAULT '[]';`},
 	// it uses its workflow's own values.
 	{58, "library variables", `
 ALTER TABLE libraries ADD COLUMN variables TEXT NOT NULL DEFAULT '[]';`},
+	// Foundation slice 9: the workflow revision a job was queued under, set where a person or the scanner
+	// queues it (Enqueue, EnqueueFailed, ConvertAgain) and left alone on the way back to the queue.
+	// workflow_rev becomes the revision the job actually ran with, stamped when a worker reads the
+	// workflow; the job details compare the two to say the workflow changed while it waited. Back-filled
+	// from workflow_rev: an upgraded install has no earlier runs until a workflow changes.
+	{59, "job queued revision", `
+ALTER TABLE jobs ADD COLUMN queued_rev INTEGER NOT NULL DEFAULT 0;
+UPDATE jobs SET queued_rev = workflow_rev;`},
 }
 
 // legacyReasonCode is the SQL for the code of a reason stored before migration 23 as its sentence alone

@@ -589,11 +589,17 @@ func TestNoJob(t *testing.T) {
 type recQueue struct {
 	Queue
 	progress []float64
+	runs     []int64 // RecordRunRevision's job ids, in order (foundation slice 9)
 }
 
 func (r *recQueue) Progress(id int64, p float64) error {
 	r.progress = append(r.progress, p)
 	return r.Queue.Progress(id, p)
+}
+
+func (r *recQueue) RecordRunRevision(id int64, tmpl rules.Template) error {
+	r.runs = append(r.runs, id)
+	return r.Queue.RecordRunRevision(id, tmpl)
 }
 
 func TestProgressReported(t *testing.T) {
@@ -604,6 +610,21 @@ func TestProgressReported(t *testing.T) {
 	w.RunOne(context.Background())
 	if len(rq.progress) != 1 || rq.progress[0] != 50 {
 		t.Errorf("want [50] (50s of 100s), got %v", rq.progress)
+	}
+}
+
+// A job's workflow revision is recorded when the worker reads the workflow, before it converts (foundation
+// slice 9). The job here has no workflow (a legacy template), so nothing is stored, but the call is made once.
+func TestTheRunRevisionIsRecordedBeforeConverting(t *testing.T) {
+	s := newScenario(t)
+	w := s.worker(Replace)
+	rq := &recQueue{Queue: s.store}
+	w.Queue = rq
+	if _, err := w.RunOne(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(rq.runs) != 1 || rq.runs[0] != s.id {
+		t.Errorf("recorded for %v, want [%d]", rq.runs, s.id)
 	}
 }
 

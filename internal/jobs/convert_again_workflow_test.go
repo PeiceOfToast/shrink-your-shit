@@ -54,7 +54,7 @@ func TestJobsStampCurrentRevisionOnUpgrade(t *testing.T) {
 	if err != nil || cur == 0 {
 		t.Fatalf("current revision %d %v", cur, err)
 	}
-	for _, q := range []string{`ALTER TABLE jobs DROP COLUMN tags`, `ALTER TABLE jobs DROP COLUMN subtitle_files`, `ALTER TABLE jobs DROP COLUMN workflow_rev`, `PRAGMA user_version=50`} {
+	for _, q := range []string{`ALTER TABLE jobs DROP COLUMN tags`, `ALTER TABLE jobs DROP COLUMN subtitle_files`, `ALTER TABLE jobs DROP COLUMN workflow_rev`, `ALTER TABLE jobs DROP COLUMN queued_rev`, `PRAGMA user_version=50`} {
 		if _, err := s.db.Exec(q); err != nil {
 			t.Fatal(q, err)
 		}
@@ -201,44 +201,4 @@ func TestLibraryAgainNoSuchLibrary(t *testing.T) {
 func isAgainError(err error, code string) bool {
 	var ae AgainError
 	return errors.As(err, &ae) && ae.Code == code
-}
-
-// A job queued again after a workflow change (a retry, or a run its worker lost) runs with the current workflow, so it
-// is stamped with the current revision and is not earlier when it finishes.
-func TestRequeuedJobIsStampedWithCurrentWorkflow(t *testing.T) {
-	s := open(t)
-	l, _ := s.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(4), true)
-	failed, _ := s.Enqueue(Job{Library: l.Path, LibraryID: l.ID, Path: filepath.Join(l.Path, "failed.mkv")})
-	lost, _ := s.Enqueue(Job{Library: l.Path, LibraryID: l.ID, Path: filepath.Join(l.Path, "lost.mkv")})
-	if _, err := s.Claim("w"); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.Fail(failed, "boom", "failed under the old workflow"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.Claim("w"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.SetFlowTemplate(l.FlowID, rules.SliderTemplate(6)); err != nil {
-		t.Fatal(err)
-	}
-	cur, err := s.EnsureRevision(l.FlowID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := s.Retry(failed); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.RequeueRunning(); err != nil {
-		t.Fatal(err)
-	}
-	for _, id := range []int64{failed, lost} {
-		var rev int64
-		if err := s.db.QueryRow(`SELECT workflow_rev FROM jobs WHERE id=?`, id).Scan(&rev); err != nil {
-			t.Fatal(err)
-		}
-		if rev != cur.ID {
-			t.Errorf("job %d requeued with revision %d, want the current %d", id, rev, cur.ID)
-		}
-	}
 }

@@ -49,6 +49,9 @@ type Queue interface {
 	// Get is the job as the store has it now (its final status and sizes for the summary line).
 	Get(id int64) (jobs.Job, error)
 	RecordRunStep(id int64, st jobs.RunStep) error
+	// RecordRunRevision records the workflow revision the job is starting with (the one tmpl came from,
+	// foundation slice 9). An error is logged and the conversion goes on: it must not fail over a record.
+	RecordRunRevision(id int64, tmpl rules.Template) error
 	SetFailureSummary(id int64, f jobs.FailureSummary) error
 	ClearFailureSummary(id int64) error
 	// UserStopped turns a job the person stopped into a file skipped as user_stopped.
@@ -984,6 +987,13 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			return "", ferr
 		}
 		return "", retryable(ferr, retryGeneral) // the database was busy
+	}
+	// Foundation slice 9: the job records the workflow revision it really runs with (the template read
+	// above), not the one newest when it was queued; before runInfo, so {workflow_revision} agrees. A
+	// record that can't be written is logged, and the conversion goes on.
+	if err := w.Queue.RecordRunRevision(job.ID, tmpl); err != nil {
+		log.Printf("worker %s: job %d: the workflow revision it runs with was not recorded: %v", w.ID, job.ID, err)
+		w.logLine(job.ID, secVariables, jobs.LevelWarning, "The workflow revision this conversion uses could not be recorded. The conversion goes on.")
 	}
 	// Convert again (design 11:45Z): a file that replaced its original runs from the original kept in
 	// .syp-trash, never from our own output; the new file replaces our earlier one (replaceOwnOutput).
