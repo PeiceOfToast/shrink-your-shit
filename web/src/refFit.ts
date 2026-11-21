@@ -32,25 +32,36 @@ export function refProblem(s: JSONSchema, v: RefVar): string {
   const kind = kindOf(v.type);
   if (!kind) return "a secret can't set this";
   if (s.type === "array" || s.type === "object") return "a list setting can't take a variable"; // typeMatches refuses a scalar there
-  if (v.value == null && !v.file) return "has no value yet";
   const choices = s.enum as unknown[] | undefined;
+  const choiceKind = (c: unknown) => (typeof c === "number" ? "number" : typeof c === "boolean" ? "boolean" : "string");
+  if (v.file) {
+    // ui-shop review #596 A: the server checks a file value's kind alone at save (reservedProblem: the kind's zero
+    // value against the type, then a choice of that kind), its value once the job has the file
+    const wrong = kindWords(v.type) + " won't fit here";
+    if (s.type === "integer" || s.type === "number") return kind === "number" ? "" : wrong;
+    if (s.type === "boolean") return kind === "boolean" ? "" : wrong;
+    if (s.type === "string") return kind === "string" ? "" : wrong;
+    if (choices?.length) return choices.some((c) => choiceKind(c) === kind) ? "" : wrong;
+    return "";
+  }
+  if (v.value == null) return "has no value yet";
   const numeric = s.type === "integer" || s.type === "number" || (!!choices?.length && choices.some((c) => typeof c === "number"));
   const whole = s.type === "integer";
   let value: unknown = v.value;
-  if (numeric && kind !== "boolean" && v.value != null) { // numberFor: text that reads as a number is a number here
+  if (numeric && kind === "boolean") return "yes or no won't fit here";
+  if (numeric) { // numberFor: text that reads as a number is a number here
     const n = Number(v.value.trim());
     if (v.value.trim() === "" || !Number.isFinite(n)) return kind === "number" ? "isn't a number" : "text won't fit here";
     if (whole && n !== Math.trunc(n)) return "isn't a whole number";
     value = n;
-  } else if (numeric && kind === "boolean") return "yes or no won't fit here";
-  else if (numeric && kind === "string" && v.value == null) return ""; // a file value of text kind on a number setting: the kind check below
-  if (!numeric) {
+  } else {
     if (s.type === "boolean" && kind !== "boolean") return kindWords(v.type) + " won't fit here";
     if (s.type === "string" && kind !== "string") return kindWords(v.type) + " won't fit here";
-    // a choice of text takes text: the server compares a number with a text choice as different values (sameValue)
-    if (!s.type && choices?.length && kind !== "string" && !choices.some((c) => typeof c === (kind === "boolean" ? "boolean" : "number"))) return kindWords(v.type) + " won't fit here";
+    // a choice of text takes text, a choice of yes/no takes yes/no: the server compares across kinds as different (sameValue)
+    if (!s.type && choices?.length && !choices.some((c) => choiceKind(c) === kind)) return kindWords(v.type) + " won't fit here";
   }
-  if (choices?.length && v.value != null && !choices.some((c) => (typeof c === "number" ? c === value : typeof c === "boolean" ? String(c) === v.value : c === v.value))) return "isn't one of the choices";
+  // one of the choices, in the choice's own kind: 1080 for a choice of numbers (text that read as one counts), "720" for text, yes/no for yes/no
+  if (choices?.length && !choices.some((c) => (typeof c === "number" ? c === value : typeof c === "boolean" ? kind === "boolean" && String(c) === v.value : kind === "string" && c === v.value))) return "isn't one of the choices";
   return "";
 }
 

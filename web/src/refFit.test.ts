@@ -33,11 +33,16 @@ test("ui-shop's three cases: text that reads as a number, a fraction on an integ
   assert.equal(refProblem(integer, { type: "number", value: null }), "has no value yet");
 });
 
-test("the file's own values pass on kind when their value isn't known here", () => {
+test("the file's own values are judged on kind alone, as the server does at save (ui-shop A)", () => {
   assert.equal(refProblem(integer, { type: "number", value: null, file: true }), "");
+  assert.equal(refProblem(integer, { type: "number", value: "4215883110", file: true }), "");
   assert.equal(refProblem(text, { type: "string", value: null, file: true }), "");
-  assert.equal(refProblem(integer, { type: "string", value: null, file: true }), "");
+  assert.equal(refProblem(integer, { type: "string", value: null, file: true }), "text won't fit here"); // {{file.name}} on Quality
+  assert.equal(refProblem(integer, { type: "string", value: "4", file: true }), "text won't fit here");
   assert.equal(refProblem(integer, { type: "boolean", value: null, file: true }), "yes or no won't fit here");
+  assert.equal(refProblem(choiceText, { type: "number", value: null, file: true }), "a number won't fit here");
+  assert.equal(refProblem(choiceNums, { type: "number", value: null, file: true }), "");
+  assert.equal(refProblem(yesno, { type: "boolean", value: null, file: true }), "");
 });
 
 test("kinds that never fit", () => {
@@ -49,11 +54,15 @@ test("kinds that never fit", () => {
   assert.equal(refProblem(yesno, { type: "boolean", value: "true" }), "");
 });
 
-test("a choice setting takes one of its choices", () => {
+test("a choice setting takes one of its choices, in the choice's own kind (ui-shop B, C)", () => {
   assert.equal(refProblem(choiceText, { type: "string", value: "720" }), "");
   assert.equal(refProblem(choiceText, { type: "string", value: "mine" }), "isn't one of the choices");
   assert.equal(refProblem(choiceNums, { type: "number", value: "4" }), "isn't one of the choices");
-  assert.equal(refProblem(choiceText, { type: "number", value: "720" }), "a number won't fit here");
+  assert.equal(refProblem(choiceNums, { type: "number", value: "1080" }), "");
+  assert.equal(refProblem(choiceText, { type: "number", value: "720" }), "a number won't fit here"); // B: sameValue(720, "720") is false
+  const choiceBool = { enum: [true, false] };
+  assert.equal(refProblem(choiceBool, { type: "string", value: "true" }), "text won't fit here"); // C: sameValue("true", true) is false
+  assert.equal(refProblem(choiceBool, { type: "bool", value: "true" }), "");
 });
 
 test("dev-review's case: a list or group setting never takes a variable; an untyped one takes anything but a secret", () => {
