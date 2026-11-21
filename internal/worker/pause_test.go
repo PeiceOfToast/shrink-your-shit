@@ -368,10 +368,12 @@ func TestPoolDownThenUpWhileBusy(t *testing.T) {
 	size.Store(99)
 	eventually(t, func() bool { return p.Running() == MaxParallel }, "capped")
 	cancel()
+	// A condition wait: stopping writes each hung job back and logs it (store fsyncs), which took over 10 s
+	// under load, so this deadline only bounds a hang — it is not a race margin.
 	select {
 	case <-stopped:
-	case <-time.After(10 * time.Second):
-		t.Fatal("the pool did not stop")
+	case <-time.After(60 * time.Second):
+		t.Fatalf("the pool did not stop (%d still converting)", p.Busy())
 	}
 }
 
