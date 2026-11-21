@@ -835,10 +835,12 @@ type HourOfWork struct {
 func (s *Store) Throughput(at string) ([]HourOfWork, error) {
 	hour := `(SELECT substr(e.at,1,13) || ':00:00Z' FROM events e
   WHERE e.kind='job' AND e.job_id=jobs.id AND e.to_status='` + string(Done) + `' ORDER BY e.seq DESC LIMIT 1)`
+	// the window's own first hour counts, even when it began after the hour did: the caller passes a full time
+	// (now-24h) and a row's h is its bucket's start (#607)
 	rows, err := s.db.Query(`SELECT h, COUNT(*), COALESCE(SUM(saved),0) FROM (
   SELECT `+hour+` AS h, `+savedNowSQL+` AS saved
   FROM jobs WHERE `+convertedNow("jobs")+` AND `+newestSQL+`
-) WHERE h >= ? GROUP BY h ORDER BY 1`, at)
+) WHERE h >= substr(?,1,13) || ':00:00Z' GROUP BY h ORDER BY 1`, at)
 	if err != nil {
 		return nil, err
 	}
