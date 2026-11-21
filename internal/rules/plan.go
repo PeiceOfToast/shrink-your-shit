@@ -571,7 +571,8 @@ func (p Plan) trackArgs() []string {
 			outs = append(outs, outTrack{idx: idx})
 		}
 	}
-	pivot := -1 // the earliest source of an added track; -1 when there is none
+	pivot := -1    // the earliest source of an added track; -1 when there is none
+	moved := false // a reorder took streams out and mapped them again
 	for _, op := range p.Tracks {
 		if op.Add {
 			outs = append(outs, outTrack{idx: op.Index, audio: true, added: true, op: op})
@@ -592,6 +593,7 @@ func (p Plan) trackArgs() []string {
 				args = append(args, "-map", "0:"+strconv.Itoa(o.idx))
 			}
 		}
+		moved = true
 	}
 	// the k-th audio track of the new file is a:k, an added copy counted where it sits
 	k := 0
@@ -636,6 +638,13 @@ func (p Plan) trackArgs() []string {
 			}
 		}
 		k++
+	}
+	// A font attachment is not a track, but the muxer fails when one stays ahead of an added copy (ffmpeg 7.1.5:
+	// "Received a packet for an attachment stream"): after a reorder it is taken out with the moved streams and mapped
+	// again behind them. ffmpeg reads all the output options before it maps, so the place among them does not matter.
+	// "0:t?" is optional, so a file with no attachment is not an error.
+	if moved {
+		args = append(args, "-map", "-0:t", "-map", "0:t?")
 	}
 	return args
 }

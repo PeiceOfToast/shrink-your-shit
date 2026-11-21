@@ -57,7 +57,7 @@ func addSteps(d Doc) map[string]AddStep {
 			switch {
 			case n.Type == TypeCommit:
 				afterSave = n.ID
-			case afterSave != "" && IsAction(n.Type):
+			case afterSave != "" && (IsAction(n.Type) || IsQuestion(n.Type)):
 				afterSave = n.ID
 			case n.Type == TypeInput || IsQuestion(n.Type) || IsAction(n.Type):
 				after = n.ID
@@ -66,7 +66,7 @@ func addSteps(d Doc) map[string]AddStep {
 	}
 	out := map[string]AddStep{}
 	for _, def := range Definitions() {
-		afterOnly := IsAction(def.Type) && !slices.Contains(def.Phase, PhaseBefore)
+		afterOnly := (IsAction(def.Type) || IsQuestion(def.Type)) && !slices.Contains(def.Phase, PhaseBefore)
 		switch {
 		case def.ReadOnly:
 			out[def.Type] = AddStep{Addable: false, Reason: "Only an earlier install's workflow has this step."}
@@ -291,7 +291,7 @@ func ValidateWith(d Doc, s Scopes) Result {
 	for _, i := range CheckVariables(d) {
 		add(i)
 	}
-	for _, i := range CheckTemplates(d) {
+	for _, i := range CheckTemplatesWith(d, s) { // W2: the globals are names a template may use
 		add(i)
 	}
 	for _, i := range CheckPublished(d) {
@@ -342,6 +342,9 @@ func ValidateWith(d Doc, s Scopes) Result {
 				add(Issue{Code: "invalid_config", NodeID: n.ID, ConfigPath: "/until", Field: "until", Message: "In '" + nodeName(n) + "', the time must read like 02:00."})
 			}
 		}
+		if n.Type == TypeCheckResult && strOf(n.Config, "test", "saved_at_least") != "bigger" && intOf(n.Config, "percent", 0) <= 0 { // FB4b: the percent tests need their percent
+			add(Issue{Code: "invalid_config", NodeID: n.ID, ConfigPath: "/percent", Field: "percent", Message: "In '" + nodeName(n) + "', set the percent of the original's size to compare with."})
+		}
 		if n.Type == TypeGoto { // FB4b: a workflow to hand to, by id. A missing key is checkConfig's "needs a value"; an empty or unreadable one (review2-579: the picker's placeholder picked again) is refused here, so it never fails every file at run time.
 			if v, present := n.Config["workflow"]; present {
 				if id, err := strconv.ParseInt(strOf(n.Config, "workflow", ""), 10, 64); v == "" || err != nil || id <= 0 {
@@ -363,6 +366,7 @@ func ValidateWith(d Doc, s Scopes) Result {
 	case triggers > 1:
 		add(Issue{Code: "multiple_triggers", Message: "A workflow has one Library files step."})
 	}
+	afterSide := afterTheSave(d) // FB4b: the steps reached from Save the result, where only after cards may follow
 	out := map[string][]string{}
 	for _, e := range d.Edges {
 		from, okF := byID[e.From]
@@ -380,7 +384,7 @@ func ValidateWith(d Doc, s Scopes) Result {
 			continue
 		}
 		out[e.From] = append(out[e.From], e.To)
-		for _, i := range phaseIssue(from, to, e, defs) {
+		for _, i := range phaseIssue(from, to, e, defs, afterSide[from.ID]) {
 			add(i)
 		}
 	}
@@ -446,11 +450,36 @@ func ValidateWith(d Doc, s Scopes) Result {
 	return r
 }
 
+// afterTheSave is the set of steps reached from a Save the result step along any port (FB4b): a card there
+// runs on the saved file, whatever phases its kind may also sit in.
+func afterTheSave(d Doc) map[string]bool {
+	next := map[string][]string{}
+	for _, e := range d.Edges {
+		next[e.From] = append(next[e.From], e.To)
+	}
+	seen := map[string]bool{}
+	var walk func(id string)
+	walk = func(id string) {
+		for _, to := range next[id] {
+			if !seen[to] {
+				seen[to] = true
+				walk(to)
+			}
+		}
+	}
+	for _, n := range d.Nodes {
+		if n.Type == TypeCommit {
+			walk(n.ID)
+		}
+	}
+	return seen
+}
+
 // phaseIssue says when an edge would run a step in a phase it can't sit in (FB1b, FB2a): a step that belongs
 // before the conversion after a step that converts, checks or saves; a step that belongs after the save before
 // the conversion or inside it. A failure port (error, skipped) may still lead to an end (V6b). The compile
 // refuses the same shapes; this names the step while editing, before a compile is tried.
-func phaseIssue(from, to Node, e Edge, defs map[string]StepDefinition) []Issue {
+func phaseIssue(from, to Node, e Edge, defs map[string]StepDefinition, afterSave bool) []Issue {
 	fd, td := defs[from.Type], defs[to.Type]
 	if fd.RunsAs == "" || td.RunsAs == "" || e.FromPort == "error" || e.FromPort == "skipped" {
 		return nil
@@ -458,11 +487,12 @@ func phaseIssue(from, to Node, e Edge, defs map[string]StepDefinition) []Issue {
 	bad := func(msg string) []Issue {
 		return []Issue{{Code: "wrong_phase", Severity: "error", NodeID: to.ID, EdgeID: e.ID, Message: "'" + nodeName(to) + "' " + msg}}
 	}
+	card := func(d StepDefinition) bool { return d.RunsAs == RunsAction || d.RunsAs == RunsQuestion } // FB4b: a question may sit after the save too
 	afterOnly := func(d StepDefinition) bool {
-		return d.RunsAs == RunsAction && !slices.Contains(d.Phase, PhaseBefore)
+		return card(d) && !slices.Contains(d.Phase, PhaseBefore)
 	}
 	afterOK := func(d StepDefinition) bool { // may sit after the save
-		return d.RunsAs == RunsAction && slices.Contains(d.Phase, PhaseAfter)
+		return card(d) && slices.Contains(d.Phase, PhaseAfter)
 	}
 	switch fd.RunsAs {
 	case RunsPlan, RunsVerify: // inside the conversion: nothing but its own steps follow on Next
@@ -476,14 +506,15 @@ func phaseIssue(from, to Node, e Edge, defs map[string]StepDefinition) []Issue {
 		if td.RunsAs != RunsEnd && !afterOK(td) {
 			return bad("can't follow 'Save the result'. After the save come only steps that act on the saved file.")
 		}
-	case RunsAction: // an after-only step is followed only by after steps; a before step is never followed by an after-only one
-		if afterOnly(fd) && !afterOK(td) {
-			return bad("can't follow '" + nodeName(from) + "'. After the save come only steps that act on the saved file.")
-		}
-		if !afterOnly(fd) && afterOnly(td) {
+	case RunsAction, RunsQuestion: // after the save, only after steps follow; before it, an after-only step never does
+		if afterSave || afterOnly(fd) {
+			if !afterOK(td) {
+				return bad("can't follow '" + nodeName(from) + "'. After the save come only steps that act on the saved file.")
+			}
+		} else if afterOnly(td) {
 			return bad("belongs after the file is saved. Put it after 'Save the result'.")
 		}
-	case RunsInput, RunsQuestion:
+	case RunsInput:
 		if afterOnly(td) {
 			return bad("belongs after the file is saved. Put it after 'Save the result'.")
 		}
@@ -771,6 +802,14 @@ func summary(n Node) string {
 		return "Hands the file to another workflow"
 	case TypeCheckRandom:
 		return "Only for about " + strconv.Itoa(intOf(c, "share", 10)) + "% of files"
+	case TypeCheckResult:
+		switch strOf(c, "test", "saved_at_least") {
+		case "saved_less_than":
+			return "Only if less than " + strconv.Itoa(intOf(c, "percent", 10)) + "% was saved"
+		case "bigger":
+			return "Only if the new file is bigger"
+		}
+		return "Only if at least " + strconv.Itoa(intOf(c, "percent", 10)) + "% was saved"
 	case TypeWait:
 		if u := strOf(c, "until", ""); u != "" {
 			return "Waits in the queue until " + u

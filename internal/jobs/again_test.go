@@ -3,6 +3,7 @@
 package jobs
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -65,6 +66,53 @@ func TestOriginalGoneWords(t *testing.T) {
 	c, _ = s.ConvertAgainCheck(id, 7)
 	if c.DeletedAt == "" || !strings.Contains(c.Message, "the original was deleted on "+time.Now().Local().Format("2 January 2006")+".") {
 		t.Errorf("now: %+v", c)
+	}
+}
+
+// A finished job goes back to the queue through Convert again only: the generic moves keep refusing
+// Done -> Queued as they do on the base, so a job that finishes between a list of running jobs and a
+// Release of each (web/v2workers.go) is not queued and converted a second time (review-583, finding 1).
+func TestOnlyConvertAgainRequeuesAFinishedJob(t *testing.T) {
+	s := open(t)
+	dir := t.TempDir()
+	in := filepath.Join(dir, "in", "a.mkv")
+	if err := os.MkdirAll(filepath.Dir(in), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(in, []byte("original"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	id, err := s.Enqueue(Job{Library: filepath.Dir(in), Path: in, Reason: "r", SizeBefore: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Claim("w"); err != nil {
+		t.Fatal(err)
+	}
+	// a new file in another folder: no original record, so "convert again" runs from the file still at its name
+	if err := s.Complete(id, filepath.Join(dir, "out", "a.mkv"), 40); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name string
+		call func() error
+	}{
+		{"Release", func() error { return s.Release(id) }},
+		{"RetryLater", func() error { return s.RetryLater(id, time.Now(), "convert_failed", "x") }},
+		{"FallBack", func() error { return s.FallBack(id, "branch", nil, "", "x") }},
+	} {
+		if err := c.call(); err == nil || !strings.Contains(err.Error(), "cannot go from done to queued") {
+			t.Errorf("%s on a finished job: %v, want cannot go from done to queued", c.name, err)
+		}
+		if j, err := s.Get(id); err != nil || j.Status != Done {
+			t.Fatalf("%s changed the finished job: status %s, %v", c.name, j.Status, err)
+		}
+	}
+	if err := s.ConvertAgain(id); err != nil {
+		t.Fatalf("Convert again must still requeue a finished job: %v", err)
+	}
+	if j, err := s.Get(id); err != nil || j.Status != Queued {
+		t.Errorf("after Convert again: status %s, %v; want queued", j.Status, err)
 	}
 }
 

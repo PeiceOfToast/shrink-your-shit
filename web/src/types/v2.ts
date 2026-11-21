@@ -92,6 +92,8 @@ export interface Library {
   workflowId: ID;
   workflowName: string;
   priority: number;
+  // W3: the library's own values for the workflow's templateParam variables; empty = it uses the workflow's values
+  variables: { name: string; type: string; value: unknown }[];
   scan: { state: "idle" | "scanning" | "settling"; progress: number | null; lastScanAt: Time | null; nextScanAt: Time | null; scheduleLabel: string };
   counts: { files: number; waiting: number; running: number; completed: number; skipped: number; failed: number };
   bytes: { freed: number; waitingToFree: number; grew?: number };

@@ -11,6 +11,7 @@ import (
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/vars"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/workflow"
 )
 
@@ -411,5 +412,39 @@ func TestNameLengthBoundary(t *testing.T) {
 	}
 	if !nameTooLong(strings.Repeat("x", maxNameLen+1)) {
 		t.Errorf("%d bytes must be refused", maxNameLen+1)
+	}
+}
+
+// W2 (ui-shop's QA of #586): a job's {{name}} templates read the server's global variables, and the
+// workflow's own of the same name wins, as the lookup order says; the variables table says which it was.
+func TestRunValuesReadTheGlobalsAndTheWorkflowsOwnWin(t *testing.T) {
+	info := jobs.RunInfo{Library: "Films", Workflow: "Globals",
+		Global:    []workflow.Variable{{Name: "qa_sub", Type: "string", Value: "alpha"}, {Name: "shared", Type: "string", Value: "from the server"}, {Name: "hidden", Type: "secret", Value: "x"}, {Name: "token", Type: "string", Value: "the server's text"}},
+		Variables: []workflow.Variable{{Name: "shared", Type: "string", Value: "from the workflow"}, {Name: "token", Type: "secret", Value: "own-secret", HasValue: true}, {Name: "blank", Type: "string"}}}
+	info.Global = append(info.Global, workflow.Variable{Name: "blank", Type: "string", Value: "the server's blank"})
+	src := vars.Source{Path: "/films/a.mkv", Library: info.Library, Variables: ownValues(info)}
+	vals := src.Values()
+	if vals["qa_sub"] != "alpha" || vals["shared"] != "from the workflow" || vals["hidden"] != "" {
+		t.Errorf("values: qa_sub %q shared %q hidden %q", vals["qa_sub"], vals["shared"], vals["hidden"])
+	}
+	// review-591: the workflow's own secret wins over a same-named global, and a secret never resolves in a
+	// template, so the name has no value at all (on 07ed6c9d it came out as the server's text)
+	if v, has := vals["token"]; has || v != "" {
+		t.Errorf("an own secret loses to a same-named global: %q", v)
+	}
+	// review2-591 P2-1: an own variable with no value shadows the global too (the name is the workflow's, so it
+	// resolves to nothing, never to the server's value), and the table credits nothing to the workflow
+	if v, has := vals["blank"]; has || v != "" {
+		t.Errorf("an own variable with no value loses to a same-named global: %q", v)
+	}
+	by := map[string]rules.RunVariable{}
+	for _, r := range variableTable(vals, vals, info, nil) {
+		by[r.Name] = r
+	}
+	if by["qa_sub"].Origin != "server" || by["qa_sub"].Start != "alpha" || by["shared"].Origin != "workflow" || by["shared"].Start != "from the workflow" {
+		t.Errorf("the table's origins: %+v %+v", by["qa_sub"], by["shared"])
+	}
+	if r, ok := by["blank"]; ok && (r.Start != "" || r.End != "") { // review2-591 P2-2: no server value credited to the workflow
+		t.Errorf("the table credits a value the workflow never set: %+v", r)
 	}
 }

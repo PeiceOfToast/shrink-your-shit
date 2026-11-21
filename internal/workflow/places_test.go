@@ -31,7 +31,7 @@ func TestValidateSaysWhereEachStepAndTypeStands(t *testing.T) {
 		switch {
 		case !ok:
 			t.Errorf("%s: no add rule", def.Type)
-		case IsAction(def.Type) && !slices.Contains(def.Phase, PhaseBefore): // FB2a: an action on the saved result goes after the save
+		case (IsAction(def.Type) || IsQuestion(def.Type)) && !slices.Contains(def.Phase, PhaseBefore): // FB2a: an action on the saved result goes after the save; FB4b: so does a question about it
 			if !a.Addable || a.After != d.Nodes[len(d.Nodes)-1].ID || a.Reason != "" || d.Nodes[len(d.Nodes)-1].Type != TypeCommit {
 				t.Errorf("%s: %+v (want addable after Save the result)", def.Type, a)
 			}

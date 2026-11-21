@@ -81,24 +81,66 @@ func branchTemplate(d Doc) (rules.Template, []Issue) {
 			}
 			chain, cur = append(chain, nn), nn
 		}
-		// FB2a: the actions after the save, in order; a step that isn't one is wrong_phase (Validate names it too)
-		var after []rules.Card
-		for id := out[[2]string{chain[len(chain)-1].ID, "success"}]; id != ""; {
-			an, ok := byID[id]
-			if !ok || !IsAction(an.Type) || !slices.Contains(definitionPhase(an.Type), PhaseAfter) {
-				issues = append(issues, Issue{Code: "wrong_phase", Severity: "error", NodeID: id,
-					Message: "'" + nodeName(an) + "' can't follow 'Save the result'. After the save come only steps that act on the saved file."})
-				return nil
+		// FB2a: the actions after the save, in order; a step that isn't one is wrong_phase (Validate names it too).
+		// FB4b: a question after the save ("Compare the result") branches the chain: the cards on its Yes and
+		// on its No; a port left unconnected means nothing more happens there.
+		var afterIDs []string
+		var afterChain func(id string, onPath map[string]bool) ([]rules.Card, bool)
+		afterChain = func(id string, onPath map[string]bool) ([]rules.Card, bool) {
+			var cards []rules.Card
+			for id != "" {
+				an, ok := byID[id]
+				if !ok || onPath[id] { // a loop: Validate names it (cycle_without_loop)
+					return cards, true
+				}
+				if an.Enabled { // review2-582 P3-1: a step turned off didn't run, so it isn't on the recorded route
+					afterIDs = append(afterIDs, id)
+				}
+				switch {
+				case IsQuestion(an.Type) && slices.Contains(definitionPhase(an.Type), PhaseAfter):
+					q := questionOf(an)
+					if q.Empty() {
+						issues = append(issues, Issue{Code: "empty_check", Severity: "error", NodeID: an.ID,
+							Message: "'" + q.Name + "' has no comparison, so every file would answer No. Choose one."})
+						return nil, false
+					}
+					seen := clone(onPath)
+					seen[id] = true
+					yes, ok1 := afterChain(out[[2]string{an.ID, "match"}], seen)
+					no, ok2 := afterChain(out[[2]string{an.ID, "else"}], seen)
+					if !ok1 || !ok2 {
+						return nil, false
+					}
+					if an.Enabled {
+						cards = append(cards, rules.Card{NodeID: an.ID, Type: an.Type, Name: q.Name, Config: clone(an.Config), Check: &q, Yes: yes, No: no})
+					} else { // a question turned off is passed over: its Yes goes on
+						cards = append(cards, yes...)
+					}
+					return cards, true
+				case IsEnd(an.Type):
+					issues = append(issues, Issue{Code: "wrong_phase", Severity: "error", NodeID: id,
+						Message: "'" + nodeName(an) + "' can't come after 'Save the result': the file is saved, so nothing ends the run there. Leave that port unconnected instead."})
+					return nil, false
+				case !IsAction(an.Type) || !slices.Contains(definitionPhase(an.Type), PhaseAfter):
+					issues = append(issues, Issue{Code: "wrong_phase", Severity: "error", NodeID: id,
+						Message: "'" + nodeName(an) + "' can't follow 'Save the result'. After the save come only steps that act on the saved file."})
+					return nil, false
+				}
+				if an.Enabled {
+					cards = append(cards, rules.Card{NodeID: an.ID, Type: an.Type, Name: nodeName(an), Config: clone(an.Config)})
+				}
+				if out[[2]string{an.ID, "error"}] != "" {
+					issues = append(issues, Issue{Code: "not_runnable_yet", Severity: "error", NodeID: an.ID, Port: "error",
+						Message: "Steps after '" + portLabel(an, "error") + "' come in a later update. For now, remove that link: a step after the save that doesn't work leaves the job done, with a warning."})
+					return nil, false
+				}
+				id = out[[2]string{an.ID, "success"}]
 			}
-			if an.Enabled {
-				after = append(after, rules.Card{NodeID: an.ID, Type: an.Type, Name: nodeName(an), Config: clone(an.Config)})
-			}
-			if out[[2]string{an.ID, "error"}] != "" {
-				issues = append(issues, Issue{Code: "not_runnable_yet", Severity: "error", NodeID: an.ID, Port: "error",
-					Message: "Steps after '" + portLabel(an, "error") + "' come in a later update. For now, remove that link: a step after the save that doesn't work leaves the job done, with a warning."})
-				return nil
-			}
-			id = out[[2]string{an.ID, "success"}]
+			return cards, true
+		}
+		after, ok := afterChain(out[[2]string{chain[len(chain)-1].ID, "success"}], map[string]bool{})
+		if !ok {
+			return nil
 		}
 		if chain[len(chain)-1].Type != TypeCommit {
 			last := chain[len(chain)-1]
@@ -126,9 +168,7 @@ func branchTemplate(d Doc) (rules.Template, []Issue) {
 		for _, c := range chain {
 			ids = append(ids, c.ID)
 		}
-		for _, c := range after {
-			ids = append(ids, c.NodeID)
-		}
+		ids = append(ids, afterIDs...)
 		b := &rules.Branch{Then: &t, Path: append(clone(path), ids...), After: after}
 		var fs rules.Failures
 		for _, c := range chain { // what the run does when it doesn't work (V6b)
@@ -161,6 +201,11 @@ func branchTemplate(d Doc) (rules.Template, []Issue) {
 		}
 		switch {
 		case IsQuestion(n.Type):
+			if !slices.Contains(definitionPhase(n.Type), PhaseBefore) { // FB4b: a question about the result can't be asked before it exists
+				issues = append(issues, Issue{Code: "wrong_phase", Severity: "error", NodeID: n.ID,
+					Message: "'" + nodeName(n) + "' belongs after the file is saved. Put it after 'Save the result'."})
+				return
+			}
 			c := questionOf(n)
 			if c.Empty() {
 				issues = append(issues, Issue{Code: "empty_check", Severity: "error", NodeID: n.ID,
@@ -256,7 +301,7 @@ func questionOf(n Node) rules.Question {
 	var q rules.Question
 	b, _ := json.Marshal(n.Config)
 	json.Unmarshal(b, &q) // a value of the wrong kind is an invalid_config from checkConfig already; here it reads as unset
-	q.Kind = map[string]string{TypeCheck: "", TypeCheckName: "name", TypeCheckAge: "age", TypeCheckVariable: "variable", TypeCheckLibrary: "library", TypeCheckHardLinks: "hardlinks", TypeCheckTag: "tag", TypeCheckRandom: "random"}[n.Type]
+	q.Kind = map[string]string{TypeCheck: "", TypeCheckName: "name", TypeCheckAge: "age", TypeCheckVariable: "variable", TypeCheckLibrary: "library", TypeCheckHardLinks: "hardlinks", TypeCheckTag: "tag", TypeCheckRandom: "random", TypeCheckResult: "result"}[n.Type]
 	q.Name = nodeName(n)
 	return q
 }
