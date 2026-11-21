@@ -57,7 +57,7 @@ const saved = (b?: number, a?: number) => {
   return bytes(b) + " → " + bytes(a) + ", " + (pct >= 0 ? pct + "% smaller" : -pct + "% bigger");
 };
 // U10: a path wraps after each slash (or backslash), so a long one breaks between folders, not in the middle of a name
-const slashWrap = (p: string) => { const parts = p.split(/(?<=[\\/])/); return parts.map((s, i) => <Fragment key={i}>{s}{i < parts.length - 1 && <wbr />}</Fragment>); };
+const slashWrap = (p: string) => { const parts = p.replace(/[\\/]/g, (m) => m + "\u0000").split("\u0000"); if (parts[parts.length - 1] === "") parts.pop(); return parts.map((s, i) => <Fragment key={i}>{s}{i < parts.length - 1 && <wbr />}</Fragment>); };
 async function act<T>(p: Promise<Answer<T>>, say: (m: string) => void): Promise<T | null> {
   try { const r = await p; if (failed(r)) return (say(r.error.message), null); return r; } catch (e) { if (e instanceof SignedOut) return null; throw e; }
 }
@@ -631,14 +631,14 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
   return (
     <div className="drawer-wrap" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <aside className="drawer jobd" ref={box} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="jd-h">
-        <div className="hd">
+        <div className={"hd" + (state === "failed" && !kept0 ? " failed" : "")}>
           <button className="btn icon ghost" type="button" aria-label="Close" onClick={onClose}><Icon id="i-chev-l" /></button>
           {own && <span className="ltile codec">{tileOf(own)}</span>}
           <div className="sp">
-            {delta && <p className="jd-delta">{delta}</p>}
             <h2 id="jd-h" className="clamp2" title={name}><FileName n={name} /></h2>
-            {/* U10: a failed job's header reads Failed; "Original kept" is the body's first line */}
-            {state && <span style={{ alignSelf: "flex-start" }}><Pill j={{ state, retryAt: j?.retryAt ?? own?.retryAt, subState: own?.subState, reason: state === "failed" ? null : (j?.reason ?? own?.reason), warning: j?.warning }} /></span>}
+            {delta && <p className="jd-delta">{delta}</p>}
+            {/* the header pill matches the list row: a kept-original job reads "Original kept" (review 572) */}
+            {state && <span style={{ alignSelf: "flex-start" }}><Pill j={{ state, retryAt: j?.retryAt ?? own?.retryAt, subState: own?.subState, reason: j?.reason ?? own?.reason, warning: j?.warning }} /></span>}
           </div>
           {/* SCREENS V6b header: Retry, Cancel or Stop, and the job ID to copy (the body keeps the rest) */}
           <div className="row nw" style={{ gap: 6, flexWrap: "wrap" }}>

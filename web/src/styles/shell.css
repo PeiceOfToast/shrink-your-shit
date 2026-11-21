@@ -589,6 +589,7 @@ label.chk{cursor:pointer}
 .drawer.jobd .jd-found{width:100%;border-collapse:collapse}
 .drawer.jobd .jd-found th,.drawer.jobd .jd-found td{font-size:var(--fs-sm);padding:4px 0;vertical-align:top;text-align:left}
 .drawer.jobd .jd-found th{width:120px;padding-right:12px;color:var(--text-2);font-weight:500}
+@media (max-width:599px){.drawer.jobd>.hd.failed .pill{display:none}} /* a failed job's header hides the pill: the Why box says Failed */
 .tline{list-style:none;margin:0;padding:0}
 .tline li{display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-bottom:1px solid var(--border)}
 .tline li:last-child{border-bottom:0}
