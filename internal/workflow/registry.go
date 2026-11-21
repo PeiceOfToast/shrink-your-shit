@@ -395,8 +395,8 @@ func Definitions() []StepDefinition {
 			ConfigSchema: object(map[string]any{
 				"test": withDefault(hinted(enum([]any{"saved_at_least", "saved_less_than", "bigger", "runtime_within"}, []string{"At least this much was saved", "Less than this much was saved", "The new file is bigger", "The running time is within so many seconds of the original's"}),
 					[]string{"Yes when the new file is smaller by at least the percent below.", "Yes when the new file saved less than the percent below (a bigger file counts too).", "Yes when the new file is larger than the original; the percent isn't used.", "Yes when the new file's running time is no more than the seconds below away from the original's, either way. 'Check the result' already refuses a file more than 2% apart; this is for a tighter bound."}), "saved_at_least", "Compare", ""),
-				"percent": withDefault(described(map[string]any{"type": "integer", "title": "Percent of the original's size", "minimum": 1, "maximum": 100}, "What counts as saved: the original's size minus the new file's, as a share of the original."), 10, "Percent of the original's size", ""),
-				"seconds": withDefault(described(map[string]any{"type": "number", "title": "Seconds", "minimum": 0.1, "maximum": 3600}, "For the running time: how far from the original's it may be, in seconds."), 2, "Seconds", ""),
+				"percent": onlyWhen(withDefault(described(map[string]any{"type": "integer", "title": "Percent of the original's size", "minimum": 1, "maximum": 100}, "What counts as saved: the original's size minus the new file's, as a share of the original."), 10, "Percent of the original's size", ""), "test", []any{"saved_at_least", "saved_less_than"}),
+				"seconds": onlyWhen(withDefault(described(map[string]any{"type": "number", "title": "Seconds", "minimum": 0.1, "maximum": 3600}, "How far from the original's running time the new file's may be, in seconds."), 2, "Seconds", ""), "test", []any{"runtime_within"}),
 			}, []string{"test"})}),
 		def(StepDefinition{Type: TypeCheckHardLinks, RunsAs: RunsQuestion, AlwaysOn: true, Category: "filter", Name: "Shares its data with another file", Icon: "branch", TypeLabel: "Check",
 			Description: "Yes when the original has another name on the same disk (a hard link), so converting it would free no space.",
@@ -561,6 +561,13 @@ func fileOnOf(d StepDefinition) map[string]string {
 // hinted adds a hint per choice (shown when it is chosen), beside x-enumLabels.
 func hinted(s map[string]any, hints []string) map[string]any {
 	s["x-enumHints"] = hints
+	return s
+}
+
+// onlyWhen marks a setting the form shows only while another setting (key) has one of the values: the server
+// ignores it otherwise, so the form has no reason to show it. {"x-onlyWhen": {key: values}}.
+func onlyWhen(s map[string]any, key string, values []any) map[string]any {
+	s["x-onlyWhen"] = map[string]any{key: values}
 	return s
 }
 
