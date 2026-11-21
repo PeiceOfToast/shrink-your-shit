@@ -1249,6 +1249,52 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	if exp.DurationSec <= 0 {
 		exp.DurationSec = job.DurationSec
 	}
+	// A recording that starts mid-stream has no decodable picture in its first seconds: no player can show them,
+	// the original included, so they are not required of the new file (the damage count already treats that lead
+	// the same way). Only a lead no other kept stream covers shortens the expected duration: a copied sound track
+	// that starts at the container's start still fills it, and the new file is then as long as the original. The
+	// whole lead moves the picture comparison to the first picture that can be shown. A frame or two is inside
+	// the duration tolerance, and not worth saying.
+	// A copied video keeps its own packets and start: nothing is decoded, so nothing of it is left out.
+	if v := src.Video(); v != nil && exp.DurationSec > 0 && !exp.VideoCopied && src.MainVideoOrdinal() >= 0 {
+		lctx, lcancel := context.WithTimeout(ctx, quickTimeout)
+		videoLead, lerr := media.UndecodableLead(lctx, w.Exec, w.FFprobe, srcPath, src.MainVideoOrdinal(), v.StartTime)
+		lcancel()
+		if lerr == nil && videoLead >= minLeadInSec {
+			exp.LeadInSec = videoLead
+			// The new file's picture starts at the first picture that can be shown, so every copied stream's
+			// offset from the picture grows by the lead. (The encode shifts all timestamps together: sync is kept.)
+			for i := range exp.Streams {
+				if exp.Streams[i].Type != "video" {
+					exp.Streams[i].OffsetSec -= videoLead
+				}
+			}
+			// The container's start, and the new file's: its earliest kept stream, or the first picture when no
+			// kept stream starts before it. A stream the plan drops fills nothing, so it does not count.
+			dropped := map[int]bool{}
+			for _, o := range plan.Tracks {
+				if !o.Add && o.Drop {
+					dropped[o.Index] = true
+				}
+			}
+			start, earliest := v.StartTime, v.StartTime+videoLead
+			for k, s := range src.Streams {
+				if dropped[s.Index] || (s.Type != "video" && s.Type != "audio" && s.Type != "subtitle") {
+					continue
+				}
+				if s.StartTime < start {
+					start = s.StartTime
+				}
+				if k != src.MainVideoIndex() && s.StartTime < earliest {
+					earliest = s.StartTime
+				}
+			}
+			if lead := earliest - start; lead >= minLeadInSec && lead < exp.DurationSec {
+				exp.DurationSec -= lead
+			}
+			w.jobf(job.ID, ": the original starts mid-stream: its first %.1f seconds have no picture that can be decoded, so the new file is not required to have them", videoLead)
+		}
+	}
 	// The job keeps what it is about to do and how the result will be judged, recorded here so its log
 	// can show the variables even when a check below stops it (an output path it can't use, a card's
 	// slot it waits for). If that cannot be recorded, it does not start: nothing has been written yet.
