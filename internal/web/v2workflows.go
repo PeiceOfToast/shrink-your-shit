@@ -337,7 +337,8 @@ func v2Workflows(api *http.ServeMux, store *jobs.Store, eng Engine) {
 		writeJSON(w, revisionView(d, sc))
 	})
 	api.HandleFunc("POST /api/v2/workflows/{id}/validate", func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := wfID(w, r); !ok {
+		id, ok := wfID(w, r)
+		if !ok {
 			return
 		}
 		var in struct{ Workflow workflow.Doc }
@@ -349,7 +350,7 @@ func v2Workflows(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			serverError(w, err)
 			return
 		}
-		writeJSON(w, workflow.ValidateWith(in.Workflow, sc))
+		writeJSON(w, workflow.ValidateWith(in.Workflow, selfScopes(sc, id)))
 	})
 	api.HandleFunc("GET /api/v2/workflows/{id}/publish-preview", func(w http.ResponseWriter, r *http.Request) {
 		id, ok := wfID(w, r)
@@ -386,7 +387,7 @@ func v2Workflows(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			return
 		}
 		writeJSON(w, map[string]any{"nextNumber": next, "changes": changes, "libraries": v["libraries"],
-			"changesOriginals": commitPolicy(d.Doc, sc) == "replace", "validation": workflow.ValidateWith(d.Doc, sc).Issues})
+			"changesOriginals": commitPolicy(d.Doc, sc) == "replace", "validation": workflow.ValidateWith(d.Doc, selfScopes(sc, id)).Issues})
 	})
 	api.HandleFunc("POST /api/v2/workflows/{id}/publish", func(w http.ResponseWriter, r *http.Request) {
 		id, ok := wfID(w, r)
@@ -411,7 +412,7 @@ func v2Workflows(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			serverError(w, err)
 			return
 		}
-		if res := workflow.ValidateWith(d.Doc, sc); res.Errors() { // FB2b: Run a command needs the Safety switch
+		if res := workflow.ValidateWith(d.Doc, selfScopes(sc, id)); res.Errors() { // FB2b: Run a command needs the Safety switch; FB4b: a hand-over must lead somewhere
 			// A {{name}} problem names its setting in the error itself (the page keys on the code and shows
 			// the field); every other problem keeps the general answer, with all the issues listed.
 			code, message := "has_errors", "This workflow has problems to fix before it can be published. Nothing was changed."
@@ -558,6 +559,12 @@ func workflowScopes(store *jobs.Store) (workflow.Scopes, error) {
 	return workflow.Scopes{Global: workflow.VariableMap(g), LeaveFile: true, Policy: policyFor(store)}, nil
 }
 
+// selfScopes is sc for validating workflow id itself (FB4b): a hand-over that leads back to it is refused.
+func selfScopes(sc workflow.Scopes, id int64) workflow.Scopes {
+	sc.Policy.SelfID = id
+	return sc
+}
+
 // workflowView is a workflow as the contract's Workflow.
 func workflowView(store *jobs.Store, id int64) (map[string]any, error) {
 	return workflowViewWith(store, id, nil)
@@ -602,7 +609,7 @@ func workflowViewWith(store *jobs.Store, id int64, libs []jobs.Library) (map[str
 	if err != nil {
 		return nil, err
 	}
-	res := workflow.ValidateWith(shown, sc) // FB2b: the Safety switch counts in what the editor shows
+	res := workflow.ValidateWith(shown, selfScopes(sc, id)) // FB2b: the Safety switch counts in what the editor shows
 	errs, warns := 0, 0
 	for _, i := range res.Issues {
 		if i.Severity == "error" {
@@ -640,7 +647,7 @@ func workflowViewWith(store *jobs.Store, id int64, libs []jobs.Library) (map[str
 
 // revisionView is a revision as the contract's WorkflowRevision.
 func revisionView(r jobs.Revision, sc workflow.Scopes) map[string]any {
-	res := workflow.ValidateWith(r.Doc, sc) // FB2b: the Safety switch counts in what the editor shows
+	res := workflow.ValidateWith(r.Doc, selfScopes(sc, r.WorkflowID)) // FB2b: the Safety switch counts in what the editor shows
 	id := any(nil)
 	if r.ID != 0 {
 		id = strconv.FormatInt(r.ID, 10)

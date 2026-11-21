@@ -80,7 +80,7 @@ func TestV2Workflows(t *testing.T) {
 	flow := strconv.FormatInt(lib.FlowID, 10)
 
 	// the registry and the template
-	if _, body := get("/api/v2/step-definitions?fileType=video"); decode[v2List](t, body).Total != 32 || !strings.Contains(body, `"configSchema"`) { // V6a: 9 + Check the file, Leave the file alone; FB1b: 4 more checks (name, age, variable, library, hard links minus the legacy card), Set a variable, Add a note, Stop as failed; FB2a: the six cards after the save; FB2b: Run a command, Ask the downloader; FB2c: Has a tag, Tag the file; FB4: A share of files, Wait, Convert again later
+	if _, body := get("/api/v2/step-definitions?fileType=video"); decode[v2List](t, body).Total != 33 || !strings.Contains(body, `"configSchema"`) { // V6a: 9 + Check the file, Leave the file alone; FB1b: 4 more checks (name, age, variable, library, hard links minus the legacy card), Set a variable, Add a note, Stop as failed; FB2a: the six cards after the save; FB2b: Run a command, Ask the downloader; FB2c: Has a tag, Tag the file; FB4: A share of files, Wait, Convert again later; FB4b: Hand to another workflow
 		t.Errorf("step definitions: %s", body[:min(300, len(body))])
 	}
 	if _, body := get("/api/v2/templates"); !strings.Contains(body, `"shrink_videos"`) {

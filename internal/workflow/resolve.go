@@ -48,6 +48,35 @@ func HasRefs(d Doc) bool {
 	return false
 }
 
+// HasFileRefs reports whether a typed setting of d names one of the file's own values (file.*,
+// source.*), which only a job with the file in hand can fill. A workflow handed files by another
+// (FB4b) is compiled without one, so such a target is refused (review-579).
+func HasFileRefs(d Doc) bool {
+	defs := map[string]StepDefinition{}
+	for _, def := range Definitions() {
+		defs[def.Type] = def
+	}
+	for _, n := range d.Nodes {
+		def, ok := defs[n.Type]
+		if !ok {
+			continue
+		}
+		props, _ := def.ConfigSchema["properties"].(map[string]any)
+		for k, p := range props {
+			prop, _ := p.(map[string]any)
+			if prop["x-variableRef"] != true {
+				continue
+			}
+			if s, ok := n.Config[k].(string); ok && strings.HasPrefix(s, "{{") && strings.HasSuffix(s, "}}") {
+				if _, reserved := ReservedNames[strings.TrimSuffix(strings.TrimPrefix(s, "{{"), "}}")]; reserved {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 // Resolve is d with every whole-field reference replaced by its variable's value, and what is wrong
 // with the ones it can't replace. A doc with no references comes back unchanged (the same slices, so
 // it still marshals to the same logic hash). Issues are errors: a reference that can't be resolved

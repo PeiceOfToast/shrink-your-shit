@@ -172,10 +172,77 @@ func (r Result) Errors() bool {
 
 var hhmmRe = regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9]$`)
 
-// Policy is what this install allows a workflow to do (FB2b): the Safety switch for Run a command.
-// Validate alone assumes everything is allowed; the server passes the live policy in Scopes.
+// Policy is what this install allows a workflow to do (FB2b): the Safety switch for Run a command, and
+// what it knows of the other workflows (FB4b, "Hand to another workflow"). Validate alone assumes
+// everything is allowed and checks a hand-over's target not at all; the server passes the live policy
+// in Scopes.
 type Policy struct {
 	CommandsAllowed bool
+	// Workflows is another workflow by id (nil: no lookup, so a target is not checked); SelfID is the
+	// workflow being validated (0: unknown), so a hand-over that leads back to it is refused.
+	Workflows func(id int64) (OtherWorkflow, bool)
+	SelfID    int64
+}
+
+// OtherWorkflow is what validation knows of a workflow a step may hand files to: its name, whether it
+// has been published, and the workflows its own published paths hand files to.
+type OtherWorkflow struct {
+	Name      string
+	Published bool
+	HandsTo   []int64
+	// FileValues: a typed setting of its names one of the file's own values (file.*, source.*), which a
+	// hand-over can't fill (review-579), so it can't be a target.
+	FileValues bool
+}
+
+// handoffIssue checks one "Hand to another workflow" step against the other workflows (FB4b): the
+// target must exist, be published, not be this workflow, and not lead back to it through its own
+// hand-overs. It walks up to MaxHandoffs workflows deep, the same bound the run keeps. With no issue, the
+// step's summary names the workflow.
+func handoffIssue(n Node, p Policy) (*Issue, string) {
+	id, err := strconv.ParseInt(strOf(n.Config, "workflow", ""), 10, 64)
+	if err != nil || id <= 0 { // the config check already said invalid_config
+		return nil, ""
+	}
+	bad := func(code, msg string) (*Issue, string) {
+		return &Issue{Code: code, Severity: "error", NodeID: n.ID, Field: "workflow", Message: "'" + nodeName(n) + "' " + msg}, ""
+	}
+	if id == p.SelfID {
+		return bad("handoff_loop", "hands the file back to this workflow. Choose another one.")
+	}
+	w, ok := p.Workflows(id)
+	if !ok {
+		return bad("invalid_config", "hands the file to a workflow that isn't there any more. Choose another one.")
+	}
+	if !w.Published {
+		return bad("handoff_unpublished", "hands the file to '"+w.Name+"', which hasn't been published yet. Publish it first.")
+	}
+	if w.FileValues {
+		return bad("handoff_file_values", "hands the file to '"+w.Name+"', whose settings use the file's own values ({{file.…}} or {{source.…}}), which a hand-over can't fill. Choose another workflow, or give that setting a plain value.")
+	}
+	// the other workflow's own hand-overs, breadth first: one that leads back here is a loop
+	seen := map[int64]bool{id: true}
+	queue := []int64{id}
+	for depth := 0; len(queue) > 0 && depth < rules.MaxHandoffs; depth++ {
+		var next []int64
+		for _, from := range queue {
+			f, ok := p.Workflows(from)
+			if !ok {
+				continue
+			}
+			for _, to := range f.HandsTo {
+				if to == p.SelfID && p.SelfID != 0 {
+					return bad("handoff_loop", "leads back to this workflow through '"+w.Name+"'. The file would go round in a loop.")
+				}
+				if !seen[to] {
+					seen[to] = true
+					next = append(next, to)
+				}
+			}
+		}
+		queue = next
+	}
+	return nil, "Hands the file to " + w.Name
 }
 
 // Validate checks d (spec 5.6): one trigger, every node reachable, no cycle (no loop nodes yet), known
@@ -275,6 +342,13 @@ func ValidateWith(d Doc, s Scopes) Result {
 				add(Issue{Code: "invalid_config", NodeID: n.ID, ConfigPath: "/until", Field: "until", Message: "In '" + nodeName(n) + "', the time must read like 02:00."})
 			}
 		}
+		if n.Type == TypeGoto { // FB4b: a workflow to hand to, by id. A missing key is checkConfig's "needs a value"; an empty or unreadable one (review2-579: the picker's placeholder picked again) is refused here, so it never fails every file at run time.
+			if v, present := n.Config["workflow"]; present {
+				if id, err := strconv.ParseInt(strOf(n.Config, "workflow", ""), 10, 64); v == "" || err != nil || id <= 0 {
+					add(Issue{Code: "invalid_config", NodeID: n.ID, ConfigPath: "/workflow", Field: "workflow", Message: "In '" + nodeName(n) + "', choose the workflow to hand the file to."})
+				}
+			}
+		}
 		if n.Type == TypeCheckName && strOf(n.Config, "match", "contains") == "regex" { // review2-531 P3: a pattern that can't compile would answer No for every file
 			if _, err := regexp.Compile(strOf(n.Config, "pattern", "")); err != nil {
 				add(Issue{Code: "invalid_config", NodeID: n.ID, ConfigPath: "/pattern", Field: "pattern",
@@ -354,6 +428,18 @@ func ValidateWith(d Doc, s Scopes) Result {
 			if n.Type == TypeCommand {
 				add(Issue{Code: "commands_off", Severity: "error", NodeID: n.ID,
 					Message: "'" + nodeName(n) + "' can't run until \"Workflows may run commands\" is on in Settings > Safety."})
+			}
+		}
+	}
+	if s.Policy.Workflows != nil { // FB4b: a hand-over must lead to another, published workflow and never back here
+		for _, n := range d.Nodes {
+			if n.Type != TypeGoto {
+				continue
+			}
+			if issue, summary := handoffIssue(n, s.Policy); issue != nil {
+				add(*issue)
+			} else if summary != "" {
+				r.StepSummaries[n.ID] = summary
 			}
 		}
 	}
@@ -681,6 +767,8 @@ func summary(n Node) string {
 		return "Failed: " + strOf(c, "reason", "Stopped by this workflow.")
 	case TypeRequeue:
 		return "Back in the queue for " + minutesWords(intOf(c, "afterMin", 60)) + ", at most " + strconv.Itoa(intOf(c, "maxTries", 5)) + " tries"
+	case TypeGoto:
+		return "Hands the file to another workflow"
 	case TypeCheckRandom:
 		return "Only for about " + strconv.Itoa(intOf(c, "share", 10)) + "% of files"
 	case TypeWait:

@@ -146,13 +146,14 @@ func (s Settings) Policy() workflow.Policy {
 	return workflow.Policy{CommandsAllowed: s.WorkflowsMayRunCommands}
 }
 
-// policyFor reads the live policy; when the settings can't be read, nothing extra is allowed.
+// policyFor reads the live policy; when the settings can't be read, nothing extra is allowed. The other
+// workflows (FB4b, "Hand to another workflow") always come from the store.
 func policyFor(store *jobs.Store) workflow.Policy {
-	s, err := LoadSettings(store)
-	if err != nil {
-		return workflow.Policy{}
+	p := workflow.Policy{Workflows: store.OtherWorkflow}
+	if s, err := LoadSettings(store); err == nil {
+		p.CommandsAllowed = s.Policy().CommandsAllowed
 	}
-	return s.Policy()
+	return p
 }
 
 func LoadSettings(store *jobs.Store) (Settings, error) {

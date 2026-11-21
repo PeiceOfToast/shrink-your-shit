@@ -582,13 +582,13 @@ func (s *Store) TemplateFor(j Job) (rules.Template, error) {
 		sc := workflow.Scopes{Library: workflow.VariableMap(overrides), Global: workflow.VariableMap(g), LeaveFile: true}
 		t, issues := workflow.ToTemplateWith(rev.Doc, f.Template, sc)
 		if len(issues) == 0 {
-			return t, nil
+			return s.WithHandoffs(t), nil
 		}
 		// #561 review ask 3: the stored template was compiled with the older values, so running it would
 		// convert with values the person has changed. Stop the job and say which variable and workflow.
 		return rules.Template{}, &SettingsUnresolvedError{Workflow: f.Name, Issues: issues}
 	}
-	return f.Template, nil
+	return s.WithHandoffs(f.Template), nil // FB4b: a path that hands the file to another workflow runs that workflow's paths
 }
 
 // SettingsUnresolvedError says a published workflow's settings no longer resolve with the server's

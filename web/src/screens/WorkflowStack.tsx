@@ -8,7 +8,7 @@ import { Icon } from "../Icon";
 import { SignedOut, failed, type Answer } from "../api";
 import { deleteNode, groupOf, insertAfter, insertQuestion, isQuestion, moveNode, newNode, order, otherwiseOf, setOtherwise, type Otherwise } from "../stepEdits"; // the steps in running order: a property of the document, not data
 import { useData } from "../useData";
-import { getDraft, getLadder, getWorkflow, listTemplates, patchWorkflow, publish, publishPreview, saveDraft, stepDefinitions, validateDoc, type Checked, type Ladder } from "../workflowApi";
+import { getDraft, getLadder, getWorkflow, listTemplates, listWorkflows, patchWorkflow, publish, publishPreview, saveDraft, stepDefinitions, validateDoc, type Checked, type Ladder } from "../workflowApi";
 import { Link, navigate, onLeave } from "../router";
 import { Browse } from "../FolderPicker";
 import { OwnVars, VarInput, builtinsOf, takesVars, varListFor, varProblems, withOwn } from "../VarInput";
@@ -24,7 +24,7 @@ export const Reg = createContext<{ defs: StepDefinition[]; words: Record<string,
 function useReg() { const r = useContext(Reg); return { stepDef: (t: string) => r.defs.find((d) => d.type === t), summary: (n: Node) => r.words[n.id] ?? "", libs: r.libs, wf: r.wf }; }
 
 // The server's icon keys (registry) -> design's sprite.
-export const ICON: Record<string, string> = { folder: "i-folder", filter: "i-shield", video: "i-video", audio: "i-audio", subtitles: "i-subtitle", file: "i-file", check: "i-checks", save: "i-save", cond: "i-cond", history: "i-history", branch: "i-branch", stop: "i-stop", variable: "i-tag", note: "i-text", tell: "i-link", bell: "i-info", shield: "i-shield", copy: "i-copy", terminal: "i-terminal", tag: "i-tag", clock: "i-clock", redo: "i-redo" }; // branch, stop: V6a check + end; variable, note: FB1d cards; tell, bell, shield, copy: FB2a after cards
+export const ICON: Record<string, string> = { folder: "i-folder", filter: "i-shield", video: "i-video", audio: "i-audio", subtitles: "i-subtitle", file: "i-file", check: "i-checks", save: "i-save", cond: "i-cond", history: "i-history", branch: "i-branch", stop: "i-stop", variable: "i-tag", note: "i-text", tell: "i-link", bell: "i-info", shield: "i-shield", copy: "i-copy", terminal: "i-terminal", tag: "i-tag", clock: "i-clock", redo: "i-redo", workflow: "i-workflow" }; // branch, stop: V6a check + end; variable, note: FB1d cards; tell, bell, shield, copy: FB2a after cards; workflow: FB4b Hand to another workflow
 // The words around each option come from the server's step definitions (#114: title, description, x-enumHints for
 // each choice, x-placeholder); the page adds none of its own.
 const MORE: Record<string, string[]> = { "video.convert": ["format", "resolution", "maxBitrate", "speed"] };
@@ -101,6 +101,22 @@ function Field(props: { id: string; name: string; s: JSONSchema; value: unknown;
     </>);
 }
 
+// WorkflowPick lists the published workflows other than this one, by name, for "Hand to another workflow" (FB4b); the
+// server's validation says when the chosen one is this workflow, a draft, gone, or leads back here (handoff_loop).
+function WorkflowPick({ fid, title, value, set, wf, description }: { fid: string; title: string; value: string; set: (v: unknown) => void; wf: string; description?: string }) {
+  const all = useData(listWorkflows, []), list = (all.data && !failed(all.data) ? all.data : []).filter((w) => w.id !== wf && w.status !== "draft");
+  const known = list.some((w) => w.id === value);
+  return (
+    <div className="field"><label htmlFor={fid}>{title}</label>
+      <select id={fid} className="input" value={value} onChange={(e) => set(e.target.value === "" ? undefined : e.target.value)} aria-describedby={fid + "-h"}>
+        <option value="">Choose a workflow…</option>
+        {value && !known && <option value={value}>{value === wf ? "This workflow" : all.data && !failed(all.data) ? "A workflow that isn't published, or isn't there" : "Workflow " + value}</option>}
+        {list.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
+      </select>
+      <span className="hint" id={fid + "-h"}>{list.length === 0 ? "No other workflow is published yet: publish one first, then choose it here." : description ?? ""}</span>
+    </div>);
+}
+
 function Control({ id, name, s, value, set, wf }: { id: string; name: string; s: JSONSchema; value: unknown; set: (v: unknown) => void; wf: string }) {
   // The schema's title; without one (V1's "ignore" has none), the key in plain form.
   const title = (s.title as string) ?? name.charAt(0).toUpperCase() + name.slice(1).replace(/([A-Z])/g, " $1").toLowerCase(), fid = id + "-" + name;
@@ -139,6 +155,8 @@ function Control({ id, name, s, value, set, wf }: { id: string; name: string; s:
         {labels(items).map(([v, l]) => <label key={String(v)} className="row nw"><input type="checkbox" checked={on.includes(v)} onChange={(e) => set(e.target.checked ? [...on, v] : on.filter((x) => x !== v))} /><span>{l}</span></label>)}
       </div>{typeof s.description === "string" && <span className="hint">{s.description}</span>}</fieldset>);
   }
+  // FB4b: "Hand to another workflow" chooses one of the other published workflows (never this one, never a draft)
+  if (widget(s) === "workflow") return <WorkflowPick fid={fid} title={title} value={String(value ?? "")} set={set} wf={wf} description={typeof s.description === "string" ? s.description : undefined} />;
   // a text field that takes {{name}} variables (x-variables): the hint, the example and the picker
   if (s["x-variables"] === true) return <VarInput id={fid} title={title} value={String(value ?? "")} wf={wf} set={(v) => set(v)} description={typeof s.description === "string" ? s.description : undefined} />;
   const hint = typeof s.description === "string" ? <span className="hint" id={fid + "-h"}>{s.description}{s.type === "array" ? " One per line." : ""}</span> : null;
@@ -308,11 +326,13 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
 // "Set place", and its More menu greyed out with the line below. The first and last steps have no menu.
 const FIXED_LINE = "The steps that convert run in a set order for now, so they can't be moved or deleted. To skip this step, turn it off.";
 type Move = { fixed: boolean; reason?: string; up: boolean; down: boolean; del: boolean; act: (w: "up" | "down" | "del") => void };
-// FB1d: a question's row says what its No does: one of the ends, or another path the graph shows.
-type Else = { kind: Otherwise; set: (k: "leave" | "fail" | "other") => void };
-const OTHERWISE: [Otherwise, string][] = [["leave", "leave the file alone"], ["fail", "stop as failed"], ["other", "another path (in the graph)"]];
+// FB1d: a question's row says what its No does: one of the ends, or another path the graph shows. FB4b: "hand to
+// another workflow" is an end with a setting, so the row shows the workflow picker under it (node: that end).
+type ElseKind = "leave" | "fail" | "goto" | "other";
+type Else = { kind: Otherwise; set: (k: ElseKind) => void; node?: Node; update?: (n: Node) => void };
+const OTHERWISE: [Otherwise, string][] = [["leave", "leave the file alone"], ["fail", "stop as failed"], ["goto", "hand to another workflow"], ["other", "another path (in the graph)"]];
 function Step({ n, i, mv, open, toggle, update, issues, otherwise, inline }: { n: Node; i: number; mv: Move; open: boolean; toggle: () => void; update: (n: Node) => void; issues: ValidationIssue[]; otherwise?: Else; inline?: boolean }) {
-  const { stepDef, summary } = useReg(), def = stepDef(n.type), mine = issues.filter((x) => x.nodeId === n.id);
+  const { stepDef, summary, wf } = useReg(), def = stepDef(n.type), mine = issues.filter((x) => x.nodeId === n.id);
   if (inline) open = true; // FB3, the simple view: every form is on the page, nothing folds
   const back = useRef<HTMLButtonElement>(null);
   useEffect(() => { if (open && matchMedia("(max-width:640px)").matches) back.current?.focus(); }, [open]);
@@ -335,7 +355,7 @@ function Step({ n, i, mv, open, toggle, update, issues, otherwise, inline }: { n
         {end ? <span className="muted sm nowrap">{end === "first" ? "Always first" : "Always last"}</span>
           : otherwise ? <label className="row nw otherwise"><span className="muted nowrap">Otherwise</span>
               <select className="input" aria-label={"Otherwise: what happens when " + nm + " answers No"} value={otherwise.kind === "none" ? "leave" : otherwise.kind}
-                onChange={(e) => otherwise.set(e.target.value as "leave" | "fail" | "other")}>
+                onChange={(e) => otherwise.set(e.target.value as ElseKind)}>
                 {OTHERWISE.filter(([k]) => k !== "other" || otherwise.kind === "other").map(([k, l]) => <option key={k} value={k}>{l}</option>)}
                 {otherwise.kind !== "other" && <option value="other">another path (open the graph)</option>}
               </select></label>
@@ -353,6 +373,11 @@ function Step({ n, i, mv, open, toggle, update, issues, otherwise, inline }: { n
         {hasOptions && !inline ? <button className="btn icon ghost" type="button" aria-expanded={open} aria-controls={n.id + "-opts"} aria-label={"Options for " + def.name} onClick={toggle}><Icon id={open ? "i-chev-d" : "i-chev-r"} /></button>
           : <span className="chev-sp" />}
       </div>
+      {otherwise?.kind === "goto" && otherwise.node && otherwise.update && (() => { const g = otherwise.node, put = otherwise.update, bad = issues.filter((x) => x.nodeId === g.id); return (
+        <div className="otherwise-goto" data-node={g.id}>
+          <WorkflowPick fid={g.id + "-workflow"} title={"When " + nm + " answers No, hand the file to"} value={String(g.config.workflow ?? "")} set={(v) => put({ ...g, config: { ...g.config, workflow: v } })} wf={wf} description={stepDef("flow.goto")?.description} />
+          {bad.map((x, k) => <span key={k} className="hint" role="alert" style={{ color: "var(--error-text)" }}>{x.message}</span>)}
+        </div>); })()}
       {open && hasOptions && <div className={"sopts" + (inline ? " inline" : "")} id={n.id + "-opts"} role="group" aria-label={"Options for " + def.name} onKeyDown={(e) => !inline && e.key === "Escape" && toggle()}>
         {!inline && <div className="sheethd phone"><button ref={back} className="btn icon ghost" type="button" aria-label="Back to the steps" onClick={toggle}><Icon id="i-chev-l" /></button><strong>{def.name}</strong></div>}
         <Options n={n} issues={issues} set={(k, v, more) => update({ ...n, config: { ...n.config, [k]: v, ...more } })} /></div>}
@@ -635,13 +660,20 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
     if (to) requestAnimationFrame(() => document.getElementById(to.id + "-more")?.focus());
   };
   const undoGone = () => { if (gone) setHist({ ...hist, at: gone.at - 1 }); setGone(null); };
-  const endDef = defs.find((x) => x.type === "flow.end"), failDef = defs.find((x) => x.type === "flow.fail");
-  const setElse = (q: Node, k: "leave" | "fail" | "other") => {
+  const endDef = defs.find((x) => x.type === "flow.end"), failDef = defs.find((x) => x.type === "flow.fail"), gotoDef = defs.find((x) => x.type === "flow.goto");
+  // ui-shop review #579: a hand-over's picked workflow is remembered through a switch of Otherwise and back, so an
+  // accidental change doesn't empty the picker (the end step is rebuilt from its defaults by setOtherwise)
+  const lastGoto = useRef<Record<ID, Record<string, unknown>>>({});
+  const setElse = (q: Node, k: ElseKind) => {
     if (k === "other") { navigate(`/workflows/${id}/graph?node=${encodeURIComponent(q.id)}`); return; }
-    const def = k === "leave" ? endDef : failDef;
+    const def = k === "leave" ? endDef : k === "fail" ? failDef : gotoDef;
     if (!def) return setSaid("This server has no such step.");
-    const next = setOtherwise(doc, q, def);
-    if (next !== doc) { edit(next); setSaid(`${nameOf(q)}: when the answer is No, ${k === "leave" ? "the file is left alone" : "the run stops as failed"}.`); }
+    const cur = otherwiseOf(doc, q);
+    if (cur.kind === "goto" && cur.node && Object.keys(cur.node.config).length > 0) lastGoto.current[q.id] = cur.node.config;
+    let next = setOtherwise(doc, q, def);
+    const remembered = lastGoto.current[q.id], made = k === "goto" && next !== doc ? otherwiseOf(next, q).node : undefined;
+    if (made && remembered && Object.keys(made.config).length === 0) next = { ...next, nodes: next.nodes.map((n) => (n.id === made.id ? { ...n, config: { ...remembered } } : n)) };
+    if (next !== doc) { edit(next); setSaid(`${nameOf(q)}: when the answer is No, ${k === "leave" ? "the file is left alone" : k === "fail" ? "the run stops as failed" : made && remembered ? "the file is handed to another workflow, the one picked before" : "the file is handed to another workflow: choose which, under the step"}.`); }
   };
   const addStep = (d: StepDefinition, after?: ID) => {
     const question = d.outputs.some((o) => o.outcome === "branch");
@@ -756,7 +788,8 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
           const p = live.stepPlaces?.[n.id], fixed = p ? p.fixedPlace : true;
           const mv: Move = { fixed, reason: p?.fixedReason, up: !fixed && !simple && i > 1 && i <= lastMovable, down: !fixed && !simple && i >= 1 && i < lastMovable, del: !fixed && !simple && i >= 1 && i <= lastMovable, // the simple view shows no place badge or menu: moving and deleting live in the steps view (ui-shop review #543)
             act: (w) => (w === "del" ? deleteStep(n.id) : moveStep(n.id, w === "up" ? -1 : 1)) };
-          const otherwise: Else | undefined = isQuestion(n) ? { kind: otherwiseOf(doc, n).kind, set: (k) => setElse(n, k) } : undefined;
+          const ow = isQuestion(n) ? otherwiseOf(doc, n) : undefined;
+          const otherwise: Else | undefined = ow ? { kind: ow.kind, set: (k) => setElse(n, k), node: ow.node, update } : undefined;
           return <Step key={n.id} n={n} i={i} mv={mv} open={open === n.id} toggle={() => setOpen(open === n.id ? null : n.id)} update={update} issues={issues} otherwise={otherwise} inline={simple} />;
         })}{simple && fold(after, "after the file is saved")}</ol>
         {!only && !simple && <button className="btn sm ghost" type="button" onClick={openAdd}><Icon id="i-plus" />Add step</button>}
