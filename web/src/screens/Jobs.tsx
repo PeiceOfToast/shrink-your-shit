@@ -446,7 +446,7 @@ function StepLog({ d, id, worker, failedIdx, kept, hasResult }: { d: { loaded: b
     const hit = q ? countIn(hitText, q) : 0;
     const took = st.tookMs != null ? "Took " + stepTime(st.tookMs) : "";
     const progress = st.speedX != null || st.avgKbps != null ? [took + (st.speedX != null ? (took ? " at " : "") + st.speedX + "× speed" : ""), st.avgKbps != null ? "average " + st.avgKbps.toLocaleString() + " kbps" : ""].filter(Boolean).join(", ") : "";
-    const pill = ["ok", "done", "completed"].includes(st.outcome) ? <span className="pill ok">Done</span> : st.outcome === "failed" ? (kept ? <span className="pill warn">Original kept</span> : <span className="pill bad">Failed</span>) : st.outcome === "skipped" ? <span className="pill">Skipped</span> : null;
+    const pill = ["ok", "done", "completed"].includes(st.outcome) ? <span className="pill ok"><Icon id="i-check-c" />Done</span> : st.outcome === "failed" ? (kept ? <span className="pill"><Icon id="i-info" />Original kept</span> : <span className="pill bad">Failed</span>) : st.outcome === "skipped" ? <span className="pill">Skipped</span> : null;
     const title = stepLabel(st.name, st.found, st.check != null);
     raw.push({ key: "step-" + i, id: "job-step-" + (i + 1), title, hits: hit, dflt: st.outcome === "failed" || st.outcome === "skipped" || i === failedIdx || (kept && st.check != null), show: !errOnly || (flagged && (!q || hit > 0)),
       head: <>
