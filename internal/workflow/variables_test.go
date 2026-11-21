@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/vars"
 )
 
 // A workflow's own variables: a name a person may type, not a built-in, and two variables differ
@@ -121,5 +122,33 @@ func TestTemplatesMayNameAGlobal(t *testing.T) {
 	}
 	if issues := CheckTemplatesWith(d, sc); len(issues) != 1 || issues[0].Code != "unknown_variable" || issues[0].Suggest != "qa_sub" {
 		t.Errorf("a near miss suggests the global: %+v", issues)
+	}
+}
+
+// W2 (#596 review): one of the file's own values (file.*, source.*) fills a whole typed setting, never text.
+// Inside a text field it is refused at save with words that say so (code unknown_variable, as any unknown
+// name), with or without the scopes; and the run's text resolver has no value for it (it would come out as
+// nothing), which is why saving refuses it.
+func TestAFileValueIsNeverInsideText(t *testing.T) {
+	d := FromTemplate(rules.SliderTemplate(3), nil)
+	for i := range d.Nodes {
+		if d.Nodes[i].Type == TypeCommit {
+			d.Nodes[i].Config["policy"], d.Nodes[i].Config["folderMode"], d.Nodes[i].Config["folder"] = "separate_folder", "one_folder", t.TempDir()+"/{{file.size}}"
+		}
+	}
+	sc := Scopes{Global: map[string]Variable{"g": {Name: "g", Type: "number", Value: float64(1)}}, LeaveFile: true, Policy: Policy{CommandsAllowed: true}}
+	for name, issues := range map[string][]Issue{"alone": CheckTemplates(d), "with scopes": CheckTemplatesWith(d, sc), "validate": ValidateWith(d, sc).Issues} {
+		var found *Issue
+		for i := range issues {
+			if issues[i].Name == "file.size" {
+				found = &issues[i]
+			}
+		}
+		if found == nil || found.Code != "unknown_variable" || !strings.Contains(found.Message, "one of the file's own values") || !strings.Contains(found.Message, "not text") {
+			t.Errorf("%s: %+v", name, issues)
+		}
+	}
+	if out, empty := vars.Resolve("/out/{{file.size}}", map[string]string{"size_bytes": "9"}); out != "/out/" || len(empty) != 1 || empty[0] != "file.size" {
+		t.Errorf("the text resolver has no value for it: %q %v", out, empty)
 	}
 }

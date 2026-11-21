@@ -25,6 +25,8 @@ type varItem struct {
 	Name, Description, Group string
 	Value                    *string
 	Fields                   []string
+	Type                     string
+	WholeFieldOnly           bool
 }
 
 type varList struct {
@@ -447,8 +449,37 @@ func TestAServerVariableIsListedAndUsable(t *testing.T) {
 		t.Fatalf("GET variables: %d", code)
 	}
 	g := got.find(t, "qa_sub")
-	if g.Group != "Server" || g.str(t) != "alpha" || g.Description != "The sub-folder" {
+	if g.Group != "Server" || g.str(t) != "alpha" || g.Description != "The sub-folder" || g.Type != "string" || g.WholeFieldOnly {
 		t.Errorf("qa_sub: %+v", g)
+	}
+	// the typed-setting picker's contract (09:33Z): the file's own values as "File values", a whole field only,
+	// each with its type; type on the Server and Workflow items too; neither key on a built-in
+	if fv := got.find(t, "file.size"); fv.Group != "File values" || !fv.WholeFieldOnly || fv.Type != "number" || fv.Value != nil || fv.Description == "" {
+		t.Errorf("file.size: %+v", fv)
+	}
+	if hdr := got.find(t, "source.hdr"); hdr.Type != "boolean" || !hdr.WholeFieldOnly {
+		t.Errorf("source.hdr: %+v", hdr)
+	}
+	if own := got.find(t, "mine"); own.Type != "string" || own.WholeFieldOnly {
+		t.Errorf("mine: %+v", own)
+	}
+	if b := got.find(t, "title"); b.Type != "" || b.WholeFieldOnly {
+		t.Errorf("a built-in carries neither key: %+v", b)
+	}
+	iFile := -1
+	for i, v := range got.Variables {
+		if v.Name == "file.size" {
+			iFile = i
+		}
+	}
+	iMine := -1
+	for i, v := range got.Variables {
+		if v.Name == "mine" {
+			iMine = i
+		}
+	}
+	if iFile < 0 || iFile > iMine {
+		t.Errorf("file values come before the workflow's own: %d %d", iFile, iMine)
 	}
 	iG, iOwn := -1, -1
 	for i, v := range got.Variables {

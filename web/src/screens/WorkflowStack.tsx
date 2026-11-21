@@ -12,6 +12,7 @@ import { getDraft, getLadder, getWorkflow, listTemplates, listWorkflows, patchWo
 import { Link, navigate, onLeave } from "../router";
 import { Browse } from "../FolderPicker";
 import { OwnVars, VarInput, builtinsOf, takesVars, varListFor, varProblems, withOwn } from "../VarInput";
+import { refProblem } from "../refFit";
 import "../styles/variables.css";
 import { getSettings, listLibraries, shrunk } from "../libraryApi";
 import type { TemplateVar } from "../mock/variables";
@@ -55,24 +56,38 @@ function SrtFiles() {
 // other problem. The flow builder owns this screen (manager, 02:10Z).
 const isRef = (v: unknown) => typeof v === "string" && /^\{\{[a-z][a-z0-9_]*\}\}$/.test(v);
 const refName = (v: unknown) => (isRef(v) ? (v as string).slice(2, -2) : "");
-function RefPick({ fid, title, value, set, back, selectRef, none }: { fid: string; title: string; value: unknown; set: (v: unknown) => void; back: () => void; selectRef: RefObject<HTMLSelectElement | null>; none: unknown }) {
-  // only the workflow's own variables can set a typed setting (W1's resolver, internal/workflow/resolve.go); the
-  // built-ins fill text fields only (ui-shop review2 #559). A secret never sets one, so it is listed but can't be chosen.
+type RefEntry = { name: string; value: string | null; type?: string; problem: string };
+function RefPick({ fid, title, value, set, back, selectRef, none, s, wf }: { fid: string; title: string; value: unknown; set: (v: unknown) => void; back: () => void; selectRef: RefObject<HTMLSelectElement | null>; none: unknown; s: JSONSchema; wf: string }) {
+  // W1 (#521), W2 (contract 09:33Z): a typed setting takes one whole {{name}}: the workflow's own variable (which wins a
+  // shared name), a server-wide one, or one of the file's own values. The built-ins fill text fields only (ui-shop
+  // review2 #559). A kind that doesn't fit the setting is greyed with its words; the server is the judge on save
+  // (variable_wrong_type comes back on the field). A secret never sets one, so it is listed but can't be chosen.
   const own = useContext(OwnVars), cur = refName(value);
-  const vars = own.map((v) => ({ name: v.name, value: v.type === "secret" ? null : v.hasValue === false || v.value == null ? null : String(v.value), secret: v.type === "secret" }));
-  const known = vars.some((v) => v.name === cur);
+  const list = useData(() => varListFor(wf, true), [wf]).data, served = list && !failed(list) ? list.variables : [];
+  // ui-shop review #596: the fit follows the value too (text that reads as a number fills a number setting; a
+  // fraction doesn't fill a whole-number one; no value yet is refused), the way the server checks on save
+  const entry = (name: string, type: string | undefined, value: string | null, file = false): RefEntry => ({ name, type, value, problem: refProblem(s, { type, value, file }) });
+  const mine = own.map((v) => entry(v.name, v.type, v.type === "secret" ? null : v.hasValue === false || v.value == null ? null : String(v.value)));
+  const ownNames = new Set(mine.map((v) => v.name));
+  const server = served.filter((v) => v.group === "Server" && !ownNames.has(v.name)).map((v) => entry(v.name, v.type, v.value));
+  const file = served.filter((v) => v.wholeFieldOnly).map((v) => entry(v.name, v.type, v.value, true));
+  const known = [...mine, ...server, ...file].some((v) => v.name === cur);
+  const label = (v: RefEntry) => "{{" + v.name + "}}" + (v.problem ? " · " + v.problem : v.value != null && v.value !== "" ? " · " + v.value : "");
+  const group = (name: string, vars: RefEntry[]) => vars.length > 0 && <optgroup label={name}>{vars.map((v) => <option key={v.name} value={v.name} disabled={v.problem !== ""}>{label(v)}</option>)}</optgroup>;
   return (
     <div className="field">
       <label htmlFor={fid}>{title}</label>
       <div className="row nw" style={{ gap: 8 }}>
         <select ref={selectRef} id={fid} className="input" value={cur} aria-describedby={fid + "-ref"} onChange={(e) => { const next = e.target.value ? "{{" + e.target.value + "}}" : none; if (next !== value) set(next); }}>
           <option value="">Choose a variable…</option>
-          {cur && !known && <option value={cur}>{"{{" + cur + "}}"} · not a variable of this workflow</option>}
-          <optgroup label="Your variables">{vars.map((v) => <option key={v.name} value={v.name} disabled={v.secret}>{"{{" + v.name + "}}"}{v.secret ? " · a secret can't set this" : v.value != null && v.value !== "" ? " · " + v.value : ""}</option>)}</optgroup>
+          {cur && !known && <option value={cur}>{"{{" + cur + "}}"} · not a variable here</option>}
+          {group("Your variables", mine)}
+          {group("Server-wide variables", server)}
+          {group("The file's own values", file)}
         </select>
         <button className="btn sm ghost nowrap" type="button" onClick={back}>Type a value instead</button>
       </div>
-      <span className="hint" id={fid + "-ref"}>{vars.length === 0 ? "This workflow has no variables yet: add one in Variables above, then choose it here." : "One of this workflow's own variables sets this; its value must fit the setting. A secret can't be used here."}</span>
+      <span className="hint" id={fid + "-ref"}>{mine.length === 0 && server.length === 0 ? "This workflow has no variables yet: add one in Variables above or in Settings, or pick one of the file's own values." : "The variable's value must fit the setting; one that won't is greyed and says why. A file value's kind is checked when you save; its value once the job has the file."}</span>
     </div>);
 }
 
@@ -89,7 +104,7 @@ function Field(props: { id: string; name: string; s: JSONSchema; value: unknown;
   const inRef = typed && (refMode || isRef(value));
   // "Choose a variable…" picked again puts the typed value back (never "" into a number or a choice: ui-shop N1)
   const none = typedValue.current !== undefined ? typedValue.current : s.default;
-  if (inRef) return <RefPick fid={fid} title={title} value={value} set={set} selectRef={pick} none={none} back={() => {
+  if (inRef) return <RefPick fid={fid} title={title} value={value} set={set} selectRef={pick} none={none} s={s} wf={props.wf} back={() => {
     const restore = typedValue.current !== undefined ? typedValue.current : s.default;
     setRefMode(false); setFocusTyped((n) => n + 1);
     if (isRef(value)) { if (restore !== value) set(restore); } // a plain value already there is left as it is
