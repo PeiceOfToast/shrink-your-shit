@@ -835,4 +835,3 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 .skel-ph{display:inline-block;height:22px;border-radius:4px;background:var(--raised);vertical-align:middle;flex:none}
 .skel-ph.skel-sw{width:200px;height:44px;border-radius:11px}
 .skel-ph.skel-btn{width:150px;height:30px}
-.skel-ph.skel-sw-s{height:36px}
