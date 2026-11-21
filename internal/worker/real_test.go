@@ -359,26 +359,77 @@ func decodedDamage(t *testing.T, path string) int {
 	return rep.Pictures
 }
 
-// A broadcast recording that begins in the middle of a group of pictures prints harmless messages at
-// its start; that must not stop a good file from being converted.
-func TestRealRecordingStartingMidStreamIsStillConverted(t *testing.T) {
+// A recording that begins in the middle of a group of pictures has no picture to show in its first seconds, in the
+// original as much as in any new file, so it still converts and the job's log says how much undecodable lead was
+// left out. The start-of-stream decoder messages (non-existing PPS, no frame) are not damage either.
+//
+// Without sound the lead also shortens the new file, so the length check must leave it out. With sound, the copied
+// track covers the lead and the new file is the original's length: the duration must not be credited there, or a
+// good conversion would be refused as too short. Both are recordings cut out of a stream, the ordinary case.
+func TestRealRecordingStartingMidStreamIsConverted(t *testing.T) {
+	needTools(t)
+	for _, sound := range []bool{false, true} {
+		name := "picture only"
+		if sound {
+			name = "with sound"
+		}
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			full := filepath.Join(dir, "full.ts")
+			args := []string{"-f", "lavfi", "-i", "testsrc2=size=640x360:rate=25:duration=20"}
+			if sound {
+				args = append(args, "-f", "lavfi", "-i", "sine=duration=20", "-c:a", "aac", "-b:a", "128k")
+			}
+			args = append(args, "-c:v", "libx264", "-b:v", "2M", "-g", "100", "-f", "mpegts", full)
+			runFFmpeg(t, args...)
+			data, _ := os.ReadFile(full)
+			cut := filepath.Join(dir, "cut.ts")
+			os.WriteFile(cut, data[188*400:], 0o644) // start on a packet boundary, but not at a keyframe
+			info, err := media.Probe(context.Background(), media.OSExec{}, "ffprobe", cut)
+			if err != nil {
+				skipUnlessRequired(t, "the cut file is not readable here: %v", err)
+			}
+			st, id := realJob(t, cut, info.DurationSec)
+			realWorker(st, media.OSExec{}).run(t)
+			j, _ := st.Get(id)
+			if j.Status != jobs.Done {
+				t.Fatalf("a recording that starts mid-stream must convert, not %s: %q", j.Status, j.Error)
+			}
+			lines, _ := st.LogLines(id)
+			said := false
+			for _, l := range lines {
+				said = said || strings.HasPrefix(l.Text, "the original starts mid-stream: its first ") &&
+					strings.Contains(l.Text, " seconds have no picture that can be decoded")
+			}
+			if !said {
+				t.Errorf("the job log does not say how much undecodable lead was left out: %v", lines)
+			}
+		})
+	}
+}
+
+// A recording with a piece missing in the middle is not one that starts mid-stream: only the lead is credited, so
+// a gap inside the file is still refused.
+func TestRealGapInTheMiddleIsKept(t *testing.T) {
 	needTools(t)
 	dir := t.TempDir()
-	full := filepath.Join(dir, "full.ts")
-	runFFmpeg(t, "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=25:duration=20", "-c:v", "libx264", "-b:v", "2M", "-g", "100", "-f", "mpegts", full)
-	data, _ := os.ReadFile(full)
-	cut := filepath.Join(dir, "cut.ts")
-	os.WriteFile(cut, data[188*400:], 0o644) // start on a packet boundary, but not at a keyframe
-	info, err := media.Probe(context.Background(), media.OSExec{}, "ffprobe", cut)
-	if err != nil {
-		skipUnlessRequired(t, "the cut file is not readable here: %v", err)
-	}
-	st, id := realJob(t, cut, info.DurationSec)
+	ts := filepath.Join(dir, "clip.ts")
+	runFFmpeg(t, "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=25:duration=20", "-c:v", "libx264", "-b:v", "2M", "-f", "mpegts", ts)
+	data, _ := os.ReadFile(ts)
+	at := len(data) / 2 / 188 * 188 // on a packet boundary, so the transport stream stays readable
+	gapped := filepath.Join(dir, "gap.ts")
+	os.WriteFile(gapped, append(append([]byte(nil), data[:at]...), data[at+188*500:]...), 0o644) // 500 packets cut out
+	st, id := realJob(t, gapped, 20)
 	realWorker(st, media.OSExec{}).run(t)
 	j, _ := st.Get(id)
-	t.Logf("status %s %q", j.Status, j.Error)
-	if j.Status == jobs.Kept && strings.Contains(j.Error, "the original file has errors") {
-		t.Errorf("harmless start-of-stream messages were taken for damage: %q", j.Error)
+	if j.Status == jobs.Done {
+		t.Fatalf("a recording with a gap in the middle must never be 'done': %q", j.Error)
+	}
+	if now, _ := os.ReadFile(gapped); len(now) != len(data)-188*500 {
+		t.Error("the original changed")
+	}
+	if tempLeft(gapped) {
+		t.Error("temp file left")
 	}
 }
 

@@ -376,19 +376,58 @@ func LeadingUndecodable(ctx context.Context, x Exec, ffprobe, path string, n int
 	}
 	var lead int64
 	for _, line := range strings.Split(string(pk), "\n") {
-		// ffprobe's field order is not the order asked for, so tell the two fields apart by content:
-		// the time parses as a number, the flags do not (they are K, _ and similar).
-		a, b, _ := strings.Cut(strings.TrimSpace(line), ",")
-		pts, flags := a, b
-		if _, ok := csvTime(b); ok {
-			pts, flags = b, a
+		t, flags, ok := packetTimeFlags(line)
+		if !ok {
+			continue
 		}
 		if strings.HasPrefix(flags, "K") { // flags: K marks a keyframe
 			return lead, nil
 		}
-		if t, ok := csvTime(pts); ok && t < first {
+		if t < first {
 			lead++
 		}
+	}
+	return 0, nil
+}
+
+// packetTimeFlags reads one packet=flags,pts_time line. ffprobe's field order is not the order asked for, so
+// tell the two fields apart by content: the time parses as a number, the flags do not (they are K, _ and similar).
+func packetTimeFlags(line string) (t float64, flags string, ok bool) {
+	a, b, _ := strings.Cut(strings.TrimSpace(line), ",")
+	if t, ok := csvTime(a); ok {
+		return t, b, true
+	}
+	if t, ok := csvTime(b); ok {
+		return t, a, true
+	}
+	return 0, "", false
+}
+
+// UndecodableLead is how much of the n-th video stream's start the decoder cannot show (seconds): a recording
+// that begins in the middle of a group of pictures has nothing before its first keyframe, and those packets are
+// in no timeline any player has. start is the stream's own start; 0 is returned when the stream starts on a
+// keyframe, when the first picture is at or before start, or when nothing can be read.
+func UndecodableLead(ctx context.Context, x Exec, ffprobe, path string, n int, start float64) (float64, error) {
+	sel := fmt.Sprintf("v:%d", n)
+	// A stream that starts on a keyframe decodes from its first packet, so there is no lead and nothing to
+	// decode; a stream that starts later pays for the decode below.
+	one, err := x.Output(ctx, ffprobe, "-v", "error", "-select_streams", sel,
+		"-read_intervals", "%+#1", "-show_entries", "packet=flags,pts_time", "-of", "csv=p=0", path)
+	if err != nil {
+		return 0, err
+	}
+	if _, flags, ok := packetTimeFlags(string(one)); ok && strings.HasPrefix(flags, "K") {
+		return 0, nil
+	}
+	// The first picture the decoder outputs: the undecodable leading pictures print nothing, so the window is
+	// by time, long enough to reach the first keyframe's picture in any ordinary group of pictures.
+	fr, err := x.Output(ctx, ffprobe, "-v", "error", "-select_streams", sel, "-show_frames",
+		"-read_intervals", "%+10", "-show_entries", "frame=pts_time", "-of", "csv=p=0", path)
+	if err != nil {
+		return 0, err
+	}
+	if first, ok := csvTime(strings.SplitN(string(fr), "\n", 2)[0]); ok && first > start {
+		return first - start, nil
 	}
 	return 0, nil
 }

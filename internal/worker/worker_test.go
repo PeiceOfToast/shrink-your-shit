@@ -101,6 +101,8 @@ type scenario struct {
 	srcProbeFails          bool
 	srcPackets, outPackets int
 	srcPts                 string // the original's packet timestamps (ffprobe csv); "" is a steady 25 fps
+	srcFirstPacket         string // the original's first packet, flags and time; "" starts on a keyframe
+	srcFirstFrame          string // the first picture the decoder shows in the original; "" when there is none
 	content                string // what the fake encoder writes
 	encodeErr              error
 	failAllEncodes         bool                                  // every encode fails, the processor's retry too
@@ -201,6 +203,15 @@ func (s *scenario) handle(name string, args []string) (string, string, error) {
 				return fmt.Sprint(s.srcPackets), "", nil
 			}
 			return fmt.Sprint(s.outPackets), "", nil
+		}
+		if isSrc && s.has(args, "packet=flags,pts_time") { // the first packet (UndecodableLead)
+			if s.srcFirstPacket != "" {
+				return s.srcFirstPacket, "", nil
+			}
+			return "0.000000,K__\n", "", nil
+		}
+		if isSrc && s.has(args, "frame=pts_time") { // the first picture the decoder shows (UndecodableLead)
+			return s.srcFirstFrame, "", nil
 		}
 		if isSrc && s.has(args, "packet=pts_time") { // the frames' spacing (FramesFollowNominalRate)
 			if s.srcPts != "" {
@@ -523,6 +534,55 @@ func TestRejections(t *testing.T) {
 			assertPlain(t, s.job().Error)
 		})
 	}
+}
+
+// A recording that starts mid-stream: the pictures before its first keyframe cannot be shown in any file, so the
+// new file is judged on the rest, and the job's log says how much lead was left out.
+func TestRecordingStartingMidStreamIsJudgedOnTheRest(t *testing.T) {
+	oneTry(t)
+	s := newScenario(t)
+	s.srcSpec.duration, s.outSpec.duration = 20, 16                                     // 20 s in the container, its first 4 s have no picture
+	s.srcSpec.streams, s.outSpec.streams = s.srcSpec.streams[:1], s.outSpec.streams[:1] // picture only: nothing covers the lead
+	s.srcFirstPacket, s.srcFirstFrame = "0.000000,___\n", "4.000000\n"
+	s.run(Replace)
+	if j := s.job(); j.Status != jobs.Done {
+		t.Fatalf("a recording that starts mid-stream converts: %s %q", j.Status, j.Error)
+	}
+	lines, _ := s.store.LogLines(s.id)
+	if !hasLogLine(lines, "the original starts mid-stream: its first 4.0 seconds have no picture that can be decoded") {
+		t.Error("the job log does not say how much lead was left out")
+	}
+}
+
+// A recording that starts mid-stream but keeps its sound: the sound starts at the container's start, so it fills
+// the lead, and the new file is as long as the original. Only the picture comparison moves to the first picture.
+func TestRecordingStartingMidStreamWithSoundKeepsItsLength(t *testing.T) {
+	oneTry(t)
+	s := newScenario(t)
+	s.srcSpec.duration, s.outSpec.duration = 20, 20                                     // the new file is the original's length, sound and all
+	s.srcSpec.streams, s.outSpec.streams = s.srcSpec.streams[:2], s.outSpec.streams[:2] // picture and sound
+	s.srcSpec.streams[0]["start_time"], s.srcSpec.streams[1]["start_time"] = "1.000000", "1.000000"
+	s.outSpec.streams[0]["start_time"], s.outSpec.streams[1]["start_time"] = "4.000000", "0.000000" // the picture starts 4 s in
+	s.srcFirstPacket, s.srcFirstFrame = "1.000000,___\n", "5.000000\n"                              // the picture starts 4 s after the sound
+	s.run(Replace)
+	if j := s.job(); j.Status != jobs.Done {
+		t.Fatalf("a recording whose sound covers its lead converts: %s %q", j.Status, j.Error)
+	}
+	lines, _ := s.store.LogLines(s.id)
+	if !hasLogLine(lines, "its first 4.0 seconds have no picture that can be decoded") {
+		t.Error("the job log does not say how much lead the picture check left out")
+	}
+}
+
+// Only the lead is credited: a piece missing after the first keyframe still refuses the file.
+func TestRecordingStartingMidStreamWithAShortRestIsStillKept(t *testing.T) {
+	oneTry(t)
+	s := newScenario(t)
+	s.srcSpec.duration, s.outSpec.duration = 20, 12                                     // 4 s of lead credited leaves 16 s; the new file has 12
+	s.srcSpec.streams, s.outSpec.streams = s.srcSpec.streams[:1], s.outSpec.streams[:1] // picture only
+	s.srcFirstPacket, s.srcFirstFrame = "0.000000,___\n", "4.000000\n"
+	s.run(Replace)
+	s.assertKept("long but the original", "check_differs")
 }
 
 func TestPreflightRunsBeforeAnyEncoding(t *testing.T) {

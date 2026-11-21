@@ -48,6 +48,10 @@ type Expect struct {
 	// DurationSec is the length the new file must have, within DurationTol (a fraction); 0 = unchecked.
 	DurationSec float64
 	DurationTol float64
+	// LeadInSec is how much of the original's start no player can show (a recording that starts mid-stream): the
+	// duration above already leaves it out, and the picture comparison starts at the first picture that can be
+	// shown. 0 = none.
+	LeadInSec float64 `json:",omitempty"`
 	// VideoPackets is how many frames the main video stream must have, within PacketsTol (a fraction);
 	// 0 = unknown, unchecked.
 	VideoPackets int64
