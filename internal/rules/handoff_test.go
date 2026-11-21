@@ -178,3 +178,31 @@ func TestKeepHandoffsAndTheHopBound(t *testing.T) {
 }
 
 func strconvItoa(n int) string { return fmt.Sprint(n) }
+
+// FB4b: "Compare the result" answers from the two sizes, in words.
+func TestAskResult(t *testing.T) {
+	for _, c := range []struct {
+		test          string
+		pct           int
+		before, after int64
+		want          bool
+		words         string
+	}{
+		{"saved_at_least", 30, 1000, 600, true, "40.0% saved, asked for at least 30%"},
+		{"saved_at_least", 50, 1000, 600, false, "40.0% saved, asked for at least 50%"},
+		{"saved_less_than", 10, 1000, 990, true, "1.0% saved, asked for less than 10%"},
+		{"saved_less_than", 10, 1000, 1200, true, "20.0% bigger, asked for less than 10%"},
+		{"bigger", 0, 1000, 1200, true, "20.0% bigger"},
+		{"bigger", 0, 1000, 999, false, "0.1% saved"},
+		{"bigger", 0, 0, 999, false, "the sizes aren't known"},
+		{"", 0, 1000, 500, false, "no comparison is chosen"},
+	} {
+		q := Question{Kind: "result", Test: c.test, Percent: c.pct}
+		if got, words := q.AskResult(c.before, c.after); got != c.want || words != c.words {
+			t.Errorf("%s %d %d→%d: %v %q, want %v %q", c.test, c.pct, c.before, c.after, got, words, c.want, c.words)
+		}
+	}
+	if !(Question{Kind: "result", Test: "saved_at_least"}).Empty() || (Question{Kind: "result", Test: "bigger"}).Empty() || !(Question{Kind: "result"}).Empty() {
+		t.Error("Empty: a percent test without a percent, and no test at all, are empty; bigger is not")
+	}
+}

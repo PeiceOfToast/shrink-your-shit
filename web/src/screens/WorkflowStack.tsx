@@ -6,7 +6,7 @@ import { PageHead } from "../PageHead";
 import { Component, Fragment, createContext, useContext, useEffect, useRef, useState, type FormEvent, type ReactNode, type RefObject } from "react";
 import { Icon } from "../Icon";
 import { SignedOut, failed, type Answer } from "../api";
-import { deleteNode, groupOf, insertAfter, insertQuestion, isQuestion, moveNode, newNode, order, otherwiseOf, setOtherwise, type Otherwise } from "../stepEdits"; // the steps in running order: a property of the document, not data
+import { afterOnly, deleteNode, groupOf, insertAfter, insertAfterSave, insertQuestion, isQuestion, moveNode, newNode, order, otherwiseOf, setOtherwise, type Otherwise } from "../stepEdits"; // the steps in running order: a property of the document, not data
 import { useData } from "../useData";
 import { getDraft, getLadder, getWorkflow, listTemplates, listWorkflows, patchWorkflow, publish, publishPreview, saveDraft, stepDefinitions, validateDoc, type Checked, type Ladder } from "../workflowApi";
 import { Link, navigate, onLeave } from "../router";
@@ -328,9 +328,11 @@ const FIXED_LINE = "The steps that convert run in a set order for now, so they c
 type Move = { fixed: boolean; reason?: string; up: boolean; down: boolean; del: boolean; act: (w: "up" | "down" | "del") => void };
 // FB1d: a question's row says what its No does: one of the ends, or another path the graph shows. FB4b: "hand to
 // another workflow" is an end with a setting, so the row shows the workflow picker under it (node: that end).
-type ElseKind = "leave" | "fail" | "goto" | "other";
+type ElseKind = "leave" | "fail" | "goto" | "other" | "none";
 type Else = { kind: Otherwise; set: (k: ElseKind) => void; node?: Node; update?: (n: Node) => void };
 const OTHERWISE: [Otherwise, string][] = [["leave", "leave the file alone"], ["fail", "stop as failed"], ["goto", "hand to another workflow"], ["other", "another path (in the graph)"]];
+// FB4b: after the save nothing ends the run, so a question there offers only "nothing more" or the graph
+const OTHERWISE_AFTER: [Otherwise, string][] = [["none", "nothing more"], ["other", "another path (in the graph)"]];
 function Step({ n, i, mv, open, toggle, update, issues, otherwise, inline }: { n: Node; i: number; mv: Move; open: boolean; toggle: () => void; update: (n: Node) => void; issues: ValidationIssue[]; otherwise?: Else; inline?: boolean }) {
   const { stepDef, summary, wf } = useReg(), def = stepDef(n.type), mine = issues.filter((x) => x.nodeId === n.id);
   if (inline) open = true; // FB3, the simple view: every form is on the page, nothing folds
@@ -353,6 +355,12 @@ function Step({ n, i, mv, open, toggle, update, issues, otherwise, inline }: { n
         <div className="sp" title={(n.name ?? def.name) + ": " + summary(n)}><span className="snm" id={n.id + "-name"}>{n.name ?? def.name}</span> <span className="ssum">{summary(n)}</span></div>
         {mine.length > 0 && <span className="pill bad"><Icon id="i-alert" />{mine.length === 1 ? "1 problem" : mine.length + " problems"}</span>}
         {end ? <span className="muted sm nowrap">{end === "first" ? "Always first" : "Always last"}</span>
+          : otherwise && afterOnly(def) ? <label className="row nw otherwise"><span className="muted nowrap">Otherwise</span>
+              <select className="input" aria-label={"Otherwise: what happens when " + nm + " answers No"} value={otherwise.kind === "other" ? "other" : "none"}
+                onChange={(e) => otherwise.set(e.target.value as ElseKind)}>
+                {OTHERWISE_AFTER.filter(([k]) => k !== "other" || otherwise.kind === "other").map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                {otherwise.kind !== "other" && <option value="other">another path (open the graph)</option>}
+              </select></label>
           : otherwise ? <label className="row nw otherwise"><span className="muted nowrap">Otherwise</span>
               <select className="input" aria-label={"Otherwise: what happens when " + nm + " answers No"} value={otherwise.kind === "none" ? "leave" : otherwise.kind}
                 onChange={(e) => otherwise.set(e.target.value as ElseKind)}>
@@ -426,7 +434,7 @@ function AddStepMenu({ wf, doc, defs, adds, onAdd, onClose }: { wf: string; doc:
     .map((d) => {
       const cond = d.outputs.some((o) => o.outcome === "branch"), a = adds?.[d.type], again = cond || d.category === "flow"; // a question or an action may appear more than once
       const on = cond ? !!a?.addable || !adds : (again || !have.has(d.type)) && !!a?.addable;
-      const line = cond ? (a?.addable ? "Only if it answers Yes; otherwise the file is left alone. Goes after " + nameOf(a.after) : "Splits files by a rule. Opens the graph.")
+      const line = cond ? (a?.addable ? (afterOnly(d) ? "Only if it answers Yes; otherwise nothing more happens. Goes after " : "Only if it answers Yes; otherwise the file is left alone. Goes after ") + nameOf(a.after) : "Splits files by a rule. Opens the graph.")
         : have.has(d.type) && !again ? "Already in this workflow" : a?.addable ? "Goes after " + nameOf(a.after) : a?.reason || "Not available here yet.";
       return { d, g: groupOf(d), on, line, after: a?.after };
     })
@@ -666,6 +674,7 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
   const lastGoto = useRef<Record<ID, Record<string, unknown>>>({});
   const setElse = (q: Node, k: ElseKind) => {
     if (k === "other") { navigate(`/workflows/${id}/graph?node=${encodeURIComponent(q.id)}`); return; }
+    if (k === "none") return; // FB4b: after the save, "nothing more" is the No port left alone, which it already is
     const def = k === "leave" ? endDef : k === "fail" ? failDef : gotoDef;
     if (!def) return setSaid("This server has no such step.");
     const cur = otherwiseOf(doc, q);
@@ -676,11 +685,11 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
     if (next !== doc) { edit(next); setSaid(`${nameOf(q)}: when the answer is No, ${k === "leave" ? "the file is left alone" : k === "fail" ? "the run stops as failed" : made && remembered ? "the file is handed to another workflow, the one picked before" : "the file is handed to another workflow: choose which, under the step"}.`); }
   };
   const addStep = (d: StepDefinition, after?: ID) => {
-    const question = d.outputs.some((o) => o.outcome === "branch");
-    if (question && (!live.addSteps?.[d.type]?.addable || !endDef)) { navigate(`/workflows/${id}/graph?add=${encodeURIComponent(d.type)}`); return; }
+    const question = d.outputs.some((o) => o.outcome === "branch"), afterSave = afterOnly(d); // FB4b: a question about the result goes after the save, nothing on its No
+    if (question && !afterSave && (!live.addSteps?.[d.type]?.addable || !endDef)) { navigate(`/workflows/${id}/graph?add=${encodeURIComponent(d.type)}`); return; }
     // a draft with no Library files step gets one first (the page adds it itself), so the chain has a start and the new step shows
     const inDef = defs.find((x) => x.type === "input.library"), start = inDef && !doc.nodes.some((n) => n.type === "input.library") ? { ...doc, nodes: [...doc.nodes, newNode(inDef, "n" + Math.random().toString(36).slice(2, 8))] } : doc;
-    const nid = "n" + Math.random().toString(36).slice(2, 8), next = question ? insertQuestion(start, after, newNode(d, nid), endDef!) : insertAfter(start, after, newNode(d, nid)), now = order(next);
+    const nid = "n" + Math.random().toString(36).slice(2, 8), next = afterSave ? insertAfterSave(start, after, newNode(d, nid)) : question ? insertQuestion(start, after, newNode(d, nid), endDef!) : insertAfter(start, after, newNode(d, nid)), now = order(next);
     edit(next); setOpen(nid); setAddOpen(false);
     requestAnimationFrame(() => document.getElementById(nid + "-more")?.focus()); // focus lands on the new step's row, not the body
     setSaid(`Added ${d.name} as step ${now.findIndex((x) => x.id === nid) + 1} of ${now.length}.`);

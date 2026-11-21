@@ -756,3 +756,89 @@ func TestHandToAnotherWorkflow(t *testing.T) {
 		t.Errorf("without a lookup: %+v", res.Issues)
 	}
 }
+
+// FB4b: "Compare the result" is a question after the save: the after chain branches on its Yes and No,
+// a port left unconnected means nothing more happens there, and the compile carries the nested cards.
+// Before the conversion it is wrong_phase; an end after the save is wrong_phase; the percent tests need
+// their percent; the summaries say what each test asks.
+func TestCompareTheResultAfterTheSave(t *testing.T) {
+	d, by := runDoc()
+	save := d.Nodes[len(d.Nodes)-1]
+	cmp := node(TypeCheckResult, "Worth it?", map[string]any{"test": "saved_at_least", "percent": float64(30)})
+	tagYes := node(TypeTag, "", map[string]any{"add": "big-win"})
+	noteNo := node(TypeNote, "", map[string]any{"text": "Only {{saved_percent}} saved"})
+	again := node(TypeCheckResult, "", map[string]any{"test": "bigger"})
+	tagBig := node(TypeTag, "", map[string]any{"add": "grew"})
+	d.Nodes = append(d.Nodes, cmp, tagYes, noteNo, again, tagBig)
+	d.Edges = append(d.Edges, link(save.ID, "success", cmp.ID), link(cmp.ID, "match", tagYes.ID), link(cmp.ID, "else", noteNo.ID), link(noteNo.ID, "success", again.ID), link(again.ID, "match", tagBig.ID))
+	r := Validate(d)
+	if r.Errors() {
+		t.Fatalf("%+v", r.Issues)
+	}
+	for id, want := range map[string]string{cmp.ID: "Only if at least 30% was saved", again.ID: "Only if the new file is bigger"} {
+		if r.StepSummaries[id] != want {
+			t.Errorf("summary %q, want %q", r.StepSummaries[id], want)
+		}
+	}
+	if a := r.AddSteps[TypeCheckResult]; !a.Addable || a.After != tagYes.ID { // the main path's last after card
+		t.Errorf("add after the save: %+v", a)
+	}
+	tm, issues := ToTemplate(d, rules.Template{})
+	if len(issues) > 0 {
+		t.Fatalf("%v", issues)
+	}
+	yes := (*tm.Branches)[0]
+	if len(yes.After) != 1 || yes.After[0].Check == nil || yes.After[0].Check.Kind != "result" || yes.After[0].Check.Test != "saved_at_least" || yes.After[0].Check.Percent != 30 || yes.After[0].Name != "Worth it?" {
+		t.Fatalf("the after question: %+v", yes.After)
+	}
+	q := yes.After[0]
+	if len(q.Yes) != 1 || q.Yes[0].Type != TypeTag || len(q.No) != 2 || q.No[0].Type != TypeNote || q.No[1].Check == nil || q.No[1].Check.Test != "bigger" || len(q.No[1].Yes) != 1 || len(q.No[1].No) != 0 {
+		t.Errorf("the nested cards: yes %+v no %+v", q.Yes, q.No)
+	}
+	if yes.Path[len(yes.Path)-1] != tagBig.ID || !slices.Contains(yes.Path, noteNo.ID) {
+		t.Errorf("path %v", yes.Path)
+	}
+	// the question turned off: its Yes goes on as if it weren't there
+	cmp.Enabled = false
+	d.Nodes[len(d.Nodes)-5] = cmp
+	if tm2, _ := ToTemplate(d, rules.Template{}); len((*tm2.Branches)[0].After) != 1 || (*tm2.Branches)[0].After[0].Type != TypeTag {
+		t.Errorf("off: %+v", (*tm2.Branches)[0].After)
+	}
+	cmp.Enabled = true
+	d.Nodes[len(d.Nodes)-5] = cmp
+	// the percent tests need their percent; "bigger" doesn't
+	cmp.Config = map[string]any{"test": "saved_less_than"}
+	d.Nodes[len(d.Nodes)-5] = cmp
+	if !hasIssue(Validate(d).Issues, "invalid_config", cmp.ID) {
+		t.Error("a percent test without a percent is refused")
+	}
+	cmp.Config = map[string]any{"test": "saved_at_least", "percent": float64(30)}
+	d.Nodes[len(d.Nodes)-5] = cmp
+	// an end after the save is refused with its own words
+	leave := node(TypeEnd, "", map[string]any{})
+	d.Nodes = append(d.Nodes, leave)
+	d.Edges = append(d.Edges, link(again.ID, "else", leave.ID))
+	res := Validate(d)
+	if !hasIssue(res.Issues, "wrong_phase", leave.ID) {
+		t.Errorf("an end after the save: %+v", res.Issues)
+	}
+	d.Nodes = d.Nodes[:len(d.Nodes)-1]
+	d.Edges = d.Edges[:len(d.Edges)-1]
+	// before the conversion, the question is in the wrong phase (both the edge check and the compile say so)
+	d3, by3 := runDoc()
+	early := node(TypeCheckResult, "", map[string]any{"test": "bigger"})
+	d3.Nodes = append(d3.Nodes, early)
+	for i, e := range d3.Edges {
+		if e.From == by3["note"].ID {
+			d3.Edges[i].To = early.ID
+		}
+	}
+	d3.Edges = append(d3.Edges, link(early.ID, "match", by3["conv"].ID), link(early.ID, "else", by3["fail"].ID))
+	if !hasIssue(Validate(d3).Issues, "wrong_phase", early.ID) {
+		t.Errorf("before the conversion: %+v", Validate(d3).Issues)
+	}
+	if _, issues := ToTemplate(d3, rules.Template{}); len(issues) == 0 {
+		t.Error("the compile should refuse it too")
+	}
+	_ = by
+}

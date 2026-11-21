@@ -136,7 +136,7 @@ type Facts struct {
 // fields, as before) or one of the other kinds. A stored BranchCheck from before FB1b reads as Kind "".
 type Question struct {
 	VideoCheck
-	Kind string `json:"kind,omitempty"` // "" (the file's facts) | name | age | variable | library | hardlinks | tag | random
+	Kind string `json:"kind,omitempty"` // "" (the file's facts) | name | age | variable | library | hardlinks | tag | random | result
 	// name: the file's name or path matches a pattern
 	Pattern       string `json:"pattern,omitempty"`
 	Match         string `json:"match,omitempty"` // contains | starts | ends | glob | regex
@@ -153,6 +153,10 @@ type Question struct {
 	Libraries []string `json:"libraries,omitempty"`
 	// random: this share of files (percent) answers Yes, the same answer for the same file every time (FB4)
 	Share int `json:"share,omitempty"`
+	// result (FB4b, after the save): how the new file compares with the original. Test is saved_at_least |
+	// saved_less_than (Percent of the original's size) | bigger (the new file is larger than the original).
+	Test    string `json:"test,omitempty"`
+	Percent int    `json:"percent,omitempty"`
 	// tag: the file's record carries any / all / none of these tags (FB2c)
 	Tags  string `json:"tags,omitempty"`  // comma-separated, as typed
 	TagOp string `json:"tagOp,omitempty"` // any | all | none (default any)
@@ -297,8 +301,32 @@ func (q Question) Empty() bool {
 		return len(CleanTags(q.Tags)) == 0
 	case "random":
 		return q.Share <= 0
+	case "result":
+		return q.Test == "" || (q.Test != "bigger" && q.Percent <= 0)
 	}
 	return false
+}
+
+// AskResult answers a "Compare the result" question (FB4b) from the original's and the new file's sizes,
+// in bytes, with the reason in words. Sizes that aren't known answer No and say so.
+func (q Question) AskResult(before, after int64) (bool, string) {
+	if before <= 0 || after <= 0 {
+		return false, "the sizes aren't known"
+	}
+	saved := float64(before-after) * 100 / float64(before)
+	savedWords := fmt.Sprintf("%.1f%% saved", saved)
+	if after > before {
+		savedWords = fmt.Sprintf("%.1f%% bigger", -saved)
+	}
+	switch q.Test {
+	case "saved_at_least":
+		return saved >= float64(q.Percent), savedWords + fmt.Sprintf(", asked for at least %d%%", q.Percent)
+	case "saved_less_than":
+		return saved < float64(q.Percent), savedWords + fmt.Sprintf(", asked for less than %d%%", q.Percent)
+	case "bigger":
+		return after > before, savedWords
+	}
+	return false, "no comparison is chosen"
 }
 
 // Card is a step carried to the run as it was saved (FB1b): a before- or after-action the run engine
@@ -308,6 +336,11 @@ type Card struct {
 	Type   string         `json:"type"`
 	Name   string         `json:"name,omitempty"`
 	Config map[string]any `json:"config,omitempty"`
+	// FB4b: a question after the save ("Compare the result"): Check is what it asks, and the cards on its
+	// Yes or its No run next, in order. A card without Check is an action.
+	Check *Question `json:"check,omitempty"`
+	Yes   []Card    `json:"yes,omitempty"`
+	No    []Card    `json:"no,omitempty"`
 }
 
 // Decision is how a file went through a "Check the file" step: the port it left by and design's words,
