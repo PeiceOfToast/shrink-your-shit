@@ -118,9 +118,11 @@ func runningJob(t *testing.T, st *jobs.Store) int64 {
 	return id
 }
 
+// updWaitFor polls until ok holds. The ceiling is generous because a waiting install writes two database
+// backups before it calls the helper, which took over 5 s on a busy Windows runner; a pass returns at once.
 func updWaitFor(t *testing.T, what string, ok func() bool) {
 	t.Helper()
-	for end := time.Now().Add(5 * time.Second); time.Now().Before(end); time.Sleep(10 * time.Millisecond) {
+	for end := time.Now().Add(30 * time.Second); time.Now().Before(end); time.Sleep(10 * time.Millisecond) {
 		if ok() {
 			return
 		}

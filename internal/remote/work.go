@@ -462,6 +462,12 @@ func (c *Client) convert(ctx context.Context, cv Converter, l *Lease, snap rules
 			}
 			last = time.Now()
 			body := map[string]any{"stage": "converting", "outTimeUs": p.OutTimeUS, "encoder": enc}
+			if p.Frame >= 0 { // frames and bytes keep an encode alive when its position is frozen (the server judges them)
+				body["frame"] = p.Frame
+			}
+			if p.TotalSize > 0 {
+				body["totalSize"] = p.TotalSize
+			}
 			if l.Job.DurationSec > 0 {
 				body["percent"] = p.Percent // a length we don't know has no percent
 			}
@@ -509,13 +515,8 @@ func encoderArgs(plan rules.Plan, main *string, caps []map[string]any, source *m
 		return plan.FFmpegArgs(src, out), "", ""
 	}
 	// The snapshot's source is the server's probe of the original: a 10-bit SDR file needs a 10-bit encoder
-	// too, not only an HDR one. Nil (an older server, or a plan sent without it): HDR decides alone.
-	need10 := plan.Video.HDR != nil
-	if source != nil {
-		if v := source.Video(); v != nil && v.BitDepth > 8 {
-			need10 = true
-		}
-	}
+	// too, not only an HDR one (rules.NeedsTenBit). Nil (an older server, or a plan sent without it): the plan decides.
+	need10 := rules.NeedsTenBit(plan, source)
 	var want string
 	want, note = rules.EncoderFor(plan.Video.Codec, *main, need10, plan.Video.HDR, caps)
 	if want == "" {

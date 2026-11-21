@@ -82,7 +82,7 @@ function EncoderCards({ w, big, reload }: { w: Worker; big?: boolean; reload?: (
         <label className="ec-t"><input type="radio" name={"primary-" + w.id + (big ? "-big" : "")} checked={c === cur} disabled={!c.lit} onChange={() => pick(c)} />
           <b>{c.name}</b>{c.lit && <span className="ec-ok">Works</span>}{c === cur && <span className="ec-ok">{c.lit ? "· " : ""}Used first</span>}</label>
         {!c.lit && <span>{c.why}</span>}
-        <span className="ec-f">{c.formats.map(([f, on]) => <span key={f} className={on ? "on" : ""}>{f}{!on && <span className="sr"> (no)</span>}</span>)}</span>
+        <span className="ec-f">{c.formats.map(([f, on]) => <span key={f} className={on ? "on" : ""}>{f}{!on && <span> (no)</span>}</span>)}</span>
         {big && c.detail && <span className="mono">{c.detail}</span>}
         {big && c.at && <span className="ec-meta">Tested {new Date(c.at).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>}
       </li>))}</ul>
@@ -397,7 +397,7 @@ export function WorkerPage({ id }: { id: string }) {
         <div style={{ padding: "8px var(--pad) 0" }}><EncoderCards w={w} big reload={d.reload} /></div>
         {decoders.length > 0 && <>
           <h3 className="ec-h" style={{ margin: "16px var(--pad) 6px" }}>Decoders</h3>
-          <div className="list"><table className="tbl">
+          <div className="list rows"><table className="tbl">
             <thead><tr><th>Format</th><th>How</th><th className="stc">Result</th><th data-p="3">When</th></tr></thead>
             <tbody>{decoders.map((c) => <tr key={c.key}><td className="idc"><span className="ttl">{FORMAT(c.key) || c.label}</span><span className="sub">{c.label}</span><span className="sub phone">{[c.label, c.test === "failed" && c.detail].filter(Boolean).join(" · ")}</span></td><td>{how(c)}</td>
               <td className="stc"><span className={"pill " + (c.test === "passed" ? "ok" : c.test === "failed" ? "" : "")} title={c.detail}>{c.test === "passed" ? "Works" : c.test === "failed" ? "Doesn't work here" : "Not tested"}</span></td>

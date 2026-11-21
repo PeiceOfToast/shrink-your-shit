@@ -23,6 +23,7 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/pathmap"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/sysload"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/worker"
 )
 
 // V4a (UI-API-CONTRACT-v2.md, Workers; slices/v2-engine/v4-plan.md): the workers in the contract's
@@ -68,15 +69,26 @@ func (v *workerView) tools() (doctor.Tools, bool) {
 	return v.eng.Doctor.ToolsNow()
 }
 
-// slots are the local worker's slots: processor (parallelJobs) and graphics.
+// gpuRunning is how many jobs on this computer encode on its graphics card (worker.GPURunning), a
+// variable so a test can stand in for jobs on the card.
+var gpuRunning = worker.GPURunning
+
+// slots are the local worker's slots: processor (parallelJobs) and graphics. A graphics slot is in use
+// while a job encodes on the card, as the worker counts it (it read 0 always before: user bug 11-20).
 func (v *workerView) slots(cfg jobs.WorkerConfig, s Settings, working int, t doctor.Tools) map[string]any {
-	gpu := 0
+	return map[string]any{"cpu": map[string]int{"used": working, "total": s.ParallelJobs}, "gpu": map[string]int{"used": gpuRunning(), "total": gpuSlotLimit(cfg, t)}}
+}
+
+// gpuSlotLimit is how many graphics slots the local worker has: the person's setting (Workers page),
+// else 1 when a graphics encoder is in this computer, else 0. The worker reads it at each job's start.
+func gpuSlotLimit(cfg jobs.WorkerConfig, t doctor.Tools) int {
 	if cfg.GPUSlots != nil {
-		gpu = *cfg.GPUSlots
-	} else if len(t.Hardware) > 0 {
-		gpu = 1
+		return *cfg.GPUSlots
 	}
-	return map[string]any{"cpu": map[string]int{"used": working, "total": s.ParallelJobs}, "gpu": map[string]int{"used": 0, "total": gpu}}
+	if len(t.Hardware) > 0 {
+		return 1
+	}
+	return 0
 }
 
 // local is the local worker as the contract's Worker.
@@ -1117,7 +1129,23 @@ func LocalEncoderFor(store *jobs.Store, chk *doctor.Checker) func(codec string, 
 		v := &workerView{store: store, eng: Engine{Doctor: chk}}
 		t, ok := v.tools()
 		caps := capabilities(t, ok)
+		if !ok { // nothing has been tested here yet: the processor takes this file, and the job log says so
+			return "", "the encoder test here has not finished yet; using the processor"
+		}
 		return rules.EncoderFor(codec, primaryEncoder(cfg.PrimaryEncoder, caps), need10, hdr, caps)
+	}
+}
+
+// LocalGPUSlots is how many graphics slots the local worker has, read at each job's start so a changed
+// limit is followed at once: the Workers page's setting, else 1 when a graphics encoder is in this
+// computer, else 0 (the processor does the encoding). A job that would encode on the card waits while
+// that many of this program's jobs are already on it.
+func LocalGPUSlots(store *jobs.Store, chk *doctor.Checker) func() int {
+	return func() int {
+		cfg, _ := store.WorkerConfigOf(jobs.LocalWorker)
+		v := &workerView{store: store, eng: Engine{Doctor: chk}}
+		t, _ := v.tools()
+		return gpuSlotLimit(cfg, t)
 	}
 }
 

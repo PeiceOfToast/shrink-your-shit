@@ -65,13 +65,17 @@ type Plan struct {
 	AudioFolded   bool      `json:"audioFolded,omitempty"`   // a 7.1 track became 5.1 E-AC-3/AC-3: the job log says FoldedNote (design, 01:52Z)
 	SmallKept     bool      `json:"smallKept,omitempty"`     // a small stereo track kept as it is: the job log says SmallKeptNote (design, 02:26Z)
 	TypeNote      string    `json:"typeNote,omitempty"`      // "keep" turned this file into MKV: said once in the job log (review 4ac9c0d)
-	// StyledSubsPlain: an ASS/SSA subtitle became plain mov_text for MP4: said once in the job log (design, 02:49Z)
-	StyledSubsPlain bool    `json:"styledSubsPlain,omitempty"`
-	AudioOrder      []int   `json:"audioOrder,omitempty"`    // the original's audio stream indexes in order, when Tracks has any
-	SubtitleOrder   []int   `json:"subtitleOrder,omitempty"` // and its subtitle stream indexes
-	MinSSIM         float64 `json:"minSSIM,omitempty"`       // picture threshold; 0 = the program's -min-ssim
-	Kind            string  `json:"kind"`                    // the template kind it was compiled from
-	CompilerVersion int     `json:"compilerVersion"`
+	// StyledSubsPlain: an ASS/SSA subtitle became plain mov_text for MP4, or plain webvtt for WebM: said
+	// once in the job log (design, 02:49Z).
+	StyledSubsPlain bool `json:"styledSubsPlain,omitempty"`
+	// BitmapSubsDropped: picture subtitles (PGS, VobSub, DVB) left out because WebM can't hold them: said
+	// once in the job log, never a reason to leave the file alone.
+	BitmapSubsDropped int     `json:"bitmapSubsDropped,omitempty"`
+	AudioOrder        []int   `json:"audioOrder,omitempty"`    // the original's audio stream indexes in order, when Tracks has any
+	SubtitleOrder     []int   `json:"subtitleOrder,omitempty"` // and its subtitle stream indexes
+	MinSSIM           float64 `json:"minSSIM,omitempty"`       // picture threshold; 0 = the program's -min-ssim
+	Kind              string  `json:"kind"`                    // the template kind it was compiled from
+	CompilerVersion   int     `json:"compilerVersion"`
 }
 
 // Skip codes: why a file is not converted, as the Preview counts them (UI-API-CONTRACT.md, the open
@@ -344,6 +348,7 @@ func (p Plan) FFmpegArgsFullGPU(in, out, enc string) ([]string, bool) {
 // the "converting to" line: convertingTo names the depth of the encoder that runs.
 var tenBitTargets = map[string]bool{"libx265": true, "libsvtav1": true}
 
+// EncodeTenBit answers a different question from NeedsTenBit: whether the target's encoder arguments make 10 bits.
 // EncodeTenBit says whether a graphics encoder makes a 10-bit video: HDR (S3), or a 10-bit source kept at its depth
 // by a target whose card encoder has one (tenBitTargets). It is a card's arguments' 10-bit flags and its "converting
 // to" line that read it; on the processor libx264 and libvpx-vp9 keep 10 bits too, which convertingTo names.
@@ -979,7 +984,12 @@ func compileSelectors(p Plan, s Selectors, info media.Info, langs []string, basi
 	p.Tracks = append(p.Tracks, movTextToSRT(p.Tracks, p.Container, info)...)
 	movText := textToMovText(p.Tracks, p.Container, info)
 	p.Tracks = append(p.Tracks, movText...)
-	for _, o := range movText {
+	webvtt := textToWebVTT(p.Tracks, p.Container, info)
+	p.Tracks = append(p.Tracks, webvtt...)
+	bitmapDrops, bitmapDropped := bitmapOutOfWebM(p.Tracks, p.Container, info)
+	p.Tracks = append(p.Tracks, bitmapDrops...)
+	p.BitmapSubsDropped = bitmapDropped
+	for _, o := range append(movText, webvtt...) {
 		for _, st := range info.Subtitles() {
 			if st.Index == o.Index && (st.Codec == "ass" || st.Codec == "ssa") {
 				p.StyledSubsPlain = true
@@ -1181,6 +1191,48 @@ func textToMovText(ops []TrackOp, container string, info media.Info) (out []Trac
 		}
 	}
 	return out
+}
+
+// textToWebVTT converts the text subtitles a WebM cannot hold as they are into its own (webvtt), the
+// same way textToMovText does for MP4, instead of the job failing when ffmpeg writes the new file's
+// header (user bug 11-20: WebM with SRT subtitles; then mov_text, the codec an MP4 holds, which a
+// hand-written name list missed). The kind is media's, so every codec ffmpeg reads as text is covered.
+// A webvtt subtitle is copied as it is: WebM holds it already. ASS loses its styling, as it does in
+// MP4. Only tracks no other op drops, saves as a file or converts.
+func textToWebVTT(ops []TrackOp, container string, info media.Info) (out []TrackOp) {
+	if container != "webm" {
+		return nil
+	}
+	has := map[int]bool{}
+	for _, o := range ops {
+		has[o.Index] = true
+	}
+	for _, s := range info.Subtitles() {
+		if s.SubKind == "text" && s.Codec != "webvtt" && !has[s.Index] {
+			out = append(out, TrackOp{Index: s.Index, Type: "subtitle", Encoder: "webvtt", Codec: "webvtt"})
+		}
+	}
+	return out
+}
+
+// bitmapOutOfWebM drops the picture subtitles (PGS, VobSub, DVB) a WebM cannot hold at all, and says how
+// many: the new file is made without them rather than the job failing (user bug 11-20). Only tracks no
+// other op drops, saves as a file or converts.
+func bitmapOutOfWebM(ops []TrackOp, container string, info media.Info) (out []TrackOp, dropped int) {
+	if container != "webm" {
+		return nil, 0
+	}
+	has := map[int]bool{}
+	for _, o := range ops {
+		has[o.Index] = true
+	}
+	for _, s := range info.Subtitles() {
+		if s.SubKind == "bitmap" && !has[s.Index] {
+			out = append(out, TrackOp{Index: s.Index, Type: "subtitle", Drop: true})
+			dropped++
+		}
+	}
+	return out, dropped
 }
 
 // movTextToSRT converts the MP4 text subtitles (mov_text) an MKV cannot hold as they are into SRT text
