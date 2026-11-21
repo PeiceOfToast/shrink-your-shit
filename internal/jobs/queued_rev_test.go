@@ -112,11 +112,19 @@ func TestAJobRecordsTheRevisionItRanWith(t *testing.T) {
 }
 
 // A Save that has no revision yet gets one when a worker records its run revision, and the job records it.
+// The old pages' SaveTemplate writes the flow's template and no revision (SetFlowTemplate makes one itself,
+// so it would not reach this branch; review2-593 M9).
 func TestRecordedRunRevisionWritesARevisionForASaveWithoutOne(t *testing.T) {
 	s, id, b := startStamped(t, 4)
-	// the old pages save the flow's template without making a revision
-	if _, err := s.SetFlowTemplate(lFlowOf(t, s, id), rules.SliderTemplate(6)); err != nil {
+	j, err := s.Get(id)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if _, err := s.SaveTemplate(j.LibraryID, rules.SliderTemplate(6), ""); err != nil {
+		t.Fatal(err)
+	}
+	if latest, ok, err := s.LatestRevision(lFlowOf(t, s, id)); err != nil || !ok || latest.ID != b {
+		t.Fatalf("SaveTemplate made a revision (%+v %v %v); the branch it tests is not reached", latest, ok, err)
 	}
 	if err := s.RecordRunRevision(id, 0, rules.SliderTemplate(6)); err != nil {
 		t.Fatal(err)
@@ -207,6 +215,71 @@ func TestARefsWorkflowRecordsTheRevisionItsSettingsCameFrom(t *testing.T) {
 	ran, queued, err := s.JobRevisions(id)
 	if err != nil || ran != two.ID || queued != one.ID {
 		t.Errorf("ran %d, queued %d; want %d (version 2) and %d (version 1) (%v)", ran, queued, two.ID, one.ID, err)
+	}
+}
+
+// A workflow that hands its files to another hands the worker an expanded template: no stored revision
+// has that template's hash, and its document has branches rather than typed-setting references, so the
+// old fallback left the queue-time revision. The revision is the one the flow's published template is, so
+// a republish while the job waits is recorded as the revision it read (review2-593 P2).
+func TestAHandOverWorkflowRecordsTheRevisionItRead(t *testing.T) {
+	useHome(t)
+	s := open(t)
+	_, plain := gotoFlow(t, s, "Plain", 0, rules.SliderTemplate(2))
+	lib, a := gotoFlow(t, s, "Hands over", plain.ID, rules.Template{}) // revision 1
+	if err := s.StartLibrary(lib.ID); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(lib.Path, "a.mkv")
+	id, err := s.Enqueue(Job{Library: lib.Path, LibraryID: lib.ID, Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	one, ok, err := s.LatestRevision(a.ID)
+	if err != nil || !ok || one.Number == nil || *one.Number != 1 {
+		t.Fatalf("the queued revision %+v %v %v", one, ok, err)
+	}
+	// republished while the job waits: revision 2, still a hand-over, with a changed path
+	d, _, err := s.Draft(a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved, err := s.SaveDraft(a.ID, d.Doc, d.Layout, d.Etag)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := s.GetFlow(a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := raw.Template
+	(*changed.Branches)[0].End = "Hand to another workflow: Plain (changed)"
+	two, err := s.Publish(a.ID, saved.Etag, changed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if two.Number == nil || *two.Number != 2 {
+		t.Fatalf("revision 2 is %+v", two)
+	}
+	if _, err := s.Claim("w"); err != nil {
+		t.Fatal(err)
+	}
+	tmpl, rev, err := s.TemplateFor(Job{Library: lib.Path, LibraryID: lib.ID, Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tmpl.Branches == nil || (*tmpl.Branches)[0].Goto != 0 {
+		t.Fatalf("the run template is not the expanded hand-over: %+v", tmpl)
+	}
+	if rev != two.ID {
+		t.Fatalf("TemplateFor names revision %d, want the one it read: %d", rev, two.ID)
+	}
+	if err := s.RecordRunRevision(id, rev, tmpl); err != nil {
+		t.Fatal(err)
+	}
+	ran, queued, err := s.JobRevisions(id)
+	if err != nil || ran != two.ID || queued != one.ID {
+		t.Errorf("ran %d, queued %d; want %d (the revision it read) and %d (queued) (%v)", ran, queued, two.ID, one.ID, err)
 	}
 }
 
