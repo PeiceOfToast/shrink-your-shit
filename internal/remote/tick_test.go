@@ -75,3 +75,58 @@ func TestNoFinishingReportAfterEnd(t *testing.T) {
 		t.Errorf("%d finishing reports after progress=end, want 0", sends-atEnd)
 	}
 }
+
+// end waits for a finishing report that is being sent: the report lands before end returns, so no report can follow
+// progress=end's "checking". With end not taking sendMu, end returns while the send is still in flight.
+func TestEndWaitsForAFinishingReportInFlight(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "x.tmp.mkv")
+	if err := os.WriteFile(out, []byte("data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rep := &encodeReports{label: "cpu", out: out, duration: 10}
+	rep.moved(10e6)
+	entered, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	var mu sync.Mutex
+	var events []string
+	record := func(s string) { mu.Lock(); events = append(events, s); mu.Unlock() }
+	send := func(map[string]any) {
+		once.Do(func() { close(entered); <-release }) // the first report is in flight until released
+		record("report")
+	}
+	stop, done := make(chan struct{}), make(chan struct{})
+	go func() { defer close(done); rep.tick(stop, time.Millisecond, send) }()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no finishing report was sent")
+	}
+	endDone := make(chan struct{})
+	go func() { rep.end(); record("end"); close(endDone) }()
+	time.Sleep(20 * time.Millisecond) // end runs now if it does not wait for the report in flight
+	close(release)
+	select {
+	case <-endDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("end did not return")
+	}
+	close(stop)
+	<-done
+	mu.Lock()
+	defer mu.Unlock()
+	endAt := -1
+	for i, e := range events {
+		if e == "end" {
+			endAt = i
+		}
+	}
+	if endAt < 0 {
+		t.Fatalf("end was not recorded: %v", events)
+	}
+	for _, e := range events[endAt+1:] {
+		if e == "report" {
+			t.Errorf("a finishing report was sent after progress=end returned: %v", events)
+			break
+		}
+	}
+}

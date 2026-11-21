@@ -567,7 +567,9 @@ type encodeReports struct {
 	atEnd    bool
 	ended    bool
 	gone     error
-	sendMu   sync.Mutex // serializes the finishing reports against progress=end (taken before mu)
+	// sendMu serializes the finishing reports against progress=end. Lock order: sendMu before mu, never the reverse
+	// (a send that answers lease_gone takes mu, so it must run with sendMu held and mu free).
+	sendMu sync.Mutex
 }
 
 // startRung clears the state of one ffmpeg run (a rung of the attempt ladder).
