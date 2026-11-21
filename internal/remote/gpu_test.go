@@ -165,7 +165,7 @@ func TestRemoteWorkerNotPassedFallsBackToTheProcessor(t *testing.T) {
 		t.Errorf("ffmpeg args %v: want the processor", x.calls)
 	}
 	want := "encoder h264_qsv didn't pass its test here; using the processor"
-	chosen := "Chosen: x264 (processor) — " + want + ". Settings: Encoder: libx264"
+	chosen := "Chosen: x264 (processor). Settings: Encoder: libx264" // the note above said why; not repeated
 	if len(notes) != 2 || notes[0] != want || !strings.HasPrefix(notes[1], chosen) || !slices.Equal(encs, []string{""}) {
 		t.Errorf("notes %q, encoders %q: want %q, then the Chosen line, and the processor reported", notes, encs, want)
 	}
