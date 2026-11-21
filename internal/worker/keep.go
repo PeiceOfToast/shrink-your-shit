@@ -308,6 +308,15 @@ func (w *Worker) now() time.Time {
 	return time.Now()
 }
 
+// stallNow is the stall watchdog's clock: the worker's job clock does not move it, so freezing Now for a
+// fixed retry time leaves a hung encode stoppable.
+func (w *Worker) stallNow() time.Time {
+	if w.stallClock != nil {
+		return w.stallClock()
+	}
+	return time.Now()
+}
+
 // Completer marks a job done (the job store).
 type Completer interface {
 	Complete(id int64, outputPath string, sizeAfter int64) error

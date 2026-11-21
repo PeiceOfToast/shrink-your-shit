@@ -16,9 +16,9 @@ import (
 
 // outFrozenExec keeps out_time on one position for every report (a subtitle gap: out_time follows the
 // most-behind stream and freezes while the encode goes on). frames says whether frame= grows with each report;
-// sizeStep is how far total_size= grows per report (0: no total_size=). Each report takes a little real time (for
-// the stall stop) and advances the fake clock by tick (for the 30 s warning). With ticks 0 it reports until the
-// stall stop cancels it.
+// sizeStep is how far total_size= grows per report (0: no total_size=). Each report advances the worker's fake
+// clock by tick: the stall stop and the 30 s warning both read that clock, so a late report under load cannot
+// move them (waiting on real time here was the flake). With ticks 0 it reports until the stall stop cancels it.
 type outFrozenExec struct {
 	*media.FakeExec
 	clock    *fakeClockAt
@@ -77,8 +77,9 @@ func encodeLines(t *testing.T, s *scenario) (warn int, stopped bool) {
 // Bug 2: out_time frozen for longer than StallAfter, with frame= (or total_size=) still growing within twice the
 // source's size, is an encode that is alive: not stopped, and no "has not moved" warning, though the fake clock runs
 // past 30 s without out_time moving. The scenario's source is 14 bytes, so the bytes stay within the bound for 28
-// reports; 24 reports 100 ms apart (about 2.4 s real, past the 2 s StallAfter) keep them there. The ceiling is out
-// of the way (its own test covers it), and a 100 ms report gap sits 20 times inside the stall allowance.
+// reports; 24 reports, each moving the worker's clock 1.5 s, stay inside the 2 s stall allowance at every report
+// and run 36 s in all. The clock moves only with the reports, so a report delayed by load cannot stop it; the
+// ceiling is out of the way (its own test covers it).
 func TestFrozenOutTimeIsAliveWhileFramesOrBytesGrow(t *testing.T) {
 	for _, c := range []struct {
 		name     string
@@ -89,10 +90,10 @@ func TestFrozenOutTimeIsAliveWhileFramesOrBytesGrow(t *testing.T) {
 			s := newScenario(t)
 			clock := &fakeClockAt{t: time.Date(2026, 11, 20, 5, 0, 0, 0, time.UTC)}
 			w := s.worker(Replace)
-			w.Now = clock.now
-			w.StallAfter = 2 * time.Second // real time: a report can come late under load
-			w.FrozenPositionFactor = 1000  // the ceiling has its own test; out of the way here
-			w.Exec = &outFrozenExec{FakeExec: s.exec, clock: clock, tick: 10 * time.Second, ticks: 24, frames: c.frames, sizeStep: c.sizeStep, gap: 100 * time.Millisecond}
+			w.stallClock = clock.now
+			w.StallAfter = 2 * time.Second
+			w.FrozenPositionFactor = 1000 // the ceiling has its own test; out of the way here
+			w.Exec = &outFrozenExec{FakeExec: s.exec, clock: clock, tick: 1500 * time.Millisecond, ticks: 24, frames: c.frames, sizeStep: c.sizeStep, gap: 100 * time.Millisecond}
 			if _, err := w.RunOne(context.Background()); err != nil {
 				t.Fatal(err)
 			}
@@ -107,20 +108,21 @@ func TestFrozenOutTimeIsAliveWhileFramesOrBytesGrow(t *testing.T) {
 }
 
 // Bug 2, the control: out_time, frame= and total_size all frozen is still stopped at StallAfter, and the warning
-// is written (the fake clock runs past 30 s).
+// is written first (30 s of the fake clock, inside the 45 s allowance). The clock moves with the reports, so the
+// stop comes at a fixed point in the reports rather than at a real-time margin.
 func TestFullyFrozenEncodeIsStillStopped(t *testing.T) {
 	s := newScenario(t)
 	clock := &fakeClockAt{t: time.Date(2026, 11, 20, 5, 0, 0, 0, time.UTC)}
 	w := s.worker(Replace)
-	w.Now = clock.now
-	w.StallAfter = 2 * time.Second // real time: the three reports that make the 30 s warning come in ~150 ms, and must beat the stop under load
+	w.stallClock = clock.now
+	w.StallAfter = 45 * time.Second
 	w.Exec = &outFrozenExec{FakeExec: s.exec, clock: clock, tick: 10 * time.Second}
 	done := make(chan struct{})
 	go func() { w.RunOne(context.Background()); close(done) }()
 	waitDone(t, done)
 	j := s.job()
-	if j.Status != jobs.Failed || !strings.Contains(j.Error, "no progress for 2s") {
-		t.Fatalf("status %s %q, want failed with no progress for 2s", j.Status, j.Error)
+	if j.Status != jobs.Failed || !strings.Contains(j.Error, "no progress for 45s") {
+		t.Fatalf("status %s %q, want failed with no progress for 45s", j.Status, j.Error)
 	}
 	if warn, _ := encodeLines(t, s); warn != 1 {
 		t.Fatalf("%d 'has not moved' warnings, want 1", warn)
@@ -129,13 +131,14 @@ func TestFullyFrozenEncodeIsStillStopped(t *testing.T) {
 }
 
 // Bug 2, the bound: frames still growing with out_time frozen is stopped once total_size passes twice the source's
-// size (a runaway output is not progress); the stall stop applies, and the warning is written.
+// size (a runaway output is not progress); the stall stop applies, and the warning is written. The allowance is
+// 45 s so the 30 s warning lands before the stop; both read the fake clock, which moves with the reports.
 func TestFrozenOutTimeStopsPastTheOutputBound(t *testing.T) {
 	s := newScenario(t)
 	clock := &fakeClockAt{t: time.Date(2026, 11, 20, 5, 0, 0, 0, time.UTC)}
 	w := s.worker(Replace)
-	w.Now = clock.now
-	w.StallAfter = 2 * time.Second // real time, as in TestFullyFrozenEncodeIsStillStopped: the reports must beat the stop under load
+	w.stallClock = clock.now
+	w.StallAfter = 45 * time.Second
 	w.Exec = &outFrozenExec{FakeExec: s.exec, clock: clock, tick: 10 * time.Second, frames: true, sizeStep: 1000}
 	done := make(chan struct{})
 	go func() { w.RunOne(context.Background()); close(done) }()
@@ -166,16 +169,17 @@ func TestFrozenOutTimeStopsPastTheOutputBound(t *testing.T) {
 
 // The time ceiling: frames keep growing within the size bound, so the encode is alive at every report, but out_time
 // has not moved for longer than FrozenPositionFactor x StallAfter (2 x 1 s here). It is stopped at the ceiling. The
-// encode runs 5 s, so without the ceiling it would finish: the test fails if the ceiling is removed. Reports are 50 ms
-// apart, far inside the 1 s StallAfter, so the plain stall stop cannot be what ends it.
+// encode would report 100 times, so without the ceiling it would finish: the test fails if the ceiling is removed.
+// Each report moves the worker's clock 500 ms, inside the 1 s StallAfter, so the plain stall stop cannot be what
+// ends it.
 func TestFrozenPositionCeilingStopsAliveEncode(t *testing.T) {
 	s := newScenario(t)
 	clock := &fakeClockAt{t: time.Date(2026, 11, 20, 5, 0, 0, 0, time.UTC)}
 	w := s.worker(Replace)
-	w.Now = clock.now
+	w.stallClock = clock.now
 	w.StallAfter = time.Second
 	w.FrozenPositionFactor = 2
-	w.Exec = &outFrozenExec{FakeExec: s.exec, clock: clock, tick: time.Second, ticks: 100, frames: true}
+	w.Exec = &outFrozenExec{FakeExec: s.exec, clock: clock, tick: 500 * time.Millisecond, ticks: 100, frames: true}
 	done := make(chan struct{})
 	go func() { w.RunOne(context.Background()); close(done) }()
 	waitDone(t, done)

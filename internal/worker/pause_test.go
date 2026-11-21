@@ -23,21 +23,21 @@ import (
 // with a channel closed when RunOne returns.
 func runHung(t *testing.T, s *scenario, w *Worker) chan struct{} {
 	t.Helper()
-	var encoding atomic.Bool
+	started := make(chan struct{})
+	var once sync.Once
 	s.hang = func(name string, args []string) bool {
 		if name == "ffmpeg" && s.has(args, "libx265") {
-			encoding.Store(true)
+			once.Do(func() { close(started) })
 			return true
 		}
 		return false
 	}
 	done := make(chan struct{})
 	go func() { w.RunOne(context.Background()); close(done) }()
-	for i := 0; !encoding.Load(); i++ {
-		if i > 500 {
-			t.Fatal("the encode never started")
-		}
-		time.Sleep(10 * time.Millisecond)
+	select { // the encode's start includes a store write, which can take seconds on a busy disk
+	case <-started:
+	case <-time.After(30 * time.Second):
+		t.Fatal("the encode never started")
 	}
 	return done
 }
@@ -92,12 +92,16 @@ func TestStopFileRecordsUserStopped(t *testing.T) {
 }
 
 // The watchdog: an encode that reports no progress for StallAfter is stopped and fails with a plain
-// reason; the original is untouched.
+// reason; the original is untouched. The worker's clock is moved by the test, so the stop is not a real-time
+// margin: no report will ever move it, and the test is the only one that does.
 func TestStallWatchdogFailsAStuckEncode(t *testing.T) {
 	s := newScenario(t)
+	clock := &fakeClockAt{t: time.Date(2026, 11, 20, 5, 0, 0, 0, time.UTC)}
 	w := s.worker(Replace)
+	w.stallClock = clock.now
 	w.StallAfter = 300 * time.Millisecond
 	done := runHung(t, s, w)
+	clock.add(300 * time.Millisecond)
 	waitDone(t, done)
 	j := s.job()
 	if j.Status != jobs.Failed || !strings.Contains(j.Error, "no progress for 300ms") || !strings.Contains(j.Error, "original is untouched") {
@@ -364,10 +368,12 @@ func TestPoolDownThenUpWhileBusy(t *testing.T) {
 	size.Store(99)
 	eventually(t, func() bool { return p.Running() == MaxParallel }, "capped")
 	cancel()
+	// A condition wait: stopping writes each hung job back and logs it (store fsyncs), which took over 10 s
+	// under load, so this deadline only bounds a hang — it is not a race margin.
 	select {
 	case <-stopped:
-	case <-time.After(10 * time.Second):
-		t.Fatal("the pool did not stop")
+	case <-time.After(60 * time.Second):
+		t.Fatalf("the pool did not stop (%d still converting)", p.Busy())
 	}
 }
 
