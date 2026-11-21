@@ -25,7 +25,7 @@ func TestH264PlanUsesTheGraphicsEncoder(t *testing.T) {
 	if !ok {
 		t.Fatalf("h264_qsv: ok false")
 	}
-	if !has(args, "-c:v:0", "h264_qsv") || !has(args, "-init_hw_device", "qsv=qsv:hw") || !has(args, "-global_quality", "22") {
+	if !has(args, "-c:v:0", "h264_qsv") || !has(args, "-init_hw_device", "qsv=qsv:hw") || !has(args, "-global_quality:v:0", "22") {
 		t.Errorf("args: %v", args)
 	}
 	if !has(args, "-tag:v:0", "avc1") {
@@ -70,7 +70,7 @@ func TestAV1PlanDropsSVTParamsOnTheGraphicsEncoder(t *testing.T) {
 	if !ok {
 		t.Fatalf("av1_qsv: ok false")
 	}
-	if !has(args, "-c:v:0", "av1_qsv") || !has(args, "-global_quality", "30") {
+	if !has(args, "-c:v:0", "av1_qsv") || !has(args, "-global_quality:v:0", "30") {
 		t.Errorf("args: %v", args)
 	}
 	if strings.Contains(strings.Join(args, " "), "svtav1") {

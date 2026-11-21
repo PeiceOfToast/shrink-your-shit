@@ -33,7 +33,7 @@ func lastCRF(s *scenario) string {
 	for i := len(s.calls) - 1; i >= 0; i-- {
 		if f := strings.Fields(s.calls[i]); strings.Contains(s.calls[i], "-crf") {
 			for j := range f {
-				if f[j] == "-crf" && j+1 < len(f) {
+				if (f[j] == "-crf" || strings.HasPrefix(f[j], "-crf:")) && j+1 < len(f) { // -crf:v:0, the plan's spelling
 					return f[j+1]
 				}
 			}
