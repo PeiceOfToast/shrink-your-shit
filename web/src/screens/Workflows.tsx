@@ -4,6 +4,7 @@
 import { Empty, LoadFailed, PageHead } from "../PageHead";
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "../Icon";
+import { Skeleton } from "../Skeleton";
 import { count, plural } from "../format";
 import { SignedOut, failed, type Answer } from "../api";
 import { useData } from "../useData";
@@ -134,7 +135,7 @@ export function Workflows() {
           <input className="input find" type="search" placeholder="Search workflows" aria-label="Search workflows" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
         {wfs.error && wfs.data && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{wfs.error.message}</span></p>}
-        {!wfs.loaded ? <div className="empty">Loading…</div> : wfs.error && !wfs.data ? <LoadFailed error={wfs.error} reload={wfs.reload} /> : rows.length === 0 ? (all.length ? <div className="empty">No workflow matches.</div>
+        {!wfs.loaded ? <Skeleton rows={4} /> : wfs.error && !wfs.data ? <LoadFailed error={wfs.error} reload={wfs.reload} /> : rows.length === 0 ? (all.length ? <div className="empty">No workflow matches.</div>
           : <Empty icon="i-workflow" text="No workflows yet. A workflow says what happens to each file.">{!wizard && <button className="btn primary" type="button" onClick={() => (setWizard(true), setSaid(""))}><Icon id="i-plus" />New workflow</button>}</Empty>) : (
           <div className="list rows"><table className="tbl wflist">
             <thead><tr><th>Name</th><th data-p="2">Libraries</th><th data-p="3">Version</th>{hasTags && <th data-p="6">Tags</th>}<th className="stc">Check</th><th className="actc">Enabled</th><th className="actc"><span className="sr">Menu</span></th></tr></thead>
