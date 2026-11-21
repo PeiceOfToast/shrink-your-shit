@@ -100,7 +100,7 @@ function usePhone() {
 }
 
 export function Overview() {
-  const phone = usePhone(), Disc = phone ? "details" : "div"; // the 30-day block is a closed disclosure on a phone, a plain block elsewhere
+  const phone = usePhone(), Disc = phone ? "details" : Fragment; // the 30-day block is a closed disclosure on a phone, a plain block (no wrapper) elsewhere
   // the sample install never calls the server (a 401 there would send the page to Sign in)
   // review 61dc891 P2-2: the workers (count, switch and rows) come from GET /api/v2/workers, the Workers page's source,
   // which has remote workers too; the overview's own worker entries add their files' progress
@@ -178,8 +178,8 @@ export function Overview() {
             {more.length > 0 && <div>{more}</div>}
             {noLibs && h.freed <= 0 && <div><Link to="/libraries/new">Add a library</Link> to start.</div>}
             {/* design SCREENS V2 Space rules: neutral, on its own line, only when > 0; never added to or taken from the figures */}
-            {(h.grew ?? 0) > 0 && <div>{bytes(h.grew!)} added by files that came out bigger</div>}
-            {rec.length >= 2 && hasSaved && <div>Last 30 days: {spaceNote}</div>}
+            {(h.grew ?? 0) > 0 && <div className="hide-phone">{bytes(h.grew!)} added by files that came out bigger</div>}
+            {rec.length >= 2 && hasSaved && <div className="hide-phone">Last 30 days: {spaceNote}</div>}
             {rec.length < 2 && <div>Charts start after two days of conversions.</div>}
           </div>
           {rec.length >= 2 && <Spark label={(kept ? "Files made smaller per day" : "Space saved per day") + ", last " + v.daily.length + " days"} color="var(--success)" values={v.daily.map((d) => (d.recorded ? (hasSaved ? d.savedBytes : d.freedBytes) ?? 0 : null))} />}
@@ -238,9 +238,9 @@ export function Overview() {
                   <div className="chips">{(["Done", "Waiting", "Skipped", "Failed"] as const).map((k, i) => <span key={k} className="mchip">{k} {count([l.counts.done, l.counts.waiting, l.counts.skipped, l.counts.failed][i])}</span>)}</div>
                   {(facts.length > 0 || (l.saved === 0 && l.couldFree > 0)) && <div className="sub libfacts">{facts.join(" · ")}{l.saved === 0 && l.couldFree > 0 && <>{facts.length > 0 && " · "}<Link className="ul over" to={"/jobs?tab=completed&left=1&libraryId=" + encodeURIComponent(String(l.id))}>{"could free " + bytes(l.couldFree) + " by removing the originals"}</Link></>}</div>}
                 </td>
-                <td className="sizec sm nowrap" data-l="Saved">{l.saved > 0 ? <><b className="gain">{bytes(l.saved)}</b> saved{l.savedPercent != null && " · " + pctTxt(l.savedPercent)}</> : l.waitingToFree > 0 ? <><b>{bytes(l.waitingToFree)} smaller</b></> : "Nothing saved yet"}
+                <td className="sizec sm nowrap" data-l="Saved">{l.saved > 0 ? <><b className="gain">{bytes(l.saved)}</b> saved{l.savedPercent != null && " · " + pctTxt(l.savedPercent)}</> : l.waitingToFree > 0 ? <><b className="hide-phone">{bytes(l.waitingToFree)} smaller</b></> : "Nothing saved yet"}
                   <span className="sub">Size now: {bytes(l.bytesNow)}</span>
-                  <span className="savebar" role="img" aria-label={share == null ? "No size yet" : "Saved " + share.toFixed(1) + "% of saved plus size now"}><i style={{ width: (share ?? 0) + "%" }} /></span></td>
+                  <span className="savebar hide-phone" role="img" aria-label={share == null ? "No size yet" : "Saved " + share.toFixed(1) + "% of saved plus size now"}><i style={{ width: (share ?? 0) + "%" }} /></span></td>
                 <td className="stc">{l.state === "no_workflow" ? <span className="pill warn">No workflow</span> : l.state === "paused" ? <span className="pill warn">Paused</span> : l.state === "paused_share" ? <span className="pill warn">Share not connected yet</span> : <span className="pill">Watching</span>}</td>
               </tr>; })}</tbody></table></div>
           <details className="libhelp"><summary>What Saved and Size now mean</summary>
@@ -260,7 +260,7 @@ export function Overview() {
       </section>
 
 
-      <section className="sec" aria-labelledby="ov-a"><Disc className="lastdays">{phone ? <summary><h2 id="ov-a">Last 30 days</h2></summary> : <h2 id="ov-a">Last 30 days</h2>}
+      <section className="sec" aria-labelledby="ov-a"><Disc {...(phone ? { className: "lastdays" } : {})}>{phone ? <summary><h2 id="ov-a">Last 30 days</h2></summary> : <h2 id="ov-a">Last 30 days</h2>}
         {rec.length < 2 ? <><p className="muted quiet short">Charts start after two days of conversions. So far: {count(h.filesConverted)} {h.filesConverted === 1 ? "file" : "files"} converted.</p>{hasAvg && <div className="chartfoot">{avgLine}</div>}</> : <>
           <div className="charts">
             {/* workshop 11-19: savedBytes and waitingBytes are dated by the day a conversion finished, freedBytes by the day an
