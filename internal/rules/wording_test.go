@@ -46,3 +46,11 @@ func TestQualityStepNamesTheCRF(t *testing.T) {
 		t.Errorf("quality step %q, want it to say at CRF 23", d)
 	}
 }
+
+// Wording (slice 16, review 581): a quality step with a cap says the cap, after the CRF it runs.
+func TestQualityCapStepNamesTheCap(t *testing.T) {
+	p := Plan{Video: VideoEncode{CRF: 23, MaxRateKbps: 6000}}
+	if want := ", and never above 6000 kbps."; !strings.HasSuffix(videoDecision(p, media.Info{}).Decision, want) {
+		t.Errorf("capped quality step %q, want it to end %q", videoDecision(p, media.Info{}).Decision, want)
+	}
+}
