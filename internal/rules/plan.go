@@ -414,6 +414,8 @@ func (p Plan) ffmpegArgs(in, out, gpu string, full bool) []string {
 	}
 	kbps := strconv.Itoa(p.Video.TargetKbps) + "k"
 	switch {
+	case gpu == "" && vp9Target(p.Video): // VP9: constrained quality, the target as its cap (see vp9Target)
+		args = append(args, "-c:"+v, p.Video.Codec, "-crf:"+v, strconv.Itoa(p.Video.CRF), "-b:"+v, kbps)
 	case gpu == "" && p.Video.TargetKbps > 0: // VBR: an average to aim at, in place of the quality
 		args = append(args, "-c:"+v, p.Video.Codec, "-b:"+v, kbps)
 	case gpu == "":
@@ -472,7 +474,7 @@ func (p Plan) ffmpegArgs(in, out, gpu string, full bool) []string {
 		args = append(args, "-filter:"+v, strings.Join(vf, ","))
 	}
 	args = append(args, p.trackArgs()...)
-	if p.Video.MaxRateKbps > 0 && !vp9Capped(p.Video) { // VP9's cap is its -b:v (extraArgs)
+	if p.Video.MaxRateKbps > 0 && !vp9Capped(p.Video) && !vp9Target(p.Video) { // VP9's cap is its -b:v (extraArgs, vp9Target)
 		k := strconv.Itoa(p.Video.MaxRateKbps) + "k"
 		buf := 2 * p.Video.MaxRateKbps
 		if p.Video.BufsizeKbps > 0 {
@@ -1408,6 +1410,13 @@ func inContainer(info media.Info, c string) bool {
 // the cap (review a772397).
 func vp9Capped(e VideoEncode) bool {
 	return e.Codec == "libvpx-vp9" && e.TargetKbps == 0 && e.MaxRateKbps > 0
+}
+
+// vp9Target: VP9 with a target bitrate. It is constrained quality too: -crf (the quality path's CRF) with the
+// target as -b:v. A plain -b:v target overshoots: on the A9 clip libvpx sat at about 36.6 Mbit/s for any target
+// above 3 Mbit/s (rounds 2 and 3), while constrained quality stays at or under the target. Decided 11-21.
+func vp9Target(e VideoEncode) bool {
+	return e.Codec == "libvpx-vp9" && e.TargetKbps > 0
 }
 
 // extraArgs are the encoder's own arguments; with a VBR target, without VP9's "-b:v 0" (constant

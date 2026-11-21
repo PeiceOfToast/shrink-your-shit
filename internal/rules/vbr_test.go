@@ -4,6 +4,7 @@ package rules
 
 import (
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -116,6 +117,32 @@ func TestVP9QualityWithALevel(t *testing.T) {
 	s.MaxBitrate, s.RateControl = "none", ""
 	if args := strings.Join(s.Template().Compile(h264(1280, 720, 8000)).FFmpegArgs("in.mkv", "out.webm"), " "); !strings.Contains(args, "-b:v 0") || strings.Contains(args, "-maxrate") {
 		t.Errorf("no level: %s", args)
+	}
+}
+
+// A9 (decided 11-21): VP9 with a target bitrate is constrained quality, not a bare -b:v target, which overshoots
+// (libvpx sat near 36.6 Mbit/s on the A9 clip). It takes the CRF the quality path would use for the same job, with
+// the target as the cap, and no -maxrate.
+func TestVP9TargetIsConstrainedQuality(t *testing.T) {
+	SetAvailableFormats(map[string]bool{"libx265": true, "libvpx-vp9": true})
+	defer SetAvailableFormats(nil)
+	s := DefaultSelectors(3)
+	s.Format, s.FileType, s.Audio, s.Resolution, s.MaxBitrate, s.RateControl = "vp9", "webm", "stereo_opus", "720", "medium", "level"
+	p := s.Template().Compile(h264(1920, 1080, 8000))
+	if p.Video.TargetKbps == 0 {
+		t.Fatalf("no target: %+v", p.Video)
+	}
+	// the quality path's CRF for the same job: the same selectors with no level
+	q := s
+	q.MaxBitrate, q.RateControl = "none", ""
+	crf := s.Template().Compile(h264(1920, 1080, 8000)).Video.CRF
+	if qp := q.Template().Compile(h264(1920, 1080, 8000)); qp.Video.CRF != crf {
+		t.Fatalf("quality CRF %d, target job CRF %d", qp.Video.CRF, crf)
+	}
+	args := strings.Join(p.FFmpegArgs("in.mkv", "out.webm"), " ")
+	want := "-c:v:0 libvpx-vp9 -crf:v:0 " + strconv.Itoa(crf) + " -b:v:0 " + strconv.Itoa(p.Video.TargetKbps) + "k"
+	if !strings.Contains(args, want) || strings.Contains(args, "-b:v 0") || strings.Contains(args, "-maxrate") {
+		t.Errorf("want %q with no -maxrate or -b:v 0: %s", want, args)
 	}
 }
 
