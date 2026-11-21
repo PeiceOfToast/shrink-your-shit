@@ -63,7 +63,7 @@ func TestFrozenPositionCeilingSaysThePositionStopped(t *testing.T) {
 	s := newScenario(t)
 	clock := &fakeClockAt{t: time.Date(2026, 11, 20, 5, 0, 0, 0, time.UTC)}
 	w := s.worker(Replace)
-	w.Now = clock.now
+	w.stallClock = clock.now
 	w.StallAfter = time.Second
 	w.FrozenPositionFactor = 2
 	// each report moves the worker's clock 500 ms (inside the 1 s stall), so only the ceiling can stop it

@@ -224,6 +224,12 @@ type Worker struct {
 	Journal  Journal
 	Now      func() time.Time // nil: time.Now
 
+	// stallClock, when set, replaces time.Now for the stall watchdog only: its checks, its progress, position
+	// and last-output stamps, the quiet check and the frozen-media warning. It is separate from Now, which is
+	// the job and retry clock: a test that freezes Now (fixed retry times) must not freeze the watchdog, or a
+	// hung encode is never stopped.
+	stallClock func() time.Time
+
 	// scorePlace, when set, replaces ssimSegment as the per-place scorer (tests fake the scores with it).
 	scorePlace scoreFunc
 	// statFinal, when set, replaces os.Stat for the new file after it is put in place (tests fail it or zero it).
@@ -900,7 +906,7 @@ func reachedEnd(outUS, durationSec float64) bool {
 // watchStall stops job id (stopStall) if its encode reports no progress for stallAfter (stallLimit once it is
 // finishing). The returned func ends the watch. Checks after the encode have their own time limits (slice 10).
 func (w *Worker) watchStall(id int64) func() {
-	now := w.now()
+	now := w.stallNow()
 	w.progressAt.Store(now.UnixNano())
 	w.positionAt.Store(now.UnixNano())
 	w.finishing.Store(false)
@@ -933,7 +939,7 @@ func (w *Worker) watchStall(id int64) func() {
 			case <-done:
 				return
 			case <-t.C:
-				now := w.now() // the worker's clock: tests move it by hand, production's is the wall clock
+				now := w.stallNow() // the watchdog's clock: tests move it by hand, production's is the wall clock
 				finishing := w.finishing.Load()
 				limit := w.stallLimit(after, finishing)
 				if now.Sub(time.Unix(0, w.progressAt.Load())) >= limit {
@@ -2830,12 +2836,12 @@ func (w *Worker) encodeLocal(ctx context.Context, job jobs.Job, args []string) (
 	wrote := int64(0)   // the most bytes it reported writing in this attempt (the run counters, L2)
 	stopWatch := w.watchStall(job.ID)
 	w.quietOn.Store(true) // R9's quiet warning: the stall watcher checks it with this clock
-	w.outputSeen(w.now())
+	w.outputSeen(w.stallNow())
 	defer w.quietOn.Store(false)
 	var tenths progressLines
-	at := -1.0       // the furthest position ffmpeg has reached
-	moved := w.now() // when it last moved (a warning says so after stallWarnAfter, R9)
-	stalled := false // the warning has been written; one line says when it moves again
+	at := -1.0            // the furthest position ffmpeg has reached
+	moved := w.stallNow() // when it last moved (a warning says so after stallWarnAfter, R9)
+	stalled := false      // the warning has been written; one line says when it moves again
 	encErr, terr = media.TranscodeLines(ctx, w.Exec, w.FFmpeg, args, job.DurationSec, func(p media.Progress) {
 		// the encode is alive while its position moves, or while its frame count or bytes written grow and the output
 		// stays within twice the source's size (a runaway output past that is not progress). out_time follows the
@@ -2852,17 +2858,17 @@ func (w *Worker) encodeLocal(ctx context.Context, job jobs.Job, args []string) (
 		}
 		if posMoved {
 			at = p.OutTimeUS
-			w.positionAt.Store(w.now().UnixNano())
+			w.positionAt.Store(w.stallNow().UnixNano())
 			w.finishing.Store(reachedEnd(p.OutTimeUS, job.DurationSec))
 		}
 		if alive {
-			w.progressAt.Store(w.now().UnixNano())
-			moved = w.now()
+			w.progressAt.Store(w.stallNow().UnixNano())
+			moved = w.stallNow()
 			if stalled { // R9: the log says it is moving again
 				stalled = false
 				w.logLine(job.ID, secEncode, jobs.LevelInfo, "The conversion is moving again.")
 			}
-		} else if !stalled && w.now().Sub(moved) >= stallWarnAfter { // R9: frozen media time, an ordinary warning
+		} else if !stalled && w.stallNow().Sub(moved) >= stallWarnAfter { // R9: frozen media time, an ordinary warning
 			stalled = true
 			w.logLine(job.ID, secEncode, jobs.LevelWarning,
 				fmt.Sprintf("The conversion has not moved for %s: ffmpeg may be stuck, or the file may be slow to read.", stallWarnAfter))
@@ -2875,7 +2881,7 @@ func (w *Worker) encodeLocal(ctx context.Context, job jobs.Job, args []string) (
 		if line := tenths.next(p); line != "" {
 			w.jobf(job.ID, ": %s", line)
 		}
-	}, func() { w.outputSeen(w.now()) })
+	}, func() { w.outputSeen(w.stallNow()) })
 	stopWatch()
 	w.addPass()       // an ffmpeg run the job needed, whatever came of it (a retry is another)
 	w.addBytes(wrote) // what this attempt wrote

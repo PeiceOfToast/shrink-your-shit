@@ -90,7 +90,7 @@ func TestFrozenOutTimeIsAliveWhileFramesOrBytesGrow(t *testing.T) {
 			s := newScenario(t)
 			clock := &fakeClockAt{t: time.Date(2026, 11, 20, 5, 0, 0, 0, time.UTC)}
 			w := s.worker(Replace)
-			w.Now = clock.now
+			w.stallClock = clock.now
 			w.StallAfter = 2 * time.Second
 			w.FrozenPositionFactor = 1000 // the ceiling has its own test; out of the way here
 			w.Exec = &outFrozenExec{FakeExec: s.exec, clock: clock, tick: 1500 * time.Millisecond, ticks: 24, frames: c.frames, sizeStep: c.sizeStep, gap: 100 * time.Millisecond}
@@ -114,7 +114,7 @@ func TestFullyFrozenEncodeIsStillStopped(t *testing.T) {
 	s := newScenario(t)
 	clock := &fakeClockAt{t: time.Date(2026, 11, 20, 5, 0, 0, 0, time.UTC)}
 	w := s.worker(Replace)
-	w.Now = clock.now
+	w.stallClock = clock.now
 	w.StallAfter = 45 * time.Second
 	w.Exec = &outFrozenExec{FakeExec: s.exec, clock: clock, tick: 10 * time.Second}
 	done := make(chan struct{})
@@ -137,7 +137,7 @@ func TestFrozenOutTimeStopsPastTheOutputBound(t *testing.T) {
 	s := newScenario(t)
 	clock := &fakeClockAt{t: time.Date(2026, 11, 20, 5, 0, 0, 0, time.UTC)}
 	w := s.worker(Replace)
-	w.Now = clock.now
+	w.stallClock = clock.now
 	w.StallAfter = 45 * time.Second
 	w.Exec = &outFrozenExec{FakeExec: s.exec, clock: clock, tick: 10 * time.Second, frames: true, sizeStep: 1000}
 	done := make(chan struct{})
@@ -176,7 +176,7 @@ func TestFrozenPositionCeilingStopsAliveEncode(t *testing.T) {
 	s := newScenario(t)
 	clock := &fakeClockAt{t: time.Date(2026, 11, 20, 5, 0, 0, 0, time.UTC)}
 	w := s.worker(Replace)
-	w.Now = clock.now
+	w.stallClock = clock.now
 	w.StallAfter = time.Second
 	w.FrozenPositionFactor = 2
 	w.Exec = &outFrozenExec{FakeExec: s.exec, clock: clock, tick: 500 * time.Millisecond, ticks: 100, frames: true}

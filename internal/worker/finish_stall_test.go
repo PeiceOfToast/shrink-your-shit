@@ -65,7 +65,7 @@ func TestSilentFinishGetsItsOwnAllowance(t *testing.T) {
 	s := newScenario(t)
 	clock := &fakeClockAt{t: time.Date(2026, 11, 20, 5, 0, 0, 0, time.UTC)}
 	w := s.worker(Replace)
-	w.Now = clock.now
+	w.stallClock = clock.now
 	w.StallAfter = 300 * time.Millisecond
 	w.FinishAfter = 5 * time.Second
 	x := finishExec{FakeExec: s.exec, reported: make(chan struct{}), release: make(chan struct{})}
@@ -85,7 +85,7 @@ func TestSilenceBeforeTheEndStillStops(t *testing.T) {
 	s := newScenario(t)
 	clock := &fakeClockAt{t: time.Date(2026, 11, 20, 5, 0, 0, 0, time.UTC)}
 	w := s.worker(Replace)
-	w.Now = clock.now
+	w.stallClock = clock.now
 	w.StallAfter = 300 * time.Millisecond
 	w.FinishAfter = 5 * time.Second
 	x := finishExec{FakeExec: s.exec, stuck: true, reported: make(chan struct{})}
@@ -104,7 +104,7 @@ func TestFinishStopsAtItsOwnLimit(t *testing.T) {
 	s := newScenario(t)
 	clock := &fakeClockAt{t: time.Date(2026, 11, 20, 5, 0, 0, 0, time.UTC)}
 	w := s.worker(Replace)
-	w.Now = clock.now
+	w.stallClock = clock.now
 	w.StallAfter = 300 * time.Millisecond
 	w.FinishAfter = time.Second
 	x := finishExec{FakeExec: s.exec, reported: make(chan struct{})} // no release: the stop ends it

@@ -98,7 +98,7 @@ func TestStallWatchdogFailsAStuckEncode(t *testing.T) {
 	s := newScenario(t)
 	clock := &fakeClockAt{t: time.Date(2026, 11, 20, 5, 0, 0, 0, time.UTC)}
 	w := s.worker(Replace)
-	w.Now = clock.now
+	w.stallClock = clock.now
 	w.StallAfter = 300 * time.Millisecond
 	done := runHung(t, s, w)
 	clock.add(300 * time.Millisecond)
