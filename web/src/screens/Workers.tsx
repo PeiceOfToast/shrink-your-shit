@@ -8,6 +8,8 @@ import { Skeleton } from "../Skeleton";
 import { SignedOut, failed, type Answer } from "../api";
 import { bytes, clock, plural } from "../format";
 import { listJobs } from "../jobsApi";
+import { getSettings, patchSettings } from "../libraryApi";
+import { GPU_HINT, GPU_LABEL, gpuSaved } from "../gpuJobs";
 import { onLive } from "../live";
 import { Empty, LoadFailed, PageHead } from "../PageHead";
 import { Link, navigate, useSearch } from "../router";
@@ -422,11 +424,34 @@ function Limits({ w, onSaved }: { w: Worker; onSaved: (m: string) => void }) {
         <div className="field"><label htmlFor="lim-cpu">Using the processor</label>
           <select id="lim-cpu" className="input" value={cpu} onChange={(e) => setCpu(Number(e.target.value))} style={{ width: "auto" }}>{[1, 2, 3, 4, 5, 6, 7, 8].map((n) => <option key={n} value={n}>{n}</option>)}</select>
           <span className="hint">How many files this worker converts at the same time. More uses more of the processor.</span></div>
+        {w.kind === "local" && <GpuSwitch onSaved={onSaved} onErr={setErr} />}
         {/* design: the graphics card's files at once stays hidden while converting is processor-only */}
         {err && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{err}</span></p>}
         <div className="row"><button className="btn primary" type="submit" disabled={cpu === w.slots.cpu.total}>Save</button></div>
       </form>
     </section>
+  );
+}
+
+// settings.gpuJobsSeparate (#623): the built-in worker only. Saves on change, like Commands in SettingsMore.
+function GpuSwitch({ onSaved, onErr }: { onSaved: (m: string) => void; onErr: (m: string) => void }) {
+  const st = useData(getSettings, []), [busy, setBusy] = useState(false), [saved, setSaved] = useState<boolean | null>(null), hint = useId();
+  const on = saved ?? !!st.data?.gpuJobsSeparate; // the saved value shows at once; the reload then takes over
+  // not disabled while saving: a disabled control drops keyboard focus, so a second Space would do nothing
+  const set = async (v: boolean) => {
+    if (busy) return;
+    setBusy(true); onErr(""); setSaved(v);
+    const r = await act(patchSettings({ gpuJobsSeparate: v }), onErr);
+    if (r) { onSaved(gpuSaved(v)); st.reload(); } else setSaved(null);
+    setBusy(false);
+  };
+  return (
+    <div className="field">
+      <label className="row nw"><input id="gpu-sw" type="checkbox" role="switch" className="switch" checked={on} disabled={!st.data} aria-busy={busy} aria-describedby={hint} onChange={(e) => set(e.target.checked)} />
+        <span>{GPU_LABEL}</span></label>
+      <span className="hint" id={hint}>{GPU_HINT}</span>
+      {st.error && !st.data && <span className="hint" role="alert">Could not load this setting.</span>}
+    </div>
   );
 }
 
