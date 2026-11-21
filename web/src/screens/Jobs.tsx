@@ -4,6 +4,7 @@
 // when it has them. Not here yet: the output path (v2 sends it in convertAgain.outputPath; the drawer does not show it).
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "../Icon";
+import { Skeleton } from "../Skeleton";
 import { MOCK, SignedOut, failed, type Answer } from "../api";
 import { bytes, clock, clockS, count, elapsed, plural, stepTime } from "../format";
 import { type LogLine, type LogProbe, convertDoneAgain, fileJobs, findSkip, getJob, getJobLog, jobAction, listJobs, listKept, restoreKept, type JobLog, type LogMove, type LogStep, type LogVariable } from "../jobsApi";
@@ -186,7 +187,7 @@ export function Jobs() {
       </div>
       <p className="muted" role="status">{said}</p>
       {page.error && current && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{page.error.message}</span></p>}
-      {!current ? (page.error ? <LoadFailed error={page.error} reload={page.reload} /> : <div className="empty">Loading…</div>) : !items.length ? (q ? <div className="empty">No file matches.</div>
+      {!current ? (page.error ? <LoadFailed error={page.error} reload={page.reload} /> : <Skeleton rows={5} />) : !items.length ? (q ? <div className="empty">No file matches.</div>
         : firstRun ? <Empty icon="i-jobs" text="No jobs yet. Jobs start when a library finds videos."><Link className="btn primary" to="/libraries/new"><Icon id="i-plus" />Add library</Link></Empty>
         : <Empty icon="i-jobs" text={kept ? TRASH_EMPTY : left ? LEFT_EMPTY : { waiting: "Nothing is waiting.", running: "Nothing is converting right now.", completed: "No file is done yet.", skipped: "No file was skipped.", failed: "Nothing has failed." }[tab]} />) : (
         <div className={"list rows" + (selecting ? " selecting" : "")}><table className="tbl jobs">

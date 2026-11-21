@@ -4,6 +4,7 @@
 // moves the bars in place; a job, library or worker change refetches. Every number comes from the server.
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "../Icon";
+import { Skeleton } from "../Skeleton";
 import { MOCK, SignedOut, failed, type Answer } from "../api";
 import { bytes, clock, count, encoderName, plural } from "../format";
 import { getSummary, scanAllLibraries } from "../dashApi";
@@ -118,7 +119,7 @@ export function Overview() {
     });
   }, []);
   const act = async (p: Promise<Answer<unknown>>) => { try { const r = await p; setSaid(failed(r) ? r.error.message : ""); } catch (e) { if (!(e instanceof SignedOut)) throw e; } o.reload(); wl.reload(); };
-  if (!o.data) return <div className="stack"><PageHead icon="i-dashboard" title="Dashboard" />{o.error ? <LoadFailed error={o.error} reload={o.reload} /> : <div className="empty">Loading…</div>}</div>;
+  if (!o.data) return <div className="stack"><PageHead icon="i-dashboard" title="Dashboard">{!o.error && <><span className="skel-ph skel-sw skel-sw-s" aria-hidden="true" /><span className="skel-ph skel-btn" aria-hidden="true" /></>}</PageHead>{o.error ?<LoadFailed error={o.error} reload={o.reload} /> : <Skeleton tiles={3} rows={3} />}</div>;
   const v = o.data, h = v.headline, noLibs = v.libraries.length === 0, job = (j: OverviewJob) => ({ ...j, ...live[j.jobId] });
   // one row per worker of GET /api/v2/workers; its files' progress from the overview (or, for a worker the overview
   // doesn't list, from Converting now by job id)

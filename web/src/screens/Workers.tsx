@@ -4,6 +4,7 @@
 // (design): files at once on the graphics card (converting is processor-only), Paths and path tests, Schedule, Logs.
 import { useEffect, useId, useRef, useState } from "react";
 import { Icon } from "../Icon";
+import { Skeleton } from "../Skeleton";
 import { SignedOut, failed, type Answer } from "../api";
 import { bytes, clock, plural } from "../format";
 import { listJobs } from "../jobsApi";
@@ -331,6 +332,7 @@ export function Workers() {
   return (
     <div className="stack">
       <PageHead icon="i-worker" title="Workers" help="The computers that convert your files. Nothing converts until a worker is started.">
+        {!ws.loaded && <span className="skel-ph skel-sw" aria-hidden="true" />}
         {list.length > 0 && <WorkersSwitch n={n} m={list.length} busy={busyAny} finishing={fin} onSet={set} />}
         {/* user item 2: Add a worker pairs another computer (V7b) */}
         <AddWorker workers={all} reload={ws.reload} />
@@ -340,7 +342,7 @@ export function Workers() {
       <p className="muted" role="status">{said}</p>
       {ws.error && ws.data && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{ws.error.message}</span></p>}
       <JoinCards joins={ws.data?.joinRequests ?? []} workers={all} on={n > 0} reload={ws.reload} />
-      {!ws.loaded ? <div className="empty">Loading…</div> : ws.error && !ws.data ? <LoadFailed error={ws.error} reload={ws.reload} /> : !list.length ? <Empty icon="i-worker" text="No workers yet." /> : (
+      {!ws.loaded ? <Skeleton cards={3} /> : ws.error && !ws.data ? <LoadFailed error={ws.error} reload={ws.reload} /> : !list.length ? <Empty icon="i-worker" text="No workers yet." /> : (
         <div className="wgrid">{list.map((w) => {
           const [t, cls, icon] = words(w), gone = w.status === "offline" || w.status === "stalled";
           return <article key={w.id} className={"card wcard" + (gone ? " dim" : "")}>
