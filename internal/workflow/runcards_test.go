@@ -475,7 +475,7 @@ func TestCommandNeedsTheSafetySwitch(t *testing.T) {
 	if r := Validate(d); r.Errors() {
 		t.Fatalf("allowed: %+v", r.Issues)
 	}
-	r := ValidateWith(d, Policy{})
+	r := ValidateWith(d, Scopes{Policy: Policy{}})
 	if !hasIssue(r.Issues, "commands_off", cmd.ID) || !r.Errors() {
 		t.Errorf("off: %+v", r.Issues)
 	}
@@ -484,7 +484,7 @@ func TestCommandNeedsTheSafetySwitch(t *testing.T) {
 			t.Errorf("the issue should name the switch: %q", i.Message)
 		}
 	}
-	if r := ValidateWith(d, Policy{CommandsAllowed: true}); r.Errors() {
+	if r := ValidateWith(d, Scopes{Policy: Policy{CommandsAllowed: true}}); r.Errors() {
 		t.Errorf("on: %+v", r.Issues)
 	}
 	tm, issues := ToTemplate(d, rules.Template{})
@@ -719,7 +719,7 @@ func TestHandToAnotherWorkflow(t *testing.T) {
 	code := func(self int64, target string) (string, string) {
 		goTo.Config = map[string]any{"workflow": target}
 		d.Nodes[len(d.Nodes)-1] = goTo
-		res := ValidateWith(d, Policy{CommandsAllowed: true, Workflows: look, SelfID: self})
+		res := ValidateWith(d, Scopes{Policy: Policy{CommandsAllowed: true, Workflows: look, SelfID: self}})
 		for _, i := range res.Issues {
 			if i.NodeID == goTo.ID {
 				return i.Code, i.Message
@@ -744,7 +744,7 @@ func TestHandToAnotherWorkflow(t *testing.T) {
 	// no lookup (Validate alone, or a policy without one): the target is not checked
 	goTo.Config = map[string]any{"workflow": "42"}
 	d.Nodes[len(d.Nodes)-1] = goTo
-	if res := ValidateWith(d, Policy{CommandsAllowed: true}); res.Errors() {
+	if res := ValidateWith(d, Scopes{Policy: Policy{CommandsAllowed: true}}); res.Errors() {
 		t.Errorf("without a lookup: %+v", res.Issues)
 	}
 }

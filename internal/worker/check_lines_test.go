@@ -4,6 +4,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -34,6 +35,30 @@ func TestCheckStartAndEndLinesAreInOrder(t *testing.T) {
 			t.Fatalf("no log line %q after line %d; log: %v", prefix, at, texts(lines))
 		}
 		at = found
+	}
+}
+
+// 12c: when the playback test fails, the job log says the playback stopped, and never that it played in.
+func TestCheckFailureLineSaysStoppedNotPlayedIn(t *testing.T) {
+	s := newScenario(t)
+	s.decodeErr = errors.New("exit status 1")
+	s.decodeStdout = "out_time_us=3000000\nframe=72\nprogress=continue\n"
+	s.decodeStderr = "Error while decoding stream #0:0"
+	w := s.worker(Replace)
+	w.Template = func(jobs.Job) (rules.Template, error) { return rules.SliderTemplate(3), nil }
+	w.RunOne(context.Background())
+	lines, _ := s.store.LogLines(s.id)
+	var stopped, playedIn int
+	for _, l := range lines {
+		if strings.HasPrefix(l.Text, "Playback stopped after ") {
+			stopped++
+		}
+		if strings.HasPrefix(l.Text, "Played in ") {
+			playedIn++
+		}
+	}
+	if stopped != 1 || playedIn != 0 {
+		t.Errorf("want one stopped line and no played-in line; got %d and %d; log: %v", stopped, playedIn, texts(lines))
 	}
 }
 

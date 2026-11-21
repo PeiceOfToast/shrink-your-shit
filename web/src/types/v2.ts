@@ -232,6 +232,7 @@ export interface ValidationIssue {
     | "unconnected_port" | "port_used_twice" | "empty_check" | "branch_in_conversion" | "path_without_save" | "fallback_loop" // V6a/V6b
     | "invalid_variable_name" | "builtin_variable_name" | "duplicate_variable" // W4a (#497): the workflow's own variables
     | "unknown_variable" | "unclosed_variable" | "variable_wrong_type" | "variable_ref_not_whole" // {{name}} in a setting (internal/workflow)
+    | "handoff_loop" | "handoff_unpublished" // FB4b: Hand to another workflow (internal/workflow)
     | (string & {}); // a newer server's code: show its message
   severity: "error" | "warning";
   message: string;

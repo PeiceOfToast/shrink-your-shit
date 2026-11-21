@@ -3,6 +3,7 @@
 package worker
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -13,6 +14,7 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/vars"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/workflow"
 )
 
 // The run's {{name}} values (W4b, design-joblog-vars sections 2 and 3): what the Save the result step's
@@ -23,7 +25,7 @@ import (
 // needs the probe and the plan (the target codec), so it runs once the plan is known.
 // published are the names the path's cards set before the conversion (FB1c): they join the values,
 // and the table, as values set at the start.
-func (w *Worker) runValues(job jobs.Job, src media.Info, plan rules.Plan, published map[string]string) (map[string]string, []rules.RunVariable, error) {
+func (w *Worker) runValues(job jobs.Job, src media.Info, plan rules.Plan, published map[string]string, used []workflow.Usage) (map[string]string, []rules.RunVariable, error) {
 	info, err := w.runInfo(job)
 	if err != nil {
 		return nil, nil, err
@@ -36,7 +38,50 @@ func (w *Worker) runValues(job jobs.Job, src media.Info, plan rules.Plan, publis
 	for k, v := range published {
 		start[k], end[k] = v, v
 	}
-	return end, variableTable(start, end, info), nil
+	return end, variableTable(start, end, info, used), nil
+}
+
+// resolveForFile is the template as this file resolves it (W2): the workflow's published settings read
+// again with the globals as they are now and the file's own reserved names (file.*, source.*) filled.
+// It also says which names the settings used and where each value came from, for the variables table.
+// A workflow with no typed references keeps the template it came with.
+func (w *Worker) resolveForFile(job jobs.Job, src media.Info, tmpl rules.Template) (rules.Template, []workflow.Usage, error) {
+	record := func(problem string) { // #561 review ask 2: the job log says what it refused to use
+		w.logLine(job.ID, secVariables, jobs.LevelWarning, "The workflow's settings were not filled: "+problem)
+	}
+	info, err := w.runInfo(job)
+	if err != nil {
+		// #561 review ask 1: never fall back to the store's template here. It was made with the values
+		// from before (a kept file.* reference is the schema's minimum there), so running it would
+		// convert with a value nobody chose. A read that may pass is tried again; the next try resolves.
+		var unreadable *jobs.SecretUnreadableError
+		if errors.As(err, &unreadable) {
+			// #561 review 2a: a secret sealed on another computer stays unreadable until someone
+			// re-enters it, so a retry can't pass; the job stops in its plain words, the original untouched.
+			record("its workflow's secret can't be opened on this computer.")
+			return tmpl, nil, failed(unreadableSecretWords(unreadable.Names), err)
+		}
+		// #561 review 2b: the raw error stays out of the job log's words (it can carry SQLite text);
+		// failed(..., err) keeps it in the program log.
+		record("its workflow could not be read.")
+		return tmpl, nil, retryable(failed("This library's setting could not be read, so converting did not start. Your original was not touched. It is tried again shortly.", err), retryGeneral)
+	}
+	if !workflow.HasRefs(info.Doc) {
+		return tmpl, nil, nil
+	}
+	sc := workflow.Scopes{Library: workflow.VariableMap(info.LibraryVariables), Global: workflow.VariableMap(info.Global),
+		File: workflow.FileValues(job.Path, src, job.SizeBefore)}
+	resolved, issues, used := workflow.ResolveWith(info.Doc, sc)
+	if len(issues) > 0 {
+		record(issues[0].Message)
+		return tmpl, nil, failed(issues[0].Message+" Nothing was converted, and your original was not touched. Give it a value, or change the workflow's setting, then press Retry.", nil)
+	}
+	t, iss := workflow.ToTemplateWith(resolved, tmpl, workflow.Scopes{})
+	if len(iss) > 0 {
+		record(iss[0].Message)
+		return tmpl, nil, failed(iss[0].Message+" Nothing was converted, and your original was not touched.", nil)
+	}
+	return t, used, nil
 }
 
 // runFacts are what the path's questions beyond the probe ask about (FB1c, rules.Facts): the run's
@@ -68,10 +113,30 @@ func (w *Worker) runInfo(job jobs.Job) (jobs.RunInfo, error) {
 	return w.RunInfo(job)
 }
 
-// ownValues are the workflow's own variables as the run uses them.
+// libraryValue is the library's value for v when the workflow lets a library change it (W3), and
+// whether there is one. The workflow's kind is the one that counts, so the value is checked and shown
+// as the workflow says.
+func libraryValue(info jobs.RunInfo, v workflow.Variable) (workflow.Variable, bool) {
+	if !v.TemplateParam {
+		return workflow.Variable{}, false
+	}
+	for _, lv := range info.LibraryVariables {
+		if lv.Name == v.Name && lv.Value != nil {
+			lv.Type = v.Type
+			return lv, true
+		}
+	}
+	return workflow.Variable{}, false
+}
+
+// ownValues are the workflow's own variables as the run uses them: a variable the workflow lets a
+// library change takes the library's value (W3).
 func ownValues(info jobs.RunInfo) []vars.Own {
 	out := make([]vars.Own, 0, len(info.Variables))
 	for _, v := range info.Variables {
+		if lv, ok := libraryValue(info, v); ok {
+			v = lv
+		}
 		out = append(out, vars.Own{Name: v.Name, Type: v.Type, Value: v.Value})
 	}
 	return out
@@ -84,8 +149,10 @@ var changedByStep = map[string]string{"target_codec": "encode"}
 // variableTable is the job log's variables table (design-joblog-vars section 1): every name with a value
 // at the start or the end, and the workflow's own variables (a secret's value never recorded, only its
 // name). Sorted by name, so the table does not depend on map order.
-func variableTable(start, end map[string]string, info jobs.RunInfo) []rules.RunVariable {
+func variableTable(start, end map[string]string, info jobs.RunInfo, used []workflow.Usage) []rules.RunVariable {
 	names := map[string]bool{}
+	origin := map[string]string{}
+	values := map[string]string{} // a used value the run's own names don't carry (a global, the file's)
 	for n, v := range start {
 		if v != "" {
 			names[n] = true
@@ -100,6 +167,21 @@ func variableTable(start, end map[string]string, info jobs.RunInfo) []rules.RunV
 	for _, v := range info.Variables {
 		names[v.Name] = true
 		own[v.Name] = true
+		origin[v.Name] = "workflow"
+		if _, ok := libraryValue(info, v); ok { // W3: the library's value is the one that ran
+			origin[v.Name] = "library"
+		}
+	}
+	// W2: the values the workflow's settings used, and where they came from, so a global reads as the
+	// value it gave and not as one the workflow set.
+	for _, u := range used {
+		if start[u.Name] == "" && end[u.Name] == "" {
+			if t := fmt.Sprint(u.Value); t != "" {
+				values[u.Name] = t
+				names[u.Name] = true
+			}
+		}
+		origin[u.Name] = u.Origin
 	}
 	sorted := make([]string, 0, len(names))
 	for n := range names {
@@ -108,7 +190,10 @@ func variableTable(start, end map[string]string, info jobs.RunInfo) []rules.RunV
 	sort.Strings(sorted)
 	var out []rules.RunVariable
 	for _, n := range sorted {
-		r := rules.RunVariable{Name: n, Start: start[n], End: end[n]}
+		r := rules.RunVariable{Name: n, Start: start[n], End: end[n], Origin: origin[n]}
+		if r.Start == "" && r.End == "" {
+			r.Start, r.End = values[n], values[n]
+		}
 		if own[n] {
 			for _, v := range info.Variables {
 				if v.Name == n && v.Type == "secret" {

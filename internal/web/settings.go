@@ -156,14 +156,6 @@ func policyFor(store *jobs.Store) workflow.Policy {
 	return p
 }
 
-// policyForWorkflow is policyFor with the workflow being validated named, so a hand-over back to it is
-// refused.
-func policyForWorkflow(store *jobs.Store, id int64) workflow.Policy {
-	p := policyFor(store)
-	p.SelfID = id
-	return p
-}
-
 func LoadSettings(store *jobs.Store) (Settings, error) {
 	ss := &settingsStore{store: store}
 	return ss.load()

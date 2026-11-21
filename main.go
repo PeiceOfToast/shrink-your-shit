@@ -37,6 +37,7 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/update"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/web"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/worker"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/workflow"
 )
 
 // version is set at release time: go build -ldflags "-X main.version=1.2.3".
@@ -498,8 +499,9 @@ func openStore(dbPath, version string, pending *update.Marker) (*jobs.Store, err
 	return jobs.OpenAs(dbPath, version)
 }
 
-// scanTargets lists the started libraries for the scanner, each with its flow's rule. A library whose
-// flow cannot run (a kind a later slice adds) is left out, with a log line.
+// scanTargets lists the started libraries for the scanner, each with its flow's rule and the doc the
+// scanner resolves per file. A library whose flow cannot run (a kind a later slice adds) is left out,
+// with a log line.
 func scanTargets(store *jobs.Store) func() ([]scanner.Target, error) {
 	return func() ([]scanner.Target, error) {
 		libs, err := store.Libraries()
@@ -510,6 +512,13 @@ func scanTargets(store *jobs.Store) func() ([]scanner.Target, error) {
 		if err != nil {
 			return nil, err
 		}
+		// W2 (review2-561 P2-1): the globals as they are now, so each file is judged the way its job
+		// will be, not on the values the template held at publish.
+		global, err := store.GlobalVariables()
+		if err != nil {
+			return nil, err
+		}
+		docs := map[int64]workflow.Doc{} // one read per workflow, however many libraries use it
 		var out []scanner.Target
 		for _, l := range libs {
 			if !l.Started {
@@ -531,7 +540,19 @@ func scanTargets(store *jobs.Store) func() ([]scanner.Target, error) {
 				log.Printf("scan: skipping library %q: %v", l.Name, err)
 				continue
 			}
-			out = append(out, scanner.Target{LibraryID: l.ID, Path: l.Path, Template: f.Template})
+			doc, ok := docs[l.FlowID]
+			if !ok {
+				if rev, has, rerr := store.LatestRevision(l.FlowID); rerr != nil {
+					log.Printf("scan: skipping library %q: %v", l.Name, rerr)
+					continue
+				} else if has {
+					doc = rev.Doc // a flow never published keeps the template as it is
+				}
+				docs[l.FlowID] = doc
+			}
+			// W3: the library's own values decide a skip too, so the scanner reads them with the job
+			out = append(out, scanner.Target{LibraryID: l.ID, Path: l.Path, Template: f.Template, Doc: doc,
+				Global: global, Library: l.Variables})
 		}
 		return out, nil
 	}

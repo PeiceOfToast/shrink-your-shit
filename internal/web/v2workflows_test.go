@@ -130,6 +130,11 @@ func TestV2Workflows(t *testing.T) {
 	if code, body := send("PUT", "/api/v2/workflows/"+id+"/draft", string(put), d.Etag); code != 409 || errCode(body) != "stale_draft" {
 		t.Errorf("stale save %d %s", code, body)
 	}
+	// no If-Match: the page sent no draft version, so the save is refused (428) and nothing is written
+	if code, body := send("PUT", "/api/v2/workflows/"+id+"/draft", string(put), ""); code != 428 || errCode(body) != "if_match_required" ||
+		!strings.Contains(body, "Reload this workflow and try again.") {
+		t.Errorf("save without If-Match %d %s", code, body)
+	}
 	if code, body := send("POST", "/api/v2/workflows/"+id+"/publish", `{"etag":"`+d2.Etag+`"}`, ""); code != 400 || errCode(body) != "system_folder" {
 		t.Errorf("publish to a system folder: %d %s", code, body)
 	}

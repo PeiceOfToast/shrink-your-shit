@@ -155,7 +155,7 @@ func runVariables(j jobs.Job) []rules.RunVariable {
 func variablesJSON(table []rules.RunVariable) []map[string]any {
 	out := make([]map[string]any, 0, len(table))
 	for _, v := range table {
-		item := map[string]any{"name": v.Name, "changedBy": nilIfEmpty(v.ChangedBy), "secret": v.Secret}
+		item := map[string]any{"name": v.Name, "changedBy": nilIfEmpty(v.ChangedBy), "secret": v.Secret, "origin": nilIfEmpty(v.Origin)}
 		if !v.Secret {
 			item["start"], item["end"] = v.Start, nilIfEmpty(v.End)
 		}

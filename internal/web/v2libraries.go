@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/workflow"
 )
 
 // V5b (UI-API-CONTRACT-v2.md, Libraries; slices/v2-engine/v5-plan.md): the libraries in the contract's
@@ -115,7 +116,10 @@ func v2Libraries(api *http.ServeMux, store *jobs.Store, eng Engine, libTotals *l
 		return map[string]any{
 			"id": strconv.FormatInt(l.ID, 10), "name": l.Name, "paths": []string{l.Path}, "fileType": "video",
 			"enabled": l.Started, "workflowId": workflowID, "workflowName": name, "priority": l.Priority,
-			"scan": scan,
+			// W3: its own values for the settings its workflow lets a library change (the workflow's
+			// templateParam variables), and nothing else.
+			"variables": l.Variables,
+			"scan":      scan,
 			"counts": map[string]int{"files": l.LastScanVideos, "waiting": c.Waiting, "running": c.Working,
 				"completed": t.Done, "skipped": t.Skipped, "failed": cards[jobs.CardFailed]},
 			"bytes":  map[string]int64{"freed": c.FreedBytes, "waitingToFree": c.WaitingBytes, "couldFree": c.CouldFreeBytes, "grew": c.GrewBytes},
@@ -272,7 +276,7 @@ func v2Libraries(api *http.ServeMux, store *jobs.Store, eng Engine, libTotals *l
 			return
 		}
 		bad := func(msg string) { apiError(w, http.StatusBadRequest, "invalid_setting", msg+" Nothing was changed.") }
-		known := map[string]bool{"name": true, "enabled": true, "workflowId": true, "priority": true, "overrideFolder": true, "discovery": true}
+		known := map[string]bool{"name": true, "enabled": true, "workflowId": true, "priority": true, "overrideFolder": true, "discovery": true, "variables": true}
 		for k := range in {
 			if !known[k] {
 				bad(fmt.Sprintf("%q can't be changed here.", k))
@@ -336,6 +340,56 @@ func v2Libraries(api *http.ServeMux, store *jobs.Store, eng Engine, libTotals *l
 			apiError(w, http.StatusBadRequest, "not_available", "A library's scan settings can't be changed yet: every library is scanned on the same schedule. Nothing was changed.")
 			return
 		}
+		// W3: its own values for the settings its workflow lets a library change (a workflow variable
+		// with templateParam). Anything else is refused as override_not_allowed; a value of the wrong
+		// kind as variable_wrong_type. Checked against the workflow the request leaves the library on.
+		var vars *[]workflow.Variable
+		if raw, ok := in["variables"]; ok {
+			vv := []workflow.Variable{}
+			if string(raw) != "null" {
+				if json.Unmarshal(raw, &vv) != nil {
+					bad("variables is a list of {name, value}, the workflow's settings a library may change.")
+					return
+				}
+			}
+			l, err := store.GetLibrary(id)
+			if err != nil {
+				storeErr(w, err)
+				return
+			}
+			target := l.FlowID
+			if rawWf, ok := in["workflowId"]; ok {
+				switch w := strings.Trim(strings.TrimSpace(string(rawWf)), `"`); w {
+				case "", "null":
+					target = 0
+				default:
+					if n, err := strconv.ParseInt(w, 10, 64); err == nil {
+						target = n
+					}
+				}
+			}
+			if target == 0 {
+				apiError(w, http.StatusConflict, "no_workflow", "This library has no workflow, so it has nothing a library may change. Assign a workflow first. Nothing was changed.")
+				return
+			}
+			rev, ok, err := store.LatestRevision(target)
+			if err != nil {
+				serverError(w, err)
+				return
+			}
+			if ok {
+				if issues := workflow.CheckLibraryOverrides(rev.Doc, vv); len(issues) > 0 {
+					writeErrorWith(w, http.StatusBadRequest, issues[0].Code, issues[0].Message+" Nothing was changed.", map[string]any{"issues": issues})
+					return
+				}
+				// the workflow's kind for each value, so reading the library back says what it is
+				own := workflow.VariableMap(rev.Doc.Variables)
+				for i := range vv {
+					vv[i].Type = own[vv[i].Name].Type
+				}
+			}
+			vars = &vv
+		}
 		if raw, ok := in["workflowId"]; ok {
 			// "" and null say the same as 0: removing a workflow, which PUT refuses on a library that has one
 			if w := strings.TrimSpace(string(raw)); w == "null" || w == `""` {
@@ -356,6 +410,9 @@ func v2Libraries(api *http.ServeMux, store *jobs.Store, eng Engine, libTotals *l
 		}
 		if err == nil && override != nil {
 			err = store.SetOverrideFolder(id, *override)
+		}
+		if err == nil && vars != nil {
+			err = store.SetLibraryVariables(id, *vars)
 		}
 		if err == nil && enabled != nil {
 			if *enabled {

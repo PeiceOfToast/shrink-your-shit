@@ -19,6 +19,7 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/workflow"
 )
 
 var videoExt = map[string]bool{".mkv": true, ".mp4": true, ".m4v": true, ".avi": true, ".mov": true, ".ts": true, ".wmv": true, ".webm": true}
@@ -99,7 +100,36 @@ func (s *Scanner) setScanning(id int64, n int, done bool) {
 type Target struct {
 	LibraryID int64
 	Path      string
-	Template  rules.Template // compiled per file into a Plan, which decides whether to convert it
+	Template  rules.Template // the workflow's template as published; Doc and Global make it per file
+	// W2 (review2-561 P2-1): the workflow's published doc and the server's global variables as they
+	// are now, so each file is judged on the settings its job will actually use. The published
+	// template holds the values from publish time; a global saved since, or a source.*/file.*
+	// reference, would make the scanner decide on values the job does not run. A workflow with no
+	// typed reference leaves Template as it is.
+	Doc    workflow.Doc
+	Global []workflow.Variable
+	// Library are the library's own values for the settings its workflow lets a library change (W3):
+	// they decide a skip too, so the scanner reads them as the job does.
+	Library []workflow.Variable
+}
+
+// planFor is what this file's workflow makes of it: the plan the file's job is about to compile.
+// The doc is resolved again with the globals and the library's values as they are now and this file's
+// own reserved values, the way the worker resolves it, instead of using the template as published.
+// When the settings can't be worked out for this file, the second return is the plain reason and the
+// file is queued anyway: the job stops with that reason rather than the file being skipped on a
+// setting it would not use.
+func planFor(t Target, path string, pi media.Info, size int64) (rules.Plan, string) {
+	if !workflow.HasRefs(t.Doc) {
+		return t.Template.Compile(pi), ""
+	}
+	sc := workflow.Scopes{Global: workflow.VariableMap(t.Global), Library: workflow.VariableMap(t.Library),
+		File: workflow.FileValues(path, pi, size)}
+	tmpl, issues := workflow.ToTemplateWith(t.Doc, t.Template, sc)
+	if len(issues) > 0 {
+		return rules.Plan{}, issues[0].Message
+	}
+	return tmpl.Compile(pi), ""
 }
 
 // ScanOnce walks every library once and returns how many jobs it queued.
@@ -351,8 +381,12 @@ func (s *Scanner) scanFile(ctx context.Context, t Target, path string, st os.Fil
 		return false
 	}
 	rec.Codec = pi.VideoCodec
-	plan := t.Template.Compile(pi)
-	if plan.Skip != "" {
+	plan, unresolved := planFor(t, path, pi, st.Size())
+	if unresolved != "" {
+		// The job resolves the same settings and stops with these words: queue the file, never skip it
+		// here on a setting the job would not use (review2-561 P2-1).
+		log.Printf("scan %s: its workflow's settings can't be worked out: %s", path, unresolved)
+	} else if plan.Skip != "" {
 		rec.Decision, rec.Reason = "skip: "+plan.Skip, plan.SkipCode
 		s.Store.PutFile(rec)
 		return false
@@ -361,6 +395,9 @@ func (s *Scanner) scanFile(ctx context.Context, t Target, path string, st os.Fil
 		return false
 	}
 	why := plan.Reason
+	if unresolved != "" {
+		why = unresolved
+	}
 	rec.Decision = jobs.DecisionQueued + why
 	id, err := s.Store.Enqueue(jobs.Job{Library: t.Path, LibraryID: t.LibraryID, Path: path, Reason: why, DurationSec: pi.DurationSec, SizeBefore: st.Size()})
 	if err != nil {
@@ -376,7 +413,11 @@ func (s *Scanner) scanFile(ctx context.Context, t Target, path string, st os.Fil
 	if len(plan.Path) > 0 {
 		s.Store.SetRoute(id, plan.Path)
 	}
-	s.Store.AddStep(id, "checked", true, "To be converted: "+why+".")
+	if unresolved != "" { // the job stops with these words: the setting is what it says, not a skip
+		s.Store.AddStep(id, "checked", false, unresolved)
+	} else {
+		s.Store.AddStep(id, "checked", true, "To be converted: "+why+".")
+	}
 	s.Store.PutFile(rec)
 	return true
 }

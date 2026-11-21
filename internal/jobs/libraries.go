@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -40,6 +39,9 @@ type Library struct {
 	// (D4b). Separate from Started, which is the person's own pause.
 	SharePausedBy    int64  `json:"sharePausedBy"`
 	SharePausedSince string `json:"sharePausedSince"`
+	// Variables are its own values for the settings its workflow lets a library change (W3: the
+	// workflow's variables with templateParam). Empty: the workflow's own values (never nil).
+	Variables []workflow.Variable `json:"variables"`
 }
 
 // Flow is one flow record. Its behaviour is its template until the graph engine (slice 30).
@@ -117,15 +119,23 @@ func Within(p, dir string) bool {
 }
 
 // libCols reads a library; flow_id is NULL for a library with no workflow, read as 0 (GetFlow(0) refuses it).
-const libCols = `id,name,path,COALESCE(flow_id,0),started,created,last_scan,last_scan_videos,override_folder,priority,COALESCE(share_paused_id,0),share_paused_since`
+const libCols = `id,name,path,COALESCE(flow_id,0),started,created,last_scan,last_scan_videos,override_folder,priority,COALESCE(share_paused_id,0),share_paused_since,variables`
 
 func scanLibrary(r interface{ Scan(...any) error }) (Library, error) {
 	var l Library
-	err := r.Scan(&l.ID, &l.Name, &l.Path, &l.FlowID, &l.Started, &l.Created, &l.LastScan, &l.LastScanVideos, &l.OverrideFolder, &l.Priority, &l.SharePausedBy, &l.SharePausedSince)
+	var vars string
+	err := r.Scan(&l.ID, &l.Name, &l.Path, &l.FlowID, &l.Started, &l.Created, &l.LastScan, &l.LastScanVideos, &l.OverrideFolder, &l.Priority, &l.SharePausedBy, &l.SharePausedSince, &vars)
 	if errors.Is(err, sql.ErrNoRows) {
-		err = ErrNotFound
+		return l, ErrNotFound
 	}
-	return l, err
+	if err != nil {
+		return l, err
+	}
+	l.Variables = []workflow.Variable{}
+	if err := json.Unmarshal([]byte(vars), &l.Variables); err != nil {
+		return l, fmt.Errorf("library %d's variables can't be read: %w", l.ID, err)
+	}
+	return l, nil
 }
 
 // Libraries lists every library, oldest first.
@@ -534,17 +544,24 @@ func (s *Store) libraryChanged(id int64, removed bool) {
 // job's Plan. A job made before libraries were records is matched to its library by folder.
 func (s *Store) TemplateFor(j Job) (rules.Template, error) {
 	var flowID int64
+	var libVars string
 	var err error
 	if j.LibraryID > 0 {
-		err = s.db.QueryRow(`SELECT COALESCE(flow_id,0) FROM libraries WHERE id=?`, j.LibraryID).Scan(&flowID)
+		err = s.db.QueryRow(`SELECT COALESCE(flow_id,0), variables FROM libraries WHERE id=?`, j.LibraryID).Scan(&flowID, &libVars)
 	} else {
-		err = s.db.QueryRow(`SELECT COALESCE(flow_id,0) FROM libraries WHERE path=?`, canonical(j.Library)).Scan(&flowID)
+		err = s.db.QueryRow(`SELECT COALESCE(flow_id,0), variables FROM libraries WHERE path=?`, canonical(j.Library)).Scan(&flowID, &libVars)
 	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return rules.Template{}, fmt.Errorf("its library no longer exists: %w", ErrLibraryGone)
 	}
 	if err != nil {
 		return rules.Template{}, err
+	}
+	var overrides []workflow.Variable
+	if libVars != "" {
+		if err := json.Unmarshal([]byte(libVars), &overrides); err != nil {
+			return rules.Template{}, fmt.Errorf("the library's variables can't be read: %w", err)
+		}
 	}
 	f, err := s.GetFlow(flowID)
 	if err != nil {
@@ -555,14 +572,48 @@ func (s *Store) TemplateFor(j Job) (rules.Template, error) {
 	// keeps a job on it even for a template written before the workflow's settings were resolved). A
 	// workflow with no such reference keeps its template exactly as it is.
 	if rev, ok, rerr := s.LatestRevision(flowID); rerr == nil && ok && workflow.HasRefs(rev.Doc) {
-		t, issues := workflow.ToTemplate(rev.Doc, f.Template)
+		// W2: the globals as they are now, so a job that starts after someone saves one runs the new
+		// value; W3: the library's own values for what the workflow lets it change. file.* and
+		// source.* stay references until the worker has the file.
+		g, gerr := s.GlobalVariables()
+		if gerr != nil {
+			return rules.Template{}, gerr
+		}
+		sc := workflow.Scopes{Library: workflow.VariableMap(overrides), Global: workflow.VariableMap(g), LeaveFile: true}
+		t, issues := workflow.ToTemplateWith(rev.Doc, f.Template, sc)
 		if len(issues) == 0 {
 			return s.WithHandoffs(t), nil
 		}
-		// publish refuses these, so this is a defect; the job still runs what was published, and says so
-		log.Printf("workflow %d: its published settings no longer resolve (%s); job %d runs the stored template", flowID, issues[0].Message, j.ID)
+		// #561 review ask 3: the stored template was compiled with the older values, so running it would
+		// convert with values the person has changed. Stop the job and say which variable and workflow.
+		return rules.Template{}, &SettingsUnresolvedError{Workflow: f.Name, Issues: issues}
 	}
 	return s.WithHandoffs(f.Template), nil // FB4b: a path that hands the file to another workflow runs that workflow's paths
+}
+
+// SettingsUnresolvedError says a published workflow's settings no longer resolve with the server's
+// global variables: someone saved a global that removed or changed one the workflow names. A job of
+// that workflow stops instead of running the template compiled with the values from before the save.
+type SettingsUnresolvedError struct {
+	Workflow string
+	Issues   []workflow.Issue
+}
+
+func (e *SettingsUnresolvedError) Error() string {
+	return fmt.Sprintf("the settings of workflow %q no longer resolve: %s", e.Workflow, e.Problem())
+}
+
+// Problem is the first issue's words (it names the setting and the variable).
+func (e *SettingsUnresolvedError) Problem() string {
+	if len(e.Issues) == 0 {
+		return "its settings can't be resolved"
+	}
+	return e.Issues[0].Message
+}
+
+// PlainWords is what the job says: the workflow, what no longer resolves, and that nothing was touched.
+func (e *SettingsUnresolvedError) PlainWords() string {
+	return fmt.Sprintf("The workflow “%s” can't run: %s Your original was not touched; press Retry once it is fixed.", e.Workflow, e.Problem())
 }
 
 // LibraryCounts are a library's job figures for its card.

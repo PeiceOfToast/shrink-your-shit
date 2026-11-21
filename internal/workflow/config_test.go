@@ -60,7 +60,7 @@ func TestConfigCheckedAgainstTheSchema(t *testing.T) {
 func TestConfigRequiredWithoutDefault(t *testing.T) {
 	def := StepDefinition{Type: "x.test", ConfigSchema: object(map[string]any{"folder": map[string]any{"type": "string", "title": "Folder"},
 		"speed": map[string]any{"type": "string", "default": "normal"}}, []string{"folder", "speed"})}
-	got := checkConfig(Node{ID: "n1", Name: "Copy", Config: map[string]any{}}, def, nil)
+	got := checkConfig(Node{ID: "n1", Name: "Copy", Config: map[string]any{}}, def, nil, false)
 	if len(got) != 1 || got[0].Field != "folder" || got[0].Message != "In 'Copy', “Folder” needs a value." {
 		t.Errorf("%+v", got)
 	}

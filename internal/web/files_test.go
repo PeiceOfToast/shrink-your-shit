@@ -14,7 +14,9 @@ import (
 	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/worker"
 )
 
 // The Files view (S5): one list by card, with every card's fields, the counts, and a job's run log.
@@ -307,5 +309,56 @@ func TestAlreadyInFormatDetailIsThePlans(t *testing.T) {
 		if !strings.Contains(body, `"It is already VP9 in WebM with the audio you chose."`) {
 			t.Errorf("%s: %s", path, body)
 		}
+	}
+}
+
+// The Files card shows the encode's ETA, bitrate and fps only while the job is running (12c): a claimed job whose
+// encode is going, and one whose converted step is written (validating), with a live entry each. Inverting the guard
+// fails this.
+func TestFilesCardShowsEncodeFiguresOnlyWhileRunning(t *testing.T) {
+	st, err := jobs.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	st.SetPaused(false)
+	a, _, _ := OpenAccess(t.TempDir(), false)
+	srv := httptest.NewServer(Handler(st, a, Engine{}))
+	defer srv.Close()
+	lib, _ := st.AddLibrary("Movies", "/m", rules.SliderTemplate(3), true)
+	m := lib.Path
+	live := media.Progress{Percent: 40, ETASeconds: 30, BitrateKbps: 2000, FPS: 24}
+
+	encoding, _ := st.Enqueue(jobs.Job{Library: m, LibraryID: lib.ID, Path: filepath.Join(m, "Encoding.mkv")})
+	if j, err := st.Claim("w"); err != nil || j.ID != encoding {
+		t.Fatalf("claim %v %v", j.ID, err)
+	}
+	worker.SetLiveForTest(encoding, worker.LiveJob{Worker: "w", Started: time.Now(), Progress: live})
+	defer worker.DropLiveForTest(encoding)
+
+	validating, _ := st.Enqueue(jobs.Job{Library: m, LibraryID: lib.ID, Path: filepath.Join(m, "Validating.mkv")})
+	if j, err := st.Claim("w"); err != nil || j.ID != validating {
+		t.Fatalf("claim %v %v", j.ID, err)
+	}
+	st.AddStep(validating, "converted", true, "Converted.")
+	worker.SetLiveForTest(validating, worker.LiveJob{Worker: "w", Started: time.Now(), Progress: live})
+	defer worker.DropLiveForTest(validating)
+
+	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/activity/files?show=processing"})
+	var v struct{ Items []map[string]any }
+	if err := json.Unmarshal([]byte(body), &v); err != nil {
+		t.Fatalf("%s", body)
+	}
+	byName := map[string]map[string]any{}
+	for _, it := range v.Items {
+		byName[it["name"].(string)] = it
+	}
+	e, ok := byName["Encoding.mkv"]
+	if !ok || e["etaSeconds"] != 30.0 || e["bitrateKbps"] != 2000.0 || e["fps"] != 24.0 {
+		t.Errorf("running card should show the encode's figures: %v", e)
+	}
+	vv, ok := byName["Validating.mkv"]
+	if !ok || vv["etaSeconds"] != nil || vv["bitrateKbps"] != nil || vv["fps"] != nil {
+		t.Errorf("validating card should show no encode figures: %v", vv)
 	}
 }
