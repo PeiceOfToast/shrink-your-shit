@@ -101,7 +101,7 @@ func TestTemplatesMayNameAGlobal(t *testing.T) {
 	d := FromTemplate(rules.SliderTemplate(3), nil)
 	for i := range d.Nodes {
 		if d.Nodes[i].Type == TypeCommit {
-			d.Nodes[i].Config["policy"], d.Nodes[i].Config["folderMode"], d.Nodes[i].Config["folder"] = "separate_folder", "one_folder", "/srv/out/{{qa_sub}}"
+			d.Nodes[i].Config["policy"], d.Nodes[i].Config["folderMode"], d.Nodes[i].Config["folder"] = "separate_folder", "one_folder", t.TempDir()+"/{{qa_sub}}"
 		}
 	}
 	sc := Scopes{Global: map[string]Variable{"qa_sub": {Name: "qa_sub", Type: "string", Value: "alpha"}}, LeaveFile: true, Policy: Policy{CommandsAllowed: true}}
@@ -116,7 +116,7 @@ func TestTemplatesMayNameAGlobal(t *testing.T) {
 	}
 	for i := range d.Nodes {
 		if d.Nodes[i].Type == TypeCommit {
-			d.Nodes[i].Config["folder"] = "/srv/out/{{qa_sun}}"
+			d.Nodes[i].Config["folder"] = t.TempDir()+"/{{qa_sun}}"
 		}
 	}
 	if issues := CheckTemplatesWith(d, sc); len(issues) != 1 || issues[0].Code != "unknown_variable" || issues[0].Suggest != "qa_sub" {
