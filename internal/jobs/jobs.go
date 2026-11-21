@@ -502,7 +502,7 @@ func (s *Store) Fail(id int64, code, msg string) error {
 // RetryLater puts a running job back in the queue after a failure that may pass (DD-2): one more try
 // counted, not taken before at; reason (its plain words) stays on it meanwhile.
 func (s *Store) RetryLater(id int64, at time.Time, code, reason string) error {
-	return s.transition(id, Queued, `, progress=0, worker='', error=?, error_code=?, attempts=attempts+1, retry_at=?`, reason, code, at.UTC().Format(time.RFC3339))
+	return s.transition(id, Queued, `, progress=0, worker='', error=?, error_code=?, attempts=attempts+1, retry_at=?, output_info=NULL`, reason, code, at.UTC().Format(time.RFC3339)) // the run put nothing in place: its probe goes too (#611)
 }
 
 // Keep marks a running job "kept original": a safety check refused the result, code and reason say why.

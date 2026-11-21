@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // Foundation slice 4 (migration 60): a database from before it opens, its jobs have no output_info, and
@@ -97,6 +98,25 @@ func TestRetryAndConvertAgainClearOutputInfo(t *testing.T) {
 		}
 		if raw, ok := s.OutputInfo(id); ok {
 			t.Errorf("a retried job still shows the last run's probe %q", raw)
+		}
+	})
+	t.Run("RetryLater", func(t *testing.T) {
+		s := open(t)
+		id, err := s.Enqueue(Job{Path: filepath.Join(t.TempDir(), "later.mkv"), SizeBefore: 100})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Claim("w"); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.SetOutputInfo(id, probe); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.RetryLater(id, time.Now().Add(time.Minute), "replace_failed", "later"); err != nil {
+			t.Fatal(err)
+		}
+		if raw, ok := s.OutputInfo(id); ok {
+			t.Errorf("a job waiting to retry still shows the last run's probe %q", raw)
 		}
 	})
 	t.Run("Convert again", func(t *testing.T) {
