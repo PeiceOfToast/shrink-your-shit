@@ -209,6 +209,17 @@ func encoderWordsUsed(plan rules.Plan, gpu string) string {
 	return label + ", " + name // the codec always named: "Intel Quick Sync (graphics), H.264"
 }
 
+// ChosenLine is the job log's encoder line: what encodes the file, why (empty when the plan says nothing), and the
+// settings it runs with. gpu is the graphics encoder's ffmpeg name, or "" for the processor. The local worker and the
+// remote one both log it, so the two read the same.
+func ChosenLine(plan rules.Plan, gpu string, args []string, why string) string {
+	line := "Chosen: " + encoderWordsUsed(plan, gpu)
+	if why != "" {
+		line += " — " + why
+	}
+	return line + ". Settings: " + encoderDetail(args)
+}
+
 // formatWords are the graphics formats as people name them, by their software encoder.
 var formatWords = map[string]string{"libx265": "HEVC", "libx264": "H.264", "libsvtav1": "AV1"}
 

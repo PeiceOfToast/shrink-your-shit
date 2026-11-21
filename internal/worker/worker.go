@@ -941,8 +941,9 @@ func (w *Worker) watchStall(job jobs.Job, out string) func() {
 		w.stalledFor.Store(int64(limit))
 		if w.overSize.Load() { // past twice the source: the new file cannot save space, so say that, not "no progress"
 			w.stopOver.Store(true)
+			// the size is ffmpeg's count or the temp file's on disk, whichever is larger: a silent encode reports 0
 			w.jobf(id, ": the new file is more than twice the original's size (%s, original %s), and its position has not moved for %s; stopping it",
-				rules.HumanBytes(w.outBytes.Load()), rules.HumanBytes(w.srcBytes.Load()), limit)
+				rules.HumanBytes(max(w.outBytes.Load(), w.diskBytes.Load())), rules.HumanBytes(w.srcBytes.Load()), limit)
 		} else {
 			w.stopOver.Store(false)
 			w.jobf(id, ": no progress for %s, stopping it", limit)
@@ -1604,11 +1605,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		}
 	}
 	if !plan.Video.Copy && w.remote == nil { // R5's last line: the encoder the real encode uses, why, and its settings
-		line := "Chosen: " + encoderWordsUsed(plan, gpu)
-		if chosenWhy != "" {
-			line += " — " + chosenWhy
-		}
-		w.logLine(job.ID, secEncode, jobs.LevelInfo, line+". Settings: "+encoderDetail(args))
+		w.logLine(job.ID, secEncode, jobs.LevelInfo, ChosenLine(plan, gpu, args, chosenWhy))
 	}
 	// The new file's rules, now that the encoder that runs is known: the main video by the plan's format,
 	// its height and width (±2 px) and the depth that encoder makes; every other stream as today.
