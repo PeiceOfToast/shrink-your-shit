@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -565,10 +564,36 @@ func (s *Store) TemplateFor(j Job) (rules.Template, error) {
 		if len(issues) == 0 {
 			return t, nil
 		}
-		// publish refuses these, so this is a defect; the job still runs what was published, and says so
-		log.Printf("workflow %d: its published settings no longer resolve (%s); job %d runs the stored template", flowID, issues[0].Message, j.ID)
+		// #561 review ask 3: the stored template was compiled with the older values, so running it would
+		// convert with values the person has changed. Stop the job and say which variable and workflow.
+		return rules.Template{}, &SettingsUnresolvedError{Workflow: f.Name, Issues: issues}
 	}
 	return f.Template, nil
+}
+
+// SettingsUnresolvedError says a published workflow's settings no longer resolve with the server's
+// global variables: someone saved a global that removed or changed one the workflow names. A job of
+// that workflow stops instead of running the template compiled with the values from before the save.
+type SettingsUnresolvedError struct {
+	Workflow string
+	Issues   []workflow.Issue
+}
+
+func (e *SettingsUnresolvedError) Error() string {
+	return fmt.Sprintf("the settings of workflow %q no longer resolve: %s", e.Workflow, e.Problem())
+}
+
+// Problem is the first issue's words (it names the setting and the variable).
+func (e *SettingsUnresolvedError) Problem() string {
+	if len(e.Issues) == 0 {
+		return "its settings can't be resolved"
+	}
+	return e.Issues[0].Message
+}
+
+// PlainWords is what the job says: the workflow, what no longer resolves, and that nothing was touched.
+func (e *SettingsUnresolvedError) PlainWords() string {
+	return fmt.Sprintf("The workflow “%s” can't run: %s Your original was not touched. Fix the variable or the workflow's setting, then press Retry.", e.Workflow, e.Problem())
 }
 
 // LibraryCounts are a library's job figures for its card.

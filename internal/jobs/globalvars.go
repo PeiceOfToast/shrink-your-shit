@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
+	"strconv"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/workflow"
 )
@@ -32,9 +33,11 @@ func (s *Store) GlobalVariables() ([]workflow.Variable, error) {
 
 // GlobalAffects is what a change to the globals touches: the workflows whose newest published
 // revision names a changed global in a typed setting, and how many libraries use those workflows.
+// Workflows are the ids as JSON strings, the type /api/v2's other workflow endpoints use
+// ("id": "12"; #561 review ask 4), so a page can compare them with a library's workflowId as it is.
 type GlobalAffects struct {
-	Workflows []int64 `json:"workflows"`
-	Libraries int     `json:"libraries"`
+	Workflows []string `json:"workflows"`
+	Libraries int      `json:"libraries"`
 }
 
 // GlobalAffectsOf says which workflows and libraries saving next would change: a global whose kind or
@@ -46,7 +49,7 @@ func (s *Store) GlobalAffectsOf(next []workflow.Variable) (GlobalAffects, error)
 		return GlobalAffects{}, err
 	}
 	changed := changedGlobals(cur, next)
-	out := GlobalAffects{Workflows: []int64{}}
+	out := GlobalAffects{Workflows: []string{}}
 	if len(changed) == 0 {
 		return out, nil
 	}
@@ -76,7 +79,9 @@ WHERE r.status='published' AND r.number=(SELECT MAX(x.number) FROM workflow_revi
 		return GlobalAffects{}, err
 	}
 	slices.Sort(ids)
-	out.Workflows = append(out.Workflows, ids...)
+	for _, id := range ids {
+		out.Workflows = append(out.Workflows, strconv.FormatInt(id, 10))
+	}
 	for _, id := range ids {
 		var n int
 		if err := s.db.QueryRow(`SELECT COUNT(*) FROM libraries WHERE flow_id=?`, id).Scan(&n); err != nil {

@@ -18,8 +18,8 @@ type v2Globals struct {
 	Total   int                 `json:"total"`
 	Saved   bool                `json:"saved"`
 	Affects struct {
-		Workflows []int64 `json:"workflows"`
-		Libraries int     `json:"libraries"`
+		Workflows []string `json:"workflows"`
+		Libraries int      `json:"libraries"`
 	} `json:"affects"`
 }
 
@@ -28,8 +28,8 @@ type v2GlobalsPut struct {
 	Total     int                 `json:"total"`
 	Saved     bool                `json:"saved"`
 	Affects   struct {
-		Workflows []int64 `json:"workflows"`
-		Libraries int     `json:"libraries"`
+		Workflows []string `json:"workflows"`
+		Libraries int      `json:"libraries"`
 	} `json:"affects"`
 }
 
@@ -91,7 +91,7 @@ func TestGlobalVariablesAPI(t *testing.T) {
 	if code != 200 {
 		t.Fatalf("preview: %d %s", code, body)
 	}
-	if g := decode[v2GlobalsPut](t, body); g.Saved || g.Total != 1 || len(g.Affects.Workflows) != 1 || g.Affects.Workflows[0] != f.ID || g.Affects.Libraries != 1 {
+	if g := decode[v2GlobalsPut](t, body); g.Saved || g.Total != 1 || len(g.Affects.Workflows) != 1 || g.Affects.Workflows[0] != strconv.FormatInt(f.ID, 10) || g.Affects.Libraries != 1 {
 		t.Errorf("preview %+v, want saved false, affects [%d] and 1 library", g, f.ID)
 	}
 	_, body = post(t, srv, "GET", "/api/v2/workflow-variables", "")

@@ -3,8 +3,11 @@
 package jobs
 
 import (
+	"errors"
 	"path/filepath"
 	"reflect"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
@@ -55,7 +58,7 @@ func TestSavingAGlobalSaysWhichWorkflowsAndLibrariesItTouches(t *testing.T) {
 		}
 	}
 	next := []workflow.Variable{{Name: "q", Type: "number", Value: float64(2)}}
-	want := GlobalAffects{Workflows: []int64{q1.ID, q2.ID}, Libraries: 3}
+	want := GlobalAffects{Workflows: []string{strconv.FormatInt(q1.ID, 10), strconv.FormatInt(q2.ID, 10)}, Libraries: 3}
 	preview, err := s.GlobalAffectsOf(next)
 	if err != nil {
 		t.Fatal(err)
@@ -131,5 +134,34 @@ func TestTemplateForReadsTheGlobalsAsTheyAreNow(t *testing.T) {
 		if !ok || sel.Quality != q {
 			t.Errorf("after saving q=%d the job's template has quality %+v (a selectors template: %v), want %d", q, sel.Quality, ok, q)
 		}
+	}
+}
+
+// #561 review ask 3 (the store's half): a published workflow whose settings stop resolving is refused,
+// naming the workflow and the variable, never the template compiled from the values from before.
+func TestTemplateForRefusesWhenTheGlobalsNoLongerResolve(t *testing.T) {
+	useHome(t)
+	s := open(t)
+	f := globalFlow(t, s, "Global", "{{q}}")
+	lib, err := s.AddLibraryOnFlow("Movies", t.TempDir(), f.ID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetGlobalVariables([]workflow.Variable{{Name: "q", Type: "number", Value: float64(2)}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.TemplateFor(Job{LibraryID: lib.ID}); err != nil {
+		t.Fatalf("with q saved the template must compile: %v", err)
+	}
+	if _, err := s.SetGlobalVariables(nil); err != nil { // the person removed q
+		t.Fatal(err)
+	}
+	_, err = s.TemplateFor(Job{LibraryID: lib.ID})
+	var unresolved *SettingsUnresolvedError
+	if !errors.As(err, &unresolved) {
+		t.Fatalf("%v, want SettingsUnresolvedError", err)
+	}
+	if unresolved.Workflow != "Global" || !strings.Contains(unresolved.PlainWords(), "{{q}}") {
+		t.Errorf("workflow %q, words %q: want the workflow's name and the variable", unresolved.Workflow, unresolved.PlainWords())
 	}
 }

@@ -959,6 +959,14 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	}
 	tmpl, err := w.templateFor(job)
 	if err != nil {
+		// #561 review ask 3: a global saved since the workflow was published can stop its settings
+		// resolving. The stored template was compiled with the old values, so the job stops, naming
+		// the workflow and the variable, rather than converting with values the person has changed.
+		var unresolved *jobs.SettingsUnresolvedError
+		if errors.As(err, &unresolved) {
+			w.logLine(job.ID, secVariables, jobs.LevelWarning, "The workflow's settings were not filled: "+unresolved.Problem())
+			return "", failed(unresolved.PlainWords(), err) // trying again changes nothing until the person fixes it
+		}
 		ferr := failed("This library's setting could not be read, so converting did not start. Your original was not touched. Open the library and save its setting again, then press Retry.", err)
 		if errors.Is(err, jobs.ErrLibraryGone) || errors.Is(err, jobs.ErrNotFound) { // gone: trying again changes nothing
 			return "", ferr

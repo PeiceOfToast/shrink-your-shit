@@ -3,6 +3,7 @@
 package worker
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -45,11 +46,21 @@ func (w *Worker) runValues(job jobs.Job, src media.Info, plan rules.Plan, publis
 // It also says which names the settings used and where each value came from, for the variables table.
 // A workflow with no typed references keeps the template it came with.
 func (w *Worker) resolveForFile(job jobs.Job, src media.Info, tmpl rules.Template) (rules.Template, []workflow.Usage, error) {
+	record := func(problem string) { // #561 review ask 2: the job log says what it refused to use
+		w.logLine(job.ID, secVariables, jobs.LevelWarning, "The workflow's settings were not filled: "+problem)
+	}
 	info, err := w.runInfo(job)
 	if err != nil {
-		// runValues reads the same thing shortly and stops the job with the right words (a secret
-		// sealed on another computer); until then the template is the one the store gave.
-		return tmpl, nil, nil
+		// #561 review ask 1: never fall back to the store's template here. It was made with the values
+		// from before (a kept file.* reference is the schema's minimum there), so running it would
+		// convert with a value nobody chose. A read that may pass is tried again; the next try resolves.
+		var unreadable *jobs.SecretUnreadableError
+		if errors.As(err, &unreadable) {
+			record("its workflow's secret can't be opened on this computer.")
+			return tmpl, nil, retryable(failed(unreadableSecretWords(unreadable.Names), err), retryGeneral)
+		}
+		record("its workflow could not be read (" + err.Error() + ").")
+		return tmpl, nil, retryable(failed("This library's setting could not be read, so converting did not start. Your original was not touched. It is tried again shortly.", err), retryGeneral)
 	}
 	if !workflow.HasRefs(info.Doc) {
 		return tmpl, nil, nil
@@ -57,10 +68,12 @@ func (w *Worker) resolveForFile(job jobs.Job, src media.Info, tmpl rules.Templat
 	sc := workflow.Scopes{Global: workflow.VariableMap(info.Global), File: workflow.FileValues(job.Path, src, job.SizeBefore)}
 	resolved, issues, used := workflow.ResolveWith(info.Doc, sc)
 	if len(issues) > 0 {
+		record(issues[0].Message)
 		return tmpl, nil, failed(issues[0].Message+" Nothing was converted, and your original was not touched. Give it a value, or change the workflow's setting, then press Retry.", nil)
 	}
 	t, iss := workflow.ToTemplateWith(resolved, tmpl, workflow.Scopes{})
 	if len(iss) > 0 {
+		record(iss[0].Message)
 		return tmpl, nil, failed(iss[0].Message+" Nothing was converted, and your original was not touched.", nil)
 	}
 	return t, used, nil
