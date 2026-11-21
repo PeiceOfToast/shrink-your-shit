@@ -12,7 +12,7 @@ import { SettingsTabs } from "../pages";
 import type { Doctor, DoctorCheck } from "../types/doctor";
 import type { Issue } from "../types/v1";
 
-const PILL: Record<DoctorCheck["status"], [string, string]> = { ok: ["", "OK"], warn: ["warn", "Warning"], bad: ["bad", "Fail"], absent: ["", "Not present"] };
+const PILL: Record<DoctorCheck["status"], [string, string, string]> = { ok: ["", "OK", "i-check-c"], warn: ["warn", "Warning", "i-alert"], bad: ["bad", "Fail", "i-x-c"], absent: ["", "Not present", "i-minus"] };
 const GROUPS: [string, (id: string) => boolean][] = [
   ["Tools", (id) => ["ffmpeg", "ffprobe", "x265", "ssim"].includes(id)],
   ["Encoders", (id) => id.startsWith("encoder:")],
@@ -22,10 +22,10 @@ const GROUPS: [string, (id: string) => boolean][] = [
 const group = (id: string) => GROUPS.find(([, f]) => f(id))?.[0] ?? "Other";
 
 function Check({ c }: { c: DoctorCheck }) {
-  const [cls, word] = PILL[c.status] ?? PILL.warn, absent = c.status === "absent";
+  const [cls, word, icon] = PILL[c.status] ?? PILL.warn, absent = c.status === "absent";
   return (
     <li className="stack" style={{ gap: 4 }}>
-      <div className="row nw" style={{ alignItems: "baseline", gap: 8 }}><span className={"pill " + cls}>{word}</span><span style={absent ? { color: "var(--text-2)" } : undefined}>{c.detail}</span></div>
+      <div className="row nw" style={{ alignItems: "baseline", gap: 8 }}><span className={"pill " + cls}><Icon id={icon} />{word}</span><span style={absent ? { color: "var(--text-2)" } : undefined}>{c.detail}</span></div>
       {c.hint && !absent && <p className="muted" style={{ margin: "0 0 0 4px" }}><strong>Fix:</strong> {c.hint}</p>}
     </li>);
 }
