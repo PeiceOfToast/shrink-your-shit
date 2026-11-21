@@ -818,6 +818,8 @@ type RunInfo struct {
 	// variables: the worker resolves them with the file it has, and records which value came from where.
 	Doc    workflow.Doc
 	Global []workflow.Variable
+	// W3: the library's own values for the settings its workflow lets a library change.
+	LibraryVariables []workflow.Variable
 }
 
 // RunInfoFor reads the RunInfo of job j. A library that is gone (or a job made before libraries were
@@ -825,19 +827,26 @@ type RunInfo struct {
 func (s *Store) RunInfoFor(j Job) (RunInfo, error) {
 	var out RunInfo
 	var flowID int64
+	var libVars string
 	var err error
 	if j.LibraryID > 0 {
-		err = s.db.QueryRow(`SELECT name, flow_id FROM libraries WHERE id=?`, j.LibraryID).Scan(&out.Library, &flowID)
+		err = s.db.QueryRow(`SELECT name, flow_id, variables FROM libraries WHERE id=?`, j.LibraryID).Scan(&out.Library, &flowID, &libVars)
 	} else {
 		// the job's path may be another name for the library's folder (a link, macOS's /var, a Windows
 		// short name): every comparison of library folders uses the canonical form (libraries.go)
-		err = s.db.QueryRow(`SELECT name, flow_id FROM libraries WHERE path=?`, canonical(j.Library)).Scan(&out.Library, &flowID)
+		err = s.db.QueryRow(`SELECT name, flow_id, variables FROM libraries WHERE path=?`, canonical(j.Library)).Scan(&out.Library, &flowID, &libVars)
 	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return out, nil
 	}
 	if err != nil {
 		return out, err
+	}
+	// W3: its own values for the settings its workflow lets a library change
+	if libVars != "" {
+		if err := json.Unmarshal([]byte(libVars), &out.LibraryVariables); err != nil {
+			return out, fmt.Errorf("library %d's variables can't be read: %w", j.LibraryID, err)
+		}
 	}
 	if flowID > 0 {
 		if f, ferr := s.GetFlow(flowID); ferr == nil {

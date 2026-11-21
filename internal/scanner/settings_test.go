@@ -85,6 +85,24 @@ func TestAFileValueDecidesTheSkip(t *testing.T) {
 	}
 }
 
+// A library's own value (W3) decides a skip too: its job reads it in place of the workflow's value,
+// so the scanner must not judge the file on the value the workflow was published with.
+func TestALibrarysOwnValueDecidesTheSkip(t *testing.T) {
+	s, st, lib, _ := setup(t, dvProbe)
+	d := dvFlow("{{dv}}")
+	d.Variables = []workflow.Variable{{Name: "dv", Type: "boolean", Value: true, TemplateParam: true}}
+	s.Targets = func() ([]Target, error) {
+		return []Target{{LibraryID: firstLibrary(t, st), Path: lib, Template: published(t, d, nil), Doc: d,
+			Library: []workflow.Variable{{Name: "dv", Type: "boolean", Value: false}}}}, nil
+	}
+	if n := settle(s); n != 0 {
+		t.Errorf("queued %d: this library set Dolby Vision off, so its job leaves the file alone", n)
+	}
+	if f, _ := st.GetFile(filepath.Join(lib, "a.mkv")); f == nil || f.Reason != rules.SkipDV || !strings.HasPrefix(f.Decision, "skip: ") {
+		t.Errorf("record %+v, want a %s skip", f, rules.SkipDV)
+	}
+}
+
 // A setting that can't be worked out for this file is not a skip: the file is queued and the job
 // stops with the same plain words, so a value nobody resolved never leaves a file silently alone.
 func TestSettingsThatCannotBeWorkedOutAreQueuedNotSkipped(t *testing.T) {

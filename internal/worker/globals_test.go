@@ -22,7 +22,7 @@ import (
 
 // publishResolved publishes a workflow whose doc is the preset with mut applied, resolving it the way
 // a publish does, and gives dir a library using it.
-func publishResolved(t *testing.T, store *jobs.Store, dir, name string, globals []workflow.Variable, mut func(*workflow.Doc)) {
+func publishResolved(t *testing.T, store *jobs.Store, dir, name string, globals []workflow.Variable, mut func(*workflow.Doc)) jobs.Library {
 	t.Helper()
 	f, err := store.AddWorkflow(name, workflow.Preset())
 	if err != nil {
@@ -48,9 +48,11 @@ func publishResolved(t *testing.T, store *jobs.Store, dir, name string, globals 
 	if _, err := store.Publish(f.ID, saved.Etag, tm); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.AddLibraryOnFlow(name, dir, f.ID, true); err != nil {
+	lib, err := store.AddLibraryOnFlow(name, dir, f.ID, true)
+	if err != nil {
 		t.Fatal(err)
 	}
+	return lib
 }
 
 // tableValue finds name in the job's variables table and checks where its value came from.

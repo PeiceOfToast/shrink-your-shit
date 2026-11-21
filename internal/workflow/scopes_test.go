@@ -16,9 +16,11 @@ import (
 // own checks, and what a save can say it affects.
 
 // A typed setting takes the workflow's own variable first, then the library's, then the server's
-// global one; each use says where its value came from.
+// global one; each use says where its value came from. W3: a variable the workflow marks templateParam
+// is the one a library may change, so the library's value comes before the workflow's own.
 func TestTheLookupOrderIsMostSpecificFirst(t *testing.T) {
 	own := []Variable{{Name: "q", Type: "number", Value: float64(1)}}
+	ownParam := []Variable{{Name: "q", Type: "number", Value: float64(1), TemplateParam: true}}
 	lib := []Variable{{Name: "q", Type: "number", Value: float64(3)}, {Name: "l", Type: "number", Value: float64(5)}}
 	glob := []Variable{{Name: "q", Type: "number", Value: float64(2)}, {Name: "g", Type: "number", Value: float64(4)}}
 	for _, c := range []struct {
@@ -35,6 +37,8 @@ func TestTheLookupOrderIsMostSpecificFirst(t *testing.T) {
 		{"then the server's", nil, Scopes{Global: VariableMap(glob)}, "{{q}}", 2, "global", "q"},
 		{"a library name nothing else has", nil, Scopes{Library: VariableMap(lib), Global: VariableMap(glob)}, "{{l}}", 5, "library", "l"},
 		{"a global name nothing else has", nil, Scopes{Global: VariableMap(glob)}, "{{g}}", 4, "global", "g"},
+		{"a variable the workflow lets a library change takes the library's", ownParam, Scopes{Library: VariableMap(lib), Global: VariableMap(glob)}, "{{q}}", 3, "library", "q"},
+		{"a library value that isn't set keeps the workflow's", ownParam, Scopes{Library: VariableMap([]Variable{{Name: "q", Type: "number"}}), Global: VariableMap(glob)}, "{{q}}", 1, "workflow", "q"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			got, issues, used := ResolveWith(qualityDoc(c.own, c.ref), c.sc)
@@ -197,5 +201,53 @@ func TestCheckGlobals(t *testing.T) {
 	}
 	if got := CheckGlobals([]Variable{{Name: "q", Type: "number", Value: float64(1)}, {Name: "q", Type: "number", Value: float64(2)}}); len(got) != 1 || got[0].Code != "duplicate_variable" {
 		t.Errorf("two of a name: %+v, want one duplicate_variable", got)
+	}
+}
+
+// W3 (workflow-architecture.md 2.2 rule 1): a library may set only a variable its workflow marks
+// templateParam; anything else is override_not_allowed, and a value has to fit the workflow's kind.
+func TestCheckLibraryOverrides(t *testing.T) {
+	d := docWith([]Variable{
+		{Name: "q", Type: "number", Value: float64(1), TemplateParam: true},
+		{Name: "k", Type: "number", Value: float64(1)},
+		{Name: "key", Type: "secret", TemplateParam: true},
+		{Name: "kind", Type: "string", TemplateParam: true},
+		{Name: "tier", Type: "enum", Options: []string{"a", "b"}, TemplateParam: true},
+	}, nil)
+	for _, c := range []struct {
+		name string
+		v    Variable
+		code string
+	}{
+		{"a variable the workflow lets a library change", Variable{Name: "q", Value: float64(4)}, ""},
+		{"no value yet", Variable{Name: "q"}, ""},
+		{"a text variable", Variable{Name: "kind", Value: "mp4"}, ""},
+		{"a choice", Variable{Name: "tier", Value: "a"}, ""},
+		{"a variable the workflow keeps", Variable{Name: "k", Value: float64(2)}, "override_not_allowed"},
+		{"a name the workflow doesn't have", Variable{Name: "nope", Value: float64(2)}, "override_not_allowed"},
+		{"a name with a dot", Variable{Name: "a.b", Value: "x"}, "invalid_variable_name"},
+		{"a secret", Variable{Name: "key", Value: "s"}, "variable_wrong_type"},
+		{"a number that is text", Variable{Name: "q", Value: "4"}, "variable_wrong_type"},
+		{"a choice that isn't one", Variable{Name: "tier", Value: "c"}, "variable_wrong_type"},
+	} {
+		got := CheckLibraryOverrides(d, []Variable{c.v})
+		if c.code == "" {
+			if len(got) != 0 {
+				t.Errorf("%s: %+v, want none", c.name, got)
+			}
+			continue
+		}
+		if len(got) != 1 || got[0].Code != c.code || got[0].Name != c.v.Name {
+			t.Errorf("%s: %+v, want one %s naming %q", c.name, got, c.code, c.v.Name)
+		}
+	}
+	got := CheckLibraryOverrides(d, []Variable{{Name: "q", Value: float64(1)}, {Name: "q", Value: float64(2)}})
+	if len(got) != 1 || got[0].Code != "duplicate_variable" {
+		t.Errorf("two of a name: %+v, want one duplicate_variable", got)
+	}
+	// the refusal is in words a person can act on, and names the variable they set
+	got = CheckLibraryOverrides(d, []Variable{{Name: "k", Value: float64(2)}})
+	if len(got) != 1 || !strings.Contains(got[0].Message, "“k”") || !strings.Contains(got[0].Message, "doesn't let a library change it") {
+		t.Errorf("the refusal: %+v, want it to name the variable and say why", got)
 	}
 }
