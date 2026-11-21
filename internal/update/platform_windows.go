@@ -27,10 +27,11 @@ func startDetached(exe string, args []string) error {
 	return cmd.Process.Release()
 }
 
-// stopChildren ends the processes whose parent is pid, except keep. They are the app's direct children (its
-// ffmpeg and ffprobe runs); a child keeps the app's PID as its parent after the app ends. keep is the watcher,
-// which is also the app's child, so it is never ended. A child that is already gone is not an error.
-func stopChildren(pid, keep int) error {
+// stopChildren ends the processes whose parent is pid and that pid started (started is pid's own start time, read
+// while it was alive), except keep. They are the app's children (its ffmpeg and ffprobe runs); a child keeps the
+// app's PID as its parent after the app ends, and a reused PID can name the app too (see ownChildren). keep is the
+// watcher, which is also the app's child, so it is never ended. A child that is already gone is not an error.
+func stopChildren(pid, keep int, started time.Time) error {
 	snap, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
 	if err != nil {
 		return err
@@ -38,10 +39,11 @@ func stopChildren(pid, keep int) error {
 	defer windows.CloseHandle(snap)
 	e := windows.ProcessEntry32{}
 	e.Size = uint32(unsafe.Sizeof(e))
-	var kids []int
+	var cands []childCandidate
 	for err = windows.Process32First(snap, &e); err == nil; err = windows.Process32Next(snap, &e) {
-		if int(e.ParentProcessID) == pid && int(e.ProcessID) != keep {
-			kids = append(kids, int(e.ProcessID))
+		if int(e.ParentProcessID) == pid {
+			created, cerr := processCreated(int(e.ProcessID))
+			cands = append(cands, childCandidate{pid: int(e.ProcessID), created: created, err: cerr})
 		}
 	}
 	// A walk that failed partway still ends the children it found; its error is reported after them.
@@ -49,7 +51,27 @@ func stopChildren(pid, keep int) error {
 	if err != windows.ERROR_NO_MORE_FILES {
 		walkErr = err
 	}
-	return endChildren(kids, walkErr, stopProcess)
+	return endChildren(ownChildren(cands, started, keep), walkErr, stopProcess)
+}
+
+// appStarted is when process pid was created. It must be called while pid is alive: the start time of a process
+// that has ended cannot be read, and its PID may be reused by then.
+func appStarted(pid int) (time.Time, error) {
+	return processCreated(pid)
+}
+
+// processCreated is when process pid was created; an error when it cannot be read (a process this one may not open).
+func processCreated(pid int) (time.Time, error) {
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
+	if err != nil {
+		return time.Time{}, err
+	}
+	defer windows.CloseHandle(h)
+	var created, exited, kernel, user windows.Filetime
+	if err := windows.GetProcessTimes(h, &created, &exited, &kernel, &user); err != nil {
+		return time.Time{}, err
+	}
+	return time.Unix(0, created.Nanoseconds()), nil
 }
 
 // stopProcess ends one process and waits for it to exit. It is not a tree kill: the watcher is the app's child,

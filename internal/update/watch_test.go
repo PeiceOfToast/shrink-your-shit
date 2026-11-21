@@ -14,6 +14,9 @@ import (
 	"time"
 )
 
+// appStart is when the fixture's app started; the watcher must pass it on to the child stop.
+var appStart = time.Date(2026, 11, 21, 2, 0, 0, 0, time.UTC)
+
 // watchFixture is a Watcher whose outside world is recorded: setups run in order, and healthy answers by
 // healthOK(number of setups run so far). events lists the steps in order; childErr is what stopping the
 // app's children returns.
@@ -32,6 +35,7 @@ func newWatchFixture(t *testing.T, healthOK func(ran int) bool, runErr map[strin
 	f.w = &Watcher{PID: 4242, From: "0.1.0", To: "0.2.0", DataDir: dir, Health: "http://unused/healthz",
 		NewSetup: filepath.Join(dir, "new.exe"), OldSetup: filepath.Join(dir, "old.exe"),
 		Wait: 20 * time.Millisecond, Poll: time.Millisecond,
+		AppStarted: func(pid int) (time.Time, error) { return appStart, nil },
 		StopApp: func(pid int) error {
 			f.stops++
 			f.events = append(f.events, "stop")
@@ -40,7 +44,10 @@ func newWatchFixture(t *testing.T, healthOK func(ran int) bool, runErr map[strin
 			}
 			return stopErr
 		},
-		StopChildren: func(pid, keep int) error {
+		StopChildren: func(pid, keep int, started time.Time) error {
+			if started != appStart {
+				t.Errorf("the app started %v, want %v", started, appStart)
+			}
 			f.events = append(f.events, "children")
 			if pid != 4242 || keep != os.Getpid() {
 				t.Errorf("stopped the children of %d, keeping %d; want the app and this watcher (%d)", pid, keep, os.Getpid())
