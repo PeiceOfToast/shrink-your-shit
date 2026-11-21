@@ -214,6 +214,50 @@ func TestLeadingUndecodableCreditsOnlyPicturesTheDecoderSkipped(t *testing.T) {
 	}
 }
 
+// UndecodableLead: a stream that starts on a keyframe has no lead (its first packet answers without decoding);
+// one that starts mid-group-of-pictures has the time from the stream's start to the first picture the decoder
+// can show. A first picture at or before the stream's start is no lead either.
+func TestUndecodableLeadIsTheTimeBeforeTheFirstPictureTheDecoderCanShow(t *testing.T) {
+	type answer struct {
+		packet, frames string
+		decoded        bool // set when the frames query ran
+	}
+	probe := func(a *answer) *FakeExec {
+		return &FakeExec{Handler: func(_ string, args []string) (string, string, error) {
+			for _, arg := range args {
+				if arg == "frame=pts_time" {
+					a.decoded = true
+					return a.frames, "", nil
+				}
+			}
+			return a.packet, "", nil
+		}}
+	}
+	cases := []struct {
+		name       string
+		a          answer
+		start      float64
+		want       float64
+		wantDecode bool
+	}{
+		{"a stream that starts on a keyframe has no lead", answer{packet: "0.000000,K__\n"}, 0, 0, false},
+		{"flags printed first are read the same", answer{packet: "K__,0.421000\n"}, 0.421, 0, false},
+		{"cut mid-GOP: the lead runs to the first picture", answer{packet: "1.880000,___\n", frames: "5.880000\n"}, 1.88, 4, true},
+		{"a picture at the stream's start is no lead", answer{packet: "1.880000,___\n", frames: "1.880000\n"}, 1.88, 0, true},
+		{"a picture before the stream's start is no lead", answer{packet: "0.000000,___\n", frames: "5.000000\n"}, 5.5, 0, true},
+		{"no picture was output", answer{packet: "1.880000,___\n"}, 1.88, 0, true},
+	}
+	for _, c := range cases {
+		got, err := UndecodableLead(context.Background(), probe(&c.a), "ffprobe", "/x.ts", 0, c.start)
+		if err != nil || math.Abs(got-c.want) > 1e-6 || c.a.decoded != c.wantDecode {
+			t.Errorf("%s: %v %v, decoded %v; want %v decoded %v", c.name, got, err, c.a.decoded, c.want, c.wantDecode)
+		}
+	}
+	if _, err := UndecodableLead(context.Background(), &FakeExec{Err: context.Canceled}, "ffprobe", "/x.ts", 0, 0); err == nil {
+		t.Error("a failed probe is an error, not zero")
+	}
+}
+
 // A phone video's Display Matrix (#81): its rotation is read; ±90/270 is a quarter turn.
 func TestDisplayMatrixRotation(t *testing.T) {
 	i, err := ParseProbe([]byte(`{"streams":[{"codec_type":"video","codec_name":"h264","width":640,"height":360,

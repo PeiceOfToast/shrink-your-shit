@@ -43,6 +43,10 @@ var (
 	fullDecodeBase, fullDecodeCap = 10 * time.Minute, 6 * time.Hour
 )
 
+// minLeadInSec is the undecodable lead a recording must have before the checks leave it out: a frame or two is
+// inside the duration tolerance, and a small quirk of one container's start time is not worth saying per file.
+const minLeadInSec = 1.0
+
 func fullDecodeTimeout(durationSec float64) time.Duration {
 	d := fullDecodeBase + time.Duration(2*durationSec*float64(time.Second))
 	if d > fullDecodeCap {
@@ -216,7 +220,7 @@ func (w *Worker) verify(ctx context.Context, src media.Info, exp rules.Expect, s
 		w.jobf(id, ": Comparing picture quality with the original.")
 	}
 	compareStart := w.now()
-	err = w.ssimCheck(ctx, src, out, srcPath, tmp, exp.MinSSIM)
+	err = w.ssimCheck(ctx, src, out, srcPath, tmp, exp.MinSSIM, exp.LeadInSec)
 	if id != 0 {
 		w.jobf(id, ": Compared in %s.", waitWords(w.now().Sub(compareStart)))
 	}
@@ -445,7 +449,7 @@ var ssimRe = regexp.MustCompile(`SSIM\b.*\bAll:([0-9.]+)`)
 // ssimCheck compares the picture of the original and the new file at up to three places, using
 // ffmpeg's built-in SSIM measure (1.0 = identical). It needs ffmpeg's ssim filter; without it the
 // check cannot run, and then the original is kept.
-func (w *Worker) ssimCheck(ctx context.Context, src, out media.Info, srcPath, tmp string, planSSIM float64) error {
+func (w *Worker) ssimCheck(ctx context.Context, src, out media.Info, srcPath, tmp string, planSSIM, leadIn float64) error {
 	sv, ov := src.MainVideoOrdinal(), out.MainVideoOrdinal()
 	if sv < 0 || ov < 0 {
 		return kept("there is no video to compare")
@@ -464,10 +468,13 @@ func (w *Worker) ssimCheck(ctx context.Context, src, out media.Info, srcPath, tm
 	}
 	segs := sampleSegments(src.DurationSec)
 	// Both pictures are put on one timeline by their own video start time (the encoder can delay the
-	// first frame: measured, a good encode scored 0.93 instead of 0.985 without this). If that still
-	// scores low, the new file is tried one frame earlier and later too and the best counts: a
-	// genuinely bad encode stays low at every alignment, a merely misaligned good one jumps up.
+	// first frame: measured, a good encode scored 0.93 instead of 0.985 without this). A recording that
+	// starts mid-stream is moved by its undecodable lead too: the new file's first picture is the
+	// original's first picture that can be shown, not the container's start. If that still scores low,
+	// the new file is tried one frame earlier and later too and the best counts: a genuinely bad encode
+	// stays low at every alignment, a merely misaligned good one jumps up.
 	sMain, oMain := src.Video(), out.Video()
+	srcStart := sMain.StartTime + leadIn
 	frame := 1.0 / 25
 	if sMain.FrameRate > 0 {
 		frame = 1 / sMain.FrameRate
@@ -486,7 +493,7 @@ func (w *Worker) ssimCheck(ctx context.Context, src, out media.Info, srcPath, tm
 		var bestFrames []frameScore // the best alignment's frames: the worst of them are the job log's evidence
 		passed := nudges[0]
 		for _, nudge := range nudges {
-			s, frames, err := score(ctx, srcPath, tmp, sv, ov, seg, sMain.StartTime, oMain.StartTime+nudge, scaleTo(sMain, oMain))
+			s, frames, err := score(ctx, srcPath, tmp, sv, ov, seg, srcStart, oMain.StartTime+nudge, scaleTo(sMain, oMain))
 			if err != nil {
 				return err
 			}
