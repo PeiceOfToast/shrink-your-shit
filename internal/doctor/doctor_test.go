@@ -501,6 +501,59 @@ func TestHardwareTestDoesNotHoldUpTheConverterCheck(t *testing.T) {
 	t.Error("the background check never stored its result")
 }
 
+// A job starting while a check holds the lock still sees what was found. Quick Sync passed and the card
+// was idle, yet the processor was chosen with no reason: ToolsNow answered "nothing" for the moment a
+// check held the lock, and an empty capability list reads as "no graphics encoder" (user bug 11-20).
+func TestToolsNowKeepsItsAnswerWhileACheckRuns(t *testing.T) {
+	var calls int
+	var mu sync.Mutex
+	slow := make(chan struct{})
+	started := make(chan struct{})
+	var once sync.Once
+	x := &media.FakeExec{Handler: func(name string, args []string) (string, string, error) {
+		if name == "/usr/bin/ffmpeg" && strings.Contains(strings.Join(args, " "), "-version") {
+			mu.Lock()
+			calls++
+			first := calls == 1
+			mu.Unlock()
+			if !first { // the check this test holds up, inside the lock
+				once.Do(func() { close(started) })
+				select {
+				case <-slow:
+				case <-time.After(5 * time.Second):
+				}
+			}
+		}
+		return "ffmpeg version 7.1\n V..... libx265  x\n V..... hevc_nvenc  x\n", "", nil
+	}}
+	c := &Checker{Exec: x, FFmpeg: "/usr/bin/ffmpeg", FFprobe: "/usr/bin/ffprobe"}
+	c.Tools(context.Background()) // the first check: hevc_nvenc passed here
+	c.mu.Lock()
+	c.toolsAt = time.Time{} // stale: the next check runs the converter again, slowly
+	c.mu.Unlock()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		c.Tools(context.Background())
+	}()
+	select {
+	case <-started: // the check is inside the lock now
+	case <-time.After(5 * time.Second):
+		t.Fatal("the slow check never started")
+	}
+	tl, ok := c.ToolsNow()
+	close(slow)
+	<-done
+	if !ok || len(tl.Hardware) != 1 || tl.Hardware[0] != "hevc_nvenc" {
+		t.Errorf("ToolsNow during a check: ok %v, hardware %v; want the last result", ok, tl.Hardware)
+	}
+	// and still nothing before the first check ever finished
+	fresh := &Checker{Exec: x, FFmpeg: "/usr/bin/ffmpeg", FFprobe: "/usr/bin/ffprobe"}
+	if _, ok := fresh.ToolsNow(); ok {
+		t.Error("a checker that never ran a check answered as if it had")
+	}
+}
+
 // One hardware test at a time (review c66c66b): a background refresh (ToolsNow) and several Tools calls
 // overlapping run it once, and every caller gets its result.
 func TestHardwareTestRunsOnceAtATime(t *testing.T) {

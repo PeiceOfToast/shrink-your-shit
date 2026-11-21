@@ -1129,6 +1129,9 @@ func LocalEncoderFor(store *jobs.Store, chk *doctor.Checker) func(codec string, 
 		v := &workerView{store: store, eng: Engine{Doctor: chk}}
 		t, ok := v.tools()
 		caps := capabilities(t, ok)
+		if !ok { // nothing has been tested here yet: the processor takes this file, and the job log says so
+			return "", "the encoder test here has not finished yet; using the processor"
+		}
 		return rules.EncoderFor(codec, primaryEncoder(cfg.PrimaryEncoder, caps), need10, hdr, caps)
 	}
 }
