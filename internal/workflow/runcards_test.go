@@ -1,0 +1,595 @@
+// Copyright (C) shrink-your-shit contributors. Licensed under AGPL-3.0-or-later.
+
+package workflow
+
+import (
+	"slices"
+	"strings"
+	"testing"
+
+	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
+)
+
+func node(typ, name string, config map[string]any) Node {
+	return Node{ID: NewID(), Type: typ, TypeVersion: 1, Name: name, Enabled: true, Config: config}
+}
+
+func link(from, port string, to string) Edge {
+	return Edge{ID: NewID(), From: from, FromPort: port, To: to, ToPort: "in"}
+}
+
+// runDoc: Library files → Check the file name (Remux?) → Yes: Set a variable, Add a note, the conversion;
+// No: Stop as failed.
+func runDoc() (Doc, map[string]Node) {
+	d := FromTemplate(rules.SliderTemplate(3), nil)
+	input := d.Nodes[0]
+	conv := segment(rules.SliderTemplate(4))
+	q := node(TypeCheckName, "Is it a remux?", map[string]any{"pattern": "remux", "match": "contains"})
+	set := node(TypeSetVariable, "", map[string]any{"name": "profile", "value": "remux of {{title}}"})
+	note := node(TypeNote, "", map[string]any{"text": "Converting {{title}} as {{profile}}"})
+	fail := node(TypeFail, "", map[string]any{"reason": "Not a remux: nothing to gain."})
+	nodes := append([]Node{input, q, set, note, fail}, conv...)
+	edges := []Edge{link(input.ID, "success", q.ID), link(q.ID, "match", set.ID), link(set.ID, "success", note.ID), link(note.ID, "success", conv[0].ID), link(q.ID, "else", fail.ID)}
+	edges = append(edges, chainEdges(conv)...)
+	return Doc{SchemaVersion: SchemaVersion, Nodes: nodes, Edges: edges, Variables: []Variable{}}, map[string]Node{"input": input, "q": q, "set": set, "note": note, "fail": fail, "conv": conv[0]}
+}
+
+// FB1b: questions of every kind, actions and the fail end compile into paths with their cards.
+func TestRunCardsCompile(t *testing.T) {
+	d, by := runDoc()
+	r := Validate(d)
+	if r.Errors() { // FB1c: every card the registry offers runs, so the document publishes
+		t.Fatalf("%+v", r.Issues)
+	}
+	tm, issues := ToTemplate(d, rules.Template{})
+	if len(issues) > 0 || tm.Branches == nil || len(*tm.Branches) != 2 {
+		t.Fatalf("%+v %v", tm, issues)
+	}
+	yes, no := (*tm.Branches)[0], (*tm.Branches)[1]
+	if yes.Then == nil || len(yes.Checks) != 1 || yes.Checks[0].Check.Kind != "name" || yes.Checks[0].Check.Pattern != "remux" || yes.Checks[0].Port != "match" {
+		t.Errorf("yes path: %+v", yes)
+	}
+	if len(yes.Before) != 2 || yes.Before[0].Type != TypeSetVariable || yes.Before[0].NodeID != by["set"].ID || yes.Before[1].Type != TypeNote || yes.Before[1].Config["text"] != "Converting {{title}} as {{profile}}" {
+		t.Errorf("before cards: %+v", yes.Before)
+	}
+	if no.Then != nil || !no.Fail || no.End != "Not a remux: nothing to gain." || no.Checks[0].Port != "else" || len(no.Before) != 0 {
+		t.Errorf("no path: %+v", no)
+	}
+	// routing: a remux takes the Yes path with its cards; another file fails with the words
+	info := video(1920, 1080)
+	p := tm.CompileWith(info, rules.Facts{Path: "/m/Harrow.Lane.2019.Remux.mkv"})
+	if p.Skip != "" || len(p.Before) != 2 || p.Fail || len(p.Decisions) != 1 || !strings.Contains(p.Decisions[0].Words, "Yes") {
+		t.Errorf("remux plan: skip %q before %d fail %v decisions %+v", p.Skip, len(p.Before), p.Fail, p.Decisions)
+	}
+	p = tm.CompileWith(info, rules.Facts{Path: "/m/Harrow.Lane.2019.WEB.mkv"})
+	if !p.Fail || p.Skip == "" || p.SkipCode != rules.SkipLeftByWorkflow || len(p.Before) != 0 {
+		t.Errorf("web plan: %+v", p)
+	}
+	// Compile without facts still routes by the file's facts (an old caller)
+	if p := tm.Compile(info); !p.Fail {
+		t.Errorf("no facts: %+v", p)
+	}
+}
+
+// A run card on a conversion step's skipped or error (Didn't work) port is refused at publish, except an end on
+// Convert video's or Check the result's error port, which becomes the path's failure policy (stop / skip).
+func TestRunCardsOnFailurePortsAreRefused(t *testing.T) {
+	for _, port := range []string{"skipped", "error"} {
+		for _, typ := range []string{TypeNote, TypeSetVariable, TypeCheckName, TypeFail, TypeEnd} {
+			d := FromTemplate(rules.SliderTemplate(3), nil)
+			var conv Node
+			for _, n := range d.Nodes {
+				if n.Type == TypeConvert {
+					conv = n
+				}
+			}
+			card := node(typ, "", map[string]any{"text": "x", "name": "v", "pattern": "x", "reason": "no"})
+			d.Nodes = append(d.Nodes, card)
+			d.Edges = append(d.Edges, link(conv.ID, port, card.ID))
+			if IsQuestion(typ) { // its answers must lead somewhere
+				end := node(TypeEnd, "", nil)
+				d.Nodes = append(d.Nodes, end)
+				d.Edges = append(d.Edges, link(card.ID, "match", end.ID), link(card.ID, "else", end.ID))
+			}
+			tm, issues := ToTemplate(d, rules.Template{})
+			allowed := port == "error" && IsEnd(typ)
+			switch {
+			case allowed && len(issues) > 0:
+				t.Errorf("%s on %s: %+v (an end there is the failure policy)", typ, port, issues)
+			case allowed:
+				f := (*tm.Branches)[0].OnFailure.Convert
+				want := map[string]string{TypeFail: "stop", TypeEnd: "skip"}[typ]
+				if f == nil || f.Action != want {
+					t.Errorf("%s on %s: policy %+v, want %s", typ, port, f, want)
+				}
+			case !allowed:
+				if !slices.ContainsFunc(issues, func(i Issue) bool { return i.Code == "not_runnable_yet" || i.Code == "fallback_must_convert" }) {
+					t.Errorf("%s on %s: not refused: %+v", typ, port, issues)
+				}
+				if r := Validate(d); !r.Errors() {
+					t.Errorf("%s on %s: publish would be allowed", typ, port)
+				}
+			}
+		}
+	}
+}
+
+// An action turned off is passed over (the path goes on without it); a question can't be turned off.
+func TestRunCardsTurnedOff(t *testing.T) {
+	d, by := runDoc()
+	for i := range d.Nodes {
+		if d.Nodes[i].ID == by["note"].ID {
+			d.Nodes[i].Enabled = false
+		}
+	}
+	tm, issues := ToTemplate(d, rules.Template{})
+	if len(issues) > 0 || len((*tm.Branches)[0].Before) != 1 || (*tm.Branches)[0].Before[0].Type != TypeSetVariable {
+		t.Errorf("%+v %v", (*tm.Branches)[0].Before, issues)
+	}
+	for i := range d.Nodes {
+		if d.Nodes[i].ID == by["q"].ID {
+			d.Nodes[i].Enabled = false
+		}
+	}
+	if r := Validate(d); !slices.ContainsFunc(r.Issues, func(i Issue) bool {
+		return i.Code == "invalid_config" && i.NodeID == by["q"].ID && strings.Contains(i.Message, "can't be turned off")
+	}) {
+		t.Errorf("%+v", r.Issues)
+	}
+}
+
+// The steps view's rules (W11, FB1b): run cards can be added and moved; the conversion's steps stay in place.
+func TestRunCardsCanBeAdded(t *testing.T) {
+	d, by := runDoc()
+	r := Validate(d)
+	save := d.Nodes[len(d.Nodes)-1]
+	for _, typ := range append(slices.Clone(Questions), Actions...) {
+		a := r.AddSteps[typ]
+		if !slices.Contains(definitionPhase(typ), PhaseBefore) { // FB2a: an action on the saved result goes after the save
+			if !a.Addable || a.After != save.ID {
+				t.Errorf("%s: %+v (want addable after the save)", typ, a)
+			}
+			continue
+		}
+		if !a.Addable || a.After != by["note"].ID {
+			t.Errorf("%s: %+v (want addable after the note)", typ, a)
+		}
+	}
+	// with a checksum behind the save, the next after card goes behind the checksum
+	sum := node(TypeChecksum, "", map[string]any{})
+	d.Nodes = append(d.Nodes, sum)
+	d.Edges = append(d.Edges, link(save.ID, "success", sum.ID))
+	if a := Validate(d).AddSteps[TypeCopy]; !a.Addable || a.After != sum.ID {
+		t.Errorf("copy after the checksum: %+v", a)
+	}
+	for _, typ := range Ends { // an end has no Next: the graph places it
+		if a := r.AddSteps[typ]; a.Addable || !strings.Contains(a.Reason, "graph") {
+			t.Errorf("%s: %+v", typ, a)
+		}
+	}
+	for _, typ := range PresetOrder[1:] {
+		if r.AddSteps[typ].Addable {
+			t.Errorf("%s: addable, but the conversion's steps are set until W10", typ)
+		}
+	}
+	if r.AddSteps[TypeLegacy].Addable {
+		t.Error("the legacy step is addable")
+	}
+	if r.StepPlaces[by["q"].ID].FixedPlace || r.StepPlaces[by["set"].ID].FixedPlace || !r.StepPlaces[by["conv"].ID].FixedPlace {
+		t.Errorf("places: %+v", r.StepPlaces)
+	}
+	// a new workflow: run cards go right after Library files
+	p := Preset()
+	if a := Validate(p).AddSteps[TypeCheckName]; !a.Addable || a.After != p.Nodes[0].ID {
+		t.Errorf("preset: %+v", a)
+	}
+}
+
+// A question, an action or an end after the steps that convert is refused while editing (wrong_phase)
+// and at compile (branch_in_conversion).
+func TestRunCardsKeepTheirPhase(t *testing.T) {
+	d := FromTemplate(rules.SliderTemplate(3), nil)
+	var conv, audio Node
+	for _, n := range d.Nodes {
+		switch n.Type {
+		case TypeConvert:
+			conv = n
+		case TypeAudio:
+			audio = n
+		}
+	}
+	late := node(TypeNote, "", map[string]any{"text": "too late"})
+	d.Nodes = append(d.Nodes, late)
+	for i := range d.Edges { // convert → note → audio
+		if d.Edges[i].From == conv.ID {
+			d.Edges[i].To = late.ID
+		}
+	}
+	d.Edges = append(d.Edges, link(late.ID, "success", audio.ID))
+	r := Validate(d)
+	codes := []string{}
+	for _, i := range r.Issues {
+		codes = append(codes, i.Code)
+	}
+	if !slices.Contains(codes, "wrong_phase") {
+		t.Errorf("no wrong_phase in %v", codes)
+	}
+	for _, i := range r.Issues {
+		if i.Code == "wrong_phase" && (i.NodeID != late.ID || !strings.Contains(i.Message, "Convert video")) {
+			t.Errorf("%+v", i)
+		}
+	}
+	// the compile answers with an issue too, and never recurses (review2-531 P1): a note, a new question kind and an
+	// end between Convert video and Audio each come back as branch_in_conversion
+	for _, typ := range []string{TypeNote, TypeCheckName, TypeFail, TypeSetVariable} {
+		d := FromTemplate(rules.SliderTemplate(3), nil)
+		var conv, audio Node
+		for _, n := range d.Nodes {
+			switch n.Type {
+			case TypeConvert:
+				conv = n
+			case TypeAudio:
+				audio = n
+			}
+		}
+		mid := node(typ, "", map[string]any{"text": "x", "pattern": "x", "name": "v"})
+		d.Nodes = append(d.Nodes, mid)
+		for i := range d.Edges {
+			if d.Edges[i].From == conv.ID {
+				d.Edges[i].To = mid.ID
+			}
+		}
+		port := "success"
+		if IsQuestion(mid.Type) {
+			port = "match"
+		}
+		if !IsEnd(mid.Type) {
+			d.Edges = append(d.Edges, link(mid.ID, port, audio.ID))
+		}
+		_, issues := ToTemplate(d, rules.Template{}) // the draft shape the workflow list compiles (v2workflows workflowViewWith)
+		if !slices.ContainsFunc(issues, func(i Issue) bool { return i.Code == "branch_in_conversion" && i.NodeID == mid.ID }) {
+			t.Errorf("%s inside the conversion: %+v", typ, issues)
+		}
+	}
+	// a fail end on the conversion's error port is fine: the failure policy says stop
+	d2, conv2 := errorDoc([]Node{node(TypeFail, "", nil)})
+	tm, issues := ToTemplate(d2, rules.Template{})
+	if len(issues) > 0 || tm.Branches == nil || (*tm.Branches)[0].OnFailure == nil || (*tm.Branches)[0].OnFailure.Convert.Action != "stop" || (*tm.Branches)[0].OnFailure.Convert.NodeID != conv2.ID {
+		t.Errorf("fail on error port: %+v %v", tm, issues)
+	}
+}
+
+// Set a variable publishes a name later fields and questions may use; the server refuses bad names and
+// a question about a name nothing sets.
+func TestPublishedVariables(t *testing.T) {
+	d, by := runDoc()
+	if !slices.Contains(PublishedNames(d), "profile") {
+		t.Errorf("published: %v", PublishedNames(d))
+	}
+	for _, i := range Validate(d).Issues { // the note reads {{profile}}: known because the step before sets it; nothing may object (the gate is empty since FB1c)
+		t.Fatalf("%+v", i)
+	}
+	ask := node(TypeCheckVariable, "", map[string]any{"variable": "profile", "op": "equals", "value": "remux"})
+	d.Nodes = append(d.Nodes, ask)
+	if issues := CheckPublished(d); len(issues) != 0 {
+		t.Errorf("a published name is unknown: %+v", issues)
+	}
+	for i := range d.Nodes {
+		if d.Nodes[i].ID == ask.ID {
+			d.Nodes[i].Config["variable"] = "profil"
+		}
+	}
+	issues := CheckPublished(d)
+	if len(issues) != 1 || issues[0].Code != "unknown_variable" || issues[0].Suggest != "profile" || issues[0].NodeID != ask.ID {
+		t.Errorf("typo: %+v", issues)
+	}
+	for i := range d.Nodes {
+		if d.Nodes[i].ID == by["set"].ID {
+			d.Nodes[i].Config["name"] = "title" // the server sets it
+		}
+	}
+	issues = CheckPublished(d)
+	if !slices.ContainsFunc(issues, func(i Issue) bool { return i.Code == "builtin_variable_name" }) {
+		t.Errorf("builtin: %+v", issues)
+	}
+	for i := range d.Nodes {
+		if d.Nodes[i].ID == by["set"].ID {
+			d.Nodes[i].Config["name"] = "Bad Name"
+		}
+	}
+	issues = CheckPublished(d)
+	if !slices.ContainsFunc(issues, func(i Issue) bool { return i.Code == "invalid_variable_name" }) {
+		t.Errorf("bad name: %+v", issues)
+	}
+}
+
+// A regular expression that can't be read is refused while editing (review2-531 P3).
+func TestBadRegexIsRefused(t *testing.T) {
+	d, by := runDoc()
+	for i := range d.Nodes {
+		if d.Nodes[i].ID == by["q"].ID {
+			d.Nodes[i].Config = map[string]any{"pattern": "(", "match": "regex"}
+		}
+	}
+	r := Validate(d)
+	if !slices.ContainsFunc(r.Issues, func(i Issue) bool {
+		return i.Code == "invalid_config" && i.NodeID == by["q"].ID && i.Field == "pattern"
+	}) {
+		t.Errorf("%+v", r.Issues)
+	}
+}
+
+// Every run card has a summary in plain words, and a question's says what it asks.
+func TestRunCardSummaries(t *testing.T) {
+	cases := []struct {
+		n    Node
+		want string
+	}{
+		{node(TypeCheck, "", map[string]any{"resolution": 2160, "hdr": "yes"}), "Only if the resolution is at least 2160p and it is HDR"},
+		{node(TypeCheck, "", map[string]any{"audioCodec": []any{"dts", "truehd"}, "minMinutes": 90}), "Only if some audio is DTS or TRUEHD and it runs at least 90 min"},
+		{node(TypeCheckName, "", map[string]any{"pattern": "Remux", "match": "contains"}), "Only if the file name contains “Remux”"},
+		{node(TypeCheckName, "", map[string]any{"pattern": "*.1080p.*", "match": "glob", "where": "path"}), "Only if the path matches “*.1080p.*”"},
+		{node(TypeCheckAge, "", map[string]any{"olderDays": 30}), "Only if last changed at least 30 days ago"},
+		{node(TypeCheckVariable, "", map[string]any{"variable": "profile", "op": "equals", "value": "remux"}), "Only if {{profile}} is “remux”"},
+		{node(TypeCheckLibrary, "", map[string]any{"libraries": []any{"1", "2"}}), "Only if the file is from one of 2 libraries"},
+		{node(TypeCheckHardLinks, "", nil), "Only if the file shares its data with another name"},
+		{node(TypeSetVariable, "", map[string]any{"name": "profile", "value": "remux"}), "Set {{profile}} = “remux”"},
+		{node(TypeNote, "", map[string]any{"text": "hello"}), "Note: “hello”"},
+		{node(TypeFail, "", map[string]any{"reason": "No."}), "Failed: No."},
+		{node(TypeEnd, "", map[string]any{"reason": "Left for later."}), "Left for later."},
+	}
+	for _, c := range cases {
+		if got := summary(c.n); got != c.want {
+			t.Errorf("%s: %q, want %q", c.n.Type, got, c.want)
+		}
+	}
+	// the registry's new conditions reach the question
+	n := node(TypeCheck, "Ten-bit?", map[string]any{"bitDepth": 10, "subtitleLanguage": []any{"eng"}})
+	q := questionOf(n)
+	if q.BitDepth != 10 || len(q.SubtitleLanguages) != 1 || q.Name != "Ten-bit?" || q.Kind != "" {
+		t.Errorf("%+v", q)
+	}
+	if yes, _ := q.Ask(media.Info{Streams: []media.Stream{{Type: "video", Width: 1920, Height: 1080, BitDepth: 10}, {Type: "subtitle", Language: "eng"}}}, rules.Facts{}); !yes {
+		t.Error("ten-bit with an English subtitle should answer Yes")
+	}
+}
+
+// FB2a: the actions after the save compile into the path's After list in order (a turned-off one left
+// out), an after-only action before the conversion or a before-only one after the save is wrong_phase, and
+// the checksum's published names are known to the cards after it.
+func TestAfterCardsCompile(t *testing.T) {
+	d, by := runDoc()
+	save := d.Nodes[len(d.Nodes)-1]
+	if save.Type != TypeCommit {
+		t.Fatalf("the last node is %s, want the save", save.Type)
+	}
+	sum := node(TypeChecksum, "", map[string]any{"kind": "sha1"})
+	side := node(TypeSidecar, "", map[string]any{"name": "{{title}}.sha1", "text": "{{checksum}}"})
+	off := node(TypeNotify, "", map[string]any{"text": "{{title}} done"})
+	off.Enabled = false
+	copyTo := node(TypeCopy, "", map[string]any{"folder": "/backup/{{library}}"})
+	d.Nodes = append(d.Nodes, sum, side, off, copyTo)
+	d.Edges = append(d.Edges, link(save.ID, "success", sum.ID), link(sum.ID, "success", side.ID), link(side.ID, "success", off.ID), link(off.ID, "success", copyTo.ID))
+	if r := Validate(d); r.Errors() {
+		t.Fatalf("%+v", r.Issues)
+	}
+	tm, issues := ToTemplate(d, rules.Template{})
+	if len(issues) > 0 || tm.Branches == nil {
+		t.Fatalf("%+v %v", tm, issues)
+	}
+	yes := (*tm.Branches)[0]
+	if len(yes.After) != 3 || yes.After[0].Type != TypeChecksum || yes.After[1].Type != TypeSidecar || yes.After[2].Type != TypeCopy || yes.After[1].Config["text"] != "{{checksum}}" {
+		t.Errorf("after cards: %+v", yes.After)
+	}
+	if yes.Path[len(yes.Path)-1] != copyTo.ID || len(yes.Before) != 2 {
+		t.Errorf("path %v, before %d", yes.Path, len(yes.Before))
+	}
+	for _, c := range yes.After {
+		if c.Name == "" {
+			t.Errorf("a card without a name: %+v", c)
+		}
+	}
+	// the plan carries them, and a plan without any is unchanged on the wire
+	plan := tm.CompileWith(media.Info{SizeBytes: 1 << 30, Ext: ".mkv", DurationSec: 100, Streams: []media.Stream{{Type: "video", Codec: "h264", Width: 1920, Height: 1080}}}, rules.Facts{Path: "/films/Harrow.Lane.Remux.mkv"})
+	if len(plan.After) != 3 {
+		t.Errorf("plan.After: %+v", plan.After)
+	}
+
+	// an after-only card before the conversion: wrong_phase names it, and the compile refuses too
+	d2, by2 := runDoc()
+	early := node(TypeChecksum, "", map[string]any{})
+	d2.Nodes = append(d2.Nodes, early)
+	for i, e := range d2.Edges {
+		if e.From == by2["note"].ID {
+			d2.Edges[i].To = early.ID
+		}
+	}
+	d2.Edges = append(d2.Edges, link(early.ID, "success", by2["conv"].ID))
+	if !hasIssue(Validate(d2).Issues, "wrong_phase", early.ID) {
+		t.Errorf("an early checksum: %+v", Validate(d2).Issues)
+	}
+	if _, is := ToTemplate(d2, rules.Template{}); !hasIssue(is, "wrong_phase", early.ID) {
+		t.Errorf("compile of an early checksum: %+v", is)
+	}
+	// a question after the save: wrong_phase too (a variable or a note may sit on either side: both phases)
+	d3, _ := runDoc()
+	save3 := d3.Nodes[len(d3.Nodes)-1]
+	late := node(TypeCheckName, "", map[string]any{"pattern": "x", "match": "contains"})
+	fail3 := node(TypeFail, "", map[string]any{"reason": "no"})
+	d3.Nodes = append(d3.Nodes, late, fail3)
+	d3.Edges = append(d3.Edges, link(save3.ID, "success", late.ID), link(late.ID, "match", fail3.ID), link(late.ID, "else", fail3.ID))
+	if !hasIssue(Validate(d3).Issues, "wrong_phase", late.ID) {
+		t.Errorf("a late question: %+v", Validate(d3).Issues)
+	}
+	if _, is := ToTemplate(d3, rules.Template{}); !hasIssue(is, "wrong_phase", late.ID) {
+		t.Errorf("compile of a late question: %+v", is)
+	}
+	d5, _ := runDoc() // and a note after the save is fine, and runs there
+	save5 := d5.Nodes[len(d5.Nodes)-1]
+	note5 := node(TypeNote, "", map[string]any{"text": "{{title}} is saved"})
+	d5.Nodes = append(d5.Nodes, note5)
+	d5.Edges = append(d5.Edges, link(save5.ID, "success", note5.ID))
+	if r := Validate(d5); r.Errors() {
+		t.Errorf("a late note: %+v", r.Issues)
+	}
+	if tm5, is := ToTemplate(d5, rules.Template{}); len(is) > 0 || len((*tm5.Branches)[0].After) != 1 {
+		t.Errorf("compile of a late note: %+v %+v", is, tm5.Branches)
+	}
+	// an after card's error port leads nowhere yet
+	d4, _ := runDoc()
+	save4 := d4.Nodes[len(d4.Nodes)-1]
+	s4, n4 := node(TypeChecksum, "", map[string]any{}), node(TypeNotify, "", map[string]any{"text": "x"})
+	d4.Nodes = append(d4.Nodes, s4, n4)
+	d4.Edges = append(d4.Edges, link(save4.ID, "success", s4.ID), link(s4.ID, "error", n4.ID))
+	if _, is := ToTemplate(d4, rules.Template{}); !hasIssue(is, "not_runnable_yet", s4.ID) {
+		t.Errorf("an after card's error port: %+v", is)
+	}
+	_ = by
+}
+
+func hasIssue(issues []Issue, code, nodeID string) bool {
+	for _, i := range issues {
+		if i.Code == code && i.NodeID == nodeID {
+			return true
+		}
+	}
+	return false
+}
+
+// FB2b: Run a command sits after the save and is refused by the policy until the Safety switch is on (the draft
+// keeps it; the issue names the switch); Ask the downloader sits before the conversion and publishes its names.
+func TestCommandNeedsTheSafetySwitch(t *testing.T) {
+	d, by := runDoc()
+	save := d.Nodes[len(d.Nodes)-1]
+	cmd := node(TypeCommand, "", map[string]any{"program": "/usr/local/bin/after", "arguments": `"{{output_path}}" {{command_output}}`})
+	look := node(TypeLookupDownloader, "", map[string]any{})
+	d.Nodes = append(d.Nodes, cmd, look)
+	d.Edges = append(d.Edges, link(save.ID, "success", cmd.ID))
+	for i, e := range d.Edges { // the lookup goes between the note and the conversion
+		if e.From == by["note"].ID {
+			d.Edges[i].To = look.ID
+		}
+	}
+	d.Edges = append(d.Edges, link(look.ID, "success", by["conv"].ID))
+	if r := Validate(d); r.Errors() {
+		t.Fatalf("allowed: %+v", r.Issues)
+	}
+	r := ValidateWith(d, Policy{})
+	if !hasIssue(r.Issues, "commands_off", cmd.ID) || !r.Errors() {
+		t.Errorf("off: %+v", r.Issues)
+	}
+	for _, i := range r.Issues {
+		if i.Code == "commands_off" && !strings.Contains(i.Message, "Settings > Safety") {
+			t.Errorf("the issue should name the switch: %q", i.Message)
+		}
+	}
+	if r := ValidateWith(d, Policy{CommandsAllowed: true}); r.Errors() {
+		t.Errorf("on: %+v", r.Issues)
+	}
+	tm, issues := ToTemplate(d, rules.Template{})
+	if len(issues) > 0 {
+		t.Fatalf("%v", issues)
+	}
+	yes := (*tm.Branches)[0]
+	if len(yes.After) != 1 || yes.After[0].Type != TypeCommand || len(yes.Before) != 3 || yes.Before[2].Type != TypeLookupDownloader {
+		t.Errorf("places: after %+v, before %+v", yes.After, yes.Before)
+	}
+	for _, name := range []string{"title_clean", "year", "season", "episode", "original_language", "command_output"} {
+		if !slices.Contains(PublishedNames(d), name) {
+			t.Errorf("%s is not published", name)
+		}
+	}
+	// the lookup can't sit after the save; the command can't sit before the conversion
+	d2, _ := runDoc()
+	save2 := d2.Nodes[len(d2.Nodes)-1]
+	late := node(TypeLookupDownloader, "", map[string]any{})
+	d2.Nodes = append(d2.Nodes, late)
+	d2.Edges = append(d2.Edges, link(save2.ID, "success", late.ID))
+	if !hasIssue(Validate(d2).Issues, "wrong_phase", late.ID) {
+		t.Errorf("a late lookup: %+v", Validate(d2).Issues)
+	}
+	if a := Validate(d).AddSteps[TypeCommand]; !a.Addable || a.After != cmd.ID {
+		t.Errorf("add rule for a command: %+v", a)
+	}
+	if a := Validate(d).AddSteps[TypeLookupDownloader]; !a.Addable || a.After != look.ID {
+		t.Errorf("add rule for a lookup: %+v", a)
+	}
+}
+
+// FB2c: Has a tag is a question (before the conversion) and Tag the file an action that may sit on either side of
+// the save; both have summaries, the action publishes {{tags}}, and a tag question with nothing to ask is caught.
+func TestTagCards(t *testing.T) {
+	d, by := runDoc()
+	save := d.Nodes[len(d.Nodes)-1]
+	tag := node(TypeTag, "", map[string]any{"add": "converted, {{profile}}", "remove": "needs review"})
+	late := node(TypeTag, "", map[string]any{"add": "done"})
+	ask := node(TypeCheckTag, "", map[string]any{"tags": "remux, needs review", "tagOp": "all"})
+	leave := node(TypeEnd, "", map[string]any{"reason": "Not tagged."})
+	d.Nodes = append(d.Nodes, tag, late, ask, leave)
+	for i, e := range d.Edges { // input → ask → (yes) q …; note → tag → conv; save → late
+		if e.From == by["input"].ID {
+			d.Edges[i].To = ask.ID
+		}
+		if e.From == by["note"].ID {
+			d.Edges[i].To = tag.ID
+		}
+	}
+	d.Edges = append(d.Edges, link(ask.ID, "match", by["q"].ID), link(ask.ID, "else", leave.ID), link(tag.ID, "success", by["conv"].ID), link(save.ID, "success", late.ID))
+	r := Validate(d)
+	if r.Errors() {
+		t.Fatalf("%+v", r.Issues)
+	}
+	if s := r.StepSummaries[ask.ID]; s != "Only if the file has all of the tags remux, needs review" {
+		t.Errorf("ask summary: %q", s)
+	}
+	if s := r.StepSummaries[tag.ID]; s != "Adds converted, {{profile}}; removes needs review" {
+		t.Errorf("tag summary: %q", s)
+	}
+	if s := r.StepSummaries[late.ID]; s != "Adds done" {
+		t.Errorf("late summary: %q", s)
+	}
+	if !slices.Contains(PublishedNames(d), "tags") {
+		t.Error("tags is not published")
+	}
+	tm, issues := ToTemplate(d, rules.Template{})
+	if len(issues) > 0 {
+		t.Fatalf("%v", issues)
+	}
+	yes := (*tm.Branches)[0]
+	if len(yes.Checks) != 2 || yes.Checks[0].Check.Kind != "tag" || yes.Checks[0].Check.TagOp != "all" || yes.Checks[0].Check.Tags != "remux, needs review" {
+		t.Errorf("checks: %+v", yes.Checks)
+	}
+	if len(yes.Before) != 3 || yes.Before[2].Type != TypeTag || len(yes.After) != 1 || yes.After[0].Type != TypeTag {
+		t.Errorf("cards: before %+v after %+v", yes.Before, yes.After)
+	}
+	// a tag question with nothing to ask
+	ask.Config = map[string]any{"tags": " , "}
+	d.Nodes[len(d.Nodes)-2] = ask
+	if !Validate(d).Errors() {
+		t.Error("an empty tag question should be refused")
+	}
+	// review2-542 P2: a Tag card with nothing to add or remove (or only separators) is refused at publish, naming
+	// the field, and its summary never reads "Adds "
+	ask.Config = map[string]any{"tags": "remux"}
+	d.Nodes[len(d.Nodes)-2] = ask
+	for _, cfg := range []map[string]any{{}, {"add": " , "}, {"add": "", "remove": ", ,"}} {
+		tag.Config = cfg
+		d.Nodes[len(d.Nodes)-4] = tag
+		r := Validate(d)
+		if !hasIssue(r.Issues, "invalid_config", tag.ID) {
+			t.Errorf("%v: an empty Tag card should be refused: %+v", cfg, r.Issues)
+		}
+		if s := r.StepSummaries[tag.ID]; strings.HasPrefix(s, "Adds ") {
+			t.Errorf("%v: summary %q", cfg, s)
+		}
+	}
+	// review2-542 P3a: the limits the description names are the ones the code keeps
+	if rules.MaxTags != 20 || rules.MaxTagLen != 40 {
+		t.Errorf("limits: %d tags of %d", rules.MaxTags, rules.MaxTagLen)
+	}
+	def, _ := Definition(TypeTag)
+	if !strings.Contains(def.Description, "40 characters") || !strings.Contains(def.Description, "at most 20 tags") {
+		t.Errorf("the description names other limits: %q", def.Description)
+	}
+}

@@ -15,6 +15,7 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,11 +26,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/shrink-your-shit/shrink-your-shit/internal/flow"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/scanner"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/vars"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/workflow"
 )
 
 // Queue is everything a worker needs from the job store.
@@ -85,6 +88,8 @@ type Queue interface {
 	Skip(id int64, words, code string) error
 	// AddStep adds a line to a job's step summary (S5): converted, verified, kept, replaced.
 	AddStep(id int64, step string, ok bool, words string) error
+	// AddDecision records a check's answer, or a card's words (FB1c), on the timeline with its node.
+	AddDecision(id int64, nodeID, port, words string) error
 	// PutProbe stores a file's probe (JSON) for its size and time: the new file's, for the Files view.
 	PutProbe(path string, size, mtime int64, info string) error
 	// GetProbe returns the stored probe (JSON) of path if it was taken at this size and modification time.
@@ -138,6 +143,11 @@ type Worker struct {
 	// a 10-bit test, and a family proven to keep HDR10's mastering data). The worker writes them and then the
 	// chosen encoder's line, in section encode.
 	EncoderCandidates func(codec string, need10 bool, hdr *rules.HDR) []string
+	// GPUSlots is how many of this computer's graphics card's slots the person let it have (Workers page),
+	// read each time a job asks for a place, so a changed limit applies to the next job that asks; a job already
+	// waiting keeps the limit it read when it started waiting. 0: the processor does the encoding. nil
+	// (a test's worker): no limit, every graphics job runs. All of the program's workers share the one card.
+	GPUSlots func() int
 	// verified is the probe of the new file the last check passed (S5: stored for its final path).
 	verified media.Info
 	// movedAside is the trash sentence for our earlier output this job moved aside (Convert again). The job's kept
@@ -151,6 +161,9 @@ type Worker struct {
 	remote *RemoteJob
 	// failures: the running job's path's choices for when it doesn't work (V6b; under mu)
 	failures *rules.Failures
+	// after and cardVars: the path's after-save cards and the run's values (FB2a), set by process for runClaimed.
+	after    []rules.Card
+	cardVars map[string]string
 	// lease: the running job's lease (V7a; under mu)
 	lease string
 	ID    string
@@ -173,6 +186,9 @@ type Worker struct {
 	Poll    time.Duration
 	// OnDone is called after a job succeeds with the final path (optional).
 	OnDone func(job jobs.Job, finalPath string)
+	// Cards is what a workflow's after-save cards may touch (FB2a): the connections and the notification
+	// targets, wired by main. Nil functions mean the card reports that it can't run here.
+	Cards func(job jobs.Job, finalPath string) flow.Env
 
 	// Safety checks (see verify.go). Zero values mean the defaults.
 	DecodeCheck string  // "auto" (default), "always" or "off"
@@ -188,11 +204,19 @@ type Worker struct {
 	StallAfter time.Duration
 	// FinishAfter: the same, once the position is at the file's length (the finishing step; 0: DefaultFinishAfter).
 	FinishAfter time.Duration
+	// FrozenPositionFactor: the multiple of StallAfter that out_time may stay frozen while frames or bytes grow
+	// (0: frozenPositionFactor).
+	FrozenPositionFactor int
 	// KeepDays is how many days a replaced original is kept in .syp-trash (keep.go); 0 or nil: it is
 	// deleted by the rename, as before slice 17. Journal records those swaps (needed when keeping).
 	KeepDays func() int
 	Journal  Journal
 	Now      func() time.Time // nil: time.Now
+
+	// scorePlace, when set, replaces ssimSegment as the per-place scorer (tests fake the scores with it).
+	scorePlace scoreFunc
+	// statFinal, when set, replaces os.Stat for the new file after it is put in place (tests fail it or zero it).
+	statFinal func(string) (os.FileInfo, error)
 
 	mu         sync.Mutex
 	filterMemo map[string]bool
@@ -202,6 +226,7 @@ type Worker struct {
 	progressAt atomic.Int64       // UnixNano of the running encode's last progress (stall watchdog)
 	finishing  atomic.Bool        // the position is at the file's length: the stall watchdog gives the finishing allowance
 	stalledFor atomic.Int64       // the limit (ns) the watchdog last stopped an encode at: the message says it
+	positionAt atomic.Int64       // UnixNano of the running encode's last forward move of out_time (the frozen-position ceiling)
 	// the running job's run counters (log-spec L2 summary): the ffmpeg runs it needed and the bytes it wrote.
 	passes, bytesWritten atomic.Int64
 	statsCounting        atomic.Bool // false: this job's counters are not recorded (a remote job, whose runs are not all here)
@@ -238,9 +263,28 @@ const DefaultFinishAfter = time.Hour
 // end: the last progress report can stop a little short of it, and out_time can run a little past it.
 const finishTolerance = 2.0
 
-// stallWarnAfter is how long the media position may stay put before the job log warns about it (log-spec R9);
+// stallWarnAfter is how long an encode may go without moving (position, frames or bytes) before the job log warns (R9);
 // the job itself is stopped only at StallAfter (ten minutes by default).
 const stallWarnAfter = 30 * time.Second
+
+// frozenPositionFactor: an encode whose out_time has not moved for this many StallAfter is stopped even while its
+// frames or bytes still grow (the size bound does not catch a slow runaway). A subtitle gap freezes out_time for
+// minutes (195 s seen), so with the default 10 min StallAfter a frozen position gets 30 min.
+const frozenPositionFactor = 3
+
+// frozenFactor is the ceiling's multiple of StallAfter (Worker.FrozenPositionFactor, or the default).
+func (w *Worker) frozenFactor() time.Duration {
+	if w.FrozenPositionFactor > 0 {
+		return time.Duration(w.FrozenPositionFactor)
+	}
+	return frozenPositionFactor
+}
+
+// outputWithin says a converting output of total bytes is within twice its source's size. A source of unknown
+// size (0) has no bound, so its bytes never count as progress.
+func outputWithin(sizeBefore, total int64) bool {
+	return sizeBefore > 0 && total <= 2*sizeBefore
+}
 
 // quietAfter is how long ffmpeg may print nothing before the job log says the conversion is still running
 // (log-spec R9's quiet warning). Unlike the stall warning it says nothing about the media position.
@@ -478,10 +522,14 @@ func (w *Worker) runClaimed(ctx context.Context, job jobs.Job, jobCtx context.Co
 		}
 		return true, err
 	}
-	st, _ := os.Stat(final)
-	var size int64
-	if st != nil {
-		size = st.Size()
+	stat := os.Stat
+	if w.statFinal != nil { // a test's fake stat
+		stat = w.statFinal
+	}
+	st, _ := stat(final)
+	size, note := newFileSize(st, w.verified.SizeBytes)
+	if note != "" {
+		w.jobf(job.ID, "%s", note)
 	}
 	if st != nil && w.verified.Video() != nil { // the new file's codec, size and length for the Files view (S5)
 		if b, err := json.Marshal(w.verified); err == nil {
@@ -504,8 +552,55 @@ func (w *Worker) runClaimed(ctx context.Context, job jobs.Job, jobCtx context.Co
 	if err := w.Queue.Complete(job.ID, final, size); err != nil {
 		return true, err
 	}
-	if w.OnDone != nil {
-		w.OnDone(job, final)
+	w.mu.Lock()
+	after, cardVars := w.after, w.cardVars
+	w.mu.Unlock()
+	// A tell card makes that kind of connection per workflow; the other kind is still told as it always has been
+	// (flow-builder.md section 10; review2-538 P3b: per kind, not per path). Without any tell card the global
+	// tell runs unchanged.
+	hasMedia, hasDownloader := false, false
+	for _, c := range after {
+		hasMedia = hasMedia || c.Type == workflow.TypeMediaServer
+		hasDownloader = hasDownloader || c.Type == workflow.TypeDownloader
+	}
+	switch {
+	case !hasMedia && !hasDownloader:
+		if w.OnDone != nil {
+			w.OnDone(job, final)
+		}
+	case w.Cards != nil:
+		e := w.Cards(job, final)
+		if !hasMedia && e.TellMediaServer != nil {
+			e.TellMediaServer("all") // "none connected" is not news here: the global tell never said so either
+		}
+		if !hasDownloader && e.TellDownloader != nil {
+			e.TellDownloader("all")
+		}
+	}
+	if len(after) > 0 { // FB2a: the path's cards on the saved result; one that doesn't work is a warning, never a failure
+		st := &flow.State{Vars: maps.Clone(cardVars), Final: final, Original: job.Path, LibraryRoot: job.Library}
+		if st.Vars == nil {
+			st.Vars = map[string]string{}
+		}
+		for k, v := range vars.EndValues(final, job.SizeBefore, size) {
+			st.Vars[k] = v
+		}
+		env := flow.Env{Log: func(l string) { w.jobNote(job.ID, secReplace, jobs.LevelInfo, "(%s): %s", job.Path, l) }, Tag: w.tagger(job.ID)}
+		if w.Cards != nil {
+			e := w.Cards(job, final)
+			env.TellMediaServer, env.TellDownloader, env.Notify, env.Exec = e.TellMediaServer, e.TellDownloader, e.Notify, e.Exec
+		}
+		notes, warnings := flow.After(after, st, env)
+		for _, n := range notes {
+			if n.Failed {
+				w.Queue.AddStep(job.ID, "after", false, n.Words)
+			} else {
+				w.Queue.AddDecision(job.ID, n.NodeID, "", n.Name+" → "+n.Words)
+			}
+		}
+		for _, msg := range warnings {
+			w.jobNote(job.ID, secReplace, jobs.LevelWarning, "(%s): %s", job.Path, msg)
+		}
 	}
 	return true, nil
 }
@@ -759,9 +854,15 @@ func reachedEnd(outUS, durationSec float64) bool {
 // finishing). The returned func ends the watch. Checks after the encode have their own time limits (slice 10).
 func (w *Worker) watchStall(id int64) func() {
 	w.progressAt.Store(time.Now().UnixNano())
+	w.positionAt.Store(time.Now().UnixNano())
 	w.finishing.Store(false)
 	after := w.stallAfter()
 	done := make(chan struct{})
+	stopFor := func(limit time.Duration) {
+		w.stalledFor.Store(int64(limit))
+		w.jobf(id, ": no progress for %s, stopping it", limit)
+		w.stop(id, stopStall)
+	}
 	go func() {
 		t := time.NewTicker(max(after/20, 10*time.Millisecond))
 		defer t.Stop()
@@ -770,11 +871,15 @@ func (w *Worker) watchStall(id int64) func() {
 			case <-done:
 				return
 			case <-t.C:
-				limit := w.stallLimit(after, w.finishing.Load())
+				finishing := w.finishing.Load()
+				limit := w.stallLimit(after, finishing)
 				if time.Since(time.Unix(0, w.progressAt.Load())) >= limit {
-					w.stalledFor.Store(int64(limit))
-					w.jobf(id, ": no progress for %s, stopping it", limit)
-					w.stop(id, stopStall)
+					stopFor(limit)
+					return
+				}
+				ceiling := w.stallLimit(w.frozenFactor()*after, finishing)
+				if time.Since(time.Unix(0, w.positionAt.Load())) >= ceiling {
+					stopFor(ceiling) // frames or bytes still grow, but out_time has not moved for the ceiling
 					return
 				}
 				w.quietCheck(id, w.now()) // R9: ffmpeg printing nothing for a minute
@@ -929,7 +1034,8 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	// The Plan for this file, from its library's flow and the probe just taken: what to run, and what
 	// the result must look like. Whether to convert it was the scanner's decision (as before Plans);
 	// only a flow that cannot say how to convert stops the job here.
-	plan := tmpl.Compile(src)
+	facts := w.runFacts(job, src, before) // FB1c: what the path's questions beyond the probe ask about
+	plan := tmpl.CompileWith(src, facts)
 	if fb, err := w.Queue.FallbackOf(job.ID); err == nil && fb != "" { // V6b: it falls back to another path
 		var b rules.Branch
 		if json.Unmarshal([]byte(fb), &b) == nil {
@@ -939,6 +1045,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	w.mu.Lock()
 	w.failures = plan.OnFailure // what this path does when it doesn't work (RunOne reads it)
 	w.planOutput = OutputMode(plan.Output)
+	w.after, w.cardVars = plan.After, nil // FB2a: the after-save cards (runClaimed runs them); the values follow below
 	w.mu.Unlock()
 	// Dolby Vision the flow leaves alone is never encoded, whatever was decided when the job was queued
 	// (review a09f6f5: a job queued before migration 17 or a setting change). Only these skips: the
@@ -956,6 +1063,35 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	// for what is queued are unchanged.
 	if plan.Skip != "" && again != nil { // the done job stays done: its file and kept original as they are
 		return "", againLeftAlone()
+	}
+	// FB1c: the path's cards before its end (Set a variable, Add a note), in order, whether the path converts,
+	// leaves the file alone or stops as failed, so a note can say why. Each one is a step of the timeline; the
+	// first that doesn't work fails the job, the original untouched; what they set joins the run's values.
+	var published map[string]string
+	if len(plan.Before) > 0 {
+		st := &flow.State{Vars: maps.Clone(facts.Vars)} // its own copy: what the cards set is told apart below
+		env := flow.Env{Log: func(l string) { w.jobNote(job.ID, secEncode, jobs.LevelInfo, "(%s): %s", job.Path, l) }, Tag: w.tagger(job.ID)}
+		if w.Cards != nil { // FB2b: the downloaders answer before the conversion
+			env.Lookup = w.Cards(job, "").Lookup
+		}
+		notes, berr := flow.Before(plan.Before, st, env)
+		for _, n := range notes {
+			w.Queue.AddDecision(job.ID, n.NodeID, "", n.Name+" → "+n.Words)
+		}
+		if berr != nil {
+			w.Queue.AddStep(job.ID, "failed", false, berr.Error()+".")
+			return "", failed(berr.Error()+". The original is untouched.", berr)
+		}
+		published = map[string]string{}
+		for k, v := range st.Vars {
+			if facts.Vars[k] != v {
+				published[k] = v
+			}
+		}
+	}
+	if plan.Skip != "" && plan.Fail { // FB1c: the path ended in "Stop as failed": the job fails with its words, the original untouched
+		w.Queue.AddStep(job.ID, "failed", false, plan.Skip+".")
+		return "", failed(plan.Skip+". The original is untouched.", errors.New("stopped by its workflow: "+plan.Skip))
 	}
 	if plan.Skip != "" {
 		w.writeStepSections(job.ID, plan.Steps) // the step that left it alone still says so (L2, R4)
@@ -994,7 +1130,14 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		stepNote(rules.StepAudio, rules.FoldedNote)
 	}
 	if plan.StyledSubsPlain { // design, 02:49Z: once per file
-		stepNote(rules.StepSubtitles, rules.StyledSubsNote)
+		note := rules.StyledSubsNote
+		if plan.Container == "webm" {
+			note = rules.StyledSubsWebMNote
+		}
+		stepNote(rules.StepSubtitles, note)
+	}
+	if plan.BitmapSubsDropped > 0 { // user bug 11-20: WebM can't hold picture subtitles, so they are left out
+		stepNote(rules.StepSubtitles, rules.BitmapSubsNote(plan.BitmapSubsDropped))
 	}
 	if plan.HDRNote != "" { // what the HDR conversion does not keep (S3)
 		stepNote(rules.StepConvertVideo, plan.HDRNote)
@@ -1002,7 +1145,12 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	// W4b: the values the Save the result step's {{name}} fields take, and its track title. The title
 	// goes on every audio track of the new file, so it is resolved before the snapshot: a remote worker
 	// encodes the plan it is given.
-	vals, vtable, err := w.runValues(job, src, plan)
+	vals, vtable, err := w.runValues(job, src, plan, published)
+	if err == nil {
+		w.mu.Lock()
+		w.cardVars = vals // the after-save cards resolve their {{name}}s with the run's values (FB2a)
+		w.mu.Unlock()
+	}
 	if err != nil {
 		// a secret sealed on another computer can't be opened here (a restored backup): the job stops,
 		// naming it, rather than run with it silently empty
@@ -1031,8 +1179,11 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	if exp.DurationSec <= 0 {
 		exp.DurationSec = job.DurationSec
 	}
-	// The job keeps what it is about to do and how the result will be judged. If that cannot be
-	// recorded, it does not start: nothing has been written yet.
+	// The job keeps what it is about to do and how the result will be judged, recorded here so its log
+	// can show the variables even when a check below stops it (an output path it can't use, a card's
+	// slot it waits for). If that cannot be recorded, it does not start: nothing has been written yet.
+	// The main video's rules are filled in and the snapshot recorded again once the encoder that runs is
+	// known: a card and the processor can make different pictures from the same plan (slice 3).
 	snap := rules.Snapshot{Plan: plan, Expect: exp, Verify: w.verification(exp), Source: &src, Variables: vtable}
 	b, err := json.Marshal(snap)
 	if err == nil {
@@ -1141,11 +1292,17 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	full := false // gpu runs the full GPU pipeline (decode and encode on the graphics card)
 	fell := false // the graphics encoder failed and the processor is retrying the file
 	fellReason := ""
+	var gpuSlot *GPUSlot // the card's place this job holds while its graphics encode runs
+	defer func() {
+		if gpuSlot != nil {
+			gpuSlot.Release()
+		}
+	}()
 	args := plan.FFmpegArgs(srcPath, tmp)
 	w.setPhase(secEncode) // the encoder choice and its notes belong to encode (log-spec section 4)
 	chosenWhy := ""
 	if w.remote == nil && w.Encoder != nil {
-		need10 := tenBitSource(plan)
+		need10 := rules.NeedsTenBit(plan, &src)
 		if w.EncoderCandidates != nil && !plan.Video.Copy { // R5: what hardware is here, and each encoder considered
 			for _, line := range w.EncoderCandidates(plan.Video.Codec, need10, plan.Video.HDR) {
 				w.logLine(job.ID, secEncode, jobs.LevelInfo, line)
@@ -1154,14 +1311,25 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		want, note := w.Encoder(plan.Video.Codec, need10, plan.Video.HDR)
 		if want != "" && !plan.Video.Copy {
 			until, paused, err := w.Queue.EncoderPaused(w.ID)
-			var ok bool
 			switch {
 			case err == nil && paused:
 				w.jobf(job.ID, ": %s is paused until %s after three failures in a row; using the processor", want, until.Local().Format("15:04"))
 			default:
-				if args, full, ok = w.graphicsArgs(ctx, job, plan, src, srcPath, tmp, want); ok {
-					gpu = want
-					chosenWhy = want + " passed its test on this computer and can do this file"
+				if gargs, gfull, ok := w.graphicsArgs(ctx, job, plan, src, srcPath, tmp, want); ok {
+					// The card's slots come first (user bug 11-20): a job waits while they are all in
+					// use, so no two graphics jobs run on it at once beyond the limit. With none (the
+					// limit at 0), the processor does the encoding, as it does for any plan the card
+					// can't do.
+					slot, serr := w.takeGPUSlot(ctx, job)
+					if serr != nil { // stopped while it waited
+						return "", serr
+					}
+					if slot != nil {
+						gpuSlot = slot
+						args, full = gargs, gfull
+						gpu = want
+						chosenWhy = want + " passed its test on this computer and can do this file"
+					}
 				} else {
 					w.jobf(job.ID, ": encoder %s can't do this file; using the processor", want)
 				}
@@ -1176,6 +1344,19 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			line += " — " + chosenWhy
 		}
 		w.logLine(job.ID, secEncode, jobs.LevelInfo, line+". Settings: "+encoderDetail(args))
+	}
+	// The new file's rules, now that the encoder that runs is known: the main video by the plan's format,
+	// its height and width (±2 px) and the depth that encoder makes; every other stream as today.
+	exp.MainVideo = plan.MainVideoRules(src, gpu)
+	// The job keeps what it is about to do and how the result will be judged, now with the main video's
+	// rules. If that cannot be recorded, it does not start: your original has not been touched.
+	snap = rules.Snapshot{Plan: plan, Expect: exp, Verify: w.verification(exp), Source: &src, Variables: vtable}
+	b, err = json.Marshal(snap)
+	if err == nil {
+		err = w.Queue.RecordPlan(job.ID, string(b), snap.Fingerprint())
+	}
+	if err != nil {
+		return "", retryable(failed("What this conversion will do could not be recorded, so it did not start. Your original was not touched. Press Retry.", err), retryGeneral)
 	}
 	if note := vbrAverageNote(plan.Video); note != "" {
 		w.jobf(job.ID, ": %s", note)
@@ -1225,6 +1406,9 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 				encErr, decoded, terr = w.encodeLocal(ctx, job, args)
 				continue
 			}
+			if gpuSlot != nil { // the processor converts from here: the card is free for another job
+				gpuSlot.Release()
+			}
 			fell, fellReason = true, shortReason(reason)
 			args = plan.FFmpegArgs(srcPath, tmp)
 			setLive(job.ID, LiveJob{Worker: w.ID, Started: w.now(), ConvertingTo: convertingTo(plan, src, ""), Encoder: encoderWords(plan),
@@ -1232,6 +1416,29 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			encStart = w.now()
 			encErr, decoded, terr = w.encodeLocal(ctx, job, args)
 			break
+		}
+		if gpuSlot != nil { // the graphics encode has ended: the card's place is free for the next job
+			gpuSlot.Release()
+		}
+	}
+	// The encoder that made the file: the card, unless it failed and the processor retried, or a remote
+	// worker's own choice, named in the arguments it reported.
+	ranOn := gpu
+	if fell {
+		ranOn = "" // the processor converted it after the card failed
+	}
+	if w.remote != nil {
+		ranOn = rules.GraphicsEncoderIn(args, plan.Video.Index)
+	}
+	if m := plan.MainVideoRules(src, ranOn); terr == nil && m != nil && (exp.MainVideo == nil || *m != *exp.MainVideo) {
+		// Another encoder made the file than the one chosen here (a fall-back, or a remote worker's own):
+		// judge it by the picture that encoder makes, and keep the record saying what it was judged by.
+		exp.MainVideo = m
+		snap.Expect = exp
+		if b, jerr := json.Marshal(snap); jerr == nil {
+			if rerr := w.Queue.RecordPlan(job.ID, string(b), snap.Fingerprint()); rerr != nil {
+				w.jobf(job.ID, ": the plan could not be recorded with the encoder that ran: %v", rerr)
+			}
 		}
 	}
 	w.recordEncode(job.ID, args, encStart, encErr, terr, probeSummary(src))
@@ -1254,10 +1461,6 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		}
 	}
 	if terr == nil {
-		ranOn := gpu // the encoder that made the new file
-		if fell {
-			ranOn = "" // the processor converted it after the card failed
-		}
 		w.Queue.AddStep(job.ID, "converted", true, "Converted: "+convertingTo(plan, src, ranOn)+".")
 	}
 	if terr != nil {
@@ -1266,6 +1469,9 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		}
 		if errors.Is(terr, syscall.ENOSPC) || strings.Contains(encErr+terr.Error(), "No space left on device") {
 			return "", retryable(failed(diskFull, terr), retrySpace)
+		}
+		if words := headerWords(encErr); words != "" { // the new file's type can't hold a track: not damage
+			return "", failed(words, fmt.Errorf("%w: %s", terr, firstLines(encErr, 3)))
 		}
 		ferr := failed("Converting stopped with an error. Your original was not touched. Press Retry; if it keeps failing, the file may be damaged.", fmt.Errorf("%w: %s", terr, firstLines(encErr, 3)))
 		if killedBySignal(terr) { // stopped by the system (out of memory...), not a problem of the file
@@ -1740,6 +1946,29 @@ var readSourceState = media.FileState
 // goneWords: the original was moved or deleted while it was converted. A failure, never a damaged file.
 const goneWords = "The file was moved or deleted while it was being converted."
 
+// headerWords is the message for ffmpeg stopping before it wrote the new file's header: its type can't
+// hold a track as the plan maps it in (user bug 11-20). ffmpeg's own sentence about what is supported,
+// when it gives one, else plain words. "" when the error is not a header refusal, so a damaged file is
+// never called a file type's limit.
+func headerWords(encErr string) string {
+	if !strings.Contains(encErr, "Could not write header") {
+		return ""
+	}
+	why := ""
+	for _, line := range strings.Split(encErr, "\n") {
+		if !strings.Contains(line, "supported for") {
+			continue
+		}
+		if i := strings.Index(line, "] "); i >= 0 { // "[webm @ 0x...] Only VP8 ... are supported for WebM."
+			why = strings.TrimSpace(line[i+2:])
+		}
+	}
+	if why == "" {
+		return "ffmpeg couldn't write the new file. Your original was not touched."
+	}
+	return "ffmpeg couldn't write the new file: " + why + " Your original was not touched."
+}
+
 // sourceGone says whether nothing is at the original's path any more. Only a missing name counts: a
 // different file put in its place is a change (kept), and any other error proves nothing about the file.
 func sourceGone(path string) bool {
@@ -2109,6 +2338,22 @@ type CheckScore struct {
 	Passed     bool
 }
 
+// newFileSize is the new file's size for the job's record. st is the stat taken after the file was put in
+// place. A failed stat, or one that reports 0 bytes for a file that was verified, uses the size measured before
+// the move, and note says so for the job log.
+func newFileSize(st os.FileInfo, measured int64) (size int64, note string) {
+	if st != nil && st.Size() > 0 {
+		return st.Size(), ""
+	}
+	if measured > 0 {
+		if st == nil {
+			return measured, fmt.Sprintf("Couldn't read the new file's size after it was put in place; using the size measured before the move (%d bytes).", measured)
+		}
+		return measured, fmt.Sprintf("The new file reported 0 bytes after it was put in place; using the size measured before the move (%d bytes).", measured)
+	}
+	return 0, "Couldn't read the new file's size after it was put in place; size unknown."
+}
+
 // recordCheck keeps the job's check step: the picture score, when the check ran (w.check, set by the picture comparison).
 func (w *Worker) recordCheck(id int64, started time.Time, verr error) {
 	if w.Queue == nil || w.check == nil {
@@ -2207,7 +2452,7 @@ func shortReason(reason string) string {
 func (w *Worker) graphicsArgs(ctx context.Context, job jobs.Job, plan rules.Plan, src media.Info, srcPath, tmp, want string) (args []string, full, ok bool) {
 	fam := rules.GraphicsFamily(want)
 	if v := src.Video(); v != nil && w.GraphicsDecodes != nil && (fam == "qsv" || fam == "vaapi") {
-		if w.GraphicsDecodes(ctx, fam, v.Codec, tenBitSource(plan)) { // one rule for 10-bit, here and at the encoder
+		if w.GraphicsDecodes(ctx, fam, v.Codec, rules.NeedsTenBit(plan, &src)) { // one rule for 10-bit, here and at the encoder
 			if args, full = plan.FFmpegArgsFullGPU(srcPath, tmp, want); full {
 				w.jobf(job.ID, ": decoding and encoding on the graphics card (full GPU pipeline)")
 				return args, true, true
@@ -2261,16 +2506,23 @@ func (w *Worker) encodeLocal(ctx context.Context, job jobs.Job, args []string) (
 	moved := w.now() // when it last moved (a warning says so after stallWarnAfter, R9)
 	stalled := false // the warning has been written; one line says when it moves again
 	encErr, terr = media.TranscodeLines(ctx, w.Exec, w.FFmpeg, args, job.DurationSec, func(p media.Progress) {
+		// the encode is alive while its position moves, or while its frame count or bytes written grow and the output
+		// stays within twice the source's size (a runaway output past that is not progress). out_time follows the
+		// most-behind stream, so it freezes in a subtitle gap while frames still go on (bug 2).
+		posMoved := p.OutTimeUS > at // a position further on: one that repeats is not progress
+		outputOK := outputWithin(job.SizeBefore, p.TotalSize)
+		alive := posMoved || (outputOK && (p.Frame > frames || p.TotalSize > wrote))
 		frames = p.Frame
 		if p.TotalSize > wrote {
 			wrote = p.TotalSize
 		}
-		// only a position further on is progress: a stuck ffmpeg can keep reporting the same one (a
-		// damaged file, 21 min on a test run, never stopped), which mustn't hold off the stall stop
-		if p.OutTimeUS > at {
+		if posMoved {
 			at = p.OutTimeUS
-			w.progressAt.Store(time.Now().UnixNano())
+			w.positionAt.Store(time.Now().UnixNano())
 			w.finishing.Store(reachedEnd(p.OutTimeUS, job.DurationSec))
+		}
+		if alive {
+			w.progressAt.Store(time.Now().UnixNano())
 			moved = w.now()
 			if stalled { // R9: the log says it is moving again
 				stalled = false
@@ -2304,4 +2556,39 @@ func (w *Worker) probeSource(ctx context.Context, path string) (media.Info, erro
 		return media.Info{}, err
 	}
 	return scanner.Probe(ctx, w.Queue, w.Exec, w.FFprobe, path, st)
+}
+
+// JobTagger is what a store offers once jobs carry tags (FB2c; the column is the store's slice): the
+// record's tags, and a change to them that answers with the result. A Queue without it leaves the
+// "Tag the file" card reporting that it can't tag from here, and "Has a tag" answering as if none.
+type JobTagger interface {
+	JobTags(id int64) ([]string, error)
+	SetJobTags(id int64, add, remove []string) ([]string, error)
+}
+
+// The store carries tags since migration 57 (#545): the cards reach them through this interface; this line
+// keeps the two from drifting apart (review2-542).
+var _ JobTagger = (*jobs.Store)(nil)
+
+// tagger is Env.Tag for job id, or nil when the store has no tags yet.
+func (w *Worker) tagger(id int64) func(add, remove []string) ([]string, error) {
+	t, ok := w.Queue.(JobTagger)
+	if !ok {
+		return nil
+	}
+	return func(add, remove []string) ([]string, error) { return t.SetJobTags(id, add, remove) }
+}
+
+// jobTags are the record's tags for the facts, empty when the store has none. A read that fails is said in
+// the job log (review2-542 P3b), since a tag question would otherwise answer No for every file in silence.
+func (w *Worker) jobTags(id int64) []string {
+	if t, ok := w.Queue.(JobTagger); ok {
+		tags, err := t.JobTags(id)
+		if err != nil {
+			w.jobNote(id, secEncode, jobs.LevelWarning, "the file's tags could not be read (%v); a tag question answers as if there were none", err)
+			return nil
+		}
+		return tags
+	}
+	return nil
 }

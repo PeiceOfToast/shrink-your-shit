@@ -56,11 +56,60 @@ func v2WorkflowVariables(api *http.ServeMux, store *jobs.Store) {
 			items = append(items, map[string]any{"name": v.Name, "description": v.Description,
 				"group": "Workflow", "value": ownValue(v), "fields": nil})
 		}
+		for _, p := range publishedVariables(store, id) { // FB1d: what a step before sets ("Set a variable")
+			items = append(items, map[string]any{"name": p.name, "description": p.words, "group": "Set by a step", "value": nil, "fields": nil})
+		}
 		writeJSON(w, map[string]any{
 			"sample":    map[string]any{"path": sample.path, "builtIn": sample.builtIn},
 			"variables": items,
 		})
 	})
+}
+
+// publishedVariables are the names the workflow's steps set for the steps after them, as its draft says
+// (else its newest published one): a "Set a variable" step's name, with the step's own words.
+type published struct{ name, words string }
+
+func publishedVariables(store *jobs.Store, flowID int64) []published {
+	var doc *workflow.Doc
+	if d, _, err := store.Draft(flowID); err == nil {
+		doc = &d.Doc
+	} else if rev, ok, err := store.LatestRevision(flowID); err == nil && ok {
+		doc = &rev.Doc
+	}
+	if doc == nil {
+		return nil
+	}
+	var out []published
+	seen := map[string]bool{}
+	for _, n := range doc.Nodes {
+		if def, ok := workflow.Definition(n.Type); ok { // FB2a: what a card publishes (the checksum, the copy's path)
+			for _, p := range def.Publishes {
+				if seen[p.Name] {
+					continue
+				}
+				seen[p.Name] = true
+				out = append(out, published{p.Name, p.Words + " (set by the step “" + def.Name + "”)"})
+			}
+		}
+		if n.Type != workflow.TypeSetVariable {
+			continue
+		}
+		name, _ := n.Config["name"].(string)
+		if name == "" || seen[name] || !workflow.NamePattern.MatchString(name) {
+			continue
+		}
+		seen[name] = true
+		words := "Set by the step “Set a variable”"
+		if n.Name != "" {
+			words = "Set by the step “" + n.Name + "”"
+		}
+		if v, _ := n.Config["value"].(string); v != "" {
+			words += " to " + v
+		}
+		out = append(out, published{name, words})
+	}
+	return out
 }
 
 // ownVariables are the workflow's own variables as its draft says (else its newest published one, for
@@ -136,13 +185,17 @@ func librariesOf(store *jobs.Store, flowID int64) []jobs.Library {
 }
 
 // probeOf is the sample as it was when the job was planned (the job's own "before" probe, which a
-// replace keeps), else the newest stored probe of its path.
+// replace keeps), else the stored probe of its path at the size the job started from. After a replace at the
+// same name the path holds the new file, so there is no fallback then (as in v2jobs).
 func probeOf(store *jobs.Store, j jobs.Job) *media.Info {
 	var snap rules.Snapshot
 	if json.Unmarshal([]byte(j.Plan), &snap) == nil && snap.Source != nil {
 		return snap.Source
 	}
-	if raw, ok := store.LatestProbe(j.Path); ok {
+	if j.OutputPath == j.Path {
+		return nil
+	}
+	if raw, ok := store.ProbeOfSize(j.Path, j.SizeBefore); ok {
 		var info media.Info
 		if json.Unmarshal([]byte(raw), &info) == nil {
 			return &info

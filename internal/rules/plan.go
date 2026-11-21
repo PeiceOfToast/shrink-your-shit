@@ -37,9 +37,15 @@ type Plan struct {
 	// step sections. Empty for flows that cannot say (see withStepDecisions).
 	Steps []StepDecision `json:"steps,omitempty"`
 	// OnFailure: a workflow path's failure policies (V6b); nil for a straight workflow.
-	OnFailure  *Failures `json:"onFailure,omitempty"`
-	FolderMode string    `json:"folderMode,omitempty"` // "next_to_library" (V5a): the library's own folder instead of OutputDir
-	Container  string    `json:"container,omitempty"`  // the new file's type (its extension, "mkv" or "mp4"); "" = the original's
+	OnFailure *Failures `json:"onFailure,omitempty"`
+	// Before: the path's actions before the conversion (FB1b), run by the worker in order; Fail: the path
+	// ends the job as failed with Skip's words, the original untouched ("Stop as failed"). Both omitted for
+	// every workflow saved before FB1b, so its Plans and fingerprints are unchanged.
+	Before     []Card `json:"before,omitempty"`
+	Fail       bool   `json:"fail,omitempty"`
+	After      []Card `json:"after,omitempty"`      // FB2a: the actions on the saved result
+	FolderMode string `json:"folderMode,omitempty"` // "next_to_library" (V5a): the library's own folder instead of OutputDir
+	Container  string `json:"container,omitempty"`  // the new file's type (its extension, "mkv" or "mp4"); "" = the original's
 	// The Save the result step's {{name}} templates (W4b), as the workflow has them. The worker fills
 	// them in at run time; "" keeps today's names and titles.
 	OutputName string `json:"outputName,omitempty"`
@@ -59,13 +65,17 @@ type Plan struct {
 	AudioFolded   bool      `json:"audioFolded,omitempty"`   // a 7.1 track became 5.1 E-AC-3/AC-3: the job log says FoldedNote (design, 01:52Z)
 	SmallKept     bool      `json:"smallKept,omitempty"`     // a small stereo track kept as it is: the job log says SmallKeptNote (design, 02:26Z)
 	TypeNote      string    `json:"typeNote,omitempty"`      // "keep" turned this file into MKV: said once in the job log (review 4ac9c0d)
-	// StyledSubsPlain: an ASS/SSA subtitle became plain mov_text for MP4: said once in the job log (design, 02:49Z)
-	StyledSubsPlain bool    `json:"styledSubsPlain,omitempty"`
-	AudioOrder      []int   `json:"audioOrder,omitempty"`    // the original's audio stream indexes in order, when Tracks has any
-	SubtitleOrder   []int   `json:"subtitleOrder,omitempty"` // and its subtitle stream indexes
-	MinSSIM         float64 `json:"minSSIM,omitempty"`       // picture threshold; 0 = the program's -min-ssim
-	Kind            string  `json:"kind"`                    // the template kind it was compiled from
-	CompilerVersion int     `json:"compilerVersion"`
+	// StyledSubsPlain: an ASS/SSA subtitle became plain mov_text for MP4, or plain webvtt for WebM: said
+	// once in the job log (design, 02:49Z).
+	StyledSubsPlain bool `json:"styledSubsPlain,omitempty"`
+	// BitmapSubsDropped: picture subtitles (PGS, VobSub, DVB) left out because WebM can't hold them: said
+	// once in the job log, never a reason to leave the file alone.
+	BitmapSubsDropped int     `json:"bitmapSubsDropped,omitempty"`
+	AudioOrder        []int   `json:"audioOrder,omitempty"`    // the original's audio stream indexes in order, when Tracks has any
+	SubtitleOrder     []int   `json:"subtitleOrder,omitempty"` // and its subtitle stream indexes
+	MinSSIM           float64 `json:"minSSIM,omitempty"`       // picture threshold; 0 = the program's -min-ssim
+	Kind              string  `json:"kind"`                    // the template kind it was compiled from
+	CompilerVersion   int     `json:"compilerVersion"`
 }
 
 // Skip codes: why a file is not converted, as the Preview counts them (UI-API-CONTRACT.md, the open
@@ -158,7 +168,11 @@ func (h HDR) x265Params() string {
 // Compile makes the Plan for one file. Skip says whether it should be converted (the scanner's
 // decision); Video, Output and the thresholds say how. A template that cannot run yields a Plan
 // with Skip set and no Video codec, and every Plan ends with its Steps (steps.go).
-func (t Template) Compile(info media.Info) (p Plan) {
+func (t Template) Compile(info media.Info) (p Plan) { return t.CompileWith(info, Facts{}) }
+
+// CompileWith is Compile with the run's facts (FB1b): what a question beyond the probe asks about. The
+// worker gives them; a caller without them gets every variable question answered No.
+func (t Template) CompileWith(info media.Info, f Facts) (p Plan) {
 	defer func() {
 		// The plan carries the source's bit depth: a 10-bit (or deeper) first video stream keeps its depth
 		// through the encode where the target's encoder has one (VideoEncode.TenBit). A copied video is the
@@ -169,12 +183,16 @@ func (t Template) Compile(info media.Info) (p Plan) {
 		p = withStepDecisions(p, info)
 	}()
 	if t.Branches != nil { // V6a: the path the file's answers lead down
-		b, ds, ok := route(*t.Branches, info)
+		b, ds, ok := route(*t.Branches, info, f)
 		switch {
 		case !ok:
 			p = Plan{Kind: KindBranches, Skip: "no path of its workflow fits it", SkipCode: SkipSettingCannotRun}
 		case b.Then == nil:
-			p = Plan{Kind: KindBranches, Skip: skipWords(b.End), SkipCode: SkipLeftByWorkflow}
+			if b.Fail {
+				p = Plan{Kind: KindBranches, Skip: failWords(b.End), SkipCode: SkipLeftByWorkflow, Fail: true}
+			} else {
+				p = Plan{Kind: KindBranches, Skip: skipWords(b.End), SkipCode: SkipLeftByWorkflow}
+			}
 		default:
 			then := *b.Then
 			then.Languages = t.Languages
@@ -183,7 +201,7 @@ func (t Template) Compile(info media.Info) (p Plan) {
 		if len(p.Steps) > 0 && ok && b.Then != nil { // the checks' answers came before the path's own steps
 			p.Steps = append(checkSteps(ds), p.Steps...)
 		}
-		p.Path, p.Decisions, p.OnFailure = b.Path, ds, b.OnFailure
+		p.Path, p.Decisions, p.OnFailure, p.Before, p.After = b.Path, ds, b.OnFailure, b.Before, b.After
 		return p
 	}
 	p = Plan{Kind: t.Kind, CompilerVersion: t.CompilerVersion}
@@ -330,6 +348,7 @@ func (p Plan) FFmpegArgsFullGPU(in, out, enc string) ([]string, bool) {
 // the "converting to" line: convertingTo names the depth of the encoder that runs.
 var tenBitTargets = map[string]bool{"libx265": true, "libsvtav1": true}
 
+// EncodeTenBit answers a different question from NeedsTenBit: whether the target's encoder arguments make 10 bits.
 // EncodeTenBit says whether a graphics encoder makes a 10-bit video: HDR (S3), or a 10-bit source kept at its depth
 // by a target whose card encoder has one (tenBitTargets). It is a card's arguments' 10-bit flags and its "converting
 // to" line that read it; on the processor libx264 and libvpx-vp9 keep 10 bits too, which convertingTo names.
@@ -621,30 +640,18 @@ func (p Plan) Expect(src media.Info, packets int64) Expect {
 			n++
 		}
 	}
-	// A phone video's Display Matrix: ffmpeg encodes the picture upright, so a ±90° file's new picture
-	// has width and height swapped (before any scaling, which applies to the upright picture).
-	// (Not when the video is copied: it keeps its coded size and its Display Matrix.)
-	if vs := src.ByType("video"); !p.Video.Copy && p.Video.Index < len(vs) && vs[p.Video.Index].Quarter() {
+	// The picture the plan makes (plannedPicture): a phone video's Display Matrix means ffmpeg encodes
+	// the upright picture, so a ±90° file's new picture has width and height swapped, and a scaled plan's
+	// is the new height with the original's shape. (Not when the video is copied: it keeps its coded size
+	// and its Display Matrix.) The check's main-video rules read the same function.
+	if w, h, scaled := p.plannedPicture(src); w > 0 {
 		n := 0
 		for k := range e.Streams {
 			if e.Streams[k].Type != "video" {
 				continue
 			}
 			if n == p.Video.Index {
-				e.Streams[k].Width, e.Streams[k].Height = e.Streams[k].Height, e.Streams[k].Width
-			}
-			n++
-		}
-	}
-	if p.Video.Height > 0 { // scaled down: the encoded stream's picture size is the new one
-		n := 0
-		for k := range e.Streams {
-			if e.Streams[k].Type != "video" {
-				continue
-			}
-			if n == p.Video.Index {
-				e.Streams[k].Width, e.Streams[k].Height = ScaledWidth(e.Streams[k].Width, e.Streams[k].Height, p.Video.Height), p.Video.Height
-				e.Streams[k].PlannedSize = true
+				e.Streams[k].Width, e.Streams[k].Height, e.Streams[k].PlannedSize = w, h, scaled
 			}
 			n++
 		}
@@ -965,7 +972,12 @@ func compileSelectors(p Plan, s Selectors, info media.Info, langs []string, basi
 	p.Tracks = append(p.Tracks, movTextToSRT(p.Tracks, p.Container, info)...)
 	movText := textToMovText(p.Tracks, p.Container, info)
 	p.Tracks = append(p.Tracks, movText...)
-	for _, o := range movText {
+	webvtt := textToWebVTT(p.Tracks, p.Container, info)
+	p.Tracks = append(p.Tracks, webvtt...)
+	bitmapDrops, bitmapDropped := bitmapOutOfWebM(p.Tracks, p.Container, info)
+	p.Tracks = append(p.Tracks, bitmapDrops...)
+	p.BitmapSubsDropped = bitmapDropped
+	for _, o := range append(movText, webvtt...) {
 		for _, st := range info.Subtitles() {
 			if st.Index == o.Index && (st.Codec == "ass" || st.Codec == "ssa") {
 				p.StyledSubsPlain = true
@@ -1167,6 +1179,48 @@ func textToMovText(ops []TrackOp, container string, info media.Info) (out []Trac
 		}
 	}
 	return out
+}
+
+// textToWebVTT converts the text subtitles a WebM cannot hold as they are into its own (webvtt), the
+// same way textToMovText does for MP4, instead of the job failing when ffmpeg writes the new file's
+// header (user bug 11-20: WebM with SRT subtitles; then mov_text, the codec an MP4 holds, which a
+// hand-written name list missed). The kind is media's, so every codec ffmpeg reads as text is covered.
+// A webvtt subtitle is copied as it is: WebM holds it already. ASS loses its styling, as it does in
+// MP4. Only tracks no other op drops, saves as a file or converts.
+func textToWebVTT(ops []TrackOp, container string, info media.Info) (out []TrackOp) {
+	if container != "webm" {
+		return nil
+	}
+	has := map[int]bool{}
+	for _, o := range ops {
+		has[o.Index] = true
+	}
+	for _, s := range info.Subtitles() {
+		if s.SubKind == "text" && s.Codec != "webvtt" && !has[s.Index] {
+			out = append(out, TrackOp{Index: s.Index, Type: "subtitle", Encoder: "webvtt", Codec: "webvtt"})
+		}
+	}
+	return out
+}
+
+// bitmapOutOfWebM drops the picture subtitles (PGS, VobSub, DVB) a WebM cannot hold at all, and says how
+// many: the new file is made without them rather than the job failing (user bug 11-20). Only tracks no
+// other op drops, saves as a file or converts.
+func bitmapOutOfWebM(ops []TrackOp, container string, info media.Info) (out []TrackOp, dropped int) {
+	if container != "webm" {
+		return nil, 0
+	}
+	has := map[int]bool{}
+	for _, o := range ops {
+		has[o.Index] = true
+	}
+	for _, s := range info.Subtitles() {
+		if s.SubKind == "bitmap" && !has[s.Index] {
+			out = append(out, TrackOp{Index: s.Index, Type: "subtitle", Drop: true})
+			dropped++
+		}
+	}
+	return out, dropped
 }
 
 // movTextToSRT converts the MP4 text subtitles (mov_text) an MKV cannot hold as they are into SRT text

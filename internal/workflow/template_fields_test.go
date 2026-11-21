@@ -3,12 +3,15 @@
 package workflow
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/shrink-your-shit/shrink-your-shit/internal/vars"
 )
 
 // templatedFields are the (step type, setting) pairs that take {{name}} variables, in the order the
-// registry lists them: exactly the design's four (design-joblog-vars section 3).
+// registry lists them: the design's four (design-joblog-vars section 3) and FB1b's three run-card fields.
 func templatedFields() []string {
 	var out []string
 	for _, def := range Definitions() {
@@ -22,8 +25,8 @@ func templatedFields() []string {
 	return out
 }
 
-// The flag the editor reads must be on exactly the four fields that take variables, and each one's
-// help text must show an example (review2-504 P3b: the description had no test).
+// The flag the editor reads must be on exactly the fields that take variables, and each one's help
+// text must show an example (review2-504 P3b: the description had no test).
 func TestTemplatedFieldsAndTheirHelpText(t *testing.T) {
 	got := map[string]bool{}
 	for _, f := range templatedFields() {
@@ -34,6 +37,21 @@ func TestTemplatedFieldsAndTheirHelpText(t *testing.T) {
 		"output.commit/outputName": "{{title}}",
 		"output.commit/srtName":    "{{sub_lang}}",
 		"output.commit/trackTitle": "{{resolution}}",
+		// FB1b: the run cards' templated fields
+		"check.variable/value":      "{{resolution}}",
+		"action.set_variable/value": "{{title}}",
+		"action.note/text":          "{{title}}",
+		// FB2a: the after-save cards
+		"action.notify/text":  "{{saved_percent}}",
+		"action.sidecar/name": "{{title}}",
+		"action.sidecar/text": "{{new_size_bytes}}",
+		"action.copy/folder":  "{{library}}",
+		"action.copy/name":    "{{title}}",
+		// FB2b
+		"action.command/arguments": "{{output_path}}",
+		// FB2c
+		"action.tag/add":    "{{profile}}",
+		"action.tag/remove": "needs-review",
 	}
 	if len(got) != len(want) {
 		t.Errorf("fields with x-variables: %v, want %d", templatedFields(), len(want))
@@ -52,7 +70,7 @@ func TestTemplatedFieldsAndTheirHelpText(t *testing.T) {
 				continue // extras are caught by the count above
 			}
 			if !isTemplated {
-				t.Errorf("%s/%s takes variables but is not one of the four", def.Type, k)
+				t.Errorf("%s/%s takes variables but is not in the list", def.Type, k)
 				continue
 			}
 			if d, _ := p["description"].(string); !strings.Contains(d, example) {
@@ -116,5 +134,66 @@ func TestCheckTemplates(t *testing.T) {
 				t.Error("Validate must refuse it: Publish keys on Errors()")
 			}
 		})
+	}
+}
+
+// A secret never goes in a {{name}} field (ui-shop row 99dc819c): file names, folders and titles are
+// read by people, and at run time a secret is not a value at all, so the name would quietly come out
+// short. The same name as a plain variable is fine: the type, not the name, is what matters.
+func TestASecretCantGoInATemplate(t *testing.T) {
+	secret := func() []Variable { return []Variable{{Name: "api_key", Type: "secret", Value: "s3cret"}} }
+	want := "{{api_key}} is a secret, and a secret can't go in a file name, folder or title."
+	for _, c := range []struct {
+		name   string
+		vars   []Variable
+		config map[string]any
+		field  string
+	}{
+		{"a file name", secret(), map[string]any{"outputName": "{{api_key}}.mkv"}, "outputName"},
+		{"a folder", secret(), map[string]any{"folder": "{{api_key}}/movies"}, "folder"},
+		{"a title", secret(), map[string]any{"trackTitle": "{{api_key}}"}, "trackTitle"},
+		{"an .srt name", secret(), map[string]any{"srtName": "{{api_key}}.srt"}, "srtName"},
+		{"mixed with other text", secret(), map[string]any{"outputName": "{{api_key}}-{{title}}"}, "outputName"},
+		{"the same name as a plain variable", []Variable{{Name: "api_key", Type: "string", Value: "x"}},
+			map[string]any{"outputName": "{{api_key}}.mkv"}, ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			d := templateDoc(t, c.vars, c.config)
+			got := CheckTemplates(d)
+			if c.field == "" {
+				if len(got) != 0 {
+					t.Fatalf("issues %+v, want none", got)
+				}
+				if r := Validate(d); r.Errors() {
+					t.Fatalf("Validate refuses: %+v", r.Issues)
+				}
+				return
+			}
+			if len(got) != 1 {
+				t.Fatalf("issues %+v, want one", got)
+			}
+			i := got[0]
+			if i.Code != "unknown_variable" || i.Severity != "error" || i.Field != c.field || i.ConfigPath != "/"+c.field ||
+				i.Name != "api_key" || i.Suggest != "" || i.Message != want {
+				t.Errorf("%+v, want code unknown_variable field %s name api_key, no suggestion, message %q", i, c.field, want)
+			}
+			if !Validate(d).Errors() {
+				t.Error("Validate must refuse it: Publish keys on Errors()")
+			}
+		})
+	}
+}
+
+// A workflow saved before the check (a secret in a name) still runs, and the secret is not in the
+// name: at run time a secret gives no value, so that piece of the template comes out empty.
+func TestAStoredSecretTemplateRunsWithItEmpty(t *testing.T) {
+	src := vars.Source{Path: filepath.Join("media", "Movie.mkv"),
+		Variables: []vars.Own{{Name: "api_key", Type: "secret", Value: "s3cret"}}}
+	got, empty := vars.OutputName("{{title}}{{api_key}}", ".mkv", src.Values())
+	if got != "Movie.mkv" {
+		t.Errorf("the new file's name is %q, want Movie.mkv: a secret is not a value", got)
+	}
+	if len(empty) != 1 || empty[0] != "api_key" {
+		t.Errorf("the names that came out empty: %v, want api_key", empty)
 	}
 }

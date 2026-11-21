@@ -6,7 +6,7 @@ import { PageHead } from "../PageHead";
 import { Component, Fragment, createContext, useContext, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Icon } from "../Icon";
 import { SignedOut, failed, type Answer } from "../api";
-import { deleteNode, groupOf, insertAfter, moveNode, newNode, order } from "../stepEdits"; // the steps in running order: a property of the document, not data
+import { deleteNode, groupOf, insertAfter, insertQuestion, isQuestion, moveNode, newNode, order, otherwiseOf, setOtherwise, type Otherwise } from "../stepEdits"; // the steps in running order: a property of the document, not data
 import { useData } from "../useData";
 import { getDraft, getLadder, getWorkflow, listTemplates, patchWorkflow, publish, publishPreview, saveDraft, stepDefinitions, validateDoc, type Checked, type Ladder } from "../workflowApi";
 import { Link, navigate, onLeave } from "../router";
@@ -24,7 +24,7 @@ export const Reg = createContext<{ defs: StepDefinition[]; words: Record<string,
 function useReg() { const r = useContext(Reg); return { stepDef: (t: string) => r.defs.find((d) => d.type === t), summary: (n: Node) => r.words[n.id] ?? "", libs: r.libs, wf: r.wf }; }
 
 // The server's icon keys (registry) -> design's sprite.
-export const ICON: Record<string, string> = { folder: "i-folder", filter: "i-shield", video: "i-video", audio: "i-audio", subtitles: "i-subtitle", file: "i-file", check: "i-checks", save: "i-save", cond: "i-cond", history: "i-history", branch: "i-branch", stop: "i-stop" }; // branch, stop: V6a check + end
+export const ICON: Record<string, string> = { folder: "i-folder", filter: "i-shield", video: "i-video", audio: "i-audio", subtitles: "i-subtitle", file: "i-file", check: "i-checks", save: "i-save", cond: "i-cond", history: "i-history", branch: "i-branch", stop: "i-stop", variable: "i-tag", note: "i-text", tell: "i-link", bell: "i-info", shield: "i-shield", copy: "i-copy", terminal: "i-terminal", tag: "i-tag" }; // branch, stop: V6a check + end; variable, note: FB1d cards; tell, bell, shield, copy: FB2a after cards
 // The words around each option come from the server's step definitions (#114: title, description, x-enumHints for
 // each choice, x-placeholder); the page adds none of its own.
 const MORE: Record<string, string[]> = { "video.convert": ["format", "resolution", "maxBitrate", "speed"] };
@@ -126,7 +126,9 @@ function convertField(k: string, s: JSONSchema, c: Record<string, unknown>, l: L
 export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unknown, more?: Record<string, unknown>) => void; issues: ValidationIssue[] }) {
   const { stepDef, libs, wf } = useReg(), def = stepDef(n.type)!, props = Object.fromEntries(Object.entries((def.configSchema.properties ?? {}) as Props).filter(([, s]) => !s.readOnly)) as Props, c = n.config;
   const lad = useData(getLadder, []).data, conv = (k: string) => (n.type === "video.convert" ? convertField(k, props[k], c, lad) : props[k]);
-  const keys = Object.keys(props).filter((k) => !(MORE[n.type] ?? []).includes(k)), more = (MORE[n.type] ?? []).filter((k) => props[k] && conv(k));
+  // FB2b: a step's required settings come first, in the order the schema requires them (the server's object keys are alphabetical)
+  const req = (def.configSchema.required as string[] | undefined) ?? [], rank = (k: string) => (req.includes(k) ? req.indexOf(k) : req.length);
+  const keys = Object.keys(props).filter((k) => !(MORE[n.type] ?? []).includes(k)).sort((a, b) => rank(a) - rank(b)), more = (MORE[n.type] ?? []).filter((k) => props[k] && conv(k));
   // #165: a setting's own problems (invalid_config, keyed on the step + field) show at that field, which is marked
   const bad = (k: string) => issues.filter((i) => i.nodeId === n.id && (i.field === k || i.configPath === "/" + k) && i.code !== "unconnected_port");
   // one edit writes its switches in the same update (A-API-SHAPE, engine #211): an old flow takes the new meaning on any
@@ -249,8 +251,12 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
 // "Set place", and its More menu greyed out with the line below. The first and last steps have no menu.
 const FIXED_LINE = "The steps that convert run in a set order for now, so they can't be moved or deleted. To skip this step, turn it off.";
 type Move = { fixed: boolean; reason?: string; up: boolean; down: boolean; del: boolean; act: (w: "up" | "down" | "del") => void };
-function Step({ n, i, mv, open, toggle, update, issues }: { n: Node; i: number; mv: Move; open: boolean; toggle: () => void; update: (n: Node) => void; issues: ValidationIssue[] }) {
+// FB1d: a question's row says what its No does: one of the ends, or another path the graph shows.
+type Else = { kind: Otherwise; set: (k: "leave" | "fail" | "other") => void };
+const OTHERWISE: [Otherwise, string][] = [["leave", "leave the file alone"], ["fail", "stop as failed"], ["other", "another path (in the graph)"]];
+function Step({ n, i, mv, open, toggle, update, issues, otherwise, inline }: { n: Node; i: number; mv: Move; open: boolean; toggle: () => void; update: (n: Node) => void; issues: ValidationIssue[]; otherwise?: Else; inline?: boolean }) {
   const { stepDef, summary } = useReg(), def = stepDef(n.type), mine = issues.filter((x) => x.nodeId === n.id);
+  if (inline) open = true; // FB3, the simple view: every form is on the page, nothing folds
   const back = useRef<HTMLButtonElement>(null);
   useEffect(() => { if (open && matchMedia("(max-width:640px)").matches) back.current?.focus(); }, [open]);
   // A read-only step (an earlier install's settings) or one this page doesn't know (a newer server, a plugin not
@@ -270,10 +276,16 @@ function Step({ n, i, mv, open, toggle, update, issues }: { n: Node; i: number; 
         <div className="sp" title={(n.name ?? def.name) + ": " + summary(n)}><span className="snm" id={n.id + "-name"}>{n.name ?? def.name}</span> <span className="ssum">{summary(n)}</span></div>
         {mine.length > 0 && <span className="pill bad"><Icon id="i-alert" />{mine.length === 1 ? "1 problem" : mine.length + " problems"}</span>}
         {end ? <span className="muted sm nowrap">{end === "first" ? "Always first" : "Always last"}</span>
+          : otherwise ? <label className="row nw otherwise"><span className="muted nowrap">Otherwise</span>
+              <select className="input" aria-label={"Otherwise: what happens when " + nm + " answers No"} value={otherwise.kind === "none" ? "leave" : otherwise.kind}
+                onChange={(e) => otherwise.set(e.target.value as "leave" | "fail" | "other")}>
+                {OTHERWISE.filter(([k]) => k !== "other" || otherwise.kind === "other").map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                {otherwise.kind !== "other" && <option value="other">another path (open the graph)</option>}
+              </select></label>
           : def.alwaysOn ? <span className="muted sm nowrap">Always on</span>
-          : <>{mv.fixed && <span className="muted sm nowrap" title={mv.reason ?? FIXED_LINE}>Set place</span>}
+          : <>{mv.fixed && !inline && <span className="muted sm nowrap" title={mv.reason ?? FIXED_LINE}>Set place</span>}
             <input type="checkbox" role="switch" className="switch" aria-label={(def.name) + " on"} checked={n.enabled} onChange={(e) => update({ ...n, enabled: e.target.checked })} /></>}
-        {!end && <details className="menu">
+        {!end && !inline && <details className="menu">
           <summary className="btn icon ghost" id={n.id + "-more"} aria-label={"More for " + nm}><Icon id="i-more" /></summary>
           <div className="pop" role="menu">
             <button className="it" type="button" role="menuitem" aria-disabled={mv.up ? undefined : true} onClick={(e) => { (e.currentTarget.closest("details") as HTMLDetailsElement).open = false; if (mv.up) mv.act("up"); }}>Move up</button>
@@ -281,11 +293,11 @@ function Step({ n, i, mv, open, toggle, update, issues }: { n: Node; i: number; 
             <button className="it" type="button" role="menuitem" aria-disabled={mv.del ? undefined : true} onClick={(e) => { (e.currentTarget.closest("details") as HTMLDetailsElement).open = false; if (mv.del) mv.act("del"); }}>Delete</button>
             {mv.fixed && <><hr /><p className="hd" style={{ whiteSpace: "normal", maxWidth: 260 }}>{mv.reason ?? FIXED_LINE}</p></>}
           </div></details>}
-        {hasOptions ? <button className="btn icon ghost" type="button" aria-expanded={open} aria-controls={n.id + "-opts"} aria-label={"Options for " + def.name} onClick={toggle}><Icon id={open ? "i-chev-d" : "i-chev-r"} /></button>
+        {hasOptions && !inline ? <button className="btn icon ghost" type="button" aria-expanded={open} aria-controls={n.id + "-opts"} aria-label={"Options for " + def.name} onClick={toggle}><Icon id={open ? "i-chev-d" : "i-chev-r"} /></button>
           : <span className="chev-sp" />}
       </div>
-      {open && hasOptions && <div className="sopts" id={n.id + "-opts"} role="group" aria-label={"Options for " + def.name} onKeyDown={(e) => e.key === "Escape" && toggle()}>
-        <div className="sheethd phone"><button ref={back} className="btn icon ghost" type="button" aria-label="Back to the steps" onClick={toggle}><Icon id="i-chev-l" /></button><strong>{def.name}</strong></div>
+      {open && hasOptions && <div className={"sopts" + (inline ? " inline" : "")} id={n.id + "-opts"} role="group" aria-label={"Options for " + def.name} onKeyDown={(e) => !inline && e.key === "Escape" && toggle()}>
+        {!inline && <div className="sheethd phone"><button ref={back} className="btn icon ghost" type="button" aria-label="Back to the steps" onClick={toggle}><Icon id="i-chev-l" /></button><strong>{def.name}</strong></div>}
         <Options n={n} issues={issues} set={(k, v, more) => update({ ...n, config: { ...n.config, [k]: v, ...more } })} /></div>}
     </li>);
 }
@@ -330,9 +342,10 @@ function AddStepMenu({ wf, doc, defs, adds, onAdd, onClose }: { wf: string; doc:
   const rows = defs
     .filter((d) => !d.readOnly && !d.deprecated && (d.name + " " + d.description).toLowerCase().includes(q.trim().toLowerCase()))
     .map((d) => {
-      const cond = d.outputs.some((o) => o.outcome === "branch"), a = adds?.[d.type];
-      const on = cond || (!have.has(d.type) && !!a?.addable);
-      const line = cond ? "Splits files by a rule. Opens the graph." : have.has(d.type) ? "Already in this workflow" : a?.addable ? "Goes after " + nameOf(a.after) : a?.reason || "Not available here yet.";
+      const cond = d.outputs.some((o) => o.outcome === "branch"), a = adds?.[d.type], again = cond || d.category === "flow"; // a question or an action may appear more than once
+      const on = cond ? !!a?.addable || !adds : (again || !have.has(d.type)) && !!a?.addable;
+      const line = cond ? (a?.addable ? "Only if it answers Yes; otherwise the file is left alone. Goes after " + nameOf(a.after) : "Splits files by a rule. Opens the graph.")
+        : have.has(d.type) && !again ? "Already in this workflow" : a?.addable ? "Goes after " + nameOf(a.after) : a?.reason || "Not available here yet.";
       return { d, g: groupOf(d), on, line, after: a?.after };
     })
     .sort((x, y) => x.g.index - y.g.index); // stable: the registry's order inside a group
@@ -565,11 +578,20 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
     if (to) requestAnimationFrame(() => document.getElementById(to.id + "-more")?.focus());
   };
   const undoGone = () => { if (gone) setHist({ ...hist, at: gone.at - 1 }); setGone(null); };
+  const endDef = defs.find((x) => x.type === "flow.end"), failDef = defs.find((x) => x.type === "flow.fail");
+  const setElse = (q: Node, k: "leave" | "fail" | "other") => {
+    if (k === "other") { navigate(`/workflows/${id}/graph?node=${encodeURIComponent(q.id)}`); return; }
+    const def = k === "leave" ? endDef : failDef;
+    if (!def) return setSaid("This server has no such step.");
+    const next = setOtherwise(doc, q, def);
+    if (next !== doc) { edit(next); setSaid(`${nameOf(q)}: when the answer is No, ${k === "leave" ? "the file is left alone" : "the run stops as failed"}.`); }
+  };
   const addStep = (d: StepDefinition, after?: ID) => {
-    if (d.outputs.some((o) => o.outcome === "branch")) { navigate(`/workflows/${id}/graph?add=${encodeURIComponent(d.type)}`); return; }
+    const question = d.outputs.some((o) => o.outcome === "branch");
+    if (question && (!live.addSteps?.[d.type]?.addable || !endDef)) { navigate(`/workflows/${id}/graph?add=${encodeURIComponent(d.type)}`); return; }
     // a draft with no Library files step gets one first (the page adds it itself), so the chain has a start and the new step shows
     const inDef = defs.find((x) => x.type === "input.library"), start = inDef && !doc.nodes.some((n) => n.type === "input.library") ? { ...doc, nodes: [...doc.nodes, newNode(inDef, "n" + Math.random().toString(36).slice(2, 8))] } : doc;
-    const nid = "n" + Math.random().toString(36).slice(2, 8), next = insertAfter(start, after, newNode(d, nid)), now = order(next);
+    const nid = "n" + Math.random().toString(36).slice(2, 8), next = question ? insertQuestion(start, after, newNode(d, nid), endDef!) : insertAfter(start, after, newNode(d, nid)), now = order(next);
     edit(next); setOpen(nid); setAddOpen(false);
     requestAnimationFrame(() => document.getElementById(nid + "-more")?.focus()); // focus lands on the new step's row, not the body
     setSaid(`Added ${d.name} as step ${now.findIndex((x) => x.id === nid) + 1} of ${now.length}.`);
@@ -609,6 +631,17 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
   </>;
   const canStack = live.stackable;
   const list = order(doc), total = list.length, tailOut = list[total - 1]?.type === "output.commit", lastMovable = total - 1 - (tailOut ? 1 : 0), only = total <= 1;
+  // FB3 (flow-builder.md 4.3): the simple view is this list filtered to the cards that shape the one conversion (the
+  // steps that convert, check and save), each with its form on the page; the questions and actions before them and
+  // the steps after the save fold into one line each, which opens the steps view. Same document, same checks.
+  const simple = new URLSearchParams(location.search).get("view") === "simple";
+  const shapes = (n: Node) => { const r = defs.find((d) => d.type === n.type)?.runsAs; return r === "plan" || r === "verify" || r === "commit"; };
+  const saveAt = list.findIndex((n) => n.type === "output.commit");
+  const before = list.filter((n, i) => i > 0 && !shapes(n) && (saveAt < 0 || i < saveAt)), after = saveAt < 0 ? [] : list.slice(saveAt + 1);
+  const shown = simple ? list.filter(shapes) : list;
+  const fold = (ns: Node[], what: string) => ns.length === 0 ? null : <li className="srow fold"><div className="sline"><span className="stepn" aria-hidden="true">·</span><Icon id="i-layers" />
+    <div className="sp"><span className="snm">{ns.length === 1 ? "1 step " + what : ns.length + " steps " + what}</span> <span className="ssum">{ns.map((n) => n.name ?? defs.find((d) => d.type === n.type)?.name ?? n.type).join(" · ")}</span></div>
+    <Link className="btn sm ghost vlink" to={"/workflows/" + id}>Open the steps view</Link></div></li>;
   return (
     <Reg.Provider value={{ defs, words: live.stepSummaries, libs, wf: id }}>
     <OwnVars.Provider value={doc.variables ?? []}>
@@ -623,6 +656,7 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
           <span className="pill">{w.version == null || w.draftDiffers || dirty ? "Draft" : "Published"}</span>
           <span className="muted sm">{w.version == null ? "Not published yet" : "v" + w.version + " published" + (w.draftDiffers || dirty ? " · v" + (w.version + 1) + " draft" : "")}</span>
         </>}>
+        {simple ? <Link className="btn sm ghost vlink" to={"/workflows/" + id}>All steps</Link> : <Link className="btn sm ghost vlink" to={"/workflows/" + id + "?view=simple"}>Simple view</Link>}
         <Link className="btn sm ghost" to={"/workflows/" + id + "/graph"}>Graph</Link>
         {canStack && <>
           <span className="desk">{tools}</span>
@@ -658,14 +692,17 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
           <div className="row"><button className="btn sm primary" type="button" autoFocus onClick={openAdd}><Icon id="i-plus" />Add the first step</button>
             <button className="btn sm" type="button" onClick={startShrink}>Start from Shrink videos</button></div>
         </div></div>}
-        <ol className="steps">{list.map((n, i) => {
+        {simple && <p className="muted simplenote">The steps that convert, check and save. {before.length + after.length > 0 ? "The rest of this workflow is folded; the steps view has everything." : "Questions, notes and what happens after the save go in the steps view."}</p>}
+        <ol className="steps">{simple && fold(before, "before converting")}{shown.map((n) => {
+          const i = list.indexOf(n);
           // the server's places: no answer for a step means it's fixed. Moves stay inside the first and last steps.
           const p = live.stepPlaces?.[n.id], fixed = p ? p.fixedPlace : true;
-          const mv: Move = { fixed, reason: p?.fixedReason, up: !fixed && i > 1 && i <= lastMovable, down: !fixed && i >= 1 && i < lastMovable, del: !fixed && i >= 1 && i <= lastMovable,
+          const mv: Move = { fixed, reason: p?.fixedReason, up: !fixed && !simple && i > 1 && i <= lastMovable, down: !fixed && !simple && i >= 1 && i < lastMovable, del: !fixed && !simple && i >= 1 && i <= lastMovable, // the simple view shows no place badge or menu: moving and deleting live in the steps view (ui-shop review #543)
             act: (w) => (w === "del" ? deleteStep(n.id) : moveStep(n.id, w === "up" ? -1 : 1)) };
-          return <Step key={n.id} n={n} i={i} mv={mv} open={open === n.id} toggle={() => setOpen(open === n.id ? null : n.id)} update={update} issues={issues} />;
-        })}</ol>
-        {!only && <button className="btn sm ghost" type="button" onClick={openAdd}><Icon id="i-plus" />Add step</button>}
+          const otherwise: Else | undefined = isQuestion(n) ? { kind: otherwiseOf(doc, n).kind, set: (k) => setElse(n, k) } : undefined;
+          return <Step key={n.id} n={n} i={i} mv={mv} open={open === n.id} toggle={() => setOpen(open === n.id ? null : n.id)} update={update} issues={issues} otherwise={otherwise} inline={simple} />;
+        })}{simple && fold(after, "after the file is saved")}</ol>
+        {!only && !simple && <button className="btn sm ghost" type="button" onClick={openAdd}><Icon id="i-plus" />Add step</button>}
         {addOpen && <AddStepMenu wf={id} doc={doc} defs={defs} adds={live.addSteps} onAdd={addStep} onClose={closeAdd} />}
         {/* one status region, always mounted: a delete fills its text, so screen readers announce it */}
         <p className="sr" role="status" aria-live="polite">{gone && hist.at === gone.at ? gone.text : ""}</p>

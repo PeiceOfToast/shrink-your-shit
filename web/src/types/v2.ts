@@ -142,7 +142,7 @@ export interface ActivityEvent { // GET /activity
 // firstRunLibrary (#116): first run's step 1 folder, kept until a library is created (then null; PATCH null clears it).
 export interface Settings { firstRunDone: boolean; firstRunStep: number; intakePaused: boolean; catalogueEnabled: boolean; firstRunLibrary: { name: string; path: string } | null;
   scanEvery?: number; scanEverySource?: "flag" | "saved"; scanEveryMin?: number; scanEveryMax?: number;
-  languages?: string[]; keepOriginalsDays?: number; trashPath?: string; authRequired?: boolean; logKeepDays?: number; checkForUpdates?: boolean } // #136: seconds; "flag" until someone changes it here; #146: the bounds; E: job logs kept, days (0 = forever)
+  languages?: string[]; keepOriginalsDays?: number; trashPath?: string; authRequired?: boolean; logKeepDays?: number; checkForUpdates?: boolean; workflowsMayRunCommands?: boolean } // #136: seconds; "flag" until someone changes it here; #146: the bounds; E: job logs kept, days (0 = forever)
 
 // GET /api/v2/trash (contract update 01:33Z; workshop branch v2-trash-settings): originals replaced and kept in the
 // trash until their date. Later embedded as Summary.bytes.trash.
@@ -226,11 +226,12 @@ export interface Variable {
 export interface ValidationIssue {
   code: "no_trigger" | "multiple_triggers" | "unreachable_node" | "cycle_without_loop" | "unhandled_error"
     | "unknown_node_type" | "unknown_type_version" | "missing_config" | "invalid_config" | "unknown_config_key"
-    | "missing_variable" | "capability_unavailable" | "capability_unknown" | "unsafe_output_path"
+    | "capability_unavailable" | "capability_unknown" | "unsafe_output_path"
     | "dangling_edge" | "unknown_port" | "port_type_mismatch"
     | "not_runnable_yet" | "unknown_schema_version" | "duplicate_id" // the last three: added in V1 (Built in V1)
     | "unconnected_port" | "port_used_twice" | "empty_check" | "branch_in_conversion" | "path_without_save" | "fallback_loop" // V6a/V6b
     | "invalid_variable_name" | "builtin_variable_name" | "duplicate_variable" // W4a (#497): the workflow's own variables
+    | "unknown_variable" | "unclosed_variable" | "variable_wrong_type" | "variable_ref_not_whole" // {{name}} in a setting (internal/workflow)
     | (string & {}); // a newer server's code: show its message
   severity: "error" | "warning";
   message: string;
@@ -279,6 +280,15 @@ export interface StepDefinition {
   source: { kind: "builtin" } | { kind: "plugin"; pluginId: ID; pluginVersion: string };
   deprecated?: boolean;
   readOnly?: boolean; // migration-only types (video.legacy_settings): kept as they are, never edited (workshop #109)
+  // The card contract (docs/architecture/flow-builder.md section 1; FB1a): what the step does, where it may sit in a
+  // run, what it publishes and needs, the file's state on each output port, and whether this build runs it. Optional
+  // until every server sends them.
+  runsAs?: "input" | "question" | "action" | "plan" | "verify" | "commit" | "end";
+  phase?: ("before" | "convert" | "check" | "save" | "after")[];
+  publishes?: { name: string; type: "string" | "number" | "bool" | "list"; words: string }[];
+  reads?: string[];
+  fileOn?: Record<string, "original" | "staged" | "saved" | "none">;
+  available?: boolean;
 }
 
 // Enrollment (ONE-COMMAND-SETUP.md section 11; workshop 00:42Z): GET /api/v2/setup, /setup/servers, POST /setup/role

@@ -25,6 +25,7 @@ import (
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/discover"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/doctor"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/flow"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/integrations"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
@@ -310,6 +311,7 @@ func main() {
 	// As many workers as the worker's parallel jobs setting (Workers page; followed live); Pause all stops them
 	// taking work and survives a restart.
 	integ := integrations.New(store, integrations.Options{Logf: log.Printf}) // Sonarr and Radarr: told after a replace
+	var cardEnv func(job jobs.Job, final string) flow.Env                    // FB2a: filled once the notifier exists below; read per job
 	pool := &worker.Pool{
 		New: func(n int) *worker.Worker {
 			id := "builtin"
@@ -322,11 +324,13 @@ func main() {
 				Paused: localGate(joined, store), StallAfter: *stallAfter, // this computer's own switch, and not while joined
 				Encoder:           web.LocalEncoderFor(store, chk),
 				EncoderCandidates: web.LocalEncoderCandidates(store, chk),
+				GPUSlots:          web.LocalGPUSlots(store, chk),
 				GraphicsDecodes:   chk.Decodes,
 				ShareDown: func(folder string, jobID int64) (worker.ShareDown, bool) {
 					return web.ShareDownFor(store, folder, jobID)
 				},
-				OnDone: func(job jobs.Job, final string) { integ.Tell(job.ID, job.Path, final) }}
+				OnDone: func(job jobs.Job, final string) { integ.Tell(job.ID, job.Path, final) },
+				Cards:  func(job jobs.Job, final string) flow.Env { return cardEnv(job, final) }}
 		},
 		Size: func() int {
 			if s, err := web.LoadSettings(store); err == nil {
@@ -359,6 +363,30 @@ func main() {
 	}
 	notifier := notify.New(store, notify.Options{Logf: log.Printf, // news to a webhook or Discord; never blocks a job
 		FailureText: func(id int64) string { return web.FailureSentence(store, id) }})
+	cardEnv = func(job jobs.Job, final string) flow.Env { // FB2a: what a workflow's after-save cards may touch
+		kinds := func(which string, all ...integrations.Kind) []integrations.Kind {
+			for _, k := range all {
+				if string(k) == which {
+					return []integrations.Kind{k}
+				}
+			}
+			return all
+		}
+		env := flow.Env{
+			Lookup: func(which string) (map[string]string, string, error) {
+				return integ.Lookup(job.Path, kinds(which, integrations.Sonarr, integrations.Radarr))
+			},
+			TellMediaServer: func(which string) (string, error) {
+				return integ.TellKinds(job.ID, job.Path, final, kinds(which, integrations.Plex, integrations.Jellyfin))
+			},
+			TellDownloader: func(which string) (string, error) {
+				return integ.TellKinds(job.ID, job.Path, final, kinds(which, integrations.Sonarr, integrations.Radarr))
+			},
+			Notify: notifier.SendTo,
+		}
+		env.Exec = web.CommandRunner(store) // FB2b: the Safety switch, read per job; nil makes the card refuse
+		return env
+	}
 	go notifier.Run(ctx.Done())
 	// The update (or roll back) is settled once /healthz has answered "ok", as the update helper and the
 	// Windows watcher see it: a new version that stops before that leaves the marker, so the program put

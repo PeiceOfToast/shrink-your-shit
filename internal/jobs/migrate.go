@@ -533,6 +533,10 @@ INSERT INTO sqlite_sequence(name, seq)
   WHERE seq > 0 AND NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name='libraries');
 UPDATE sqlite_sequence SET seq = MAX(seq, (SELECT seq FROM temp.libraries_seq)) WHERE name='libraries';
 DROP TABLE temp.libraries_seq;`},
+	// FB2c (flow builder): tags on a job's record, as a JSON list of short strings. A workflow's "Tag the file"
+	// step sets them, "Has a tag" asks about them, Jobs shows them. '[]' for every job so far.
+	{57, "job tags", `
+ALTER TABLE jobs ADD COLUMN tags TEXT NOT NULL DEFAULT '[]';`},
 }
 
 // legacyReasonCode is the SQL for the code of a reason stored before migration 23 as its sentence alone

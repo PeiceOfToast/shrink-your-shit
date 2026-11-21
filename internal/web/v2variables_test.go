@@ -375,3 +375,43 @@ func TestVariableNameSaves(t *testing.T) {
 		t.Fatalf("movie_name: %+v", v)
 	}
 }
+
+// FB1d: a name a "Set a variable" step sets is in the list, under "Set by a step", with the step's words, so the
+// editor's checks and picker know it; a name that is not one a step may set is left out.
+func TestVariablesPublishedByASetStep(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	lib, err := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.EnsureRevision(lib.FlowID); err != nil { // the flow's first revision, as the editor's first open makes it
+		t.Fatal(err)
+	}
+	d, _, err := st.Draft(lib.FlowID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := d.Doc
+	doc.Nodes = append(doc.Nodes,
+		workflow.Node{ID: "set1", Type: workflow.TypeSetVariable, TypeVersion: 1, Name: "Pick a profile", Enabled: true, Config: map[string]any{"name": "profile", "value": "remux"}},
+		workflow.Node{ID: "set2", Type: workflow.TypeSetVariable, TypeVersion: 1, Enabled: true, Config: map[string]any{"name": "Bad Name"}},
+		workflow.Node{ID: "sum", Type: workflow.TypeChecksum, TypeVersion: 1, Enabled: true, Config: map[string]any{}})
+	if _, err := st.SaveDraft(lib.FlowID, doc, d.Layout, d.Etag); err != nil {
+		t.Fatal(err)
+	}
+	code, got := getVars(t, srv, lib.FlowID)
+	if code != http.StatusOK {
+		t.Fatalf("GET variables: %d", code)
+	}
+	if v := got.find(t, "checksum"); v.Group != "Set by a step" || v.Value != nil || !strings.Contains(v.Description, "Checksum the result") { // FB2a: a card's published name
+		t.Errorf("checksum: %+v", v)
+	}
+	if v := got.find(t, "profile"); v.Group != "Set by a step" || v.Value != nil || !strings.Contains(v.Description, "Pick a profile") || !strings.Contains(v.Description, "remux") {
+		t.Errorf("profile: %+v", v)
+	}
+	for _, v := range got.Variables {
+		if v.Name == "Bad Name" {
+			t.Errorf("a name a step may not set is listed: %+v", v)
+		}
+	}
+}

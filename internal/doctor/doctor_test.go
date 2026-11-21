@@ -501,6 +501,153 @@ func TestHardwareTestDoesNotHoldUpTheConverterCheck(t *testing.T) {
 	t.Error("the background check never stored its result")
 }
 
+// A job starting while a check holds the lock still sees what was found. Quick Sync passed and the card
+// was idle, yet the processor was chosen with no reason: ToolsNow answered "nothing" for the moment a
+// check held the lock, and an empty capability list reads as "no graphics encoder" (user bug 11-20).
+func TestToolsNowKeepsItsAnswerWhileACheckRuns(t *testing.T) {
+	var calls int
+	var mu sync.Mutex
+	slow := make(chan struct{})
+	started := make(chan struct{})
+	var once sync.Once
+	x := &media.FakeExec{Handler: func(name string, args []string) (string, string, error) {
+		if name == "/usr/bin/ffmpeg" && strings.Contains(strings.Join(args, " "), "-version") {
+			mu.Lock()
+			calls++
+			first := calls == 1
+			mu.Unlock()
+			if !first { // the check this test holds up, inside the lock
+				once.Do(func() { close(started) })
+				select {
+				case <-slow:
+				case <-time.After(5 * time.Second):
+				}
+			}
+		}
+		return "ffmpeg version 7.1\n V..... libx265  x\n V..... hevc_nvenc  x\n", "", nil
+	}}
+	c := &Checker{Exec: x, FFmpeg: "/usr/bin/ffmpeg", FFprobe: "/usr/bin/ffprobe"}
+	c.Tools(context.Background()) // the first check: hevc_nvenc passed here
+	c.mu.Lock()
+	c.toolsAt = time.Time{} // stale: the next check runs the converter again, slowly
+	c.mu.Unlock()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		c.Tools(context.Background())
+	}()
+	select {
+	case <-started: // the check is inside the lock now
+	case <-time.After(5 * time.Second):
+		t.Fatal("the slow check never started")
+	}
+	tl, ok := c.ToolsNow()
+	close(slow)
+	<-done
+	if !ok || len(tl.Hardware) != 1 || tl.Hardware[0] != "hevc_nvenc" {
+		t.Errorf("ToolsNow during a check: ok %v, hardware %v; want the last result", ok, tl.Hardware)
+	}
+	// and still nothing before the first check ever finished
+	fresh := &Checker{Exec: x, FFmpeg: "/usr/bin/ffmpeg", FFprobe: "/usr/bin/ffprobe"}
+	if _, ok := fresh.ToolsNow(); ok {
+		t.Error("a checker that never ran a check answered as if it had")
+	}
+}
+
+// A Retest clears the stored hardware result before its test runs. A job that asks meanwhile must still
+// see the card that passed, not an empty list: an empty list reads as "no graphics encoder" and the job
+// picks the processor for no reason (review2-547 P3a).
+func TestToolsNowKeepsItsAnswerDuringARetest(t *testing.T) {
+	var mu sync.Mutex
+	encodes := 0
+	slow := make(chan struct{})
+	started := make(chan struct{})
+	var once sync.Once
+	x := &media.FakeExec{Handler: func(name string, args []string) (string, string, error) {
+		a := strings.Join(args, " ")
+		switch {
+		case strings.Contains(a, "-version"):
+			return name + " version 7.1.5", "", nil
+		case strings.Contains(a, "-encoders"):
+			return " V....D libx265              H.265 / HEVC\n V....D hevc_nvenc           hardware HEVC\n", "", nil
+		case strings.Contains(a, "-c:v hevc_nvenc") && !strings.Contains(a, "main10"):
+			mu.Lock()
+			encodes++
+			n := encodes
+			mu.Unlock()
+			if n > 1 { // the Retest's 8-bit encode: hold it while the test asks
+				once.Do(func() { close(started) })
+				<-slow
+			}
+			return "", "", nil
+		case strings.Contains(a, "-c:v"):
+			return "", "", errors.New("no device")
+		}
+		return "", "", errors.New("unexpected " + a)
+	}}
+	c := &Checker{Exec: x, FFmpeg: "/usr/bin/ffmpeg", FFprobe: "/usr/bin/ffprobe"}
+	c.Tools(context.Background()) // the first check: hevc_nvenc passed and is known
+	done := make(chan Tools, 1)
+	go func() { done <- c.Retest(context.Background()) }()
+	select {
+	case <-started: // the retest has cleared the result and is in its test encode
+	case <-time.After(5 * time.Second):
+		t.Fatal("the retest never reached its encode")
+	}
+	tl, ok := c.ToolsNow()
+	close(slow)
+	after := <-done
+	if !ok || len(tl.Hardware) != 1 || tl.Hardware[0] != "hevc_nvenc" {
+		t.Errorf("ToolsNow during a retest: ok %v, hardware %v; want the last result", ok, tl.Hardware)
+	}
+	if len(after.Hardware) != 1 || after.Hardware[0] != "hevc_nvenc" {
+		t.Errorf("the retest's own answer: %v; want hevc_nvenc", after.Hardware)
+	}
+}
+
+// A re-check that finds the card no longer works replaces the kept answer: after it, ToolsNow has no card
+// rather than the one that used to work (review2-547 P3b).
+func TestAFailingRetestReplacesTheKeptAnswer(t *testing.T) {
+	var mu sync.Mutex
+	working := true
+	x := &media.FakeExec{Handler: func(name string, args []string) (string, string, error) {
+		a := strings.Join(args, " ")
+		switch {
+		case strings.Contains(a, "-version"):
+			return name + " version 7.1.5", "", nil
+		case strings.Contains(a, "-encoders"):
+			return " V....D libx265              H.265 / HEVC\n V....D hevc_nvenc           hardware HEVC\n", "", nil
+		case strings.Contains(a, "-c:v hevc_nvenc"):
+			mu.Lock()
+			ok := working
+			mu.Unlock()
+			if ok {
+				return "", "", nil
+			}
+			return "", "", errors.New("no device")
+		case strings.Contains(a, "-c:v"):
+			return "", "", errors.New("no device")
+		}
+		return "", "", errors.New("unexpected " + a)
+	}}
+	c := &Checker{Exec: x, FFmpeg: "/usr/bin/ffmpeg", FFprobe: "/usr/bin/ffprobe"}
+	c.Tools(context.Background()) // the card passes and is known
+	if tl, ok := c.ToolsNow(); !ok || len(tl.Hardware) != 1 || tl.Hardware[0] != "hevc_nvenc" {
+		t.Fatalf("before the retest: ok %v, hardware %v; want hevc_nvenc", ok, tl.Hardware)
+	}
+	mu.Lock()
+	working = false // the card has gone (a driver update, another session holding it)
+	mu.Unlock()
+	c.Retest(context.Background())
+	tl, ok := c.ToolsNow()
+	if !ok {
+		t.Fatal("ToolsNow lost its answer after a retest ran")
+	}
+	if len(tl.Hardware) != 0 {
+		t.Errorf("after a failing retest: hardware %v; want none", tl.Hardware)
+	}
+}
+
 // One hardware test at a time (review c66c66b): a background refresh (ToolsNow) and several Tools calls
 // overlapping run it once, and every caller gets its result.
 func TestHardwareTestRunsOnceAtATime(t *testing.T) {
