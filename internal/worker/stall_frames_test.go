@@ -113,14 +113,14 @@ func TestFullyFrozenEncodeIsStillStopped(t *testing.T) {
 	clock := &fakeClockAt{t: time.Date(2026, 11, 20, 5, 0, 0, 0, time.UTC)}
 	w := s.worker(Replace)
 	w.Now = clock.now
-	w.StallAfter = 300 * time.Millisecond
+	w.StallAfter = 2 * time.Second // real time: the three reports that make the 30 s warning come in ~150 ms, and must beat the stop under load
 	w.Exec = &outFrozenExec{FakeExec: s.exec, clock: clock, tick: 10 * time.Second}
 	done := make(chan struct{})
 	go func() { w.RunOne(context.Background()); close(done) }()
 	waitDone(t, done)
 	j := s.job()
-	if j.Status != jobs.Failed || !strings.Contains(j.Error, "no progress for 300ms") {
-		t.Fatalf("status %s %q, want failed with no progress for 300ms", j.Status, j.Error)
+	if j.Status != jobs.Failed || !strings.Contains(j.Error, "no progress for 2s") {
+		t.Fatalf("status %s %q, want failed with no progress for 2s", j.Status, j.Error)
 	}
 	if warn, _ := encodeLines(t, s); warn != 1 {
 		t.Fatalf("%d 'has not moved' warnings, want 1", warn)
@@ -135,7 +135,7 @@ func TestFrozenOutTimeStopsPastTheOutputBound(t *testing.T) {
 	clock := &fakeClockAt{t: time.Date(2026, 11, 20, 5, 0, 0, 0, time.UTC)}
 	w := s.worker(Replace)
 	w.Now = clock.now
-	w.StallAfter = 300 * time.Millisecond
+	w.StallAfter = 2 * time.Second // real time, as in TestFullyFrozenEncodeIsStillStopped: the reports must beat the stop under load
 	w.Exec = &outFrozenExec{FakeExec: s.exec, clock: clock, tick: 10 * time.Second, frames: true, sizeStep: 1000}
 	done := make(chan struct{})
 	go func() { w.RunOne(context.Background()); close(done) }()
