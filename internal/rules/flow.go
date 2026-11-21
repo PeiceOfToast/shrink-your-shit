@@ -204,8 +204,8 @@ func (t Template) Tag() string {
 		s, _ := t.SelectorsView()
 		p, _ := SliderAt(s.Quality)
 		parts := []string{"Standard"}
-		if s.Format != "" && s.Format != "hevc" {
-			parts = append(parts, strings.ToUpper(s.Format))
+		if f, ok := VideoFormats[s.Format]; ok && s.Format != "hevc" {
+			parts = append(parts, f.Name) // "H.264", "AV1", "VP9"
 		}
 		parts = append(parts, p.Name)
 		if s.Resolution == "keep" {

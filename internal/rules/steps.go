@@ -88,7 +88,10 @@ func videoDecision(p Plan, info media.Info) StepDecision {
 	if p.Video.Height > 0 {
 		d += fmt.Sprintf(", scaled down to %dp", p.Video.Height)
 	}
-	if p.Video.MaxRateKbps > 0 {
+	switch {
+	case p.Video.PeakLimitKbps > 0 && p.Video.TargetKbps == 0: // VBR: the person's max is named, not only the figure it aims at
+		d += fmt.Sprintf(", VBR, aims for about %d kbps, never above %d kbps", p.Video.MaxRateKbps, p.Video.PeakLimitKbps)
+	case p.Video.MaxRateKbps > 0:
 		d += fmt.Sprintf(", and never above %d kbps", p.Video.MaxRateKbps)
 	}
 	return StepDecision{Label: StepConvertVideo, Outcome: "ran", Decision: d + "."}

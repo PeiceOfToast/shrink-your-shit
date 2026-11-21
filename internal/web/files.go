@@ -246,7 +246,11 @@ func outputBlockers(store *jobs.Store, except int64, dir string, moreLibraries .
 	}
 	for _, lp := range append(moreLibraries, otherLibraries(store, except)...) { // moreLibraries: one being added or moved
 		if outputInside(dir, lp) {
-			add("inside_library", "This folder is inside the library, so new files would be converted again. Pick a folder outside "+lp+".")
+			if inside(resolved(lp), real) { // the folder holds the library (outputInside also catches the reverse)
+				add("inside_library", "This folder contains the library. Choose a folder outside it, or the new files would be scanned and converted again.")
+			} else {
+				add("inside_library", "This folder is inside the library, so new files would be converted again. Pick a folder outside "+lp+".")
+			}
 			break
 		}
 	}
