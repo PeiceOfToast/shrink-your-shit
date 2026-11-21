@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"sync/atomic"
+	"sync"
 	"testing"
 	"time"
 
@@ -69,10 +69,11 @@ func TestJobOfARemovedLibraryFails(t *testing.T) {
 // behind, and the job record is dropped rather than requeued.
 func TestRequeueJobPutsTheRunningJobBack(t *testing.T) {
 	s := newScenario(t)
-	var encoding atomic.Bool
+	started := make(chan struct{})
+	var once sync.Once
 	s.hang = func(name string, args []string) bool {
 		if name == "ffmpeg" && s.has(args, "libx265") {
-			encoding.Store(true)
+			once.Do(func() { close(started) })
 			return true
 		}
 		return false
@@ -80,19 +81,14 @@ func TestRequeueJobPutsTheRunningJobBack(t *testing.T) {
 	w := s.worker(Replace)
 	done := make(chan struct{})
 	go func() { w.RunOne(context.Background()); close(done) }()
-	for i := 0; !encoding.Load(); i++ {
-		if i > 200 {
-			t.Fatal("the encode never started")
-		}
-		time.Sleep(10 * time.Millisecond)
+	select { // a condition wait: the encode's start includes a store write, seconds on a busy disk
+	case <-started:
+	case <-time.After(30 * time.Second):
+		t.Fatal("the encode never started")
 	}
 	w.RequeueJob(s.id + 1) // another job: nothing happens
 	w.RequeueJob(s.id)
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("StopJob did not stop the job")
-	}
+	waitDone(t, done)
 	if j, err := s.store.Get(s.id); err != nil || j.Status != jobs.Queued {
 		t.Errorf("the stopped job goes back in the queue: %+v %v", j, err)
 	}

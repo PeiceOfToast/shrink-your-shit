@@ -13,45 +13,67 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 )
 
-// finishExec reports the encode at the file's length (scenarioDuration, 100 s), then prints nothing for silent:
-// the finishing step (a +faststart rewrite) has no progress line. It ends when the stall stop cancels it.
+// finishExec reports the encode at the file's length (scenarioDuration, 100 s), or at 5 s of it with stuck: the
+// finishing step (a +faststart rewrite) then prints nothing. reported is closed once that report has reached the
+// worker; the test then moves the worker's clock, so the silence is measured rather than waited for. Closing
+// release lets the encode finish as the fake makes it; with no release it waits for the stall stop.
 type finishExec struct {
 	*media.FakeExec
-	silent time.Duration
+	stuck    bool
+	reported chan struct{}
+	release  chan struct{} // nil: the encode waits to be stopped
 }
 
 func (x finishExec) Stream(ctx context.Context, onLine func(string), name string, args ...string) (string, error) {
 	if name != "ffmpeg" || !slices.Contains(args, "libx265") {
 		return x.FakeExec.Stream(ctx, onLine, name, args...)
 	}
-	onLine("frame=2500")
-	onLine("out_time_us=100000000")
+	if x.stuck {
+		onLine("frame=0")
+		onLine("out_time_us=5000000")
+	} else {
+		onLine("frame=2500")
+		onLine("out_time_us=100000000")
+	}
 	onLine("progress=continue")
+	close(x.reported)
 	select {
 	case <-ctx.Done():
 		return "", ctx.Err()
-	case <-time.After(x.silent):
+	case <-x.release:
 	}
 	return x.FakeExec.Stream(ctx, onLine, name, args...)
 }
 
-// runOnce runs w's one job to its end and waits for it.
-func runOnce(t *testing.T, w *Worker) {
+// runClock runs w's one job in the background and returns x's report channel, so the test can move the clock
+// once the encode has spoken.
+func runClock(t *testing.T, w *Worker, x finishExec) chan struct{} {
 	t.Helper()
 	done := make(chan struct{})
 	go func() { w.RunOne(context.Background()); close(done) }()
-	waitDone(t, done)
+	select {
+	case <-x.reported:
+	case <-time.After(30 * time.Second):
+		t.Fatal("the encode never reported")
+	}
+	return done
 }
 
 // Silence once the position is at the file's length gets the finishing allowance, not the stall one: a silent
 // finish longer than StallAfter but within FinishAfter is not stopped.
 func TestSilentFinishGetsItsOwnAllowance(t *testing.T) {
 	s := newScenario(t)
+	clock := &fakeClockAt{t: time.Date(2026, 11, 20, 5, 0, 0, 0, time.UTC)}
 	w := s.worker(Replace)
+	w.Now = clock.now
 	w.StallAfter = 300 * time.Millisecond
 	w.FinishAfter = 5 * time.Second
-	w.Exec = finishExec{FakeExec: s.exec, silent: time.Second}
-	runOnce(t, w)
+	x := finishExec{FakeExec: s.exec, reported: make(chan struct{}), release: make(chan struct{})}
+	w.Exec = x
+	done := runClock(t, w, x)
+	clock.add(time.Second) // silent, but well inside FinishAfter
+	close(x.release)
+	waitDone(t, done)
 	if j := s.job(); j.Status != jobs.Done {
 		t.Errorf("a silent finish within its allowance: %s %q", j.Status, j.Error)
 	}
@@ -61,11 +83,16 @@ func TestSilentFinishGetsItsOwnAllowance(t *testing.T) {
 // StallAfter, however large FinishAfter is.
 func TestSilenceBeforeTheEndStillStops(t *testing.T) {
 	s := newScenario(t)
+	clock := &fakeClockAt{t: time.Date(2026, 11, 20, 5, 0, 0, 0, time.UTC)}
 	w := s.worker(Replace)
+	w.Now = clock.now
 	w.StallAfter = 300 * time.Millisecond
 	w.FinishAfter = 5 * time.Second
-	w.Exec = positionExec{FakeExec: s.exec} // step 0: stuck at 5 s
-	runOnce(t, w)
+	x := finishExec{FakeExec: s.exec, stuck: true, reported: make(chan struct{})}
+	w.Exec = x
+	done := runClock(t, w, x)
+	clock.add(300 * time.Millisecond) // the stall allowance, not the finishing one
+	waitDone(t, done)
 	if j := s.job(); j.Status != jobs.Failed || !strings.Contains(j.Error, "no progress for 300ms") {
 		t.Errorf("stuck before the end: %s %q", j.Status, j.Error)
 	}
@@ -75,11 +102,16 @@ func TestSilenceBeforeTheEndStillStops(t *testing.T) {
 // The finishing allowance is bounded: a finish silent for longer than FinishAfter is stopped like any stall.
 func TestFinishStopsAtItsOwnLimit(t *testing.T) {
 	s := newScenario(t)
+	clock := &fakeClockAt{t: time.Date(2026, 11, 20, 5, 0, 0, 0, time.UTC)}
 	w := s.worker(Replace)
+	w.Now = clock.now
 	w.StallAfter = 300 * time.Millisecond
 	w.FinishAfter = time.Second
-	w.Exec = finishExec{FakeExec: s.exec, silent: 3 * time.Second}
-	runOnce(t, w)
+	x := finishExec{FakeExec: s.exec, reported: make(chan struct{})} // no release: the stop ends it
+	w.Exec = x
+	done := runClock(t, w, x)
+	clock.add(3 * time.Second) // silent past FinishAfter
+	waitDone(t, done)
 	if j := s.job(); j.Status != jobs.Failed || !strings.Contains(j.Error, "no progress for 1s") {
 		t.Errorf("silent past FinishAfter: %s %q", j.Status, j.Error)
 	}

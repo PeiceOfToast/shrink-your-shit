@@ -66,7 +66,8 @@ func TestFrozenPositionCeilingSaysThePositionStopped(t *testing.T) {
 	w.Now = clock.now
 	w.StallAfter = time.Second
 	w.FrozenPositionFactor = 2
-	w.Exec = &outFrozenExec{FakeExec: s.exec, clock: clock, tick: time.Second, ticks: 100, frames: true}
+	// each report moves the worker's clock 500 ms (inside the 1 s stall), so only the ceiling can stop it
+	w.Exec = &outFrozenExec{FakeExec: s.exec, clock: clock, tick: 500 * time.Millisecond, ticks: 100, frames: true}
 	done := make(chan struct{})
 	go func() { w.RunOne(context.Background()); close(done) }()
 	waitDone(t, done)

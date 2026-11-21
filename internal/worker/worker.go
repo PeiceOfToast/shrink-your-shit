@@ -900,8 +900,9 @@ func reachedEnd(outUS, durationSec float64) bool {
 // watchStall stops job id (stopStall) if its encode reports no progress for stallAfter (stallLimit once it is
 // finishing). The returned func ends the watch. Checks after the encode have their own time limits (slice 10).
 func (w *Worker) watchStall(id int64) func() {
-	w.progressAt.Store(time.Now().UnixNano())
-	w.positionAt.Store(time.Now().UnixNano())
+	now := w.now()
+	w.progressAt.Store(now.UnixNano())
+	w.positionAt.Store(now.UnixNano())
 	w.finishing.Store(false)
 	w.overSize.Store(false)
 	after := w.stallAfter()
@@ -932,18 +933,19 @@ func (w *Worker) watchStall(id int64) func() {
 			case <-done:
 				return
 			case <-t.C:
+				now := w.now() // the worker's clock: tests move it by hand, production's is the wall clock
 				finishing := w.finishing.Load()
 				limit := w.stallLimit(after, finishing)
-				if time.Since(time.Unix(0, w.progressAt.Load())) >= limit {
+				if now.Sub(time.Unix(0, w.progressAt.Load())) >= limit {
 					stopFor(limit)
 					return
 				}
 				ceiling := w.stallLimit(w.frozenFactor()*after, finishing)
-				if time.Since(time.Unix(0, w.positionAt.Load())) >= ceiling {
+				if now.Sub(time.Unix(0, w.positionAt.Load())) >= ceiling {
 					stopCeiling(ceiling) // frames or bytes still grow, but out_time has not moved for the ceiling
 					return
 				}
-				w.quietCheck(id, w.now()) // R9: ffmpeg printing nothing for a minute
+				w.quietCheck(id, now) // R9: ffmpeg printing nothing for a minute
 			}
 		}
 	}()
@@ -2850,11 +2852,11 @@ func (w *Worker) encodeLocal(ctx context.Context, job jobs.Job, args []string) (
 		}
 		if posMoved {
 			at = p.OutTimeUS
-			w.positionAt.Store(time.Now().UnixNano())
+			w.positionAt.Store(w.now().UnixNano())
 			w.finishing.Store(reachedEnd(p.OutTimeUS, job.DurationSec))
 		}
 		if alive {
-			w.progressAt.Store(time.Now().UnixNano())
+			w.progressAt.Store(w.now().UnixNano())
 			moved = w.now()
 			if stalled { // R9: the log says it is moving again
 				stalled = false
