@@ -680,10 +680,12 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
     const def = k === "leave" ? endDef : k === "fail" ? failDef : gotoDef;
     if (!def) return setSaid("This server has no such step.");
     const cur = otherwiseOf(doc, q);
-    if (cur.kind === "goto" && cur.node && Object.keys(cur.node.config).length > 0) lastGoto.current[q.id] = cur.node.config;
+    const picked = (cfg: Record<string, unknown>) => Object.values(cfg).some((v) => v !== undefined && v !== ""); // ui-shop nit #582: a cleared pick is no pick
+    if (cur.kind === "goto" && cur.node && picked(cur.node.config)) lastGoto.current[q.id] = cur.node.config;
+    else if (cur.kind === "goto") delete lastGoto.current[q.id];
     let next = setOtherwise(doc, q, def);
     const remembered = lastGoto.current[q.id], made = k === "goto" && next !== doc ? otherwiseOf(next, q).node : undefined;
-    if (made && remembered && Object.keys(made.config).length === 0) next = { ...next, nodes: next.nodes.map((n) => (n.id === made.id ? { ...n, config: { ...remembered } } : n)) };
+    if (made && remembered && !picked(made.config)) next = { ...next, nodes: next.nodes.map((n) => (n.id === made.id ? { ...n, config: { ...remembered } } : n)) };
     if (next !== doc) { edit(next); setSaid(`${nameOf(q)}: when the answer is No, ${k === "leave" ? "the file is left alone" : k === "fail" ? "the run stops as failed" : made && remembered ? "the file is handed to another workflow, the one picked before" : "the file is handed to another workflow: choose which, under the step"}.`); }
   };
   const addStep = (d: StepDefinition, after?: ID) => {
