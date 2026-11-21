@@ -841,6 +841,7 @@ func TestCompareTheResultAfterTheSave(t *testing.T) {
 		t.Error("the compile should refuse it too")
 	}
 	_ = by
+}
 
 // review2-579 P3-2: HasFileRefs reads a reference the way the resolver does, spaces and all.
 func TestHasFileRefsAgreesWithTheResolver(t *testing.T) {
