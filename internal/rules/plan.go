@@ -365,13 +365,16 @@ func (p Plan) ffmpegArgs(in, out, gpu string, full bool) []string {
 	v := "v:" + strconv.Itoa(p.Video.Index)
 	fam := GraphicsFamily(gpu) // "" for the processor
 	args := []string{"-y", "-nostdin", "-v", "error", "-progress", "pipe:1", "-nostats"}
-	switch fam { // a hardware device is set up before the input
-	case "qsv":
-		args = append(args, "-init_hw_device", "qsv=qsv:hw")
+	if p, ok := profiles[fam]; ok { // a hardware device is set up before the input (the family's profile)
+		args = append(args, p.Setup(vaapiDevice())...)
+	}
+	switch fam {
 	case "vaapi":
 		args = append(args, "-init_hw_device", "vaapi=va:"+vaapiDevice(), "-filter_hw_device", "va")
 	}
-	if full { // the device decodes too, so the frames never come down to software
+	if p, ok := profiles[fam]; full && ok && p.FullDecode() != nil { // the device decodes too, so the frames never come down to software
+		args = append(args, p.FullDecode()...)
+	} else if full {
 		args = append(args, "-hwaccel", fam, "-hwaccel_output_format", fam, "-hwaccel_device", map[string]string{"qsv": "qsv", "vaapi": "va"}[fam])
 	}
 	args = append(args, "-i", in,
@@ -481,6 +484,9 @@ func withOutput(args []string, out string) []string {
 // aspect ratio, rounds half up and is even, the same width ScaledWidth plans (a plan of 854 must not encode as 852).
 // H*iw is multiplied first: iw/ih rounded early lands an exact .5 tie a pixel low (328x1280 at 480: 122, not 124).
 func gpuScale(fam string, h int, tenBit bool) string {
+	if p, ok := profiles[fam]; ok && p.scale != nil {
+		return p.scale(h, tenBit)
+	}
 	size := "w=-2:h=" + strconv.Itoa(h)
 	if fam != "vaapi" {
 		hs := strconv.Itoa(h)
@@ -501,8 +507,6 @@ func gpuQuality(fam string, crf int) []string {
 	}
 	n := strconv.Itoa(crf)
 	switch fam {
-	case "qsv":
-		return []string{"-global_quality", n}
 	case "vaapi":
 		return []string{"-rc_mode", "CQP", "-qp", n}
 	default: // amf
