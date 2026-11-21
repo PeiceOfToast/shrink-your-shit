@@ -144,11 +144,11 @@ func run(c rules.Card, st *State, env Env) (Note, error) {
 				n.Words = "Not waiting until " + u + ": the file was retried by hand"
 				return n, nil
 			}
-			if r := env.ReturnedAt; !r.IsZero() && r.In(now.Location()).Format("15:04") == u { // this wait's own time came
+			if r := env.ReturnedAt; !r.IsZero() && isOwnTime(r.In(now.Location()), t.Hour(), t.Minute()) { // this wait's own time came
 				n.Words = "Waited until " + u + ": the file came back as asked"
 				return n, nil
 			}
-			at := NextTimeOfDay(now, t.Hour(), t.Minute())
+			at := nextTimeOfDay(now, t.Hour(), t.Minute())
 			return n, &Later{At: at, Words: WaitPrefix + u + " as the workflow asks"}
 		}
 		secs := 0
@@ -516,9 +516,16 @@ func quoteOr(s, empty string) string {
 	return quote(s)
 }
 
-// NextTimeOfDay is the next HH:MM after now in now's location: today's if still ahead, else tomorrow's by
+// isOwnTime says whether r is HH:MM of its own day as the clock has it: a time inside a spring-forward gap
+// is normalised forward (02:00 becomes 03:00 on that one night), and the return the card queued is compared
+// after the same normalisation, so a Wait recognises its own return on that night too (review2-548 P3a).
+func isOwnTime(r time.Time, hour, minute int) bool {
+	return time.Date(r.Year(), r.Month(), r.Day(), hour, minute, 0, 0, r.Location()).Equal(r)
+}
+
+// nextTimeOfDay is the next HH:MM after now in now's location: today's if still ahead, else tomorrow's by
 // calendar date, so a clock change keeps the wall-clock time (review-548: +24h drifted an hour across one).
-func NextTimeOfDay(now time.Time, hour, minute int) time.Time {
+func nextTimeOfDay(now time.Time, hour, minute int) time.Time {
 	loc := now.Location()
 	at := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, loc)
 	if !at.After(now) {

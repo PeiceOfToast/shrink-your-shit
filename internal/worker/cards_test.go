@@ -467,7 +467,8 @@ func TestConvertAgainLaterAndWaitUntil(t *testing.T) {
 		}
 	}
 	// back at another time (as Convert again later would bring it): the Wait still holds it (review-548 item 5)
-	backAt(time.Now().Add(-time.Minute))
+	y0 := time.Now().AddDate(0, 0, -1)
+	backAt(time.Date(y0.Year(), y0.Month(), y0.Day(), 1, 30, 0, 0, time.Local)) // a fixed clock, never 02:00 by accident (review2-548 P3b)
 	w2.RunOne(context.Background())
 	if j := s2.job(); j.Status != jobs.Queued || !strings.HasPrefix(j.Error, flow.WaitPrefix) {
 		t.Errorf("back at another time: %s %q", j.Status, j.Error)

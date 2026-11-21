@@ -407,7 +407,7 @@ func Definitions() []StepDefinition {
 				"remove": templated(described(map[string]any{"type": "string", "title": "Remove", "maxLength": 1000, "x-placeholder": "needs-review"}, "Tags to take off, separated by commas, like needs-review.")),
 			}, nil)}),
 		def(StepDefinition{Type: TypeWait, RunsAs: RunsAction, Phase: []string{PhaseBefore}, Category: "flow", Name: "Wait", Icon: "clock", TypeLabel: "Action",
-			Description: "Pauses before the conversion: for a number of seconds (the worker waits), or until a time of day (the file goes back to the queue until then, so the worker is free).",
+			Description: "Pauses before the conversion: for a number of seconds (the worker waits), or until a time of day (the file goes back to the queue until then, so the worker is free). A file that comes back at that time goes through once; a try that 'Convert again later' sends back waits for the next day's time; a person's Retry now goes through at once when this step queued the file, while a file that 'Convert again later' sent back still waits.",
 			Inputs:      []Port{in}, Outputs: []Port{success}, SideEffects: "none",
 			ConfigSchema: object(map[string]any{
 				"seconds": described(map[string]any{"type": "integer", "title": "Wait for (seconds)", "minimum": 1, "maximum": 3600}, "Up to an hour. Leave empty when waiting until a time of day."),
