@@ -1161,58 +1161,62 @@ func LocalEncoderCandidates(store *jobs.Store, chk *doctor.Checker) func(codec s
 		if !ok {
 			return []string{"Hardware found: the encoder test has not finished yet; the processor does the encoding."}
 		}
-		caps := capabilities(t, ok)
-		format := encoderFormat(codec)
-		if format == "" { // VideoFormats' names are libx265/libx264/libsvtav1/libvpx-vp9
-			return nil
-		}
-		var here []string
-		for _, c := range caps {
-			if name, _ := c["key"].(string); c["kind"] == "encoder" && c["slot"] == "gpu" && c["test"] != "not_present" {
-				here = append(here, strings.TrimPrefix(name, "encoder:"))
-			}
-		}
-		out := []string{}
-		if len(here) == 0 {
-			out = append(out, "Hardware found: no graphics encoder on this computer; the processor does the encoding.")
-		} else {
-			out = append(out, "Hardware found: "+strings.Join(here, ", ")+".")
-		}
-		probes := chk.Probes()
-		tried := 0
-		for _, c := range caps {
-			name, _ := c["key"].(string)
-			name = strings.TrimPrefix(name, "encoder:")
-			if c["kind"] != "encoder" || c["slot"] != "gpu" || c["format"] != format {
-				continue
-			}
-			tried++
-			test, _ := c["test"].(string)
-			switch test {
-			case "passed":
-				tenBit, _ := c["tenBit"].(bool)
-				if why := candidateReject(name, need10, tenBit, hdr); why != "" {
-					out = append(out, name+": "+why+".")
-				} else {
-					out = append(out, name+": passed its test here.")
-				}
-			case "not_present":
-				out = append(out, name+": not tried: no card for it in this computer.")
-			case "unsupported":
-				out = append(out, name+": not tried: this graphics card does not support it.")
-			default: // failed: R5 wants the last error line of the test
-				line := name + ": failed its test here"
-				if p, ok := probes[name]; ok && p.Err != "" {
-					line += ": " + testWords(p.Err)
-				}
-				out = append(out, line+".")
-			}
-		}
-		if tried == 0 {
-			out = append(out, "No graphics encoder for "+format+" is listed here; the processor encodes it.")
-		}
-		return out
+		return candidateLines(capabilities(t, ok), chk.Probes(), codec, need10, hdr)
 	}
+}
+
+// candidateLines is LocalEncoderCandidates' lines, built from the capabilities and the test probes. An encoder the
+// card does not support is not in "Hardware found" as well: it gets its one "not tried" line (job 58 showed both).
+func candidateLines(caps []map[string]any, probes map[string]doctor.Probe, codec string, need10 bool, hdr *rules.HDR) []string {
+	format := encoderFormat(codec)
+	if format == "" { // VideoFormats' names are libx265/libx264/libsvtav1/libvpx-vp9
+		return nil
+	}
+	var here []string
+	for _, c := range caps {
+		if name, _ := c["key"].(string); c["kind"] == "encoder" && c["slot"] == "gpu" && c["test"] != "not_present" && c["test"] != "unsupported" {
+			here = append(here, strings.TrimPrefix(name, "encoder:"))
+		}
+	}
+	out := []string{}
+	if len(here) == 0 {
+		out = append(out, "Hardware found: no graphics encoder on this computer; the processor does the encoding.")
+	} else {
+		out = append(out, "Hardware found: "+strings.Join(here, ", ")+".")
+	}
+	tried := 0
+	for _, c := range caps {
+		name, _ := c["key"].(string)
+		name = strings.TrimPrefix(name, "encoder:")
+		if c["kind"] != "encoder" || c["slot"] != "gpu" || c["format"] != format {
+			continue
+		}
+		tried++
+		test, _ := c["test"].(string)
+		switch test {
+		case "passed":
+			tenBit, _ := c["tenBit"].(bool)
+			if why := candidateReject(name, need10, tenBit, hdr); why != "" {
+				out = append(out, name+": "+why+".")
+			} else {
+				out = append(out, name+": passed its test here.")
+			}
+		case "not_present":
+			out = append(out, name+": not tried: no card for it in this computer.")
+		case "unsupported":
+			out = append(out, name+": not tried: this graphics card does not support it.")
+		default: // failed: R5 wants the last error line of the test
+			line := name + ": failed its test here"
+			if p, ok := probes[name]; ok && p.Err != "" {
+				line += ": " + testWords(p.Err)
+			}
+			out = append(out, line+".")
+		}
+	}
+	if tried == 0 {
+		out = append(out, "No graphics encoder for "+format+" is listed here; the processor encodes it.")
+	}
+	return out
 }
 
 // candidateReject says why graphics encoder name, whose test passed, was not used for this file, in words; ""

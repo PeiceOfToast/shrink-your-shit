@@ -194,7 +194,7 @@ func TestQSVScaleWidthIsThePlannedWidth(t *testing.T) {
 		}
 	}
 	want := "scale_qsv=w=trunc(480*iw/ih/2+0.5)*2:h=480"
-	if got := gpuScale("qsv", 480, false); got != want {
+	if got := profiles["qsv"].scale(480, false); got != want {
 		t.Errorf("qsv scale: got %s want %s", got, want)
 	}
 }
