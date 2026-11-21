@@ -174,6 +174,8 @@ func (r Result) Errors() bool {
 // node types, ports and config values, edges between existing ports, always-on steps on, and whether
 // this version can run it. A node's unwired "error" port means stop: the job fails and the original
 // stays, as the engine has always done.
+var hhmmRe = regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9]$`)
+
 // Policy is what this install allows a workflow to do (FB2b): the Safety switch for Run a command.
 // Validate alone assumes everything is allowed; the server passes the live policy to ValidateWith.
 type Policy struct {
@@ -270,6 +272,15 @@ func Validate(d Doc) Result {
 		}
 		if n.Type == TypeTag && len(rules.CleanTags(strOf(n.Config, "add", ""))) == 0 && len(rules.CleanTags(strOf(n.Config, "remove", ""))) == 0 { // review2-542 P2: an empty card would fail every job
 			add(Issue{Code: "invalid_config", NodeID: n.ID, ConfigPath: "/add", Field: "add", Message: "In '" + nodeName(n) + "', name a tag to add or one to remove."})
+		}
+		if n.Type == TypeWait { // FB4: one of the two, and a time it can read
+			secs, until := intOf(n.Config, "seconds", 0), strOf(n.Config, "until", "")
+			if secs <= 0 && until == "" {
+				add(Issue{Code: "invalid_config", NodeID: n.ID, ConfigPath: "/seconds", Field: "seconds", Message: "In '" + nodeName(n) + "', set seconds to wait, or a time of day to wait until."})
+			}
+			if until != "" && !hhmmRe.MatchString(until) {
+				add(Issue{Code: "invalid_config", NodeID: n.ID, ConfigPath: "/until", Field: "until", Message: "In '" + nodeName(n) + "', the time must read like 02:00."})
+			}
 		}
 		if n.Type == TypeCheckName && strOf(n.Config, "match", "contains") == "regex" { // review2-531 P3: a pattern that can't compile would answer No for every file
 			if _, err := regexp.Compile(strOf(n.Config, "pattern", "")); err != nil {
@@ -658,6 +669,15 @@ func summary(n Node) string {
 		return strOf(c, "reason", "Left alone by this workflow.")
 	case TypeFail:
 		return "Failed: " + strOf(c, "reason", "Stopped by this workflow.")
+	case TypeRequeue:
+		return "Back in the queue for " + minutesWords(intOf(c, "afterMin", 60)) + ", at most " + strconv.Itoa(intOf(c, "maxTries", 5)) + " tries"
+	case TypeCheckRandom:
+		return "Only for about " + strconv.Itoa(intOf(c, "share", 10)) + "% of files"
+	case TypeWait:
+		if u := strOf(c, "until", ""); u != "" {
+			return "Waits in the queue until " + u
+		}
+		return "Waits " + strconv.Itoa(intOf(c, "seconds", 0)) + " seconds"
 	// FB2a: the cards after the save
 	case TypeMediaServer:
 		return "Tells " + map[string]string{"plex": "Plex", "jellyfin": "Jellyfin"}[strOf(c, "which", "all")] + map[bool]string{true: "every connected media server", false: ""}[strOf(c, "which", "all") == "all"]
@@ -773,4 +793,22 @@ func qualityWords(name string) string {
 		return name
 	}
 	return name + " quality"
+}
+
+// minutesWords says a number of minutes in the unit that reads best.
+func minutesWords(m int) string {
+	switch {
+	case m >= 1440 && m%1440 == 0:
+		return plural(m/1440, "day")
+	case m >= 60 && m%60 == 0:
+		return plural(m/60, "hour")
+	}
+	return plural(m, "minute")
+}
+
+func plural(n int, unit string) string {
+	if n == 1 {
+		return "1 " + unit
+	}
+	return strconv.Itoa(n) + " " + unit + "s"
 }

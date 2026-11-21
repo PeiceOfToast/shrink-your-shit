@@ -208,6 +208,13 @@ func branchTemplate(d Doc) (rules.Template, []Issue) {
 				reason = "Stopped by this workflow"
 			}
 			branches = append(branches, rules.Branch{Checks: checks, Before: before, End: reason, Fail: true, Path: append(clone(path), n.ID)})
+		case n.Type == TypeRequeue: // FB4
+			reason, _ := n.Config["reason"].(string)
+			if reason == "" {
+				reason = "Tried as often as this workflow allows"
+			}
+			branches = append(branches, rules.Branch{Checks: checks, Before: before, End: reason, Fail: true, Path: append(clone(path), n.ID),
+				Requeue: &rules.Requeue{AfterSec: intOf(n.Config, "afterMin", 60) * 60, MaxTries: intOf(n.Config, "maxTries", 5)}})
 		case n.Type == TypeInput:
 			next := out[[2]string{n.ID, "success"}]
 			if next == "" {
@@ -246,7 +253,7 @@ func questionOf(n Node) rules.Question {
 	var q rules.Question
 	b, _ := json.Marshal(n.Config)
 	json.Unmarshal(b, &q) // a value of the wrong kind is an invalid_config from checkConfig already; here it reads as unset
-	q.Kind = map[string]string{TypeCheck: "", TypeCheckName: "name", TypeCheckAge: "age", TypeCheckVariable: "variable", TypeCheckLibrary: "library", TypeCheckHardLinks: "hardlinks", TypeCheckTag: "tag"}[n.Type]
+	q.Kind = map[string]string{TypeCheck: "", TypeCheckName: "name", TypeCheckAge: "age", TypeCheckVariable: "variable", TypeCheckLibrary: "library", TypeCheckHardLinks: "hardlinks", TypeCheckTag: "tag", TypeCheckRandom: "random"}[n.Type]
 	q.Name = nodeName(n)
 	return q
 }

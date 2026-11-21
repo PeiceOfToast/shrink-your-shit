@@ -5,6 +5,7 @@ package rules
 import (
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"strings"
 	"testing"
 	"time"
@@ -176,5 +177,50 @@ func TestTagQuestionAndTagHelpers(t *testing.T) {
 	}
 	if got, left := ApplyTagsCounted(have, []string{"new1", "new2"}, nil); len(got) != 23 || left != 2 {
 		t.Errorf("adds past the cap: %d tags, %d left off", len(got), left)
+	}
+}
+
+// FB4: a random share answers the same for the same file every time, about the share of files overall; 100
+// is every file, 0 nothing to ask.
+func TestRandomShareIsStablePerFile(t *testing.T) {
+	q := Question{Kind: "random", Share: 30}
+	yes := 0
+	for i := 0; i < 1000; i++ {
+		f := Facts{Path: fmt.Sprintf("/films/film-%d.mkv", i)}
+		a, _ := q.Ask(media.Info{}, f)
+		b, _ := q.Ask(media.Info{}, f)
+		if a != b {
+			t.Fatalf("file %d answered differently twice", i)
+		}
+		if a {
+			yes++
+		}
+	}
+	if yes < 220 || yes > 380 {
+		t.Errorf("30%% of 1000 files: %d said Yes", yes)
+	}
+	if a, _ := (Question{Kind: "random", Share: 100}).Ask(media.Info{}, Facts{Path: "/x"}); !a {
+		t.Error("100% is every file")
+	}
+	// review-548: the boundary is exact: a file whose draw equals the share answers No, one draw below answers Yes
+	draw := func(path string) int { h := fnv.New32a(); h.Write([]byte(path)); return int(h.Sum32() % 100) }
+	at, below := "", ""
+	for i := 0; i < 100000 && (at == "" || below == ""); i++ {
+		p := fmt.Sprintf("/films/draw-%d.mkv", i)
+		switch draw(p) {
+		case 30:
+			at = p
+		case 29:
+			below = p
+		}
+	}
+	if a, why := (Question{Kind: "random", Share: 30}).Ask(media.Info{}, Facts{Path: at}); a {
+		t.Errorf("a draw of 30 with a share of 30 answers No: %q", why)
+	}
+	if a, why := (Question{Kind: "random", Share: 30}).Ask(media.Info{}, Facts{Path: below}); !a {
+		t.Errorf("a draw of 29 with a share of 30 answers Yes: %q", why)
+	}
+	if !(Question{Kind: "random"}).Empty() || (Question{Kind: "random", Share: 5}).Empty() {
+		t.Error("Empty")
 	}
 }

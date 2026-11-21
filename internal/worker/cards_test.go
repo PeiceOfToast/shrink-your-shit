@@ -400,3 +400,107 @@ func TestTagCardsReadAndWriteTheRecord(t *testing.T) {
 type noTagsQueue struct{ *jobs.Store }
 
 func (q *noTagsQueue) JobTags(int64, ...struct{}) {}
+
+// FB4: "Convert again later" puts the job back in the queue for the card's wait, counting the try, and fails it
+// with the card's words once the tries are used up; a Wait until a time of day puts it back until then, no try
+// counted as failed. Nothing is encoded either way and the original is untouched.
+func TestConvertAgainLaterAndWaitUntil(t *testing.T) {
+	s := newScenarioNamed(t, "Harrow.Lane.2019.WEB.mkv") // not a remux: the No path
+	tm := cardsTemplate()
+	(*tm.Branches)[1] = rules.Branch{Checks: (*tm.Branches)[1].Checks, End: "The download never finished", Fail: true, Path: []string{"in", "q", "again"},
+		Requeue: &rules.Requeue{AfterSec: 1800, MaxTries: 2}}
+	w := s.worker(Beside)
+	w.Template = func(jobs.Job) (rules.Template, error) { return tm, nil }
+	if _, err := w.RunOne(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	j := s.job()
+	if j.Status != jobs.Queued || j.Attempts != 1 || j.RetryAt == "" || !strings.Contains(j.Error, "try 1 of 2") {
+		t.Fatalf("first try: %s attempts %d at %q %q", j.Status, j.Attempts, j.RetryAt, j.Error)
+	}
+	if s.count("-c:v") != 0 {
+		t.Error("nothing should have been encoded")
+	}
+	s.assertOriginalSafe()
+	// the last try fails with the card's words (a card that allows one try: its first try is its last)
+	s3 := newScenarioNamed(t, "Harrow.Lane.2019.WEB.mkv")
+	tm3 := cardsTemplate()
+	(*tm3.Branches)[1] = rules.Branch{Checks: (*tm3.Branches)[1].Checks, End: "The download never finished", Fail: true, Path: []string{"in", "q", "again"},
+		Requeue: &rules.Requeue{AfterSec: 1800, MaxTries: 1}}
+	w3 := s3.worker(Beside)
+	w3.Template = func(jobs.Job) (rules.Template, error) { return tm3, nil }
+	w3.RunOne(context.Background())
+	if j3 := s3.job(); j3.Status != jobs.Failed || !strings.Contains(j3.Error, "The download never finished. Tried 1 times") {
+		t.Errorf("last try: %s %q", j3.Status, j3.Error)
+	}
+	// Wait until a time of day: back in the queue until then
+	s2 := newScenarioNamed(t, "Harrow.Lane.2019.Remux.mkv")
+	tm2 := cardsTemplate()
+	(*tm2.Branches)[0].Before = append([]rules.Card{{NodeID: "w", Type: workflow.TypeWait, Name: "Wait", Config: map[string]any{"until": "02:00"}}}, (*tm2.Branches)[0].Before...)
+	w2 := s2.worker(Beside)
+	w2.Template = func(jobs.Job) (rules.Template, error) { return tm2, nil }
+	w2.RunOne(context.Background())
+	j2 := s2.job()
+	if j2.Status != jobs.Queued || j2.RetryAt == "" || !strings.Contains(j2.Error, "Waiting until 02:00") {
+		t.Errorf("wait until: %s at %q %q", j2.Status, j2.RetryAt, j2.Error)
+	}
+	if s2.count("-c:v") != 0 {
+		t.Error("nothing should have been encoded")
+	}
+	steps, _ := s2.store.Steps(j2.ID)
+	if len(steps) == 0 || steps[len(steps)-1].Step != "later" || !strings.Contains(steps[len(steps)-1].Words, "Waiting until 02:00") {
+		t.Errorf("timeline: %+v", steps)
+	}
+	// review2-548 P1: when the file comes back because that wait's time came, the same card lets it through and
+	// the file is converted; it is not sent to tomorrow again. The queue's way of bringing it back is RetryLater
+	// with the wait's words on the job, which the worker reads; here that return is made by hand, as the queue
+	// would at 02:00.
+	backAt := func(at time.Time) { // the queue brings the file back at that time, as RetryLater had asked
+		if err := s2.store.RetryNow(j2.ID); err != nil {
+			t.Fatal(err)
+		}
+		if j, err := s2.store.Claim("x"); err != nil || j.ID != j2.ID {
+			t.Fatalf("claim: %+v %v", j, err)
+		}
+		if err := s2.store.RetryLater(j2.ID, at, jobs.ReasonRetryLater, flow.WaitPrefix+"02:00 as the workflow asks"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// back at another time (as Convert again later would bring it): the Wait still holds it (review-548 item 5)
+	backAt(time.Now().Add(-time.Minute))
+	w2.RunOne(context.Background())
+	if j := s2.job(); j.Status != jobs.Queued || !strings.HasPrefix(j.Error, flow.WaitPrefix) {
+		t.Errorf("back at another time: %s %q", j.Status, j.Error)
+	}
+	// back at its own time: through it goes and the file is converted
+	y := time.Now().AddDate(0, 0, -1)
+	backAt(time.Date(y.Year(), y.Month(), y.Day(), 2, 0, 0, 0, time.Local))
+	if _, err := w2.RunOne(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if j := s2.job(); j.Status != jobs.Done {
+		t.Errorf("after the wait's time: %s %q at %q", j.Status, j.Error, j.RetryAt)
+	}
+	if !noteOnTimeline(s2, "came back as asked") {
+		steps, _ := s2.store.Steps(j2.ID)
+		t.Errorf("timeline after the wait: %+v", steps)
+	}
+	// a person's Retry now on a waiting file: wanted now, converted (review-548 item 6)
+	s5 := newScenarioNamed(t, "Harrow.Lane.2019.Remux.mkv")
+	w5 := s5.worker(Beside)
+	w5.Template = func(jobs.Job) (rules.Template, error) { return tm2, nil }
+	w5.RunOne(context.Background())
+	if j := s5.job(); j.Status != jobs.Queued {
+		t.Fatalf("first run: %s", j.Status)
+	}
+	if err := s5.store.RetryNow(s5.id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w5.RunOne(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if j := s5.job(); j.Status != jobs.Done || !noteOnTimeline(s5, "retried by hand") {
+		steps, _ := s5.store.Steps(s5.id)
+		t.Errorf("retried by hand: %s %q %+v", j.Status, j.Error, steps)
+	}
+}

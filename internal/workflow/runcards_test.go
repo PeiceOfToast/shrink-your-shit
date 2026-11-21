@@ -593,3 +593,78 @@ func TestTagCards(t *testing.T) {
 		t.Errorf("the description names other limits: %q", def.Description)
 	}
 }
+
+// FB4: Convert again later is an end that carries its wait and its tries into the branch; A share of files is a
+// question; Wait is a before action whose settings are checked; summaries for all three.
+func TestFlowCardsFB4(t *testing.T) {
+	d, by := runDoc()
+	again := node(TypeRequeue, "", map[string]any{"afterMin": float64(30), "maxTries": float64(3), "reason": "The download never finished"})
+	d.Nodes = append(d.Nodes, again)
+	for i, e := range d.Edges { // the No path tries again later instead of failing
+		if e.From == by["q"].ID && e.FromPort == "else" {
+			d.Edges[i].To = again.ID
+		}
+	}
+	d.Nodes = slices.DeleteFunc(d.Nodes, func(n Node) bool { return n.ID == by["fail"].ID })
+	share := node(TypeCheckRandom, "", map[string]any{"share": float64(25)})
+	wait := node(TypeWait, "", map[string]any{"until": "02:00"})
+	leave := node(TypeEnd, "", map[string]any{"reason": "Not this time."})
+	d.Nodes = append(d.Nodes, share, wait, leave)
+	for i, e := range d.Edges { // input → share → (yes) wait → q
+		if e.From == by["input"].ID {
+			d.Edges[i].To = share.ID
+		}
+	}
+	d.Edges = append(d.Edges, link(share.ID, "match", wait.ID), link(wait.ID, "success", by["q"].ID), link(share.ID, "else", leave.ID))
+	r := Validate(d)
+	if r.Errors() {
+		t.Fatalf("%+v", r.Issues)
+	}
+	for id, want := range map[string]string{again.ID: "Back in the queue for 30 minutes, at most 3 tries", share.ID: "Only for about 25% of files", wait.ID: "Waits in the queue until 02:00"} {
+		if r.StepSummaries[id] != want {
+			t.Errorf("summary %q, want %q", r.StepSummaries[id], want)
+		}
+	}
+	tm, issues := ToTemplate(d, rules.Template{})
+	if len(issues) > 0 {
+		t.Fatalf("%v", issues)
+	}
+	var later *rules.Branch
+	for i := range *tm.Branches {
+		if b := &(*tm.Branches)[i]; b.Requeue != nil {
+			later = b
+		}
+	}
+	if later == nil || later.Requeue.AfterSec != 1800 || later.Requeue.MaxTries != 3 || later.End != "The download never finished" || !later.Fail || later.Then != nil {
+		t.Errorf("the requeue branch: %+v", later)
+	}
+	yes := (*tm.Branches)[0]
+	if len(yes.Checks) != 2 || yes.Checks[0].Check.Kind != "random" || yes.Checks[0].Check.Share != 25 || len(yes.Before) != 3 || yes.Before[0].Type != TypeWait {
+		t.Errorf("yes path: checks %+v before %+v", yes.Checks, yes.Before)
+	}
+	plan := tm.CompileWith(media.Info{SizeBytes: 1 << 30, Ext: ".mkv", DurationSec: 100, Streams: []media.Stream{{Type: "video", Codec: "h264", Width: 1920, Height: 1080}}}, rules.Facts{Path: "/films/Plain.mkv"})
+	if plan.Requeue != nil && (plan.Requeue.MaxTries != 3 || plan.Skip != "The download never finished") {
+		t.Errorf("a requeued plan: %+v", plan.Requeue)
+	}
+	// a Wait with nothing set, or a time it can't read, is refused
+	wait.Config = map[string]any{}
+	d.Nodes[len(d.Nodes)-2] = wait
+	if !hasIssue(Validate(d).Issues, "invalid_config", wait.ID) {
+		t.Error("an empty wait should be refused")
+	}
+	for _, bad := range []string{"2 am", "25:00", "2:00", "02:60", "0200"} { // review-548: refused at publish, not at run time
+		wait.Config = map[string]any{"until": bad}
+		d.Nodes[len(d.Nodes)-2] = wait
+		if !hasIssue(Validate(d).Issues, "invalid_config", wait.ID) {
+			t.Errorf("%q should be refused", bad)
+		}
+	}
+	wait.Config = map[string]any{"until": "02:00"}
+	d.Nodes[len(d.Nodes)-2] = wait
+	if hasIssue(Validate(d).Issues, "invalid_config", wait.ID) {
+		t.Error("02:00 is a time")
+	}
+	if a := Validate(d).AddSteps[TypeRequeue]; a.Addable {
+		t.Error("an end is placed in the graph")
+	}
+}

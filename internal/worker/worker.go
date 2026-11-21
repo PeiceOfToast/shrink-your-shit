@@ -20,6 +20,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -470,6 +471,11 @@ func (w *Worker) runClaimed(ctx context.Context, job jobs.Job, jobCtx context.Co
 		if errors.As(err, &se) { // left alone by its flow (S3): Skipped, not failed, never retried
 			w.jobf(job.ID, " (%s): skipped: %s", job.Path, se.Words)
 			return true, w.Queue.Skip(job.ID, se.Words, se.Code)
+		}
+		var le *laterError
+		if errors.As(err, &le) { // FB4: the workflow wants the file again later: back in the queue, not before then
+			w.jobf(job.ID, " (%s): %s; back in the queue until %s", job.Path, le.words, le.at.Format(time.RFC3339))
+			return true, w.Queue.RetryLater(job.ID, le.at, jobs.ReasonRetryLater, le.words)
 		}
 		// V6b: the path's own choice for when its conversion doesn't work comes first.
 		w.mu.Lock()
@@ -1083,13 +1089,27 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	var published map[string]string
 	if len(plan.Before) > 0 {
 		st := &flow.State{Vars: maps.Clone(facts.Vars)} // its own copy: what the cards set is told apart below
-		env := flow.Env{Log: func(l string) { w.jobNote(job.ID, secEncode, jobs.LevelInfo, "(%s): %s", job.Path, l) }, Tag: w.tagger(job.ID)}
+		env := flow.Env{Log: func(l string) { w.jobNote(job.ID, secEncode, jobs.LevelInfo, "(%s): %s", job.Path, l) }, Tag: w.tagger(job.ID), Now: w.now,
+			ReturnedAt: returnedAt(job), Retried: w.retriedByHand(job), // FB4: a Wait passes on its own return time, or when a person retried a waiting file
+			Sleep: func(d time.Duration) error { // FB4: a Wait card's pause ends early when the worker is told to stop
+				select {
+				case <-time.After(d):
+					return nil
+				case <-ctx.Done():
+					return errors.New("the wait was cut short: the worker is stopping")
+				}
+			}}
 		if w.Cards != nil { // FB2b: the downloaders answer before the conversion
 			env.Lookup = w.Cards(job, "").Lookup
 		}
 		notes, berr := flow.Before(plan.Before, st, env)
 		for _, n := range notes {
 			w.Queue.AddDecision(job.ID, n.NodeID, "", n.Name+" → "+n.Words)
+		}
+		var later *flow.Later
+		if errors.As(berr, &later) { // FB4: a Wait until a time of day: back in the queue, nothing tried
+			w.Queue.AddStep(job.ID, "later", true, later.Words+".")
+			return "", &laterError{at: later.At, words: later.Words}
 		}
 		if berr != nil {
 			w.Queue.AddStep(job.ID, "failed", false, berr.Error()+".")
@@ -1101,6 +1121,15 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 				published[k] = v
 			}
 		}
+	}
+	if plan.Requeue != nil && plan.Skip != "" { // FB4: "Convert again later": back in the queue for a while, at most so many tries
+		if job.Attempts+1 < plan.Requeue.MaxTries {
+			wait := time.Duration(plan.Requeue.AfterSec) * time.Second
+			w.Queue.AddStep(job.ID, "later", true, "Back in the queue: try "+strconv.Itoa(job.Attempts+1)+" of "+strconv.Itoa(plan.Requeue.MaxTries)+", again in "+wait.String()+" as the workflow asks.")
+			return "", &laterError{at: w.now().Add(wait), words: "Convert again later: try " + strconv.Itoa(job.Attempts+1) + " of " + strconv.Itoa(plan.Requeue.MaxTries)}
+		}
+		w.Queue.AddStep(job.ID, "failed", false, plan.Skip+" (tried "+strconv.Itoa(plan.Requeue.MaxTries)+" times).")
+		return "", failed(plan.Skip+". Tried "+strconv.Itoa(plan.Requeue.MaxTries)+" times; the original is untouched.", errors.New("stopped by its workflow after its tries: "+plan.Skip))
 	}
 	if plan.Skip != "" && plan.Fail { // FB1c: the path ended in "Stop as failed": the job fails with its words, the original untouched
 		w.Queue.AddStep(job.ID, "failed", false, plan.Skip+".")
@@ -2604,4 +2633,45 @@ func (w *Worker) jobTags(id int64) []string {
 		return tags
 	}
 	return nil
+}
+
+// laterError is a workflow's wish to see the file again later (FB4): the job goes back to the queue, not
+// before at, with the words as its reason; no try is "failed".
+type laterError struct {
+	at    time.Time
+	words string
+}
+
+func (e *laterError) Error() string { return e.words }
+
+// returnedAt is when the queue was asked to bring the job back (the claim keeps the time), zero otherwise.
+func returnedAt(job jobs.Job) time.Time {
+	if job.RetryAt == "" {
+		return time.Time{}
+	}
+	t, err := time.Parse(time.RFC3339, job.RetryAt)
+	if err != nil {
+		return time.Time{}
+	}
+	return t
+}
+
+// retriedByHand says a person pressed Retry on a job that was waiting for a Wait card's time: its return
+// time is gone while its last step still says it was waiting. Such a file is wanted now (review-548 item 6).
+func (w *Worker) retriedByHand(job jobs.Job) bool {
+	if job.RetryAt != "" {
+		return false
+	}
+	q, ok := w.Queue.(interface {
+		Steps(int64) ([]jobs.Step, error)
+	})
+	if !ok {
+		return false
+	}
+	steps, err := q.Steps(job.ID)
+	if err != nil || len(steps) == 0 {
+		return false
+	}
+	last := steps[len(steps)-1]
+	return last.Step == "later" && strings.HasPrefix(last.Words, flow.WaitPrefix)
 }
