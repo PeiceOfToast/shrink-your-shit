@@ -4,9 +4,9 @@
 export function Skeleton({ tiles = 0, rows = 0, cards = 0 }: { tiles?: number; rows?: number; cards?: number }) {
   const n = (k: number) => Array.from({ length: k }, (_, i) => i);
   return (
-    <div className="skel" aria-busy="true">
+    <div className="skel">
       <span role="status"><span className="sr">Loading</span></span>
-      <div aria-hidden="true">
+      <div aria-hidden="true" aria-busy="true">
         {tiles > 0 && <section className="tiles">{n(tiles).map((i) => (
           <div className="tile" key={i}><span className="skel-b skel-w25" /><span className="skel-b skel-big" /><span className="skel-b skel-w60" /></div>
         ))}</section>}
