@@ -16,6 +16,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
@@ -77,7 +78,8 @@ var hardwareEncoders = []string{
 	"hevc_videotoolbox", "h264_videotoolbox", "av1_videotoolbox",
 }
 
-// has10Bit says whether enc gets the 10-bit test: HEVC and AV1 only (H.264 has no 10-bit profile here).
+// has10Bit says whether enc gets the 10-bit test: HEVC and AV1 only (H.264 has no 10-bit profile here). It asks
+// about the encoder, not the job: that is rules.NeedsTenBit.
 func has10Bit(enc string) bool {
 	return strings.HasPrefix(enc, "hevc_") || strings.HasPrefix(enc, "av1_")
 }
@@ -113,8 +115,13 @@ type Checker struct {
 	mu      sync.Mutex
 	tools   *Tools // the converter, without the hardware test
 	toolsAt time.Time
-	hw      *[5][]string // hardware: working, listed-but-failing, 10-bit; software: working, failing
-	hwAt    time.Time
+	// known is the last complete result, readable while mu is held by a check: a caller that asks
+	// "now" during a refresh gets what was found before, not an empty answer (user bug 11-20: Quick
+	// Sync had passed and the card was idle, yet the processor was chosen with no reason, because
+	// ToolsNow answered "nothing" for the moment the check held mu).
+	known atomic.Pointer[Tools]
+	hw    *[5][]string // hardware: working, listed-but-failing, 10-bit; software: working, failing
+	hwAt  time.Time
 	// refreshing: ToolsNow started a background check that has not finished
 	refreshing bool
 	// hwRun is closed when the hardware test in flight ends (nil: none runs): one at a time
@@ -171,6 +178,7 @@ func (c *Checker) tested(ctx context.Context, maxAge time.Duration) (Tools, map[
 		stored := ctx.Err() == nil // a test cut short by its caller is not a result: the next caller runs it again
 		if stored {
 			c.hw, c.hwAt, c.probes = &hw, at, probes
+			c.publishLocked()
 		}
 		c.hwRun = nil
 		close(run)
@@ -280,13 +288,19 @@ func (c *Checker) Retest(ctx context.Context) Tools {
 	return c.Tools(ctx)
 }
 
-// ToolsNow is Tools without waiting: the last result, or ok false when none is known yet (or a check is
-// running right now). A missing or stale result is refreshed in the background, one refresh at a time:
-// a page that only shows the graphics card never waits for the hardware test's encodes (S2, ui-shop's
-// 1.5 s stop answer).
+// ToolsNow is Tools without waiting: the last result, or ok false when none is known yet. A missing or
+// stale result is refreshed in the background, one refresh at a time: a page that only shows the graphics
+// card never waits for the hardware test's encodes (S2, ui-shop's 1.5 s stop answer).
+//
+// While a check holds the lock its answer is the last complete result, not "nothing": a caller that takes
+// "nothing" for an empty capability list would pick the processor on a computer whose card passed (user
+// bug 11-20: Quick Sync passed, card idle, "Chosen: x265 (processor)" with no reason).
 func (c *Checker) ToolsNow() (Tools, bool) {
 	if !c.mu.TryLock() {
-		return Tools{}, false // a check is running: its result is there on the next call
+		if t := c.known.Load(); t != nil {
+			return *t, true // a check is running: what was found before still stands until it stores its own
+		}
+		return Tools{}, false
 	}
 	t, ok := Tools{}, c.tools != nil && c.hw != nil
 	stale := !ok || time.Since(c.hwAt) >= toolsTTL || time.Since(c.toolsAt) >= toolsTTL
@@ -340,7 +354,18 @@ func (c *Checker) Converter(ctx context.Context) Tools {
 		}
 	}
 	c.tools, c.toolsAt = &t, time.Now()
+	c.publishLocked()
 	return t
+}
+
+// publishLocked keeps the copy ToolsNow hands out while a check holds the lock current: the last result
+// with both parts known. Called with the lock held.
+func (c *Checker) publishLocked() {
+	if c.tools == nil || c.hw == nil {
+		return
+	}
+	t := c.tools.withEncoders(*c.hw, c.hwAt)
+	c.known.Store(&t)
 }
 
 // encodes tries one tiny frame with a hardware encoder (10-bit: Main10 from p010): listed in ffmpeg is

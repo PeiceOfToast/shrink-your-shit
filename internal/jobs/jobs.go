@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 	"os"
 	"path/filepath"
 	"strings"
@@ -59,25 +60,26 @@ var ErrNoJob = errors.New("no queued job")
 
 // Job is one transcode of one file.
 type Job struct {
-	ID          int64   `json:"id"`
-	Library     string  `json:"library"`   // the library's folder when the job was made (kept as text)
-	LibraryID   int64   `json:"libraryId"` // 0: made before libraries were records, and not matched since
-	Path        string  `json:"path"`
-	Status      Status  `json:"status"`
-	Progress    float64 `json:"progress"`
-	Reason      string  `json:"reason"`
-	Error       string  `json:"error,omitempty"`
-	Worker      string  `json:"worker,omitempty"`
-	DurationSec float64 `json:"durationSec"`
-	SizeBefore  int64   `json:"sizeBefore"`
-	SizeAfter   int64   `json:"sizeAfter,omitempty"`
-	OutputPath  string  `json:"outputPath,omitempty"`
-	Plan        string  `json:"-"`                         // the Plan it ran with, JSON (RecordPlan)
-	PlanPrint   string  `json:"planFingerprint,omitempty"` // its conversion settings' fingerprint
-	Created     string  `json:"created"`
-	Updated     string  `json:"updated"`
-	Attempts    int     `json:"attempts"`          // tries finished (failed, kept, or waiting to be tried again: DD-2)
-	RetryAt     string  `json:"retryAt,omitempty"` // a queued job waiting to be tried again: not before then (RFC3339)
+	ID          int64    `json:"id"`
+	Library     string   `json:"library"`   // the library's folder when the job was made (kept as text)
+	LibraryID   int64    `json:"libraryId"` // 0: made before libraries were records, and not matched since
+	Path        string   `json:"path"`
+	Status      Status   `json:"status"`
+	Progress    float64  `json:"progress"`
+	Reason      string   `json:"reason"`
+	Error       string   `json:"error,omitempty"`
+	Worker      string   `json:"worker,omitempty"`
+	DurationSec float64  `json:"durationSec"`
+	SizeBefore  int64    `json:"sizeBefore"`
+	SizeAfter   int64    `json:"sizeAfter,omitempty"`
+	OutputPath  string   `json:"outputPath,omitempty"`
+	Plan        string   `json:"-"`                         // the Plan it ran with, JSON (RecordPlan)
+	PlanPrint   string   `json:"planFingerprint,omitempty"` // its conversion settings' fingerprint
+	Created     string   `json:"created"`
+	Updated     string   `json:"updated"`
+	Attempts    int      `json:"attempts"`          // tries finished (failed, kept, or waiting to be tried again: DD-2)
+	RetryAt     string   `json:"retryAt,omitempty"` // a queued job waiting to be tried again: not before then (RFC3339)
+	Tags        []string `json:"tags"`              // the record's tags (migration 57; FB2c): what a workflow's "Tag the file" step set
 }
 
 // File is what the scanner last saw for a path, so unchanged files are not re-probed.
@@ -261,13 +263,62 @@ SELECT ?,?,?,?,?,?,?,?,?,priority,?,?,1,`+queuedRevSQL+` FROM libraries WHERE id
 	return r.LastInsertId()
 }
 
-const cols = `id,library,COALESCE(library_id,0),path,status,progress,reason,error,worker,duration,size_before,size_after,output_path,COALESCE(plan,''),COALESCE(plan_fingerprint,''),created,updated,attempts,retry_at`
+const cols = `id,library,COALESCE(library_id,0),path,status,progress,reason,error,worker,duration,size_before,size_after,output_path,COALESCE(plan,''),COALESCE(plan_fingerprint,''),created,updated,attempts,retry_at,COALESCE(tags,'[]')`
 
 func scan(r interface{ Scan(...any) error }) (Job, error) {
 	var j Job
+	var tags string
 	err := r.Scan(&j.ID, &j.Library, &j.LibraryID, &j.Path, &j.Status, &j.Progress, &j.Reason, &j.Error, &j.Worker,
-		&j.DurationSec, &j.SizeBefore, &j.SizeAfter, &j.OutputPath, &j.Plan, &j.PlanPrint, &j.Created, &j.Updated, &j.Attempts, &j.RetryAt)
+		&j.DurationSec, &j.SizeBefore, &j.SizeAfter, &j.OutputPath, &j.Plan, &j.PlanPrint, &j.Created, &j.Updated, &j.Attempts, &j.RetryAt, &tags)
+	j.Tags = tagsOf(tags)
 	return j, err
+}
+
+// tagsOf reads a tags column: a JSON list, never null (a value that can't be read is no tags).
+func tagsOf(raw string) []string {
+	var out []string
+	if json.Unmarshal([]byte(raw), &out) != nil || out == nil {
+		return []string{}
+	}
+	return out
+}
+
+// MaxTagLen and MaxTags are rules' limits: the store is the floor, so nothing can store more.
+const (
+	MaxTagLen = rules.MaxTagLen
+	MaxTags   = rules.MaxTags
+)
+
+// JobTags are the record's tags.
+func (s *Store) JobTags(id int64) ([]string, error) {
+	var raw string
+	if err := s.db.QueryRow(`SELECT COALESCE(tags,'[]') FROM jobs WHERE id=?`, id).Scan(&raw); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return tagsOf(raw), nil
+}
+
+// SetJobTags takes remove off the record's tags and puts add on, with rules.ApplyTags (a comma is a separator,
+// never part of a tag; trimmed, cut to MaxTagLen, the same tag in another case once, at most MaxTags kept in
+// order), and answers with the result.
+func (s *Store) SetJobTags(id int64, add, remove []string) ([]string, error) {
+	have, err := s.JobTags(id)
+	if err != nil {
+		return nil, err
+	}
+	out := rules.ApplyTags(have, add, remove)
+	b, _ := json.Marshal(out)
+	res, err := s.db.Exec(`UPDATE jobs SET tags=?, updated=? WHERE id=?`, string(b), s.stamp(), id)
+	if err != nil {
+		return nil, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return nil, ErrNotFound
+	}
+	return out, nil
 }
 
 // Get returns one job.

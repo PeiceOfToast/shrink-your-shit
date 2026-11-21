@@ -137,8 +137,15 @@ func chain(nodes []Node, prev *Doc) []Edge {
 // is the flow's template now: when d means the same, it is returned unchanged, so a Basic flow stays a
 // Basic flow. A Doc this version can't run gives an issue instead (it can still be saved as a draft).
 func ToTemplate(d Doc, current rules.Template) (rules.Template, []Issue) {
+	// W1: the compile sees resolved settings only. A reference that can't be resolved is the workflow's
+	// to fix, so it comes back as an issue rather than compiling at whatever the literal would default to.
+	resolved, refIssues := Resolve(d)
+	if len(refIssues) > 0 {
+		return rules.Template{}, refIssues
+	}
+	d = resolved
 	order, ok := straightChain(d)
-	if !ok || hasOnError(d) { // V6a: a workflow with checks; V6b: or a step's own choice for when it doesn't work
+	if !ok || hasOnError(d) || hasRunCards(d) { // V6a: checks; V6b: a step's own failure choice; FB1b: actions and ends on the chain
 		return branchTemplate(d)
 	}
 	types := make([]string, len(order))
@@ -375,6 +382,17 @@ func orEmpty(s []string) []string {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// hasRunCards reports whether d has a step the run engine executes outside the conversion (FB1b: a
+// question, an action or an end), so it compiles as paths even when it is one chain.
+func hasRunCards(d Doc) bool {
+	for _, n := range d.Nodes {
+		if IsQuestion(n.Type) || IsAction(n.Type) || IsEnd(n.Type) {
+			return true
+		}
+	}
+	return false
+}
 
 // hasOnError reports whether a step of d has its own choice for when it doesn't work (V6b).
 func hasOnError(d Doc) bool {

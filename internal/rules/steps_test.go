@@ -85,8 +85,8 @@ func TestStepsOfALegacyFlow(t *testing.T) {
 func TestStepsOfAWorkflowWithChecks(t *testing.T) {
 	then := SliderTemplate(3)
 	checks := []Branch{{Path: []string{"in", "check", "out"}, Checks: []BranchCheck{
-		{NodeID: "check", Port: "match", Check: VideoCheck{Name: "Is it 4K?", Resolution: 2160}},
-		{NodeID: "check", Port: "match", Check: VideoCheck{Name: "Is it HDR?", HDR: "yes"}},
+		{NodeID: "check", Port: "match", Check: Question{VideoCheck: VideoCheck{Name: "Is it 4K?", Resolution: 2160}}},
+		{NodeID: "check", Port: "match", Check: Question{VideoCheck: VideoCheck{Name: "Is it HDR?", HDR: "yes"}}},
 	}, Then: &then}}
 	tmpl := Template{Kind: KindBranches, Branches: &checks}
 	p := tmpl.Compile(guardFiles()["hevc-4k-hdr"])
