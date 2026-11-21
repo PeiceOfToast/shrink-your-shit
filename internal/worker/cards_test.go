@@ -400,6 +400,7 @@ func TestTagCardsReadAndWriteTheRecord(t *testing.T) {
 type noTagsQueue struct{ *jobs.Store }
 
 func (q *noTagsQueue) JobTags(int64, ...struct{}) {}
+
 // FB4: "Convert again later" puts the job back in the queue for the card's wait, counting the try, and fails it
 // with the card's words once the tries are used up; a Wait until a time of day puts it back until then, no try
 // counted as failed. Nothing is encoded either way and the original is untouched.
