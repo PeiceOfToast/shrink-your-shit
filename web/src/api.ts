@@ -3,6 +3,7 @@
 // Prototype banner. A 401 goes to the sign-in page; it never falls back to the mock.
 import { navigate } from "./router";
 import type { Issue } from "./types/v1";
+import { httpError } from "./httpError";
 
 export const MOCK = /^(1|fresh)$/.test(new URLSearchParams(location.search).get("mock") ?? "");
 export type Answer<T> = T | { error: Issue };
@@ -30,6 +31,6 @@ export async function call<T>(method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE
     throw new SignedOut();
   }
   const j = await r.json().catch(() => null);
-  if (!r.ok) return { error: j?.error ?? { code: "http_" + r.status, message: "The server answered " + r.status + "." } };
+  if (!r.ok) return { error: httpError(r.status, j) };
   return j as T;
 }

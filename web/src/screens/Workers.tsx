@@ -410,21 +410,21 @@ export function WorkerPage({ id }: { id: string }) {
         {others.length > 0 && <p className="sm muted" style={{ padding: "8px var(--pad)" }}>Also: {others.map((c) => c.label + (c.test === "passed" ? "" : " (doesn't work)")).join(", ")}.</p>}
         <p className="sm" style={{ padding: "0 var(--pad) var(--pad)" }}>FFmpeg {w.ffmpeg ? w.ffmpeg.version + " · " + w.ffmpeg.path : "not found"}</p>
       </section>}
-      {tab === "limits" && <Limits w={w} onSaved={(m) => (setSaid(m), d.reload())} />}
-      {tab === "settings" && <Settings w={w} onSaved={(m) => (setSaid(m), d.reload())} />}
+      {tab === "limits" && <Limits w={w} onStart={() => setSaid("")} onSaved={(m) => (setSaid(m), d.reload())} />}
+      {tab === "settings" && <Settings w={w} onStart={() => setSaid("")} onSaved={(m) => (setSaid(m), d.reload())} />}
     </div>
   );
 }
 
-function Limits({ w, onSaved }: { w: Worker; onSaved: (m: string) => void }) {
+function Limits({ w, onSaved, onStart }: { w: Worker; onSaved: (m: string) => void; onStart: () => void }) {
   const [cpu, setCpu] = useState(w.slots.cpu.total), [err, setErr] = useState("");
   return (
     <section className="card panel"><div className="hd"><h2>Files at once</h2></div>
-      <form className="bd stack" style={{ maxWidth: 520 }} onSubmit={async (e) => { e.preventDefault(); setErr(""); if (await act(patchWorker(w.id, { slots: { cpu } }), setErr)) onSaved("Saved: " + plural(cpu, "file", "files") + " at once."); }}>
+      <form className="bd stack" style={{ maxWidth: 520 }} onSubmit={async (e) => { e.preventDefault(); setErr(""); onStart(); if (await act(patchWorker(w.id, { slots: { cpu } }), setErr)) onSaved("Saved: " + plural(cpu, "file", "files") + " at once."); else setCpu(w.slots.cpu.total); }}>
         <div className="field"><label htmlFor="lim-cpu">Using the processor</label>
           <select id="lim-cpu" className="input" value={cpu} onChange={(e) => setCpu(Number(e.target.value))} style={{ width: "auto" }}>{[1, 2, 3, 4, 5, 6, 7, 8].map((n) => <option key={n} value={n}>{n}</option>)}</select>
           <span className="hint">How many files this worker converts at the same time. More uses more of the processor.</span></div>
-        {w.kind === "local" && <GpuSwitch onSaved={onSaved} onErr={setErr} />}
+        {w.kind === "local" && <GpuSwitch onSaved={onSaved} onErr={setErr} onStart={onStart} />}
         {/* design: the graphics card's files at once stays hidden while converting is processor-only */}
         {err && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{err}</span></p>}
         <div className="row"><button className="btn primary" type="submit" disabled={cpu === w.slots.cpu.total}>Save</button></div>
@@ -434,13 +434,13 @@ function Limits({ w, onSaved }: { w: Worker; onSaved: (m: string) => void }) {
 }
 
 // settings.gpuJobsSeparate (#623): the built-in worker only. Saves on change, like Commands in SettingsMore.
-function GpuSwitch({ onSaved, onErr }: { onSaved: (m: string) => void; onErr: (m: string) => void }) {
+function GpuSwitch({ onSaved, onErr, onStart }: { onSaved: (m: string) => void; onErr: (m: string) => void; onStart: () => void }) {
   const st = useData(getSettings, []), [busy, setBusy] = useState(false), [saved, setSaved] = useState<boolean | null>(null), hint = useId();
   const on = saved ?? !!st.data?.gpuJobsSeparate; // the saved value shows at once; the reload then takes over
   // not disabled while saving: a disabled control drops keyboard focus, so a second Space would do nothing
   const set = async (v: boolean) => {
     if (busy) return;
-    setBusy(true); onErr(""); setSaved(v);
+    onStart(); setBusy(true); onErr(""); setSaved(v);
     const r = await act(patchSettings({ gpuJobsSeparate: v }), onErr);
     if (r) { onSaved(gpuSaved(v)); st.reload(); } else setSaved(null);
     setBusy(false);
@@ -455,12 +455,12 @@ function GpuSwitch({ onSaved, onErr }: { onSaved: (m: string) => void; onErr: (m
   );
 }
 
-function Settings({ w, onSaved }: { w: Worker; onSaved: (m: string) => void }) {
+function Settings({ w, onSaved, onStart }: { w: Worker; onSaved: (m: string) => void; onStart: () => void }) {
   const [name, setName] = useState(w.name), [tags, setTags] = useState(w.tags.join(", ")), [err, setErr] = useState("");
   const list = tags.split(",").map((x) => x.trim()).filter(Boolean), changed = name.trim() !== w.name || list.join() !== w.tags.join();
   return (
     <section className="card panel"><div className="hd"><h2>Settings</h2></div>
-      <form className="bd stack" style={{ maxWidth: 520 }} onSubmit={async (e) => { e.preventDefault(); setErr(""); if (!name.trim()) return setErr("Give the worker a name."); if (await act(patchWorker(w.id, { name: name.trim(), tags: list }), setErr)) onSaved("Saved."); }}>
+      <form className="bd stack" style={{ maxWidth: 520 }} onSubmit={async (e) => { e.preventDefault(); setErr(""); if (!name.trim()) return setErr("Give the worker a name."); onStart(); if (await act(patchWorker(w.id, { name: name.trim(), tags: list }), setErr)) onSaved("Saved."); }}>
         <div className="field"><label htmlFor="ws-name">Name</label><input id="ws-name" className="input" value={name} onChange={(e) => setName(e.target.value)} /></div>
         <div className="field"><label htmlFor="ws-tags">Tags</label><input id="ws-tags" className="input" value={tags} onChange={(e) => setTags(e.target.value)} aria-describedby="ws-tags-h" /><span className="hint" id="ws-tags-h">Separate tags with commas.</span></div>
         {err && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{err}</span></p>}
