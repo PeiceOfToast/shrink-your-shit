@@ -212,7 +212,7 @@ export function Jobs() {
                 {pct != null && <span className="uline" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(pct)} aria-label={j.progress?.stage || "Progress"}><i style={{ width: pct + "%" }} /></span>}
               </td>
               <td className="stc"><Pill j={j} /></td>
-              <td className="sizec sm nowrap">{j.state === "completed" ? saved(j.beforeBytes, j.afterBytes) : bytes(j.bytes)}</td>
+              <td className="sizec sm nowrap">{j.state === "completed" ? <span className={j.beforeBytes && j.afterBytes != null && j.afterBytes < j.beforeBytes ? "gain" : undefined}>{saved(j.beforeBytes, j.afterBytes)}</span> : bytes(j.bytes)}</td>
             </tr>);})}
           </tbody>
         </table></div>)}
