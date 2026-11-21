@@ -422,7 +422,7 @@ label.chk{cursor:pointer}
   .list .tbl td.stc,.list .tbl td.actc,.list .tbl td.posc,.list .tbl td.sizec{display:block;flex:none}
   .list .tbl td.posc{min-width:20px}
   .list.selecting .tbl td.selc{display:block;flex:none}
-  .list .tbl td.idc .sub:not(.phone):not(.runs){display:none}   /* phone rows: the title and one muted line; Workflows' Recent runs line stays */
+  .list .tbl td.idc .sub:not(.phone):not(.runs):not(.live):not(.libfacts){display:none}   /* phone rows: the title and one muted line; Workflows' Recent runs line stays */
   .list .tbl .desk{display:none}
   .list .tbl .ttl::before{content:"";position:absolute;inset:0}   /* the whole row opens it */
   .list .tbl td.selc,.list .tbl td.actc,.list .tbl .over{position:relative;z-index:1}
