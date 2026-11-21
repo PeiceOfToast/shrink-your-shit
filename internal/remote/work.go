@@ -229,6 +229,12 @@ func (c *Client) workOne(ctx context.Context, cv Converter) (did bool, err error
 		}
 		return true, c.report(ctx, l, map[string]any{"ok": false, "message": err.Error(), "stderr": stderr, "args": ran})
 	}
+	// The main video is judged by the encoder this worker ran (a card makes another depth than the
+	// processor for the same plan); the server judges the uploaded file by the same one, from the
+	// arguments reported below.
+	if snap.Source != nil {
+		snap.Expect.MainVideo = snap.Plan.MainVideoRules(*snap.Source, rules.GraphicsEncoderIn(ran, snap.Plan.Video.Index))
+	}
 	checkStart := time.Now()
 	score, err := worker.CheckResult(ctx, cv.Exec, cv.FFmpeg, cv.FFprobe, snap, src, out)
 	steps := checkSteps(checkStart, score, err) // the job's check step, as the server keeps a local one (Q1)
