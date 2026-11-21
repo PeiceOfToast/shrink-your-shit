@@ -160,6 +160,37 @@ func TestV2Workers(t *testing.T) {
 	}
 }
 
+// The Workers view's graphics slots: "used" is the jobs encoding on the card now (it said 0 always
+// before: user bug 11-20), and "total" is the person's setting, else 1 when a graphics encoder works
+// here, else 0.
+func TestV2WorkerGraphicsSlotsHoldTheJobCount(t *testing.T) {
+	old := gpuRunning
+	gpuRunning = func() int { return 2 }
+	defer func() { gpuRunning = old }()
+
+	v := &workerView{}
+	one, zero := 1, 0
+	for _, c := range []struct {
+		name  string
+		cfg   jobs.WorkerConfig
+		tools doctor.Tools
+		used  int
+		total int
+	}{
+		{"the setting", jobs.WorkerConfig{GPUSlots: &zero}, doctor.Tools{Hardware: []string{"hevc_nvenc"}}, 2, 0},
+		{"no setting, a graphics encoder", jobs.WorkerConfig{}, doctor.Tools{Hardware: []string{"hevc_nvenc"}}, 2, 1},
+		{"no setting, no graphics encoder", jobs.WorkerConfig{}, doctor.Tools{}, 2, 0},
+		{"the setting above the default", jobs.WorkerConfig{GPUSlots: &one}, doctor.Tools{}, 2, 1},
+	} {
+		slots := v.slots(c.cfg, Settings{ParallelJobs: 3}, 1, c.tools)
+		cpu, _ := slots["cpu"].(map[string]int)
+		gpu, _ := slots["gpu"].(map[string]int)
+		if cpu["used"] != 1 || cpu["total"] != 3 || gpu["used"] != c.used || gpu["total"] != c.total {
+			t.Errorf("%s: %v, want cpu used 1 of 3 and graphics used %d of %d", c.name, slots, c.used, c.total)
+		}
+	}
+}
+
 // The live stream says the worker is there every few seconds (worker.heartbeat, no id).
 func TestV2WorkerHeartbeat(t *testing.T) {
 	old := eventHeartbeat
