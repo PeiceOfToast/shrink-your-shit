@@ -34,6 +34,8 @@ let items: JobItem[] = [
   base("48195", "Holiday.2021.1080p.mkv", "Holiday (2021)", HOME, "failed", { detail: "Kept the original: the picture changed too much (0.912, 0.95 required).", newFileRefused: true, reason: { code: "kept_original", message: "Kept the original: the picture changed too much (0.912, 0.95 required)." } }),
   base("48196", "Concert.2022.1080p.mkv", "Concert (2022)", HOME, "failed", { detail: "Kept the original: the new file didn't play to the end.", reason: { code: "kept_original", message: "Kept the original: the new file didn't play to the end." } }),
   base("48197", "Old.Tape.1998.avi", "Old Tapes", HOME, "failed", { detail: "Kept the original: the original is damaged in 7 places.", reason: { code: "kept_original", message: "Kept the original: the original is damaged in 7 places." } }),
+  // a workflow stopped its own job (Stop as failed): the server's reason from a real job (id 17), no failure summary
+  base("48300", "Stop.Clean.Sample.mkv", "Clips", HOME, "failed", { reason: { code: "workflow_stopped", message: "Stopped by this workflow: the new file did not save at least 99%. (No (67.4% saved, asked for at least 99%)). The original is untouched." } }),
   base("48198", "Lecture.2020.mkv", "Lecture (2020)", HOME, "completed", {}),
   base("48199", "Old.Movie.2018.mkv", "Old Movie (2018)", HOME, "completed", {}),
   base("failed-replace", "Replace.Fail.mkv", "Failed Saves", HOME, "failed", { detail: "The new file was converted, but saving it in place of the original failed.", reason: { code: "stalled", message: "The new file was converted, but saving it in place of the original failed." } }),

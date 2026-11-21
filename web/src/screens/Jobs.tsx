@@ -9,6 +9,7 @@ import { MOCK, SignedOut, failed, type Answer } from "../api";
 import { bytes, clock, clockS, count, elapsed, plural, stepTime } from "../format";
 import { type LogLine, type LogProbe, convertDoneAgain, fileJobs, findSkip, getJob, getJobLog, jobAction, listJobs, listKept, restoreKept, type JobLog, type LogMove, type LogStep, type LogVariable } from "../jobsApi";
 import { getWorkflow } from "../workflowApi";
+import { stoppedTitle, whyHeading } from "../jobResult";
 import { getHealth, getSettings } from "../libraryApi";
 import { onLive } from "../live";
 import { FileName } from "../FileName";
@@ -49,7 +50,7 @@ const libPaused = (j: PillJob) => j.state === "queued" && j.subState === "librar
 const keptOrig = (j: PillJob) => j.state === "failed" && (j.newFileRefused === true || j.reason?.code === "kept_original" || j.reason?.code === "check_failed");
 const words = (j: PillJob) => (libPaused(j) ? "Library paused" : keptOrig(j) ? "Original kept" : fell(j) ? "Done, with a warning" : j.state === "retry_wait" && j.retryAt ? "Retry at " + clock(j.retryAt) : WORD[j.state]);
 function Pill({ j }: { j: PillJob }) {
-  return <span className={"pill " + (libPaused(j) || fell(j) ? "warn" : keptOrig(j) ? "" : PILL[j.state] ?? "")} title={keptOrig(j) ? j.reason?.message ?? undefined : undefined}><Icon id={libPaused(j) ? "i-pause" : keptOrig(j) ? "i-info" : fell(j) ? "i-alert" : ICON[j.state] ?? "i-play"} />{words(j)}</span>;
+  return <span className={"pill " + (libPaused(j) || fell(j) ? "warn" : keptOrig(j) ? "" : PILL[j.state] ?? "")} title={keptOrig(j) ? j.reason?.message ?? undefined : j.reason?.code === "workflow_stopped" ? stoppedTitle(j.reason.message ?? "") : undefined}><Icon id={libPaused(j) ? "i-pause" : keptOrig(j) ? "i-info" : fell(j) ? "i-alert" : ICON[j.state] ?? "i-play"} />{words(j)}</span>;
 }
 const reasonText = (j: JobItem) => j.reason?.message ?? j.detail ?? ""; // #130: every row's reason is {code, message}
 const saved = (b?: number, a?: number) => {
@@ -276,11 +277,11 @@ const copyBox = (title: string, ls: string[]) => ls.length > 0 && <div className
 const FoundRows = ({ rows }: { rows: [string, string][] }) => rows.length > 0 ? <table className="jd-found"><tbody>{rows.map(([k, v], i) => <tr key={i}><th scope="row">{k}</th><td style={{ whiteSpace: "pre-line", fontVariantNumeric: "tabular-nums" }}>{v}</td></tr>)}</tbody></table> : null;
 const Driver = ({ ls }: { ls: string[] }) => ls.length > 0 ? <details><summary className="sm" style={{ cursor: "pointer" }}>Driver messages ({ls.length})</summary>{copyBox("Driver messages", ls)}</details> : null;
 // A kept job: its own neutral section (keeping the original is the safe outcome, not an error).
-function CheckFound({ lines, reason }: { lines: string[]; reason: string }) {
-  const f = readFound(lines);
+function CheckFound({ lines, reason, code }: { lines: string[]; reason: string; code: string }) {
+  const f = readFound(lines), title = code === "workflow_stopped" ? whyHeading(code, false) : "What the check found";
   return (
-    <section className="note" role="region" aria-label="What the check found" style={{ display: "block" }}>
-      <h3><Icon id="i-info" /> What the check found</h3>
+    <section className="note" role="region" aria-label={title} style={{ display: "block" }}>
+      <h3><Icon id="i-info" /> {title}</h3>
       {reason && <p>{reason.charAt(0).toUpperCase() + reason.slice(1)}</p>}
       <FoundRows rows={f.rows} />
       {copyBox("What ffmpeg said", f.errors)}
@@ -294,8 +295,8 @@ function WhyFailed({ id, msg, code, worker, f, found = [] }: { id: string; msg: 
   // Copy summary: the plain text a bug report needs (V6b item 5): the job, its worker and the app version, then the box
   const copy = () => navigator.clipboard?.writeText("Job " + id + " · " + (worker ?? "no worker") + " · Shrink Your Shit " + (ver ?? "") + "\n" + (box.current?.innerText ?? "")).catch(() => {});
   return (
-    <section ref={box} className="note" role="region" aria-label="Why it failed" style={{ display: "block", borderLeft: "3px solid var(--error)" }}>
-      <h3><Icon id="i-alert" /> Why it failed <span className="pill bad">Failed</span></h3>
+    <section ref={box} className="note" role="region" aria-label={whyHeading(code, true)} style={{ display: "block", borderLeft: "3px solid var(--error)" }}>
+      <h3><Icon id="i-alert" /> {whyHeading(code, true)} <span className="pill bad">Failed</span></h3>
       <p style={{ fontSize: "var(--fs-lg)" }}>{msg}</p>
       <p className="sm muted mono">{code}</p>
       <p className="sm">In step {f.stepIndex + 1} of {f.stepCount}, <a href={"#job-step-" + (f.stepIndex + 1)}>{stepLabel(f.step, found)}</a>, after {t}{f.mediaTime ? " (at " + f.mediaTime + " in the video)" : ""}.</p>
@@ -668,8 +669,8 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
           {done && j?.warning && <div className="note warn"><Icon id="i-alert" /><div style={{ display: "grid", gap: 6 }}>{warnLines(j).map((w, i) => <div key={i}>{w}</div>)}</div></div>}
           {j?.removed && j.reason?.code === "removed" ? <div className="note"><Icon id="i-info" /><div>Its library was removed, so this file won't be converted.</div></div>
             : j?.failure ? <WhyFailed id={id} msg={reason} code={j.reason?.code ?? ""} worker={j.worker ?? null} f={j.failure} found={found.flatMap((st) => st.found!)} />
-            : found.length ? <CheckFound lines={found.flatMap((st) => st.found!)} reason={reason} />
-            : reason && <section><h3>Why</h3><p>{reason}</p></section>}
+            : found.length ? <CheckFound lines={found.flatMap((st) => st.found!)} reason={reason} code={j?.reason?.code ?? ""} />
+            : reason && <section><h3>{whyHeading(j?.reason?.code ?? "", false)}</h3><p>{reason}</p></section>}
           <section><h3>File</h3><dl className="kv">
             {(own?.path ?? j?.file?.path) && <><dt>Source</dt><dd className="mono sm">{slashWrap(own?.path ?? j?.file?.path ?? "")}</dd></>} {/* review 54ff228: no '-' when the server doesn't keep the path (a removed library's job) */}
             {(j?.library || own) && <><dt>Library</dt><dd>{j?.library?.name ?? own?.library}</dd></>}
