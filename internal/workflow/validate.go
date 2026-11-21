@@ -291,7 +291,7 @@ func ValidateWith(d Doc, s Scopes) Result {
 	for _, i := range CheckVariables(d) {
 		add(i)
 	}
-	for _, i := range CheckTemplates(d) {
+	for _, i := range CheckTemplatesWith(d, s) { // W2: the globals are names a template may use
 		add(i)
 	}
 	for _, i := range CheckPublished(d) {

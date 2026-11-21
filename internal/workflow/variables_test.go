@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 )
 
 // A workflow's own variables: a name a person may type, not a built-in, and two variables differ
@@ -89,5 +91,35 @@ func TestValidateRefusesABuiltInVariableName(t *testing.T) {
 	d.Variables = nil
 	if r := Validate(d); r.Errors() {
 		t.Fatalf("the preset itself does not validate: %+v", r.Issues)
+	}
+}
+
+// W2 (ui-shop's QA of #586): a server-wide variable is a name a {{name}} field may use: the check knows
+// it in the live scopes, refuses a name nobody has, suggests a global for a near miss, and Validate alone
+// (no scopes) still refuses it, so the test goes red on a build that forgets the scopes.
+func TestTemplatesMayNameAGlobal(t *testing.T) {
+	d := FromTemplate(rules.SliderTemplate(3), nil)
+	for i := range d.Nodes {
+		if d.Nodes[i].Type == TypeCommit {
+			d.Nodes[i].Config["policy"], d.Nodes[i].Config["folderMode"], d.Nodes[i].Config["folder"] = "separate_folder", "one_folder", "/srv/out/{{qa_sub}}"
+		}
+	}
+	sc := Scopes{Global: map[string]Variable{"qa_sub": {Name: "qa_sub", Type: "string", Value: "alpha"}}, LeaveFile: true, Policy: Policy{CommandsAllowed: true}}
+	if issues := CheckTemplatesWith(d, sc); len(issues) != 0 {
+		t.Errorf("a global in a folder template: %+v", issues)
+	}
+	if res := ValidateWith(d, sc); res.Errors() {
+		t.Errorf("validate with the globals: %+v", res.Issues)
+	}
+	if issues := CheckTemplates(d); len(issues) != 1 || issues[0].Code != "unknown_variable" {
+		t.Errorf("without the scopes the name is unknown: %+v", issues)
+	}
+	for i := range d.Nodes {
+		if d.Nodes[i].Type == TypeCommit {
+			d.Nodes[i].Config["folder"] = "/srv/out/{{qa_sun}}"
+		}
+	}
+	if issues := CheckTemplatesWith(d, sc); len(issues) != 1 || issues[0].Code != "unknown_variable" || issues[0].Suggest != "qa_sub" {
+		t.Errorf("a near miss suggests the global: %+v", issues)
 	}
 }

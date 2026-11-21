@@ -129,10 +129,17 @@ func libraryValue(info jobs.RunInfo, v workflow.Variable) (workflow.Variable, bo
 	return workflow.Variable{}, false
 }
 
-// ownValues are the workflow's own variables as the run uses them: a variable the workflow lets a
-// library change takes the library's value (W3).
+// ownValues are the variables a run's {{name}} templates take, in the lookup order's reverse so the
+// last put wins (vars.Source.Values): the server's global variables first (W2; a template may name one,
+// as the editor's check allows), then the workflow's own, a variable the workflow lets a library change
+// taking the library's value (W3).
 func ownValues(info jobs.RunInfo) []vars.Own {
-	out := make([]vars.Own, 0, len(info.Variables))
+	out := make([]vars.Own, 0, len(info.Global)+len(info.Variables))
+	for _, g := range info.Global {
+		if g.Type != "secret" {
+			out = append(out, vars.Own{Name: g.Name, Type: g.Type, Value: g.Value})
+		}
+	}
 	for _, v := range info.Variables {
 		if lv, ok := libraryValue(info, v); ok {
 			v = lv
@@ -164,6 +171,11 @@ func variableTable(start, end map[string]string, info jobs.RunInfo, used []workf
 		}
 	}
 	own := map[string]bool{}
+	for _, g := range info.Global { // W2: a global a template read is the server's, unless the workflow's own of that name won
+		if names[g.Name] {
+			origin[g.Name] = "server"
+		}
+	}
 	for _, v := range info.Variables {
 		names[v.Name] = true
 		own[v.Name] = true

@@ -52,6 +52,12 @@ func v2WorkflowVariables(api *http.ServeMux, store *jobs.Store) {
 			items = append(items, map[string]any{"name": b.Name, "description": b.Description,
 				"group": b.Group, "value": valueOrNil(values, b.Name), "fields": fields})
 		}
+		if g, err := store.GlobalVariables(); err == nil { // W2: the server's variables, before the workflow's own (which win a shared name)
+			for _, v := range g {
+				items = append(items, map[string]any{"name": v.Name, "description": v.Description,
+					"group": "Server", "value": ownValue(v), "fields": nil})
+			}
+		}
 		for _, v := range ownVariables(store, id) {
 			items = append(items, map[string]any{"name": v.Name, "description": v.Description,
 				"group": "Workflow", "value": ownValue(v), "fields": nil})
