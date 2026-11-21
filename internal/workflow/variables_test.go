@@ -116,7 +116,7 @@ func TestTemplatesMayNameAGlobal(t *testing.T) {
 	}
 	for i := range d.Nodes {
 		if d.Nodes[i].Type == TypeCommit {
-			d.Nodes[i].Config["folder"] = t.TempDir()+"/{{qa_sun}}"
+			d.Nodes[i].Config["folder"] = t.TempDir() + "/{{qa_sun}}"
 		}
 	}
 	if issues := CheckTemplatesWith(d, sc); len(issues) != 1 || issues[0].Code != "unknown_variable" || issues[0].Suggest != "qa_sub" {
