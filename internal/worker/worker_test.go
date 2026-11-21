@@ -621,11 +621,17 @@ func TestNoJob(t *testing.T) {
 type recQueue struct {
 	Queue
 	progress []float64
+	runs     []int64 // RecordRunRevision's job ids, in order (foundation slice 9)
 }
 
 func (r *recQueue) Progress(id int64, p float64) error {
 	r.progress = append(r.progress, p)
 	return r.Queue.Progress(id, p)
+}
+
+func (r *recQueue) RecordRunRevision(id, revID int64, tmpl rules.Template) error {
+	r.runs = append(r.runs, id)
+	return r.Queue.RecordRunRevision(id, revID, tmpl)
 }
 
 func TestProgressReported(t *testing.T) {
@@ -636,6 +642,21 @@ func TestProgressReported(t *testing.T) {
 	w.RunOne(context.Background())
 	if len(rq.progress) != 1 || rq.progress[0] != 50 {
 		t.Errorf("want [50] (50s of 100s), got %v", rq.progress)
+	}
+}
+
+// A job's workflow revision is recorded when the worker reads the workflow, before it converts (foundation
+// slice 9). The job here has no workflow (a legacy template), so nothing is stored, but the call is made once.
+func TestTheRunRevisionIsRecordedBeforeConverting(t *testing.T) {
+	s := newScenario(t)
+	w := s.worker(Replace)
+	rq := &recQueue{Queue: s.store}
+	w.Queue = rq
+	if _, err := w.RunOne(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(rq.runs) != 1 || rq.runs[0] != s.id {
+		t.Errorf("recorded for %v, want [%d]", rq.runs, s.id)
 	}
 }
 
@@ -1211,7 +1232,7 @@ func TestBasicRepackagesHEVC(t *testing.T) {
 	s.outSpec.streams = []map[string]any{vid("hevc", 640, 360, "yuv420p"), aud("aac", "eng", 2), sub("subrip", "eng", false), att("font.ttf")}
 	w := s.worker(Replace)
 	tmpl := rules.BasicTemplate(3, "")
-	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 	w.RunOne(context.Background())
 	if j := s.job(); j.Status != jobs.Done {
 		t.Fatalf("%s %q", j.Status, j.Error)
@@ -1269,7 +1290,7 @@ func TestQueuedDolbyVisionIsSkippedNotEncoded(t *testing.T) {
 			if plan := tmpl.Compile(must(media.ParseProbe([]byte(s.srcSpec.json())))); c.codec == "av1" && plan.SkipCode != rules.SkipModernFormat || c.legacy && plan.SkipCode == c.code {
 				t.Fatalf("the case does not take the path it is about: %q", plan.SkipCode)
 			}
-			w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+			w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 			w.RunOne(context.Background())
 			if s.count("libx265") != 0 {
 				t.Fatalf("encoded:\n%s", strings.Join(s.calls, "\n"))
@@ -1351,7 +1372,7 @@ func TestQueuedHDRToH264IsSkipped(t *testing.T) {
 	sel := rules.DefaultSelectors(3)
 	sel.Format = "h264"
 	tmpl := sel.Template()
-	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 	w.RunOne(context.Background())
 	if s.count("libx264") != 0 {
 		t.Fatalf("encoded:\n%s", strings.Join(s.calls, "\n"))
@@ -1378,7 +1399,7 @@ func TestSkippedPlanLogsNoActionNotes(t *testing.T) {
 	if p := tmpl.Compile(must(media.ParseProbe([]byte(s.srcSpec.json())))); !p.AudioFolded || p.Skip == "" {
 		t.Fatalf("the case does not take the path it is about: folded %v, skip %q", p.AudioFolded, p.Skip)
 	}
-	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 	w.RunOne(context.Background())
 	if s.count("libx265") != 0 {
 		t.Fatalf("encoded:\n%s", strings.Join(s.calls, "\n"))
@@ -1403,7 +1424,7 @@ func TestStyledSubtitlesNote(t *testing.T) {
 	sel := rules.DefaultSelectors(3)
 	sel.FileType, sel.AfterConverting = "mp4", "beside"
 	tmpl := sel.Template()
-	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 	w.RunOne(context.Background())
 	text := logTextOf(s.store, s.id)
 	if strings.Count(text, rules.StyledSubsNote) != 1 {

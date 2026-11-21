@@ -68,7 +68,7 @@ func TestLibraryVariablesAPI(t *testing.T) {
 	if len(got) != 1 || got[0].Name != "q" || got[0].Value != float64(4) || got[0].Type != "number" {
 		t.Errorf("the view says %+v, want q = 4 as a number", got)
 	}
-	if tmpl, err := st.TemplateFor(jobs.Job{LibraryID: lib.ID}); err != nil {
+	if tmpl, _, err := st.TemplateFor(jobs.Job{LibraryID: lib.ID}); err != nil {
 		t.Error(err)
 	} else if sel, ok := tmpl.SelectorsView(); !ok || sel.Quality != 4 {
 		t.Errorf("the library's job would run quality %+v (a selectors template: %v), want its 4", sel.Quality, ok)

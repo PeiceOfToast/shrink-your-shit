@@ -156,7 +156,7 @@ func TestRealReplaceSyncs(t *testing.T) {
 	id, _ := st.Enqueue(jobs.Job{Library: dir, Path: src, DurationSec: 10})
 	w := realWorker(st, media.OSExec{})
 	tmpl := rules.DefaultSelectors(3).Template()
-	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 	w.KeepDays, w.Journal = func() int { return 7 }, st
 	w.run(t)
 	j, _ := st.Get(id)

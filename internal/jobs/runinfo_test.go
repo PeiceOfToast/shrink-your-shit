@@ -88,7 +88,7 @@ func TestTemplateForFindsTheLibraryUnderAnotherNameForItsFolder(t *testing.T) {
 	if _, err := s.AddLibrary("Movies", real, rules.SliderTemplate(3), false); err != nil {
 		t.Fatal(err)
 	}
-	tm, err := s.TemplateFor(Job{Library: link})
+	tm, _, err := s.TemplateFor(Job{Library: link})
 	if err != nil {
 		t.Fatalf("TemplateFor by the folder's other name: %v", err)
 	}

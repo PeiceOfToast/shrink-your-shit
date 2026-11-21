@@ -101,7 +101,7 @@ func TestUpgradeAdoptsFlagLibrariesAsLegacyFlows(t *testing.T) {
 				if after[i].Status != before[i].Status || after[i].LibraryID != libs[0].ID {
 					t.Errorf("job %d: %s -> %s, library %d", after[i].ID, before[i].Status, after[i].Status, after[i].LibraryID)
 				}
-				tmpl, err := s.TemplateFor(after[i])
+				tmpl, _, err := s.TemplateFor(after[i])
 				if err != nil || tmpl != rules.LegacyTemplate(flagRule, "beside") {
 					t.Errorf("job %d template %+v %v, want the flags' values", after[i].ID, tmpl, err)
 				}
@@ -144,7 +144,7 @@ func TestFreshInstallFlowNames(t *testing.T) {
 	if _, err := s.AddLibrary("Other", "/m", rules.SliderTemplate(3), false); err != ErrPathTaken {
 		t.Errorf("same folder twice: %v", err)
 	}
-	if tmpl, _ := s.TemplateFor(Job{LibraryID: l.ID}); tmpl != rules.SliderTemplate(3) {
+	if tmpl, _, _ := s.TemplateFor(Job{LibraryID: l.ID}); tmpl != rules.SliderTemplate(3) {
 		t.Errorf("balanced slider template %+v", tmpl)
 	}
 }
@@ -187,7 +187,7 @@ func TestDeleteLibraryKeepsFlowAndFinishedJobs(t *testing.T) {
 	if err := s.DeleteLibrary(l.ID); err != ErrNotFound {
 		t.Errorf("second delete: %v", err)
 	}
-	if _, err := s.TemplateFor(Job{LibraryID: l.ID}); err == nil {
+	if _, _, err := s.TemplateFor(Job{LibraryID: l.ID}); err == nil {
 		t.Error("a job of a removed library has no settings")
 	}
 }

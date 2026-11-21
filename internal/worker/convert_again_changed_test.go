@@ -33,7 +33,7 @@ func (s *scenario) folderWorker(dir string) *Worker {
 	}
 	tmpl := sel.Template()
 	w := s.worker(Folder)
-	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 	return w
 }
 

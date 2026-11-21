@@ -39,7 +39,7 @@ func TestRealAudioAndSubtitles(t *testing.T) {
 		tmpl.Languages = langs
 		st, id := realJob(t, p, 5)
 		w := realWorker(st, media.OSExec{})
-		w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+		w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 		if err := w.run(t); err != nil {
 			t.Fatal(err)
 		}
@@ -103,7 +103,7 @@ func TestRealSubtitlesAsSrtFiles(t *testing.T) {
 	run := func() jobs.Job {
 		st, id := realJob(t, src, 5)
 		w := realWorker(st, media.OSExec{})
-		w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+		w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 		w.run(t)
 		j, _ := st.Get(id)
 		return j

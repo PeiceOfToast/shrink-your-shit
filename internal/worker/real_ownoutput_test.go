@@ -56,7 +56,7 @@ func TestRealOwnOutputIsNeverConvertedAgain(t *testing.T) {
 				t.Fatalf("the original: %d jobs queued, want 1", n)
 			}
 			w := realWorker(st, media.OSExec{})
-			w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+			w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 			w.KeepDays, w.Journal = func() int { return 7 }, st
 			w.run(t)
 			done, _ := st.List(10)
