@@ -38,7 +38,10 @@ func TestFixedPrefixOfATemplatedFolder(t *testing.T) {
 			t.Errorf("%q: %q, want %q", in, got, want)
 		}
 	}
-	for in, want := range map[string]bool{"/data/lib/{{a}}/../..": true, "/data/out/{{sub}}/../keep": true, `C:\out\..\{{sub}}`: true, "/data/out/{{sub}}/keep": false, "/data/out/..x/{{sub}}": false, "/data/out/{{sub}}": false} {
+	for in, want := range map[string]bool{"/data/lib/{{a}}/../..": true, "/data/out/{{sub}}/../keep": true, `C:\out\..\{{sub}}`: true, "/data/out/{{sub}}/keep": false, "/data/out/..x/{{sub}}": false, "/data/out/{{sub}}": false,
+		// round 4: a ".." glued to a template, and Windows' dot-and-space segments; "..x" and "{{a}}x" are names
+		"/data/lib/{{a}}..": true, "/data/lib/..{{a}}": true, "/data/lib/x{{a}}..": true, "/data/lib/{{a}}../out": true, "/data/lib/.. /{{a}}": true, "/data/lib/.../{{a}}": true, "/data/lib/.. ./{{a}}": true, "/data/lib/ ../{{a}}": true,
+		"/data/lib/{{a}}x": false, "/data/lib/..x": false, "/data/lib/.x/{{a}}": false, "/data/lib/a.b/{{a}}": false, "/data/lib/./{{a}}": false} {
 		if got := hasDotDot(in); got != want {
 			t.Errorf("hasDotDot(%q) = %v", in, got)
 		}
@@ -113,7 +116,9 @@ func TestPublishNeverMakesATemplatedFolder(t *testing.T) {
 	// review-592 round 3: any ".." in a templated folder is refused (an empty value would let it climb past the
 	// checked part: /data/lib/{{a}}/../.. with a = "" is /), so the two ".." cases are refused for that reason
 	dots := "can't use '..'"
-	for folder, want := range map[string]string{"{{sub}}/out": "not_writable", root + "/other/{{sub}}/../../lib": dots, lib + "/{{sub}}/../..": dots, filepath.Join(root, "out", "{{sub}}", "keep"): ""} {
+	for folder, want := range map[string]string{"{{sub}}/out": "not_writable", root + "/other/{{sub}}/../../lib": dots, lib + "/{{sub}}/../..": dots,
+		lib + "/{{sub}}..": dots, lib + "/..{{sub}}": dots, lib + "/.. /{{sub}}": dots, // round 4: glued to the template, and a Windows dot-space segment
+		filepath.Join(root, "out", "{{sub}}", "keep"): ""} {
 		_, body = send("GET", "/api/v2/workflows/"+id+"/draft", "", "") // the publish took the draft; a fresh one
 		d3 := decode[v2Rev](t, body)
 		for i := range doc.Nodes {

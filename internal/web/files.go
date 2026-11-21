@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -231,12 +232,20 @@ func fileItem(store *jobs.Store, libs []jobs.Library, row jobs.FileRow, card str
 	return it
 }
 
-// hasDotDot reports whether a folder setting has a ".." segment (either separator). A templated folder
-// is refused with one: a {{name}} that comes out empty at run time would let the ".." climb past the
-// folder the publish check looked at (review-592 round 3).
+// templateRe is a {{name}} in a folder setting.
+var templateRe = regexp.MustCompile(`\{\{[^}]*\}\}`)
+
+// hasDotDot reports whether a folder setting has a segment that acts as ".." (either separator) once its
+// {{name}}s are taken out: a {{name}} that comes out empty at run time would let it climb past the folder
+// the publish check looked at (review-592 rounds 3 and 4: "..", "{{a}}..", "..{{a}}"). On Windows a
+// segment of dots and spaces, like ".. " or "...", is trimmed to ".." when the folder is made, so any
+// segment made only of dots and spaces with two or more dots counts, and so does one that ends in ".."
+// (Windows trims trailing dots, so "x.." is "x" there, and "x{{a}}.." is "x.." when a is empty)
+// (review2-592 P3-1). "..x" and "{{a}}x" are ordinary names.
 func hasDotDot(dir string) bool {
-	for _, seg := range strings.FieldsFunc(dir, func(r rune) bool { return r == '/' || r == '\\' }) {
-		if seg == ".." {
+	bare := templateRe.ReplaceAllString(dir, "")
+	for _, seg := range strings.FieldsFunc(bare, func(r rune) bool { return r == '/' || r == '\\' }) {
+		if strings.HasSuffix(strings.TrimRight(seg, " "), "..") || strings.TrimRight(seg, " .") == "" && strings.Count(seg, ".") >= 2 {
 			return true
 		}
 	}
