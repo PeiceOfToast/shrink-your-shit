@@ -25,10 +25,10 @@ func TestVideoFormats(t *testing.T) {
 	src := h264(1920, 1080, 8000) // an MPEG-2 file: every format converts it
 	src.Streams[0].Codec, src.VideoCodec = "mpeg2video", "mpeg2video"
 	for _, c := range []struct{ format, speed, want, codec string }{
-		{"hevc", "normal", "-c:v:0 libx265 -crf 23 -preset medium -tag:v:0 hvc1", "hevc"},
-		{"h264", "slower", "-c:v:0 libx264 -crf 18 -preset slow -tag:v:0 avc1", "h264"},
-		{"av1", "faster", "-c:v:0 libsvtav1 -crf 32 -preset 8 -svtav1-params tune=0 -tag:v:0 av01", "av1"},
-		{"vp9", "normal", "-c:v:0 libvpx-vp9 -crf 33 -b:v 0 -deadline good -cpu-used 2", "vp9"},
+		{"hevc", "normal", "-c:v:0 libx265 -crf:v:0 23 -preset:v:0 medium -tag:v:0 hvc1", "hevc"},
+		{"h264", "slower", "-c:v:0 libx264 -crf:v:0 18 -preset:v:0 slow -tag:v:0 avc1", "h264"},
+		{"av1", "faster", "-c:v:0 libsvtav1 -crf:v:0 32 -preset:v:0 8 -svtav1-params tune=0 -tag:v:0 av01", "av1"},
+		{"vp9", "normal", "-c:v:0 libvpx-vp9 -crf:v:0 33 -b:v 0 -deadline good -cpu-used 2", "vp9"},
 	} {
 		p := withFormat(c.format, c.speed).Compile(src)
 		args := strings.Join(p.FFmpegArgs("in.mkv", "out.mkv"), " ")

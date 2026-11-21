@@ -425,15 +425,15 @@ func (p Plan) ffmpegArgs(in, out, gpu string, full bool) []string {
 	case gpu == "" && p.Video.TargetKbps > 0: // VBR: an average to aim at, in place of the quality
 		args = append(args, "-c:"+v, p.Video.Codec, "-b:"+v, kbps)
 	case gpu == "":
-		args = append(args, "-c:"+v, p.Video.Codec, "-crf", strconv.Itoa(p.Video.CRF))
+		args = append(args, "-c:"+v, p.Video.Codec, "-crf:"+v, strconv.Itoa(p.Video.CRF))
 	case p.Video.TargetKbps > 0:
 		args = append(args, "-c:"+v, gpu, "-b:"+v, kbps)
 	default:
 		args = append(args, "-c:"+v, gpu)
-		args = append(args, profiles[fam].quality(p.Video.CRF)...)
+		args = append(args, profiles[fam].quality(v, p.Video.CRF)...)
 	}
 	if gpu == "" && p.Video.Preset != "" { // a graphics encoder has no x265 presets
-		args = append(args, "-preset", p.Video.Preset)
+		args = append(args, "-preset:"+v, p.Video.Preset)
 	}
 	if gpu == "" {
 		args = append(args, extraArgs(p.Video)...)

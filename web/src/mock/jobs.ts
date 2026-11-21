@@ -199,7 +199,7 @@ export function mockJob(id: string): JobDetail | null {
     ...(j.state === "failed" && j.id === "48191" ? { failure: { step: "encode", stepIndex: 0, stepCount: 1, afterMs: 0, mediaTime: null, hint: "Free some space on that disk, then press Retry.", ffmpegRan: false, exitCode: null, keyLines: [] } } : {}),
     ...(j.state === "failed" && j.id === "failed-replace" ? { failure: { step: "replace", stepIndex: 2, stepCount: 3, afterMs: 500, mediaTime: null, hint: null, ffmpegRan: true, exitCode: 1, keyLines: ["rename /mnt/shrunk/file.tmp /mnt/shrunk/file.mkv: permission denied"] } } : {}), retryAt: j.retryAt ?? null, error: null, worker: j.worker ?? null,
     file: { path: j.path, bytes: j.beforeBytes ?? j.bytes }, createdAt: at(300), updatedAt: at(5),
-    library: { id: j.libraryId, name: j.library }, workflow: { id: "w1", revisionId: "w1r4", version: 4 },
+    library: { id: j.libraryId, name: j.library }, workflow: { id: "w1", revisionId: "w1r4", version: 4, ...(j.id === "48165" ? { queuedVersion: 3 } : {}) },
     events: old ? [] : [{ seq: 1, at: at(300), from: null, to: "queued", reason: null, workerId: null },
       ...(j.state !== "queued" ? [{ seq: 5, at: at(20), from: "queued" as JobState, to: "running" as JobState, reason: null, workerId: "builtin" }] : []),
       ...(["completed", "failed"].includes(j.state) ? [{ seq: 8, at: at(10), from: "running" as JobState, to: j.state, reason: j.state === "failed" ? "convert_failed" : null, workerId: "builtin" }] : [])],
@@ -218,7 +218,7 @@ export function mockJob(id: string): JobDetail | null {
     ...(j.id === "48165" ? { subtitleFiles: ["Severance.S02E01.1080p.WEB-DL.eng.srt", "Severance.S02E01.Goodbye.Mrs.Selvig.1080p.ATVP.WEB-DL.DDP5.1.Atmos.H.264-FLUX.eng.sdh.srt"] } : {}),
     warning: j.id === "48160" ? FELL : j.id === "48165" ? NOT_TOLD : null,
     metadata: { before: old ? null : { container: "matroska,webm", videoCodec: "h264", bitrateKbps: 12109, durationSec: 7200, sizeBytes: j.beforeBytes ?? j.bytes, streams: [{ index: 0, type: "video", codec: "h264", Width: 1920, Height: 1080 }, { index: 1, type: "audio", codec: "dts", channels: 6, channelLayout: "5.1" }] },
-      after: j.state === "completed" ? { container: "matroska,webm", videoCodec: "hevc", bitrateKbps: 5300, durationSec: 7200, sizeBytes: j.afterBytes, streams: [{ index: 0, type: "video", codec: "hevc", Width: 1920, Height: 1080 }, { index: 1, type: "audio", codec: "aac", channels: 2, channelLayout: "stereo" }] } : null },
+      after: j.state === "completed" || j.id === "48195" ? { container: "matroska,webm", videoCodec: "hevc", bitrateKbps: 5300, durationSec: 7200, sizeBytes: j.afterBytes ?? j.bytes, streams: [{ index: 0, type: "video", codec: "hevc", Width: 1920, Height: 1080 }, { index: 1, type: "audio", codec: "aac", channels: 2, channelLayout: "stereo" }] } : null },
   };
 }
 // POST /api/skipped/{id}/convert-again (v1): forget the decision; the next scan looks at the file again (here: it goes
