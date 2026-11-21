@@ -233,6 +233,10 @@ type Worker struct {
 	finishing  atomic.Bool        // the position is at the file's length: the stall watchdog gives the finishing allowance
 	stalledFor atomic.Int64       // the limit (ns) the watchdog last stopped an encode at: the message says it
 	positionAt atomic.Int64       // UnixNano of the running encode's last forward move of out_time (the frozen-position ceiling)
+	// the running local encode's output against its source at the last report: past twice the source (overSize), with the
+	// two sizes, so a stall stop can say why it stopped (stopOver: the stop that fired was for that size).
+	overSize, stopOver atomic.Bool
+	outBytes, srcBytes atomic.Int64
 	// the running job's run counters (log-spec L2 summary): the ffmpeg runs it needed and the bytes it wrote.
 	passes, bytesWritten atomic.Int64
 	statsCounting        atomic.Bool // false: this job's counters are not recorded (a remote job, whose runs are not all here)
@@ -450,6 +454,9 @@ func (w *Worker) runClaimed(ctx context.Context, job jobs.Job, jobCtx context.Co
 		case stopUser:
 			return true, w.Queue.UserStopped(job.ID)
 		case stopStall:
+			if w.stopOver.Load() {
+				return true, w.Queue.Fail(job.ID, jobs.ReasonStalled, "Stopped: the new file is more than twice the original's size and its position has stopped moving. The original is untouched; press Retry to try again.")
+			}
 			return true, w.Queue.Fail(job.ID, jobs.ReasonStalled, fmt.Sprintf("Stopped: no progress for %s. The original is untouched; press Retry to try again.", w.stalledLimit()))
 		}
 	}
@@ -880,14 +887,23 @@ func (w *Worker) watchStall(id int64) func() {
 	w.progressAt.Store(time.Now().UnixNano())
 	w.positionAt.Store(time.Now().UnixNano())
 	w.finishing.Store(false)
+	w.overSize.Store(false)
 	after := w.stallAfter()
 	done := make(chan struct{})
 	stopFor := func(limit time.Duration) {
 		w.stalledFor.Store(int64(limit))
-		w.jobf(id, ": no progress for %s, stopping it", limit)
+		if w.overSize.Load() { // past twice the source: the new file cannot save space, so say that, not "no progress"
+			w.stopOver.Store(true)
+			w.jobf(id, ": the new file is more than twice the original's size (%s, original %s), and its position has not moved for %s; stopping it",
+				rules.HumanBytes(w.outBytes.Load()), rules.HumanBytes(w.srcBytes.Load()), limit)
+		} else {
+			w.stopOver.Store(false)
+			w.jobf(id, ": no progress for %s, stopping it", limit)
+		}
 		w.stop(id, stopStall)
 	}
 	stopCeiling := func(limit time.Duration) { // frames still grow, so the log says the position is what stopped it
+		w.stopOver.Store(false)
 		w.stalledFor.Store(int64(limit))
 		w.jobf(id, ": its position has not moved for %s, though it is still writing; stopping it", limit)
 		w.stop(id, stopStall)
@@ -922,6 +938,7 @@ func (w *Worker) watchStall(id int64) func() {
 // job is stopped (stopStall, the same words and retry rules) when it hasn't moved on for stallAfter
 // while the worker says it is converting.
 func (w *Worker) watchRemoteStall(id int64, rj *RemoteJob) func() {
+	w.stopOver.Store(false) // a stop from an earlier local encode on this worker is not this stop's reason
 	after := w.stallAfter()
 	done := make(chan struct{})
 	go func() {
@@ -2707,6 +2724,9 @@ func (w *Worker) encodeLocal(ctx context.Context, job jobs.Job, args []string) (
 		// most-behind stream, so it freezes in a subtitle gap while frames still go on (bug 2).
 		posMoved := p.OutTimeUS > at // a position further on: one that repeats is not progress
 		outputOK := outputWithin(job.SizeBefore, p.TotalSize)
+		w.overSize.Store(job.SizeBefore > 0 && !outputOK) // an unknown source size is not "over twice": there is no bound
+		w.outBytes.Store(p.TotalSize)
+		w.srcBytes.Store(job.SizeBefore)
 		alive := posMoved || (outputOK && (p.Frame > frames || p.TotalSize > wrote))
 		frames = p.Frame
 		if p.TotalSize > wrote {
