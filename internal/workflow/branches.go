@@ -93,7 +93,9 @@ func branchTemplate(d Doc) (rules.Template, []Issue) {
 				if !ok || onPath[id] { // a loop: Validate names it (cycle_without_loop)
 					return cards, true
 				}
-				afterIDs = append(afterIDs, id)
+				if an.Enabled { // review2-582 P3-1: a step turned off didn't run, so it isn't on the recorded route
+					afterIDs = append(afterIDs, id)
+				}
 				switch {
 				case IsQuestion(an.Type) && slices.Contains(definitionPhase(an.Type), PhaseAfter):
 					q := questionOf(an)
