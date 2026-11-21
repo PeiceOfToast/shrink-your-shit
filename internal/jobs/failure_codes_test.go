@@ -207,6 +207,7 @@ func TestReasonConditionMatchesFailureCode(t *testing.T) {
 		{ReasonDiskFull, nil}, {ReasonCannotWrite, nil}, {ReasonKeptOriginal, nil}, {ReasonStalled, nil}, {ReasonWorkerLost, nil},
 		{ReasonSettingsRejected, nil},
 		{ReasonCheckDiffers, nil}, {ReasonOutputDamaged, nil}, {ReasonCheckNotRun, nil}, {ReasonSourceMissing, nil}, {ReasonSourceDamaged, nil},
+		{ReasonWorkflowStopped, nil},
 		{ReasonConvertFailed, []string{"[AVEncoder @ 0x1] Unknown encoder 'h264_qsv'"}},
 		{ReasonConvertFailed, []string{"/mnt/out/Movie.mkv: Permission denied"}},
 		{ReasonConvertFailed, []string{"/media/Movie.mkv: No such file or directory"}},
@@ -234,7 +235,7 @@ func TestReasonConditionMatchesFailureCode(t *testing.T) {
 	}
 	for _, want := range []string{"no_space", "output_not_writable", "check_failed", "kept_original", "stalled", "worker_lost",
 		"settings_rejected", "encoder_unavailable", "source_missing", "source_damaged", "ffmpeg_error",
-		"check_differs", "output_damaged", "check_not_run"} {
+		"check_differs", "output_damaged", "check_not_run", "workflow_stopped"} {
 		cond, args, ok := ReasonCondition(want)
 		if !ok {
 			t.Fatalf("no condition for %s", want)

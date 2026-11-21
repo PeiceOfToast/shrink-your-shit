@@ -1144,6 +1144,10 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	// never an encode (review 6cafc6f: the second such case after Dolby Vision). The scanner's rules
 	// for what is queued are unchanged.
 	if plan.Skip != "" && again != nil { // the done job stays done: its file and kept original as they are
+		if plan.Fail { // unless the workflow now ends in "Stop as failed": that ending applies, and its own code (#615 P3-1)
+			w.Queue.AddStep(job.ID, "failed", false, plan.Skip+".")
+			return "", failedWithCode(jobs.ReasonWorkflowStopped, plan.Skip+". The original is untouched.", errors.New("stopped by its workflow: "+plan.Skip))
+		}
 		return "", againLeftAlone()
 	}
 	// FB1c: the path's cards before its end (Set a variable, Add a note), in order, whether the path converts,

@@ -13,6 +13,7 @@ import (
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 )
 
 // encodeInput is the -i of the scenario's last encode.
@@ -196,5 +197,40 @@ func TestBesideKeepsSameSizeUserFile(t *testing.T) {
 	}
 	if kept := trashedBeside(t, out); len(kept) != 1 || read(kept[0]) != own {
 		t.Errorf("trash %v, want the person's file kept once", kept)
+	}
+}
+
+// A Convert again whose workflow now ends in "Stop as failed" fails with that ending: its own code and the
+// workflow's words, as the beside run does (dev-review2 P3-1 of #615). The replanning "leaves this file
+// alone" refusal used to come first, so the job stored convert_failed with words that hid the ending.
+func TestConvertAgainWithAStopAsFailedEndingGetsItsCode(t *testing.T) {
+	s := newScenarioNamed(t, "Harrow.Lane.2019.WEB.mkv")
+	w := s.keeping(7)
+	if _, err := w.RunOne(context.Background()); err != nil || s.job().Status != jobs.Done {
+		t.Fatalf("first: %v %s", err, s.job().Status)
+	}
+	encodes := s.count("-c:v")
+	o, err := s.store.OriginalOfJob(s.id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.ConvertAgain(s.id); err != nil {
+		t.Fatal(err)
+	}
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return cardsTemplate(), 0, nil } // its No path ends in Stop as failed
+	s.moreSrcs = map[string]bool{o.Trash: true}
+	w.RunOne(context.Background())
+	j := s.job()
+	if j.Status != jobs.Failed || j.ErrorCode != jobs.ReasonWorkflowStopped {
+		t.Errorf("a Stop as failed on Convert again: %s code %q, want failed code %q", j.Status, j.ErrorCode, jobs.ReasonWorkflowStopped)
+	}
+	if !strings.Contains(j.Error, "Not a remux: nothing to gain") || strings.Contains(j.Error, "leaves this file alone") {
+		t.Errorf("the words are %q, want the workflow's ending, not the leaves-it-alone refusal", j.Error)
+	}
+	if got := s.count("-c:v"); got != encodes {
+		t.Error("nothing should have been encoded")
+	}
+	if read(s.src) != "new" || read(o.Trash) != "original-bytes" { // our earlier output, and the kept original
+		t.Errorf("the file %q and the kept original %q, want both untouched", read(s.src), read(o.Trash))
 	}
 }
