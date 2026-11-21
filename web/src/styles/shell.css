@@ -97,6 +97,10 @@ body.conn-lost .stale{color:var(--text-2)}
 .btn.sm.icon{width:30px}
 .btn[aria-pressed=true]{background:var(--raised);border-color:var(--accent)}
 .input,select.input,textarea.input{width:100%;min-height:36px;padding:6px 10px;border:1px solid var(--border-strong);border-radius:var(--radius-sm);background:var(--surface);color:var(--text);font:inherit}
+/* #564: a disabled fieldset mutes its own selects and the slider's chosen word (scoped; not a global :disabled rule) */
+fieldset:disabled .input,fieldset:disabled select.input{color:var(--text-2)}
+.slider-on{color:var(--text)}
+fieldset:disabled .slider-on{color:var(--text-2)}
 textarea.input{min-height:72px;font-family:var(--mono);font-size:var(--fs-sm)}
 .field{display:flex;flex-direction:column;gap:4px;min-width:0}
 .field>label,.lab{font-weight:600}
