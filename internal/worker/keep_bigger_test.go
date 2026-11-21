@@ -109,7 +109,7 @@ func TestBiggerNewFileEndsSkipped(t *testing.T) {
 	sel := rules.DefaultSelectors(3)
 	sel.KeepIfBigger = true
 	tmpl := sel.Template()
-	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 	if _, err := w.RunOne(context.Background()); err != nil {
 		t.Fatalf("RunOne: %v", err)
 	}

@@ -48,7 +48,7 @@ func TestRealSelectors(t *testing.T) {
 		}
 		st, id := realJob(t, path, 5)
 		w := realWorker(st, media.OSExec{})
-		w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+		w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 		if err := w.run(t); err != nil {
 			t.Fatal(err)
 		}
@@ -207,7 +207,7 @@ func TestRealReplaceWithNewFileType(t *testing.T) {
 	tmpl := sel.Template()
 	st, id := realJob(t, src, 5)
 	w := realWorker(st, media.OSExec{})
-	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 	w.KeepDays, w.Journal = func() int { return 7 }, st
 	w.run(t)
 	mkv := filepath.Join(dir, "Movie.mkv")
@@ -246,7 +246,7 @@ func TestRealBasicDefaults(t *testing.T) {
 		tmpl.Languages = "eng"
 		st, id := realJob(t, src, 5)
 		w := realWorker(st, media.OSExec{})
-		w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+		w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 		w.KeepDays, w.Journal = func() int { return 7 }, st // the .mp4 to .mkv rename is journaled (25a-2)
 		w.run(t)
 		return st, id
@@ -345,7 +345,7 @@ func TestRealSaveToAnotherFolder(t *testing.T) {
 		st.SetPaused(false) // a new store starts with its worker stopped (S2)
 		id, _ := st.Enqueue(jobs.Job{Library: lib, Path: src, DurationSec: 3})
 		w := realWorker(st, media.OSExec{})
-		w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+		w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 		w.run(t)
 		j, _ := st.Get(id)
 		return j
@@ -395,7 +395,7 @@ func TestRealEachVideoFormat(t *testing.T) {
 			st, id := realJob(t, src, 3)
 			st.SetPaused(false)
 			w := realWorker(st, media.OSExec{})
-			w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+			w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 			w.run(t)
 			j, _ := st.Get(id)
 			if j.Status != jobs.Done {
@@ -432,7 +432,7 @@ func TestRealWebMWithSmallAAC(t *testing.T) {
 	st, id := realJob(t, src, 3)
 	st.SetPaused(false)
 	w := realWorker(st, media.OSExec{})
-	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 	w.run(t)
 	j, _ := st.Get(id)
 	if j.Status != jobs.Done {
@@ -467,7 +467,7 @@ func TestRealKeepWebMBecomesMKV(t *testing.T) {
 	st, id := realJob(t, src, 3)
 	st.SetPaused(false)
 	w := realWorker(st, media.OSExec{})
-	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 	w.run(t)
 	j, _ := st.Get(id)
 	text := logTextOf(st, id)
@@ -499,7 +499,7 @@ func TestRealMP4KeepsTextSubtitles(t *testing.T) {
 	st, id := realJob(t, src, 3)
 	st.SetPaused(false)
 	w := realWorker(st, media.OSExec{})
-	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 	w.run(t)
 	j, _ := st.Get(id)
 	if j.Status != jobs.Done {
@@ -528,7 +528,7 @@ func TestRealSparseSubtitlesConvert(t *testing.T) {
 	tmpl := s.Template()
 	st, id := realJob(t, src, 5)
 	w := realWorker(st, media.OSExec{})
-	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 	w.run(t)
 	j, _ := st.Get(id)
 	if j.Status != jobs.Done {
@@ -581,7 +581,7 @@ func TestRealMP4LostSubtitleIsRefused(t *testing.T) {
 	st, id := realJob(t, src, 3)
 	st.SetPaused(false)
 	w := realWorker(st, dropSubtitleExec{})
-	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 	w.run(t)
 	j, _ := st.Get(id)
 	if j.Status != jobs.Kept || !strings.Contains(j.Error, "subtitle") {

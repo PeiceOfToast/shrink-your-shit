@@ -54,7 +54,7 @@ func noteOnTimeline(s *scenario, words string) bool {
 func TestCardsRunBeforeTheConversion(t *testing.T) {
 	s := newScenarioNamed(t, "Harrow.Lane.2019.Remux.mkv")
 	w := s.worker(Beside)
-	w.Template = func(jobs.Job) (rules.Template, error) { return cardsTemplate(), nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return cardsTemplate(), 0, nil }
 	if _, err := w.RunOne(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestStopAsFailedEndsTheRun(t *testing.T) {
 	s := newScenarioNamed(t, "Harrow.Lane.2019.WEB.mkv")
 	before, _ := os.Stat(s.src)
 	w := s.worker(Replace)
-	w.Template = func(jobs.Job) (rules.Template, error) { return cardsTemplate(), nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return cardsTemplate(), 0, nil }
 	w.RunOne(context.Background())
 	j := s.job()
 	if j.Status != jobs.Failed || !strings.Contains(j.Error, "Not a remux: nothing to gain") || !strings.Contains(j.Error, "original is untouched") {
@@ -121,7 +121,7 @@ func TestLeaveAloneStaysSkipped(t *testing.T) {
 	tm := cardsTemplate()
 	(*tm.Branches)[1].Fail, (*tm.Branches)[1].End = false, "Not a remux: left for later."
 	w := s.worker(Replace)
-	w.Template = func(jobs.Job) (rules.Template, error) { return tm, nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return tm, 0, nil }
 	w.RunOne(context.Background())
 	rec, _ := s.store.GetFile(s.src)
 	if rec == nil || rec.Reason != rules.SkipLeftByWorkflow || !strings.Contains(rec.Decision, "not a remux: left for later") {
@@ -142,7 +142,7 @@ func TestCardFailureStopsTheRun(t *testing.T) {
 	tm := cardsTemplate()
 	(*tm.Branches)[0].Before = append((*tm.Branches)[0].Before, rules.Card{NodeID: "later", Type: "action.later", Name: "A later card"})
 	w := s.worker(Replace)
-	w.Template = func(jobs.Job) (rules.Template, error) { return tm, nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return tm, 0, nil }
 	w.RunOne(context.Background())
 	j := s.job()
 	if j.Status != jobs.Failed || !strings.Contains(j.Error, "A later card didn't work") {
@@ -167,7 +167,7 @@ func TestAfterCardsRunOnTheSavedFile(t *testing.T) {
 		{NodeID: "ms", Type: workflow.TypeMediaServer, Name: "Tell the media server", Config: map[string]any{}},
 	}
 	w := s.worker(Beside)
-	w.Template = func(jobs.Job) (rules.Template, error) { return tm, nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return tm, 0, nil }
 	globalTold, sent := false, ""
 	w.OnDone = func(jobs.Job, string) { globalTold = true }
 	w.Cards = func(jobs.Job, string) flow.Env {
@@ -214,7 +214,7 @@ func TestAfterCardsRunOnTheSavedFile(t *testing.T) {
 	tm3 := cardsTemplate()
 	(*tm3.Branches)[0].After = []rules.Card{{NodeID: "ms", Type: workflow.TypeMediaServer, Name: "Tell the media server", Config: map[string]any{}}}
 	w3 := s3.worker(Beside)
-	w3.Template = func(jobs.Job) (rules.Template, error) { return tm3, nil }
+	w3.Template = func(jobs.Job) (rules.Template, int64, error) { return tm3, 0, nil }
 	var told3 []string
 	w3.OnDone = func(jobs.Job, string) { told3 = append(told3, "global") }
 	w3.Cards = func(jobs.Job, string) flow.Env {
@@ -235,7 +235,7 @@ func TestAfterCardsRunOnTheSavedFile(t *testing.T) {
 	tm2 := cardsTemplate()
 	(*tm2.Branches)[0].After = []rules.Card{{NodeID: "sum", Type: workflow.TypeChecksum, Name: "Checksum the result", Config: map[string]any{}}}
 	w2 := s2.worker(Beside)
-	w2.Template = func(jobs.Job) (rules.Template, error) { return tm2, nil }
+	w2.Template = func(jobs.Job) (rules.Template, int64, error) { return tm2, 0, nil }
 	told := false
 	w2.OnDone = func(jobs.Job, string) { told = true }
 	w2.RunOne(context.Background())
@@ -257,7 +257,7 @@ func TestLookupAndCommandCardsAreWired(t *testing.T) {
 		{NodeID: "note", Type: workflow.TypeNote, Name: "Add a note to the log", Config: map[string]any{"text": "the program said {{command_output}}"}},
 	}
 	w := s.worker(Beside)
-	w.Template = func(jobs.Job) (rules.Template, error) { return tm, nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return tm, 0, nil }
 	var ran []string
 	w.Cards = func(jobs.Job, string) flow.Env {
 		return flow.Env{
@@ -287,7 +287,7 @@ func TestLookupAndCommandCardsAreWired(t *testing.T) {
 	// the switch off: no Exec, the card is a warning, the job stays done
 	s2 := newScenarioNamed(t, "Harrow.Lane.2019.Remux.mkv")
 	w2 := s2.worker(Beside)
-	w2.Template = func(jobs.Job) (rules.Template, error) { return tm, nil }
+	w2.Template = func(jobs.Job) (rules.Template, int64, error) { return tm, 0, nil }
 	w2.Cards = func(jobs.Job, string) flow.Env { // the downloader answers, but no Exec: the switch is off
 		return flow.Env{Lookup: func(string) (map[string]string, string, error) {
 			return map[string]string{"title_clean": "Harrow Lane", "year": "2019"}, "Radarr: Harrow Lane (2019)", nil
@@ -338,7 +338,7 @@ func TestTagCardsReadAndWriteTheRecord(t *testing.T) {
 	(*tm.Branches)[0].After = []rules.Card{{NodeID: "tag2", Type: workflow.TypeTag, Name: "Tag the file", Config: map[string]any{"add": "converted", "remove": "converting"}}}
 	w := s.worker(Beside)
 	w.Queue = store
-	w.Template = func(jobs.Job) (rules.Template, error) { return tm, nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return tm, 0, nil }
 	if _, err := w.RunOne(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -356,7 +356,7 @@ func TestTagCardsReadAndWriteTheRecord(t *testing.T) {
 	// the same workflow on a store without tags: the question answers No (no tags), the file stops as failed
 	s2 := newScenarioNamed(t, "Harrow.Lane.2019.Remux.mkv")
 	w2 := s2.worker(Beside)
-	w2.Template = func(jobs.Job) (rules.Template, error) { return tm, nil }
+	w2.Template = func(jobs.Job) (rules.Template, int64, error) { return tm, 0, nil }
 	w2.RunOne(context.Background())
 	if j := s2.job(); j.Status != jobs.Failed || !strings.Contains(j.Error, "Not a remux") {
 		t.Errorf("no tags in the store: %s %q", j.Status, j.Error)
@@ -367,7 +367,7 @@ func TestTagCardsReadAndWriteTheRecord(t *testing.T) {
 	tm4 := cardsTemplate()
 	(*tm4.Branches)[0].Before = append([]rules.Card{{NodeID: "tag", Type: workflow.TypeTag, Name: "Tag the file", Config: map[string]any{"add": "converting, {{title}}"}}}, (*tm4.Branches)[0].Before...)
 	w4 := s4.worker(Beside)
-	w4.Template = func(jobs.Job) (rules.Template, error) { return tm4, nil }
+	w4.Template = func(jobs.Job) (rules.Template, int64, error) { return tm4, 0, nil }
 	if _, err := w4.RunOne(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -386,7 +386,7 @@ func TestTagCardsReadAndWriteTheRecord(t *testing.T) {
 	s6 := newScenarioNamed(t, "Harrow.Lane.2019.Remux.mkv")
 	w6 := s6.worker(Beside)
 	w6.Queue = &noTagsQueue{Store: s6.store}
-	w6.Template = func(jobs.Job) (rules.Template, error) { return tm4, nil }
+	w6.Template = func(jobs.Job) (rules.Template, int64, error) { return tm4, 0, nil }
 	if _, err := w6.RunOne(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -411,7 +411,7 @@ func TestConvertAgainLaterAndWaitUntil(t *testing.T) {
 	(*tm.Branches)[1] = rules.Branch{Checks: (*tm.Branches)[1].Checks, End: "The download never finished", Fail: true, Path: []string{"in", "q", "again"},
 		Requeue: &rules.Requeue{AfterSec: 1800, MaxTries: 2}}
 	w := s.worker(Beside)
-	w.Template = func(jobs.Job) (rules.Template, error) { return tm, nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return tm, 0, nil }
 	if _, err := w.RunOne(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -429,7 +429,7 @@ func TestConvertAgainLaterAndWaitUntil(t *testing.T) {
 	(*tm3.Branches)[1] = rules.Branch{Checks: (*tm3.Branches)[1].Checks, End: "The download never finished", Fail: true, Path: []string{"in", "q", "again"},
 		Requeue: &rules.Requeue{AfterSec: 1800, MaxTries: 1}}
 	w3 := s3.worker(Beside)
-	w3.Template = func(jobs.Job) (rules.Template, error) { return tm3, nil }
+	w3.Template = func(jobs.Job) (rules.Template, int64, error) { return tm3, 0, nil }
 	w3.RunOne(context.Background())
 	if j3 := s3.job(); j3.Status != jobs.Failed || !strings.Contains(j3.Error, "The download never finished. Tried 1 times") {
 		t.Errorf("last try: %s %q", j3.Status, j3.Error)
@@ -439,7 +439,7 @@ func TestConvertAgainLaterAndWaitUntil(t *testing.T) {
 	tm2 := cardsTemplate()
 	(*tm2.Branches)[0].Before = append([]rules.Card{{NodeID: "w", Type: workflow.TypeWait, Name: "Wait", Config: map[string]any{"until": "02:00"}}}, (*tm2.Branches)[0].Before...)
 	w2 := s2.worker(Beside)
-	w2.Template = func(jobs.Job) (rules.Template, error) { return tm2, nil }
+	w2.Template = func(jobs.Job) (rules.Template, int64, error) { return tm2, 0, nil }
 	w2.RunOne(context.Background())
 	j2 := s2.job()
 	if j2.Status != jobs.Queued || j2.RetryAt == "" || !strings.Contains(j2.Error, "Waiting until 02:00") {
@@ -490,7 +490,7 @@ func TestConvertAgainLaterAndWaitUntil(t *testing.T) {
 	// a person's Retry now on a waiting file: wanted now, converted (review-548 item 6)
 	s5 := newScenarioNamed(t, "Harrow.Lane.2019.Remux.mkv")
 	w5 := s5.worker(Beside)
-	w5.Template = func(jobs.Job) (rules.Template, error) { return tm2, nil }
+	w5.Template = func(jobs.Job) (rules.Template, int64, error) { return tm2, 0, nil }
 	w5.RunOne(context.Background())
 	if j := s5.job(); j.Status != jobs.Queued {
 		t.Fatalf("first run: %s", j.Status)

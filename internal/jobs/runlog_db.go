@@ -110,6 +110,13 @@ SELECT ?, COALESCE(MAX(seq),0)+1, ?, ?, ?, ?, ?, ? FROM job_log_lines WHERE job_
 	return err
 }
 
+// JobRevisions are the workflow revision job id ran with and the one it was queued under (0: none
+// recorded; foundation slice 9).
+func (s *Store) JobRevisions(id int64) (ran, queued int64, err error) {
+	err = s.db.QueryRow(`SELECT workflow_rev, queued_rev FROM jobs WHERE id=?`, id).Scan(&ran, &queued)
+	return ran, queued, err
+}
+
 // JobWorkflowRev is the workflow revision job id ran with (0: none recorded).
 func (s *Store) JobWorkflowRev(id int64) (int64, error) {
 	var rev int64

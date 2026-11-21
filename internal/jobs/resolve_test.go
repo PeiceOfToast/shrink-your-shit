@@ -50,7 +50,7 @@ func TestTemplateForResolvesAWholeFieldReference(t *testing.T) {
 	useHome(t)
 	s := open(t)
 	lib, _ := qualityFlow(t, s, []workflow.Variable{{Name: "q", Type: "number", Value: float64(1)}}, "{{q}}", rules.SliderTemplate(3))
-	got, err := s.TemplateFor(Job{LibraryID: lib.ID})
+	got, _, err := s.TemplateFor(Job{LibraryID: lib.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestTemplateForLeavesAWorkflowWithoutRefsAlone(t *testing.T) {
 	s := open(t)
 	stored := rules.SliderTemplate(2) // deliberately not the doc's quality (3): a recompile would say so
 	lib, _ := qualityFlow(t, s, nil, float64(3), stored)
-	got, err := s.TemplateFor(Job{LibraryID: lib.ID})
+	got, _, err := s.TemplateFor(Job{LibraryID: lib.ID})
 	if err != nil {
 		t.Fatal(err)
 	}

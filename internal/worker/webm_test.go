@@ -45,7 +45,7 @@ func TestRealWebMKeepsTextSubtitles(t *testing.T) {
 	tmpl := s.Template()
 	st, id := realJob(t, src, 3)
 	w := realWorker(st, media.OSExec{})
-	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 	w.run(t)
 	j, _ := st.Get(id)
 	if j.Status != jobs.Done {
@@ -89,7 +89,7 @@ func TestRealWebMMovTextBecomesWebVTT(t *testing.T) {
 	tmpl := s.Template()
 	st, id := realJob(t, src, 3)
 	w := realWorker(st, media.OSExec{})
-	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 	w.run(t)
 	j, _ := st.Get(id)
 	if j.Status != jobs.Done {
@@ -107,7 +107,7 @@ func TestRealWebMMovTextBecomesWebVTT(t *testing.T) {
 func TestHeaderRefusalIsNotDamage(t *testing.T) {
 	s := newScenario(t)
 	w := s.worker(Replace)
-	w.Template = func(jobs.Job) (rules.Template, error) { return rules.SliderTemplate(3), nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return rules.SliderTemplate(3), 0, nil }
 	s.encodeErr = errors.New("exit status 234")
 	s.encodeStderr = "[webm @ 0x1] Only VP8 or VP9 or AV1 video and Vorbis or Opus audio and WebVTT subtitles are supported for WebM.\n" +
 		"[out#0/webm @ 0x2] Could not write header (incorrect codec parameters ?): Invalid argument"

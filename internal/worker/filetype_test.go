@@ -27,7 +27,7 @@ func mp4ToMkv(t *testing.T, days int) (*scenario, *Worker, string) {
 	sel.FileType = "mkv"
 	tmpl := sel.Template()
 	w := s.keeping(days)
-	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 	return s, w, filepath.Join(s.dir, "movie.mkv")
 }
 
@@ -257,7 +257,7 @@ func TestSameTypeOtherCaseKeepsTheName(t *testing.T) {
 	sel.FileType = "mkv"
 	tmpl := sel.Template()
 	w := s.keeping(7)
-	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 	w.RunOne(context.Background())
 	if j := s.job(); j.Status != jobs.Done || j.OutputPath != s.src || read(s.src) != "new" {
 		t.Fatalf("%+v %q", j, read(s.src))

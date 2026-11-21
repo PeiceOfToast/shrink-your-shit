@@ -126,7 +126,7 @@ func TestTemplateForReadsTheGlobalsAsTheyAreNow(t *testing.T) {
 		if _, err := s.SetGlobalVariables([]workflow.Variable{{Name: "q", Type: "number", Value: float64(q)}}); err != nil {
 			t.Fatal(err)
 		}
-		got, err := s.TemplateFor(Job{LibraryID: lib.ID})
+		got, _, err := s.TemplateFor(Job{LibraryID: lib.ID})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -150,13 +150,13 @@ func TestTemplateForRefusesWhenTheGlobalsNoLongerResolve(t *testing.T) {
 	if _, err := s.SetGlobalVariables([]workflow.Variable{{Name: "q", Type: "number", Value: float64(2)}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.TemplateFor(Job{LibraryID: lib.ID}); err != nil {
+	if _, _, err := s.TemplateFor(Job{LibraryID: lib.ID}); err != nil {
 		t.Fatalf("with q saved the template must compile: %v", err)
 	}
 	if _, err := s.SetGlobalVariables(nil); err != nil { // the person removed q
 		t.Fatal(err)
 	}
-	_, err = s.TemplateFor(Job{LibraryID: lib.ID})
+	_, _, err = s.TemplateFor(Job{LibraryID: lib.ID})
 	var unresolved *SettingsUnresolvedError
 	if !errors.As(err, &unresolved) {
 		t.Fatalf("%v, want SettingsUnresolvedError", err)

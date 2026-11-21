@@ -17,7 +17,7 @@ import (
 func TestEncodeStepAndFailureAreInTheDatabase(t *testing.T) {
 	s := newScenario(t)
 	w := s.worker(Replace)
-	w.Template = func(jobs.Job) (rules.Template, error) { return rules.SliderTemplate(3), nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return rules.SliderTemplate(3), 0, nil }
 	s.encodeErr = errors.New("exit status 1")
 	s.encodeStderr = "Input #0, matroska\nInvalid data found when processing input\nlast line"
 	w.RunOne(context.Background())

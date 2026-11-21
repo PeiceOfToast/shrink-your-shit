@@ -42,7 +42,7 @@ func TestCheckJudgesTheScaledPictureByItsRules(t *testing.T) {
 			s.srcSpec = hdSpec("h264", "yuv420p", 1920, 1080)
 			s.outSpec = hdSpec("hevc", "yuv420p", c.w, c.h)
 			w := s.worker(Replace)
-			w.Template = func(jobs.Job) (rules.Template, error) { return hdFlow("hevc", "480"), nil }
+			w.Template = func(jobs.Job) (rules.Template, int64, error) { return hdFlow("hevc", "480"), 0, nil }
 			w.RunOne(context.Background()) // a kept refusal is this test's point too
 			j := s.job()
 			if done := j.Status == jobs.Done; done != c.done {
@@ -86,7 +86,7 @@ func TestCheckJudgesTheDepthOfTheEncoderThatRan(t *testing.T) {
 			s.srcSpec = hdSpec("hevc", "yuv420p10le", 1920, 1080) // 10-bit SDR, converted to H.264
 			s.outSpec = hdSpec("h264", c.pix, 1920, 1080)
 			w := s.worker(Replace)
-			w.Template = func(jobs.Job) (rules.Template, error) { return hdFlow("h264", "keep"), nil }
+			w.Template = func(jobs.Job) (rules.Template, int64, error) { return hdFlow("h264", "keep"), 0, nil }
 			w.Encoder = func(string, bool, *rules.HDR) (string, string) { return c.gpu, "" }
 			w.RunOne(context.Background()) // a kept refusal is this test's point too
 			j := s.job()
@@ -114,7 +114,7 @@ func TestCheckJudgesTheProcessorAfterAFallBack(t *testing.T) {
 	s.outSpec = hdSpec("h264", "yuv420p10le", 1920, 1080) // libx264 keeps the source's 10 bits
 	s.failEncoder = "h264_qsv"
 	w := s.worker(Replace)
-	w.Template = func(jobs.Job) (rules.Template, error) { return hdFlow("h264", "keep"), nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return hdFlow("h264", "keep"), 0, nil }
 	w.Encoder = func(string, bool, *rules.HDR) (string, string) { return "h264_qsv", "" }
 	w.RunOne(context.Background())
 	j := s.job()
