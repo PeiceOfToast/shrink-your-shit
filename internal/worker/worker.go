@@ -1458,9 +1458,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	// The local worker encodes with its graphics encoder for this plan's format when it can do this plan; else,
 	// and for a remote worker, the processor (its own arguments are FFmpegArgs, unchanged).
 	gpu := ""
-	full := false // gpu runs the full GPU pipeline (decode and encode on the graphics card)
-	fell := false // the graphics encoder failed and the processor is retrying the file
-	fellReason := ""
+	full := false        // gpu runs the full GPU pipeline (decode and encode on the graphics card)
 	var gpuSlot *GPUSlot // the card's place this job holds while its graphics encode runs
 	defer func() {
 		if gpuSlot != nil {
@@ -1538,7 +1536,8 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	var terr error
 	decoded := int64(-1) // frames ffmpeg took from the original; -1 when a remote worker did not say
 	encStart := w.now()
-	if w.remote != nil { // V7b2: a worker on another computer converts and checks; its file comes up here
+	fell, fellReason := false, "" // the graphics encoder failed and the processor retried the file
+	if w.remote != nil {          // V7b2: a worker on another computer converts and checks; its file comes up here
 		stopWatch := w.watchRemoteStall(job.ID, w.remote)
 		var ran []string
 		encErr, ran, terr = w.remote.convert(ctx, w, job, snap, srcPath, tmp)
@@ -1560,42 +1559,35 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			w.storeOutputInfo(job.ID, w.remote.Measured())
 		}
 	} else {
-		encErr, encLog, decoded, terr = w.encodeRun(ctx, job, args)
-		// A failed graphics encode steps down a rung at a time: the full GPU pipeline to the processor decoding
-		// for the same encoder (no count toward the pause), then to the processor, which counts (EncoderFell).
-		for gpu != "" && w.gpuFailed(ctx, terr, encErr, full) {
-			w.recordEncode(job.ID, args, encStart, encErr, terr, probeSummary(src))
-			reason := firstLines(encErr, 1)
-			if reason == "" {
-				reason = terr.Error()
-			}
-			// Truncate, don't remove: the staged file is checked by identity (staged.intact), so the retry must
-			// write into the same file, not a new one that may get another inode.
-			if err := os.Truncate(tmp, 0); err != nil {
-				encErr, terr = "", fmt.Errorf("clearing the partial output: %w", err)
-				break
-			}
-			if full {
-				full = false
-				args, _ = plan.FFmpegArgsWith(srcPath, tmp, gpu)
-				w.jobf(job.ID, ": full GPU pipeline failed (%s); the processor decodes for %s", shortReason(reason), gpu)
-				setLive(job.ID, LiveJob{Worker: w.ID, Started: w.now(), ConvertingTo: convertingTo(plan, src, gpu), Encoder: encoderWordsUsed(plan, gpu),
-					Decoder: decoderWords(src, false), Progress: media.Progress{ETASeconds: -1}})
-				encStart = w.now()
-				encErr, encLog, decoded, terr = w.encodeRun(ctx, job, args)
-				continue
-			}
-			if gpuSlot != nil { // the processor converts from here: the card is free for another job
-				gpuSlot.Release()
-			}
-			fell, fellReason = true, shortReason(reason)
-			args = plan.FFmpegArgs(srcPath, tmp)
-			setLive(job.ID, LiveJob{Worker: w.ID, Started: w.now(), ConvertingTo: convertingTo(plan, src, ""), Encoder: encoderWords(plan),
-				Decoder: decoderWords(src, false), Progress: media.Progress{ETASeconds: -1}})
+		// The local ladder (attempt.go): a graphics rung that fails steps down, and the card's slot is given up when
+		// the processor takes over. Each run keeps its own start time for the record of the rung.
+		run := func(ctx context.Context, rargs []string) (string, error) {
 			encStart = w.now()
-			encErr, encLog, decoded, terr = w.encodeRun(ctx, job, args)
-			break
+			_, raw, frames, err := w.encodeRun(ctx, job, rargs)
+			decoded = frames
+			return raw, err
 		}
+		hooks := AttemptHooks{
+			OnRung: func(r Rung) {
+				if r.Encoder == "" && gpuSlot != nil { // the processor converts from here: the card is free for another job
+					gpuSlot.Release()
+				}
+				enc, conv := encoderWordsUsed(plan, r.Encoder), convertingTo(plan, src, r.Encoder)
+				if r.Encoder == "" {
+					enc = encoderWords(plan)
+				}
+				setLive(job.ID, LiveJob{Worker: w.ID, Started: w.now(), ConvertingTo: conv, Encoder: enc,
+					Decoder: decoderWords(src, false), Progress: media.Progress{ETASeconds: -1}})
+			},
+			Failed: func(r Rung, errText string, err error) {
+				w.recordEncode(job.ID, r.Args, encStart, errText, err, probeSummary(src))
+			},
+			Note:    func(text string) { w.jobf(job.ID, ": %s", text) },
+			Stopped: w.stalled,
+		}
+		res := Attempt(ctx, AttemptInput{Plan: plan, SrcPath: srcPath, Tmp: tmp, First: Rung{Args: args, Encoder: gpu, Full: full}}, run, hooks)
+		args, encErr, encLog, terr = res.Args, res.Errors, res.Stderr, res.Err
+		fell, fellReason = res.Fell, res.FellReason
 		if gpuSlot != nil { // the graphics encode has ended: the card's place is free for the next job
 			gpuSlot.Release()
 		}
@@ -2785,30 +2777,16 @@ func (w *Worker) graphicsArgs(ctx context.Context, job jobs.Job, plan rules.Plan
 	return args, false, ok
 }
 
-// gpuFailed says whether a graphics encode that ended with err should convert again on the processor. Off the full
-// GPU pipeline, only an encoder or ffmpeg failure (jobs.FallsBackToProcessor). On the full rung the graphics card
-// also decodes, and a decode error there can be the card's, not the file's (a profile or chroma layout it cannot
-// read), so any failure steps down except a stop (cancel, shutdown, the stall stop), a lost lease, a full disk, a
-// missing source or an unwritable output, which the processor would hit too.
+// gpuFailed says whether a graphics encode that ended with err steps down (attemptSteps).
 func (w *Worker) gpuFailed(ctx context.Context, err error, stderr string, full bool) bool {
-	if err == nil || ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, errLeaseLost) {
-		return false
-	}
+	return attemptSteps(ctx, err, stderr, full, w.stalled)
+}
+
+// stalled says the worker's stall stop ended the encode: a stop never steps down.
+func (w *Worker) stalled() bool {
 	w.mu.Lock()
-	stalled := w.stopped == stopStall
-	w.mu.Unlock()
-	if stalled {
-		return false
-	}
-	lines := strings.Split(stderr, "\n")
-	if full {
-		switch jobs.FailureCode(jobs.ReasonConvertFailed, lines) {
-		case "no_space", "source_missing", "output_not_writable", "settings_rejected":
-			return false
-		}
-		return true
-	}
-	return jobs.FallsBackToProcessor(lines)
+	defer w.mu.Unlock()
+	return w.stopped == stopStall
 }
 
 // encodeRun is encodeLocal with the encode's log split in two: the raw log, where ffmpeg's end-of-run
