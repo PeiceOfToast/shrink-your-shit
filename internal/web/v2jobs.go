@@ -483,17 +483,21 @@ func v2Progress(state string, id int64, pct *float64) map[string]any {
 		if state == "running" && pct != nil {
 			p["percent"], p["workflowPercent"] = *pct, 5+int(*pct*0.8)
 		}
-		if pr.Speed > 0 {
-			p["speed"] = pr.Speed
-		}
-		if pr.ETASeconds >= 0 {
-			p["etaS"] = int(pr.ETASeconds + 0.5)
-		}
-		if pr.FPS > 0 {
-			p["fps"] = pr.FPS
-		}
-		if pr.BitrateKbps > 0 {
-			p["bitrateKbps"] = int(pr.BitrateKbps + 0.5)
+		// the encode's own speed, ETA, fps and bitrate are the converting step's: Live is kept until the whole run
+		// ends, so during the check after the encode they would still show the encode's last "eta 2s" (12c)
+		if state == "running" {
+			if pr.Speed > 0 {
+				p["speed"] = pr.Speed
+			}
+			if pr.ETASeconds >= 0 {
+				p["etaS"] = int(pr.ETASeconds + 0.5)
+			}
+			if pr.FPS > 0 {
+				p["fps"] = pr.FPS
+			}
+			if pr.BitrateKbps > 0 {
+				p["bitrateKbps"] = int(pr.BitrateKbps + 0.5)
+			}
 		}
 	}
 	return p

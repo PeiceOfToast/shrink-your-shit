@@ -170,7 +170,16 @@ func (w *Worker) verify(ctx context.Context, src media.Info, exp rules.Expect, s
 	if problems := exp.Compare(out, -1); len(problems) > 0 {
 		return kept("%s", strings.Join(problems, "; "))
 	}
+	// 12c: the job log says when each check starts and how long it took, so a long check is not silent
+	id := w.runningJob()
+	if id != 0 {
+		w.jobf(id, ": Playing the new file to check it (about %s).", rules.Clock(out.DurationSec))
+	}
+	playStart := w.now()
 	packets, counted, err := w.decodeCheck(ctx, out, tmp)
+	if id != 0 {
+		w.jobf(id, ": Played in %s.", waitWords(w.now().Sub(playStart)))
+	}
 	if err != nil {
 		return err
 	}
@@ -197,7 +206,16 @@ func (w *Worker) verify(ctx context.Context, src media.Info, exp rules.Expect, s
 	if w.remote != nil { // the remote worker compared the pictures itself, against its copy (Q4 a)
 		return nil
 	}
-	return w.ssimCheck(ctx, src, out, srcPath, tmp, exp.MinSSIM)
+	id = w.runningJob()
+	if id != 0 {
+		w.jobf(id, ": Comparing picture quality with the original.")
+	}
+	compareStart := w.now()
+	err = w.ssimCheck(ctx, src, out, srcPath, tmp, exp.MinSSIM)
+	if id != 0 {
+		w.jobf(id, ": Compared in %s.", waitWords(w.now().Sub(compareStart)))
+	}
+	return err
 }
 
 // ---- playback test ----
