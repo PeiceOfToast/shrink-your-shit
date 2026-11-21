@@ -54,14 +54,14 @@ export const takesVars = (defs: { configSchema: { properties?: Record<string, un
 const noVars: VarList = { sample: { path: "", builtIn: true }, variables: [] };
 export const varListFor = (wf: string, on: boolean) => (on ? getVariables(wf) : Promise.resolve(noVars));
 export function varProblems(nodes: { id: string; type: string; config?: Record<string, unknown> }[], defs: { type: string; configSchema: { properties?: Record<string, unknown> } }[], vars: TemplateVar[]) {
-  const out: { nodeId: string; field: string; title: string; code: "unknown_variable" | "unclosed_brace"; name: string; error: string }[] = [];
+  const out: { nodeId: string; field: string; title: string; code: "unknown_variable" | "unclosed_variable"; name: string; error: string }[] = [];
   for (const n of nodes) {
     const props = (defs.find((d) => d.type === n.type)?.configSchema.properties ?? {}) as Record<string, { "x-variables"?: unknown; title?: unknown }>;
     for (const [k, s] of Object.entries(props)) {
       if (s["x-variables"] !== true) continue;
       const a = analyse(String(n.config?.[k] ?? ""), vars), first = a.errors[0];
       // errors[0] is an unknown-name error whenever there is one (analyse pushes those before the brace check)
-      if (first) out.push({ nodeId: n.id, field: k, title: (s.title as string) ?? k, code: a.unknown.length ? "unknown_variable" : "unclosed_brace", name: a.unknown[0] ?? "", error: first });
+      if (first) out.push({ nodeId: n.id, field: k, title: (s.title as string) ?? k, code: a.unknown.length ? "unknown_variable" : "unclosed_variable", name: a.unknown[0] ?? "", error: first });
     }
   }
   return out;
