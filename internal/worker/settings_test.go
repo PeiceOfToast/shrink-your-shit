@@ -126,6 +126,41 @@ func TestJobRecordsItsPlan(t *testing.T) {
 	}
 }
 
+// A job that stops at an output-path check still keeps the plan and the variables it resolved, so its
+// log can show them: an output name made from a template is exactly when someone looks (slice 3's
+// later record, once the encoder is known, never runs for this job).
+func TestAFailureAtTheOutputPathKeepsTheVariables(t *testing.T) {
+	s := newScenario(t)
+	w := s.worker(Folder)
+	sel := rules.DefaultSelectors(3)
+	sel.AfterConverting, sel.OutputDir = "folder", "{{title}}" // not a full path: the folder check stops the job
+	w.Template = func(jobs.Job) (rules.Template, error) {
+		return rules.Template{Kind: rules.KindSelectors, Selectors: &sel, CompilerVersion: rules.CompilerVersion}, nil
+	}
+	w.RunOne(context.Background())
+	j := s.job()
+	if j.Status != jobs.Failed || !strings.Contains(j.Error, "isn't a full path") {
+		t.Fatalf("%s %q", j.Status, j.Error)
+	}
+	var snap rules.Snapshot
+	if err := json.Unmarshal([]byte(j.Plan), &snap); err != nil {
+		t.Fatalf("the job keeps the plan it stopped with: %q: %v", j.Plan, err)
+	}
+	var title *rules.RunVariable
+	for i, v := range snap.Variables {
+		if v.Name == "title" {
+			title = &snap.Variables[i]
+		}
+	}
+	if title == nil || title.End != "movie" {
+		t.Errorf("the recorded plan keeps the variables it resolved, with title movie: %+v", snap.Variables)
+	}
+	if j.PlanPrint != snap.Fingerprint() {
+		t.Errorf("fingerprint %q, want %q", j.PlanPrint, snap.Fingerprint())
+	}
+	s.assertOriginalSafe()
+}
+
 // failingRecord is the store with RecordPlan failing, like a database write error.
 type failingRecord struct{ Queue }
 

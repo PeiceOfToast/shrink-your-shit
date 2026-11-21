@@ -28,7 +28,7 @@ code,.mono{font-family:var(--mono);font-size:max(.92em,var(--fs-sm))}
 .grp{height:14px}
 .nav a{position:relative;display:flex;align-items:center;gap:10px;min-height:40px;padding:0 12px;border-radius:var(--radius-sm);color:var(--text);text-decoration:none}
 .nav a:hover{background:color-mix(in srgb,var(--raised) 60%,transparent)}
-.nav a[aria-current=page]{background:var(--raised);font-weight:var(--fw-strong)}
+.nav a[aria-current=page]{background:var(--accent-soft);font-weight:var(--fw-strong)}
 .nav a[aria-current=page]::before{content:"";position:absolute;left:-8px;top:8px;bottom:8px;width:3px;border-radius:0 3px 3px 0;background:var(--accent)}
 .badge{margin-left:auto;min-width:20px;min-height:20px;padding:0 6px;border-radius:10px;font-size:var(--fs-sm);font-weight:var(--fw-strong);display:inline-grid;place-items:center;background:var(--error);color:var(--on-accent)}
 .badge.warn{background:var(--warning);color:var(--on-accent)}
@@ -128,9 +128,10 @@ textarea.input{min-height:72px;font-family:var(--mono);font-size:var(--fs-sm)}
 .pill{display:inline-flex;align-items:center;gap:4px;height:var(--chip-h);padding:0 8px;border-radius:calc(var(--chip-h)/2);background:var(--raised);color:var(--text-2);font-size:var(--fs-sm);font-weight:500;white-space:nowrap;flex:none}
 .pill .ic{width:12px;height:12px}
 .pill.run{background:var(--accent-soft);color:var(--accent-text)}
-.pill.ok{background:var(--ok-soft);color:var(--success-text)}
+.pill.ok{background:var(--raised);color:var(--success-text)} /* U8: Done is success text on a neutral pill, not a success fill */
 .pill.bad{background:var(--bad-soft);color:var(--error-text)}
 .pill.warn,.pill.sample{background:var(--warn-soft);color:var(--warning-text)}
+.gain{color:var(--success-text)} /* U8: a saved figure is success text, never a fill */
 .st.ok{color:var(--success-text)}.st.run{color:var(--accent-text)}.st.bad{color:var(--error-text)}.st.warn{color:var(--warning-text)}.st.wait{color:var(--text-2)}
 .st .ic{width:16px;height:16px}
 .st:has(>.fail){align-items:flex-start}.st:has(>.fail)>.ic{margin-top:2px}.st .fail{white-space:normal}.st .why{font-weight:400;color:var(--text)}
@@ -424,7 +425,7 @@ label.chk{cursor:pointer}
   .list .tbl td.stc,.list .tbl td.actc,.list .tbl td.posc,.list .tbl td.sizec{display:block;flex:none}
   .list .tbl td.posc{min-width:20px}
   .list.selecting .tbl td.selc{display:block;flex:none}
-  .list .tbl td.idc .sub:not(.phone):not(.runs){display:none}   /* phone rows: the title and one muted line; Workflows' Recent runs line stays */
+  .list .tbl td.idc .sub:not(.phone):not(.runs):not(.live):not(.libfacts){display:none}   /* phone rows: the title and one muted line; Workflows' Recent runs line stays */
   .list .tbl .desk{display:none}
   .list .tbl .ttl::before{content:"";position:absolute;inset:0}   /* the whole row opens it */
   .list .tbl td.selc,.list .tbl td.actc,.list .tbl .over{position:relative;z-index:1}
@@ -563,7 +564,7 @@ label.chk{cursor:pointer}
   .sline>.sp{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 }
 .plist .ttl.clamp2{display:-webkit-box}   /* .plist .ttl's display:block had switched the clamp off */
-@media (min-width:901px){.list .tbl td.idc>.sub:not(.phone),.list .tbl td.idc .row .sub:not(.phone){display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}}
+@media (min-width:901px){.list .tbl td.idc>.sub:not(.phone):not(.libfacts):not(.live),.list .tbl td.idc .row .sub:not(.phone):not(.libfacts):not(.live){display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}}
 @media (min-width:960px){.tbl .wftag{white-space:nowrap}} /* pass 5: the short workflow line stays on one line where it fits; 901-959 px it may wrap (nowrap there pushed the table 17 px past the page) */
 @media (pointer:coarse){.linkbtn{min-width:44px;justify-content:center}}
 /* controls with no visible label (row checkboxes, the Enabled switch, the favourite star) get a 44 px hit area on
@@ -762,22 +763,28 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 .ginspect .ginform .input,.ginspect .ginform select{width:100%;max-width:100%;min-width:0} /* review 13f1c75 P3: no cut-off selects in the narrow panel */
 @media (pointer:coarse){.gfold>summary{min-height:44px;display:flex;align-items:center}.gpi{min-height:44px}}
 .fieldbad>.field .input,.fieldbad>.field select,.fieldbad>fieldset{border-color:var(--error);box-shadow:0 0 0 1px var(--error)} /* #165: a setting with a value it cannot use */
-/* user item 5 (design 7.3): the Dashboard as an overview: a headline band, flat sections, two small day charts */
-.ov .headline{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:24px;align-items:end;padding:8px 0 16px;border-bottom:1px solid var(--border)}
-.ov .big{font-size:var(--fs-display);line-height:1.05;font-weight:var(--fw-strong);letter-spacing:-.02em;margin-bottom:8px}
-.ov .big small{font-size:var(--fs-lg);font-weight:400;color:var(--text-2);letter-spacing:0;margin-left:6px}
-.ov .stats{display:flex;gap:32px;flex-wrap:wrap}
-.ov .stats div{display:flex;flex-direction:column;gap:2px}
-.ov .stats b{font-size:var(--fs-xl);font-weight:var(--fw-strong)}
-.ov .stats span{color:var(--text-2);font-size:var(--fs-sm)}
-.ov .stats a{color:var(--text);text-decoration:none}.ov .stats a.bad b{color:var(--error-text)}
+/* user item 5 (design 7.3): the Dashboard as an overview: stat tiles with sparklines (U6), flat sections, two small day charts */
+.ov .tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--s4)}
+.ov .tiles .tile{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:var(--s4);display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-rows:auto auto auto;gap:4px var(--s3);align-content:start;min-width:0}
+.ov .tiles .tile .l{grid-column:1;color:var(--text-2);font-size:var(--fs-sm);font-weight:var(--fw-strong)}
+.ov .tiles .tile .v{grid-column:1;font-size:var(--fs-display);font-weight:var(--fw-strong);line-height:1.1;letter-spacing:-.01em;overflow-wrap:anywhere}
+.ov .tiles .tile .v small{font-size:var(--fs-lg);font-weight:400;color:var(--text-2);letter-spacing:0;margin-left:6px}
+.ov .tiles .tile .v.ok{color:var(--success-text)}
+.ov .tiles .tile .d{grid-column:1;color:var(--text-2);font-size:var(--fs-sm);overflow-wrap:anywhere}
+.ov .tiles .tile .d a{color:var(--text)}.ov .tiles .tile .d a.bad{color:var(--error-text)}
+.ov .tiles .tile .spark{grid-column:2;grid-row:1/4;width:128px;height:56px;align-self:end;overflow:visible}
 .ov .sec>h2{font-size:var(--fs-lg);font-weight:var(--fw-strong);margin:0 0 10px;display:flex;align-items:baseline;gap:12px}
 .ov .sec>h2 .more{margin-left:auto;font-size:var(--fs);font-weight:400;color:var(--text-2)}
 .ov .sec+.sec{margin-top:20px}
 .ov .num{text-align:right;font-variant-numeric:tabular-nums}
 .ov .ovt th.num{text-align:right}
+/* U7: the Converting now and Libraries rows are the Jobs list rows (.list.rows); the bar under the saved figure is .savebar */
+.ov .savebar{display:block;width:120px;max-width:100%;height:4px;margin:6px 0 0 auto;border-radius:2px;background:var(--border-strong)}
+.ov .savebar i{display:block;height:100%;border-radius:2px;background:var(--text)}
+.ov .libhelp{margin-top:8px}.ov .libhelp p{margin:4px 0 0}
 .ov .ovt .prog{flex-direction:row;align-items:center;gap:8px;min-width:160px}.ov .ovt .prog .bar{flex:1 1 120px}
 .ov .fname{display:block;overflow-wrap:anywhere}
+@media (min-width:901px){.ov .list .tbl td.sizec{min-width:9rem}} /* the saving cell keeps its width without nowrap (Dashboard only; Jobs keeps its own) */
 /* pass 1 (row e8c7e61d): the day charts lead the page, two side by side; dataviz marks (see DayBars) */
 .ov .charts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:32px}
 .ov .dchart{margin:0;position:relative;min-width:0}
@@ -792,8 +799,12 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 .ov .chartfoot b{color:var(--text);margin-left:6px}.ov .chartfoot details{margin-left:auto}.ov .chartfoot details[open]{flex-basis:100%;margin-left:0;min-width:0/* a flex item is as wide as its table otherwise, so .daytbl never scrolls and the page does (390 px) */}
 .ov .quiet{margin:0;display:flex;align-items:center;justify-content:center;text-align:center;min-height:160px;padding:12px;border:1px solid var(--border);border-radius:var(--radius)}.ov .quiet.short{min-height:80px}
 
+/* U6 review2: at 901-1280 px the sparkline sits under the text, full tile width, so the figure keeps the whole tile */
+@media (min-width:901px) and (max-width:1280px){
+  .ov .tiles .tile{grid-template-columns:minmax(0,1fr)}.ov .tiles .tile .spark{grid-column:1 / -1;grid-row:auto;width:100%;height:40px;align-self:auto}
+}
 @media (max-width:900px){
-  .ov .headline{grid-template-columns:minmax(0,1fr);gap:8px}.ov .stats{gap:20px}
+  .ov .tiles{grid-template-columns:minmax(0,1fr)}.ov .tiles .tile{grid-template-columns:minmax(0,1fr) 96px}.ov .tiles .tile .spark{width:96px;height:40px}
   .ov .charts{grid-template-columns:minmax(0,1fr);gap:24px}
   .ov .legend.ph{display:none}
   .ov .ovt,.ov .ovt tbody{display:block}.ov .ovt thead{display:none}
@@ -802,12 +813,12 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
   .ov .ovt td.full,.ov .ovt td.nm{grid-column:1/-1}
   .ov .ovt td[data-l]::before{content:attr(data-l) ": ";color:var(--text-2);font-size:var(--fs-sm)}
   .ov .ovt td[data-l]:empty{display:none}
+  .ov .savebar{margin-left:0}
 }
 /* overview at phone widths (m7, overview-mock): the day table scrolls in its own box; links and the failed count are 44 px targets on touch */
 .ov .daytbl{overflow-x:auto;max-width:100%}.ov .daytbl td,.ov .daytbl th{white-space:nowrap}/* it scrolls now, so "567 MB" stays on one line */
-@media (pointer:coarse){.ov .sec>h2 .more,.ov .stats a,.ov a.fname,.ov td.nm a,.ov details>summary{display:inline-flex;align-items:center;min-height:44px}}
+@media (pointer:coarse){.ov .sec>h2 .more,.ov .tiles .tile .d a,.ov a.fname,.ov td.nm a,.ov details>summary{display:inline-flex;align-items:center;min-height:44px}}
 .ov .kv{grid-template-columns:auto minmax(0,1fr)} /* the 30-day totals keep label and figure on one line on phones */
-@media (max-width:640px){.ov .stats{gap:12px 20px}.ov .stats div{min-width:calc(50% - 10px)}} /* review a7d25ec P3: the four headline figures sit two by two on a phone */
 /* Settings > Connections (V9e): a folder row is "<app> sees" -> "Shrink Your Shit sees" x; at phone widths the two fields stack */
 .cfold>summary{cursor:pointer;overflow-wrap:anywhere}
 .cmap{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr) auto;gap:8px;align-items:end}

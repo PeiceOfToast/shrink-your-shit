@@ -82,9 +82,11 @@ func scanRevision(r interface{ Scan(...any) error }) (Revision, error) {
 	if pub.Valid {
 		v.Published = &pub.String
 	}
-	if err := json.Unmarshal([]byte(doc), &v.Doc); err != nil {
+	d, err := workflow.Load([]byte(doc)) // an older stored shape is upgraded here, not rewritten in the store
+	if err != nil {
 		return v, err
 	}
+	v.Doc = d
 	workflow.FillCommitDefaults(&v.Doc) // R8: an old workflow's Save the result reads back as "replace anyway"
 	json.Unmarshal([]byte(layout), &v.Layout)
 	normalLayout(&v.Layout)

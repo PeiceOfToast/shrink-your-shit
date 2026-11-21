@@ -12,7 +12,7 @@ import { SettingsTabs } from "../pages";
 import type { Doctor, DoctorCheck } from "../types/doctor";
 import type { Issue } from "../types/v1";
 
-const PILL: Record<DoctorCheck["status"], [string, string]> = { ok: ["ok", "OK"], warn: ["warn", "Warning"], bad: ["bad", "Fail"], absent: ["", "Not present"] };
+const PILL: Record<DoctorCheck["status"], [string, string]> = { ok: ["", "OK"], warn: ["warn", "Warning"], bad: ["bad", "Fail"], absent: ["", "Not present"] };
 const GROUPS: [string, (id: string) => boolean][] = [
   ["Tools", (id) => ["ffmpeg", "ffprobe", "x265", "ssim"].includes(id)],
   ["Encoders", (id) => id.startsWith("encoder:")],
