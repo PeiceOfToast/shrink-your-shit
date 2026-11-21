@@ -69,7 +69,8 @@ func (w *Worker) resolveForFile(job jobs.Job, src media.Info, tmpl rules.Templat
 	if !workflow.HasRefs(info.Doc) {
 		return tmpl, nil, nil
 	}
-	sc := workflow.Scopes{Global: workflow.VariableMap(info.Global), File: workflow.FileValues(job.Path, src, job.SizeBefore)}
+	sc := workflow.Scopes{Library: workflow.VariableMap(info.LibraryVariables), Global: workflow.VariableMap(info.Global),
+		File: workflow.FileValues(job.Path, src, job.SizeBefore)}
 	resolved, issues, used := workflow.ResolveWith(info.Doc, sc)
 	if len(issues) > 0 {
 		record(issues[0].Message)
@@ -112,10 +113,30 @@ func (w *Worker) runInfo(job jobs.Job) (jobs.RunInfo, error) {
 	return w.RunInfo(job)
 }
 
-// ownValues are the workflow's own variables as the run uses them.
+// libraryValue is the library's value for v when the workflow lets a library change it (W3), and
+// whether there is one. The workflow's kind is the one that counts, so the value is checked and shown
+// as the workflow says.
+func libraryValue(info jobs.RunInfo, v workflow.Variable) (workflow.Variable, bool) {
+	if !v.TemplateParam {
+		return workflow.Variable{}, false
+	}
+	for _, lv := range info.LibraryVariables {
+		if lv.Name == v.Name && lv.Value != nil {
+			lv.Type = v.Type
+			return lv, true
+		}
+	}
+	return workflow.Variable{}, false
+}
+
+// ownValues are the workflow's own variables as the run uses them: a variable the workflow lets a
+// library change takes the library's value (W3).
 func ownValues(info jobs.RunInfo) []vars.Own {
 	out := make([]vars.Own, 0, len(info.Variables))
 	for _, v := range info.Variables {
+		if lv, ok := libraryValue(info, v); ok {
+			v = lv
+		}
 		out = append(out, vars.Own{Name: v.Name, Type: v.Type, Value: v.Value})
 	}
 	return out
@@ -147,6 +168,9 @@ func variableTable(start, end map[string]string, info jobs.RunInfo, used []workf
 		names[v.Name] = true
 		own[v.Name] = true
 		origin[v.Name] = "workflow"
+		if _, ok := libraryValue(info, v); ok { // W3: the library's value is the one that ran
+			origin[v.Name] = "library"
+		}
 	}
 	// W2: the values the workflow's settings used, and where they came from, so a global reads as the
 	// value it gave and not as one the workflow set.

@@ -39,6 +39,9 @@ type Library struct {
 	// (D4b). Separate from Started, which is the person's own pause.
 	SharePausedBy    int64  `json:"sharePausedBy"`
 	SharePausedSince string `json:"sharePausedSince"`
+	// Variables are its own values for the settings its workflow lets a library change (W3: the
+	// workflow's variables with templateParam). Empty: the workflow's own values (never nil).
+	Variables []workflow.Variable `json:"variables"`
 }
 
 // Flow is one flow record. Its behaviour is its template until the graph engine (slice 30).
@@ -116,15 +119,23 @@ func Within(p, dir string) bool {
 }
 
 // libCols reads a library; flow_id is NULL for a library with no workflow, read as 0 (GetFlow(0) refuses it).
-const libCols = `id,name,path,COALESCE(flow_id,0),started,created,last_scan,last_scan_videos,override_folder,priority,COALESCE(share_paused_id,0),share_paused_since`
+const libCols = `id,name,path,COALESCE(flow_id,0),started,created,last_scan,last_scan_videos,override_folder,priority,COALESCE(share_paused_id,0),share_paused_since,variables`
 
 func scanLibrary(r interface{ Scan(...any) error }) (Library, error) {
 	var l Library
-	err := r.Scan(&l.ID, &l.Name, &l.Path, &l.FlowID, &l.Started, &l.Created, &l.LastScan, &l.LastScanVideos, &l.OverrideFolder, &l.Priority, &l.SharePausedBy, &l.SharePausedSince)
+	var vars string
+	err := r.Scan(&l.ID, &l.Name, &l.Path, &l.FlowID, &l.Started, &l.Created, &l.LastScan, &l.LastScanVideos, &l.OverrideFolder, &l.Priority, &l.SharePausedBy, &l.SharePausedSince, &vars)
 	if errors.Is(err, sql.ErrNoRows) {
-		err = ErrNotFound
+		return l, ErrNotFound
 	}
-	return l, err
+	if err != nil {
+		return l, err
+	}
+	l.Variables = []workflow.Variable{}
+	if err := json.Unmarshal([]byte(vars), &l.Variables); err != nil {
+		return l, fmt.Errorf("library %d's variables can't be read: %w", l.ID, err)
+	}
+	return l, nil
 }
 
 // Libraries lists every library, oldest first.
@@ -533,17 +544,24 @@ func (s *Store) libraryChanged(id int64, removed bool) {
 // job's Plan. A job made before libraries were records is matched to its library by folder.
 func (s *Store) TemplateFor(j Job) (rules.Template, error) {
 	var flowID int64
+	var libVars string
 	var err error
 	if j.LibraryID > 0 {
-		err = s.db.QueryRow(`SELECT COALESCE(flow_id,0) FROM libraries WHERE id=?`, j.LibraryID).Scan(&flowID)
+		err = s.db.QueryRow(`SELECT COALESCE(flow_id,0), variables FROM libraries WHERE id=?`, j.LibraryID).Scan(&flowID, &libVars)
 	} else {
-		err = s.db.QueryRow(`SELECT COALESCE(flow_id,0) FROM libraries WHERE path=?`, canonical(j.Library)).Scan(&flowID)
+		err = s.db.QueryRow(`SELECT COALESCE(flow_id,0), variables FROM libraries WHERE path=?`, canonical(j.Library)).Scan(&flowID, &libVars)
 	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return rules.Template{}, fmt.Errorf("its library no longer exists: %w", ErrLibraryGone)
 	}
 	if err != nil {
 		return rules.Template{}, err
+	}
+	var overrides []workflow.Variable
+	if libVars != "" {
+		if err := json.Unmarshal([]byte(libVars), &overrides); err != nil {
+			return rules.Template{}, fmt.Errorf("the library's variables can't be read: %w", err)
+		}
 	}
 	f, err := s.GetFlow(flowID)
 	if err != nil {
@@ -555,12 +573,14 @@ func (s *Store) TemplateFor(j Job) (rules.Template, error) {
 	// workflow with no such reference keeps its template exactly as it is.
 	if rev, ok, rerr := s.LatestRevision(flowID); rerr == nil && ok && workflow.HasRefs(rev.Doc) {
 		// W2: the globals as they are now, so a job that starts after someone saves one runs the new
-		// value; file.* and source.* stay references until the worker has the file.
+		// value; W3: the library's own values for what the workflow lets it change. file.* and
+		// source.* stay references until the worker has the file.
 		g, gerr := s.GlobalVariables()
 		if gerr != nil {
 			return rules.Template{}, gerr
 		}
-		t, issues := workflow.ToTemplateWith(rev.Doc, f.Template, workflow.Scopes{Global: workflow.VariableMap(g), LeaveFile: true})
+		sc := workflow.Scopes{Library: workflow.VariableMap(overrides), Global: workflow.VariableMap(g), LeaveFile: true}
+		t, issues := workflow.ToTemplateWith(rev.Doc, f.Template, sc)
 		if len(issues) == 0 {
 			return t, nil
 		}

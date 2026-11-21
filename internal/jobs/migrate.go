@@ -537,6 +537,11 @@ DROP TABLE temp.libraries_seq;`},
 	// step sets them, "Has a tag" asks about them, Jobs shows them. '[]' for every job so far.
 	{57, "job tags", `
 ALTER TABLE jobs ADD COLUMN tags TEXT NOT NULL DEFAULT '[]';`},
+	// W3 (workflow-architecture.md 2.2): a library's own values for the settings its workflow lets a
+	// library change (Doc.Variables with templateParam), as a JSON list. '[]' for every library so far:
+	// it uses its workflow's own values.
+	{58, "library variables", `
+ALTER TABLE libraries ADD COLUMN variables TEXT NOT NULL DEFAULT '[]';`},
 }
 
 // legacyReasonCode is the SQL for the code of a reason stored before migration 23 as its sentence alone

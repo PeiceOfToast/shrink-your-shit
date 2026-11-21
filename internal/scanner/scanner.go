@@ -108,11 +108,14 @@ type Target struct {
 	// typed reference leaves Template as it is.
 	Doc    workflow.Doc
 	Global []workflow.Variable
+	// Library are the library's own values for the settings its workflow lets a library change (W3):
+	// they decide a skip too, so the scanner reads them as the job does.
+	Library []workflow.Variable
 }
 
 // planFor is what this file's workflow makes of it: the plan the file's job is about to compile.
-// The doc is resolved again with the globals as they are now and this file's own reserved values,
-// the way the worker resolves it, instead of using the template as it was published.
+// The doc is resolved again with the globals and the library's values as they are now and this file's
+// own reserved values, the way the worker resolves it, instead of using the template as published.
 // When the settings can't be worked out for this file, the second return is the plain reason and the
 // file is queued anyway: the job stops with that reason rather than the file being skipped on a
 // setting it would not use.
@@ -120,7 +123,8 @@ func planFor(t Target, path string, pi media.Info, size int64) (rules.Plan, stri
 	if !workflow.HasRefs(t.Doc) {
 		return t.Template.Compile(pi), ""
 	}
-	sc := workflow.Scopes{Global: workflow.VariableMap(t.Global), File: workflow.FileValues(path, pi, size)}
+	sc := workflow.Scopes{Global: workflow.VariableMap(t.Global), Library: workflow.VariableMap(t.Library),
+		File: workflow.FileValues(path, pi, size)}
 	tmpl, issues := workflow.ToTemplateWith(t.Doc, t.Template, sc)
 	if len(issues) > 0 {
 		return rules.Plan{}, issues[0].Message

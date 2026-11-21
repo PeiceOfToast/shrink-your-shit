@@ -11,11 +11,11 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 )
 
-// W2 (workflow-architecture.md 2.3 and 2.4): the values a whole-field reference can take besides the
-// workflow's own variables. Lookup is most specific first: the workflow's own variable, then the
-// library's (W3 adds its column; the hook is here), then the server's global variables, then the
-// file's own reserved names. A name none of them has is unknown_variable, with a suggestion when a
-// close name exists.
+// W2/W3 (workflow-architecture.md 2.3 and 2.4): the values a whole-field reference can take besides
+// the workflow's own variables. Lookup is most specific first: the workflow's own variable, then the
+// library's (for a variable the workflow marks templateParam it takes precedence, W3), then the
+// server's global variables, then the file's own reserved names. A name none of them has is
+// unknown_variable, with a suggestion when a close name exists.
 //
 // Validate and publish resolve with the globals and leave file.* and source.* references in place:
 // there is no file yet, so only their kinds can be checked. The job resolves them when it has one.
@@ -24,7 +24,7 @@ import (
 // this install allows the doc to do.
 type Scopes struct {
 	Global  map[string]Variable // the server's global variables (Settings > Workflows)
-	Library map[string]Variable // the library's own (W3; nil until it has a column)
+	Library map[string]Variable // the library's own values for the variables its workflow marks templateParam (W3)
 	File    map[string]any      // file.* and source.* values for one file, at job start
 	// LeaveFile keeps file.* and source.* references in place, their kinds checked against the
 	// setting. Validate and publish use it; the job fills the values.
@@ -105,18 +105,63 @@ type Usage struct {
 	Origin string
 }
 
-// lookup is a name through the scopes, most specific first.
+// lookup is a name through the scopes, most specific first. A library's value takes precedence over
+// the workflow's own only for a variable the workflow marks templateParam (W3): a library may change
+// what the workflow lets it, and CheckLibraryOverrides refuses a library value on anything else when
+// it is saved. A name the workflow doesn't define resolves from the library, then the server.
 func (s Scopes) lookup(name string, own map[string]Variable) (Variable, string, bool) {
-	if v, ok := own[name]; ok {
-		return v, "workflow", true
+	if wv, ok := own[name]; ok {
+		if wv.TemplateParam {
+			if lv, ok := s.Library[name]; ok && lv.Value != nil {
+				return lv, "library", true
+			}
+		}
+		return wv, "workflow", true
 	}
-	if v, ok := s.Library[name]; ok {
-		return v, "library", true
+	if lv, ok := s.Library[name]; ok {
+		return lv, "library", true
 	}
-	if v, ok := s.Global[name]; ok {
-		return v, "global", true
+	if gv, ok := s.Global[name]; ok {
+		return gv, "global", true
 	}
 	return Variable{}, "", false
+}
+
+// CheckLibraryOverrides checks the values a library sets on its workflow (W3, workflow-architecture.md
+// 2.2 rule 1): each must name a workflow variable the workflow marks templateParam, or it is
+// override_not_allowed, and its value must fit that variable's kind. The variable's own type is the
+// one that counts: the order says the same thing.
+func CheckLibraryOverrides(d Doc, vs []Variable) []Issue {
+	own := VariableMap(d.Variables)
+	var out []Issue
+	seen := map[string]bool{}
+	for _, v := range vs {
+		wv, defined := own[v.Name]
+		switch {
+		case !NamePattern.MatchString(v.Name):
+			out = append(out, Issue{Code: "invalid_variable_name", Severity: "error", Name: v.Name,
+				Message: fmt.Sprintf("%s can't be a variable name: use lowercase letters, numbers and _, starting with a letter, up to 40 characters.", nameOrEmpty(v.Name))})
+		case seen[v.Name]:
+			out = append(out, Issue{Code: "duplicate_variable", Severity: "error", Name: v.Name,
+				Message: fmt.Sprintf("Two of the library's values are called {{%s}}. Give one of them another name.", v.Name)})
+		case !defined:
+			out = append(out, Issue{Code: "override_not_allowed", Severity: "error", Name: v.Name,
+				Message: fmt.Sprintf("A library can't set %s: its workflow has no variable called that. Remove it from the library, or add the variable to the workflow and mark it as one a library may change.", nameOrEmpty(v.Name))})
+		case !wv.TemplateParam:
+			out = append(out, Issue{Code: "override_not_allowed", Severity: "error", Name: v.Name,
+				Message: fmt.Sprintf("A library can't set %s: this workflow doesn't let a library change it. In the workflow, mark the variable as one a library may change, or remove it from the library.", nameOrEmpty(v.Name))})
+		case wv.Type == "secret":
+			out = append(out, Issue{Code: "variable_wrong_type", Severity: "error", Name: v.Name,
+				Message: fmt.Sprintf("A library can't set %s: a secret stays sealed in its workflow.", nameOrEmpty(v.Name))})
+		default:
+			if msg := globalValueProblem(Variable{Name: v.Name, Type: wv.Type, Value: v.Value, Options: wv.Options}); msg != "" {
+				out = append(out, Issue{Code: "variable_wrong_type", Severity: "error", Name: v.Name,
+					Message: fmt.Sprintf("The library's value for %s %s. Give it a value of the workflow's kind, or leave it without one.", nameOrEmpty(v.Name), msg)})
+			}
+		}
+		seen[v.Name] = true
+	}
+	return out
 }
 
 // reservedProblem says whether a reserved name's kind can fill schema p when there is no file yet ("":

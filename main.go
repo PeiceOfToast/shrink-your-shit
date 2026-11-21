@@ -550,7 +550,9 @@ func scanTargets(store *jobs.Store) func() ([]scanner.Target, error) {
 				}
 				docs[l.FlowID] = doc
 			}
-			out = append(out, scanner.Target{LibraryID: l.ID, Path: l.Path, Template: f.Template, Doc: doc, Global: global})
+			// W3: the library's own values decide a skip too, so the scanner reads them with the job
+			out = append(out, scanner.Target{LibraryID: l.ID, Path: l.Path, Template: f.Template, Doc: doc,
+				Global: global, Library: l.Variables})
 		}
 		return out, nil
 	}
