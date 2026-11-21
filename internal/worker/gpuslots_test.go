@@ -171,3 +171,18 @@ func TestAGraphicsSlotWaitEndsWhenTheJobStops(t *testing.T) {
 		t.Errorf("graphics used after the release: %d, want 0", n)
 	}
 }
+
+// Slice 11b, the #547 case: the processor chosen after a graphics encoder passed its test says why on the Chosen line,
+// not only in the line above it.
+func TestChosenLineSaysWhyTheProcessorWasChosenAfterAPass(t *testing.T) {
+	s := newScenario(t)
+	w := s.worker(Replace)
+	w.GPUSlots = func() int { return 0 }
+	w.Encoder = func(string, bool, *rules.HDR) (string, string) { return "hevc_nvenc", "" }
+	if _, err := w.RunOne(context.Background()); err != nil {
+		t.Fatalf("RunOne: %v", err)
+	}
+	if n := logCount(t, s, "Chosen: x265 (processor) — hevc_nvenc passed its test on this computer, but the graphics slots are set to 0. Settings:"); n != 1 {
+		t.Errorf("Chosen line with its reason: %d, want 1", n)
+	}
+}

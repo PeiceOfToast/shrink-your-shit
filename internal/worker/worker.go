@@ -1481,6 +1481,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			switch {
 			case err == nil && paused:
 				w.jobf(job.ID, ": %s is paused until %s after three failures in a row; using the processor", want, until.Local().Format("15:04"))
+				chosenWhy = want + " is paused after three failures in a row"
 			default:
 				if gargs, gfull, ok := w.graphicsArgs(ctx, job, plan, src, srcPath, tmp, want); ok {
 					// The card's slots come first (user bug 11-20): a job waits while they are all in
@@ -1496,9 +1497,12 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 						args, full = gargs, gfull
 						gpu = want
 						chosenWhy = want + " passed its test on this computer and can do this file"
+					} else {
+						chosenWhy = want + " passed its test on this computer, but the graphics slots are set to 0"
 					}
 				} else {
 					w.jobf(job.ID, ": encoder %s can't do this file; using the processor", want)
+					chosenWhy = want + " can't do this file"
 				}
 			}
 		} else if note != "" && !plan.Video.Copy {
