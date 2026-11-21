@@ -178,8 +178,8 @@ export function Overview() {
             {more.length > 0 && <div>{more}</div>}
             {noLibs && h.freed <= 0 && <div><Link to="/libraries/new">Add a library</Link> to start.</div>}
             {/* design SCREENS V2 Space rules: neutral, on its own line, only when > 0; never added to or taken from the figures */}
-            {(h.grew ?? 0) > 0 && <div className="hide-phone">{bytes(h.grew!)} added by files that came out bigger</div>}
-            {rec.length >= 2 && hasSaved && <div className="hide-phone">Last 30 days: {spaceNote}</div>}
+            {(h.grew ?? 0) > 0 && <div>{bytes(h.grew!)} added by files that came out bigger</div>}
+            {rec.length >= 2 && hasSaved && <div className={split ? "hide-phone" : undefined}>Last 30 days: {spaceNote}</div>}
             {rec.length < 2 && <div>Charts start after two days of conversions.</div>}
           </div>
           {rec.length >= 2 && <Spark label={(kept ? "Files made smaller per day" : "Space saved per day") + ", last " + v.daily.length + " days"} color="var(--success)" values={v.daily.map((d) => (d.recorded ? (hasSaved ? d.savedBytes : d.freedBytes) ?? 0 : null))} />}
