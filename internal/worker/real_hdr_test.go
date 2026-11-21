@@ -23,7 +23,7 @@ func TestRealHDR10(t *testing.T) {
 		tmpl.Languages = "eng"
 		st, id := realJob(t, src, 3)
 		w := realWorker(st, media.OSExec{})
-		w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+		w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 		w.KeepDays, w.Journal = func() int { return 7 }, st
 		w.run(t)
 		if j, _ := st.Get(id); j.Status != jobs.Done {
@@ -91,7 +91,7 @@ func TestRealRunLogAndSteps(t *testing.T) {
 	runFFmpeg(t, "-f", "lavfi", "-i", "testsrc2=duration=3:size=640x360:rate=25", "-c:v", "libx264", "-b:v", "3000k", src)
 	st, id := realJob(t, src, 3)
 	w := realWorker(st, media.OSExec{})
-	w.Template = func(jobs.Job) (rules.Template, error) { return rules.BasicTemplate(3, "keep_all"), nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return rules.BasicTemplate(3, "keep_all"), 0, nil }
 	w.KeepDays, w.Journal = func() int { return 7 }, st
 	w.run(t)
 	if j, _ := st.Get(id); j.Status != jobs.Done {

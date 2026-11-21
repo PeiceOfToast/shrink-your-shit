@@ -542,10 +542,18 @@ ALTER TABLE jobs ADD COLUMN tags TEXT NOT NULL DEFAULT '[]';`},
 	// it uses its workflow's own values.
 	{58, "library variables", `
 ALTER TABLE libraries ADD COLUMN variables TEXT NOT NULL DEFAULT '[]';`},
+	// Foundation slice 9: the workflow revision a job was queued under, set where a person or the scanner
+	// queues it (Enqueue, EnqueueFailed, ConvertAgain) and left alone on the way back to the queue.
+	// workflow_rev becomes the revision the job actually ran with, stamped when a worker reads the
+	// workflow; the job details compare the two to say the workflow changed while it waited. Back-filled
+	// from workflow_rev: an upgraded install has no earlier runs until a workflow changes.
+	{59, "job queued revision", `
+ALTER TABLE jobs ADD COLUMN queued_rev INTEGER NOT NULL DEFAULT 0;
+UPDATE jobs SET queued_rev = workflow_rev;`},
 	// Foundation slice 4: what the new file turned out to be, as the check's own probe read it (JSON
 	// media.Info). NULL for a job from before this, one whose check never read a file, and one that has
 	// not finished yet: the API then falls back to the probes table as it always did.
-	{59, "job output info", `
+	{60, "job output info", `
 ALTER TABLE jobs ADD COLUMN output_info TEXT;`},
 }
 

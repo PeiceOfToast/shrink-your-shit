@@ -19,7 +19,7 @@ import (
 func TestStepSectionsFromTheWorkflow(t *testing.T) {
 	s := newScenario(t)
 	w := s.worker(Replace)
-	w.Template = func(jobs.Job) (rules.Template, error) { return rules.SliderTemplate(3), nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return rules.SliderTemplate(3), 0, nil }
 	w.RunOne(context.Background())
 	if j := s.job(); j.Status != jobs.Done {
 		t.Fatalf("%s %q", j.Status, j.Error)
@@ -82,7 +82,7 @@ func TestStepThatDidNothingStillHasItsSection(t *testing.T) {
 	s.srcSpec.streams = s.srcSpec.streams[:1] // the video only
 	s.outSpec.streams = s.outSpec.streams[:1]
 	w := s.worker(Replace)
-	w.Template = func(jobs.Job) (rules.Template, error) { return rules.SliderTemplate(3), nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return rules.SliderTemplate(3), 0, nil }
 	w.RunOne(context.Background())
 	lines, _ := s.store.LogLines(s.id)
 	found := ""
@@ -152,7 +152,7 @@ func TestRunCountersAreRecorded(t *testing.T) {
 	s := newScenario(t)
 	s.progressOut = "frame=10\ntotal_size=123456\nout_time_us=50000000\nprogress=continue\n"
 	w := s.worker(Replace)
-	w.Template = func(jobs.Job) (rules.Template, error) { return rules.SliderTemplate(3), nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return rules.SliderTemplate(3), 0, nil }
 	w.RunOne(context.Background())
 	if j := s.job(); j.Status != jobs.Done {
 		t.Fatalf("%s %q", j.Status, j.Error)

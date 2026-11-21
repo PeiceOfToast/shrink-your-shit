@@ -172,6 +172,46 @@ func (s *Store) EnsureRevision(flowID int64) (Revision, error) {
 	return v, err
 }
 
+// RecordRunRevision records the workflow revision a job is about to run with (foundation slice 9): revID,
+// the one its template came from, as TemplateFor named it. Reading the newest published again here would
+// record a revision a publish between the two had replaced (review-593 finding 2). revID 0: the flow was
+// saved since its last revision, so tmpl (what the job reads) makes that revision and finds it by its
+// template's hash. A job whose library has no workflow, or whose template came from none of its
+// revisions, keeps the revision its queueing recorded. It never fails a conversion: the caller logs it.
+func (s *Store) RecordRunRevision(jobID, revID int64, tmpl rules.Template) error {
+	if revID == 0 {
+		var flow int64
+		if err := s.db.QueryRow(`SELECT COALESCE((SELECT flow_id FROM libraries WHERE id=jobs.library_id),0) FROM jobs WHERE id=?`, jobID).Scan(&flow); err != nil {
+			return err
+		}
+		if flow == 0 { // no workflow: nothing ran from one
+			return nil
+		}
+		if _, err := s.EnsureRevision(flow); err != nil {
+			return err // a Save with no revision yet: it is made when this next works
+		}
+		var err error
+		revID, err = s.revisionWithTemplate(flow, tmpl)
+		if err != nil || revID == 0 {
+			return err
+		}
+	}
+	_, err := s.db.Exec(`UPDATE jobs SET workflow_rev=? WHERE id=?`, revID, jobID)
+	return err
+}
+
+// revisionWithTemplate is the newest published revision of flowID whose stored template is tmpl, or 0
+// when none is.
+func (s *Store) revisionWithTemplate(flowID int64, tmpl rules.Template) (int64, error) {
+	var id int64
+	err := s.db.QueryRow(`SELECT id FROM workflow_revisions WHERE workflow_id=? AND status='published' AND template_hash=? ORDER BY number DESC LIMIT 1`,
+		flowID, templateHash(tmpl)).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	return id, err
+}
+
 // ensureLibraryRevision makes sure library libraryID's flow has its current revision before a job is queued
 // under it, so the job records the workflow it will run with (workflow_rev). A library that doesn't exist is left
 // to the insert to refuse; a failure is logged, and the job keeps 0 until a revision is written (EnsureRevision
@@ -355,6 +395,16 @@ func (s *Store) Revisions(flowID int64) ([]Revision, error) {
 // RevisionByID is one of the workflow's revisions.
 func (s *Store) RevisionByID(flowID, revID int64) (Revision, error) {
 	v, err := scanRevision(s.db.QueryRow(`SELECT `+revCols+` FROM workflow_revisions WHERE workflow_id=? AND id=?`, flowID, revID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return v, ErrNotFound
+	}
+	return v, err
+}
+
+// RevisionByIDAnyFlow is a revision by its id alone: a job's record says which one it ran with, and its
+// library may have been given another workflow since.
+func (s *Store) RevisionByIDAnyFlow(revID int64) (Revision, error) {
+	v, err := scanRevision(s.db.QueryRow(`SELECT `+revCols+` FROM workflow_revisions WHERE id=?`, revID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return v, ErrNotFound
 	}

@@ -7,9 +7,9 @@ import (
 	"testing"
 )
 
-// Foundation slice 4 (migration 59): a database from before it opens, its jobs have no output_info, and
+// Foundation slice 4 (migration 60): a database from before it opens, its jobs have no output_info, and
 // the store keeps one on a job once the check has read its new file.
-func TestMigration59AddsOutputInfoAndOldJobsHaveNone(t *testing.T) {
+func TestMigration60AddsOutputInfoAndOldJobsHaveNone(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "syp.db")
 	s, err := Open(path)
 	if err != nil {
@@ -21,7 +21,7 @@ func TestMigration59AddsOutputInfoAndOldJobsHaveNone(t *testing.T) {
 	}
 	s.Close()
 	db := rawDB(t, path) // back to version 58: as an install from before this left it
-	for _, q := range []string{`ALTER TABLE jobs DROP COLUMN output_info`, `PRAGMA user_version=58`} {
+	for _, q := range []string{`ALTER TABLE jobs DROP COLUMN output_info`, `ALTER TABLE jobs DROP COLUMN queued_rev`, `PRAGMA user_version=58`} {
 		if _, err := db.Exec(q); err != nil {
 			t.Fatal(q, err)
 		}

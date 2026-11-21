@@ -20,7 +20,7 @@ func runVBRJob(t *testing.T, maxKbps int) []string {
 	sel := rules.DefaultSelectors(3)
 	sel.Resolution, sel.MaxBitrate, sel.RateControl, sel.VBRMaxKbps, sel.Audio, sel.OnlyMyLanguages = "720", "medium", "vbr_legacy", maxKbps, "as_is", false
 	tmpl := sel.Template()
-	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 	w.RunOne(context.Background())
 	lines, err := s.store.LogLines(s.id)
 	if err != nil {

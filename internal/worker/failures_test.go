@@ -52,7 +52,7 @@ func TestFailurePolicies(t *testing.T) {
 		other := rules.SliderTemplate(1)
 		tm := onePath(false, rules.Failure{Action: "fallback", Fallback: &rules.Branch{Then: &other, Path: []string{"in", "conv2", "verify2", "save2"}}})
 		w := s.worker(Replace)
-		w.Template = func(jobs.Job) (rules.Template, error) { return tm, nil }
+		w.Template = func(jobs.Job) (rules.Template, int64, error) { return tm, 0, nil }
 		s.encodeErr = broken
 		w.RunOne(context.Background())
 		first := lastCRF(s)
@@ -81,7 +81,7 @@ func TestFailurePolicies(t *testing.T) {
 		s := newScenario(t)
 		tm := onePath(false, rules.Failure{Action: "skip", SkipWords: "Convert video didn't work, so the file was left as it is."})
 		w := s.worker(Replace)
-		w.Template = func(jobs.Job) (rules.Template, error) { return tm, nil }
+		w.Template = func(jobs.Job) (rules.Template, int64, error) { return tm, 0, nil }
 		s.encodeErr = broken
 		w.RunOne(context.Background())
 		rec, _ := s.store.GetFile(s.src)
@@ -95,7 +95,7 @@ func TestFailurePolicies(t *testing.T) {
 		s := newScenario(t)
 		tm := onePath(false, rules.Failure{Action: "retry", Max: 2, BackoffSeconds: 60, Then: "stop"})
 		w := s.retrying()
-		w.Template = func(jobs.Job) (rules.Template, error) { return tm, nil }
+		w.Template = func(jobs.Job) (rules.Template, int64, error) { return tm, 0, nil }
 		s.encodeErr = broken
 		w.RunOne(context.Background())
 		if j := s.job(); j.Status != jobs.Queued || j.Attempts != 1 || j.RetryAt == "" {
@@ -112,7 +112,7 @@ func TestFailurePolicies(t *testing.T) {
 		other := rules.SliderTemplate(1)
 		tm := onePath(true, rules.Failure{Action: "fallback", Fallback: &rules.Branch{Then: &other, Path: []string{"in", "conv2"}}})
 		w := s.worker(Replace)
-		w.Template = func(jobs.Job) (rules.Template, error) { return tm, nil }
+		w.Template = func(jobs.Job) (rules.Template, int64, error) { return tm, 0, nil }
 		s.ssimStderr = "[Parsed_ssim_0] SSIM Y:0.50 U:0.50 V:0.50 All:0.500000 (3.0)" // the picture is too different
 		w.RunOne(context.Background())
 		if j := s.job(); j.Status != jobs.Queued {

@@ -23,7 +23,7 @@ func TestTemplateForReadsTheLibrarysValuesAsTheyAreNow(t *testing.T) {
 	s := open(t)
 	lib, _ := qualityFlow(t, s, []workflow.Variable{{Name: "q", Type: "number", Value: float64(1), TemplateParam: true}},
 		"{{q}}", rules.SliderTemplate(1))
-	got, err := s.TemplateFor(Job{LibraryID: lib.ID})
+	got, _, err := s.TemplateFor(Job{LibraryID: lib.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +33,7 @@ func TestTemplateForReadsTheLibrarysValuesAsTheyAreNow(t *testing.T) {
 	if err := s.SetLibraryVariables(lib.ID, []workflow.Variable{{Name: "q", Value: float64(4)}}); err != nil {
 		t.Fatal(err)
 	}
-	got, err = s.TemplateFor(Job{LibraryID: lib.ID})
+	got, _, err = s.TemplateFor(Job{LibraryID: lib.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestAWorkflowsOwnValueWinsWhereTheLibraryMayNotChangeIt(t *testing.T) {
 	if err := s.SetLibraryVariables(lib.ID, []workflow.Variable{{Name: "q", Value: float64(4)}}); err != nil {
 		t.Fatal(err)
 	}
-	got, err := s.TemplateFor(Job{LibraryID: lib.ID})
+	got, _, err := s.TemplateFor(Job{LibraryID: lib.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func TestMigration58AddsTheLibraryVariablesKeepingTheRows(t *testing.T) {
 	s.Close()
 	// back to version 57: as an install from before W3 left it
 	db := rawDB(t, path)
-	for _, q := range []string{`ALTER TABLE jobs DROP COLUMN output_info`, `ALTER TABLE libraries DROP COLUMN variables`, `PRAGMA user_version=57`} {
+	for _, q := range []string{`ALTER TABLE jobs DROP COLUMN output_info`, `ALTER TABLE libraries DROP COLUMN variables`, `ALTER TABLE jobs DROP COLUMN queued_rev`, `PRAGMA user_version=57`} {
 		if _, err := db.Exec(q); err != nil {
 			t.Fatal(q, err)
 		}

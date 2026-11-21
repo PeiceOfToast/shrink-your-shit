@@ -37,7 +37,7 @@ func templateWorker(s *scenario, after string) *Worker {
 	}
 	tmpl := sel.Template()
 	w := s.worker("")
-	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 	return w
 }
 

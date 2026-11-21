@@ -19,7 +19,7 @@ func TestVBRKeptWords(t *testing.T) {
 	sel := rules.DefaultSelectors(3)
 	sel.MaxBitrate, sel.RateControl, sel.VBRMaxKbps, sel.Audio, sel.OnlyMyLanguages = "medium", "vbr", 3000, "as_is", false
 	tmpl := sel.Template()
-	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 	w.RunOne(context.Background())
 	j := s.job()
 	if j.Status != jobs.Kept || j.Error != "Kept the original: under a 3,000 kbps max bitrate the picture would suffer." {

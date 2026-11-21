@@ -162,6 +162,11 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 		}
 	})
 
+	// jobWorkflowView is a job detail's workflow object: the workflow's id, and the revision's id and number.
+	jobWorkflowView := func(rev jobs.Revision) map[string]any {
+		return map[string]any{"id": strconv.FormatInt(rev.WorkflowID, 10), "revisionId": strconv.FormatInt(rev.ID, 10), "version": rev.Number}
+	}
+
 	api.HandleFunc("GET /api/v2/jobs/{id}", func(w http.ResponseWriter, r *http.Request) {
 		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 		if err != nil || id <= 0 {
@@ -267,21 +272,28 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 		d["convertAgain"] = convertAgainOf(store, id, keepDays())
 		if lib, err := store.GetLibrary(j.LibraryID); err == nil {
 			d["library"] = map[string]any{"id": strconv.FormatInt(lib.ID, 10), "name": lib.Name}
-			// the revision it runs with: a waiting job (never started, or back to retry) runs the newest published
-			// at its next start; one that started ran the one published then (lead 22:23Z, 22:41Z)
-			var at string
-			for _, e := range events {
-				if e.To == string(jobs.Running) {
-					at = e.At
-				}
-			}
-			if j.Status == jobs.Queued {
+			// the revision it ran with (foundation slice 9): the one the worker recorded when it read the
+			// workflow. A queued job runs the newest published at its next start, even one waiting to retry
+			// whose last run is in its history: its next start records the newest too (review-593 finding 1).
+			started := j.Status != jobs.Queued
+			if !started {
 				if _, err := store.EnsureRevision(lib.FlowID); err == nil { // an old Save's template counts too
-					at = time.Now().UTC().Format(time.RFC3339)
+					if rev, ok, err := store.RevisionAt(lib.FlowID, time.Now().UTC().Format(time.RFC3339)); err == nil && ok {
+						d["workflow"] = jobWorkflowView(rev)
+					}
 				}
-			}
-			if rev, ok, err := store.RevisionAt(lib.FlowID, at); err == nil && ok {
-				d["workflow"] = map[string]any{"id": strconv.FormatInt(lib.FlowID, 10), "revisionId": strconv.FormatInt(rev.ID, 10), "version": rev.Number}
+			} else if ran, queued, err := store.JobRevisions(id); err == nil {
+				if rev, err := store.RevisionByIDAnyFlow(ran); err == nil {
+					wf := jobWorkflowView(rev)
+					// the workflow changed between queueing this job and starting it: the UI says so in
+					// design's words "Workflow changed after this job was queued (rev X → Y)"
+					if queued > 0 && queued != ran {
+						if q, err := store.RevisionByIDAnyFlow(queued); err == nil && q.Number != nil {
+							wf["queuedVersion"] = *q.Number
+						}
+					}
+					d["workflow"] = wf
+				}
 			}
 		}
 		writeJSON(w, d)
