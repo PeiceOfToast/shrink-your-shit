@@ -189,11 +189,13 @@ func TestAskResult(t *testing.T) {
 		words         string
 	}{
 		{"saved_at_least", 30, 1000, 600, true, "40.0% saved, asked for at least 30%"},
+		{"saved_at_least", 20, 1000, 800, true, "20.0% saved, asked for at least 20%"}, // review-582: exactly the asked share is enough
 		{"saved_at_least", 50, 1000, 600, false, "40.0% saved, asked for at least 50%"},
 		{"saved_less_than", 10, 1000, 990, true, "1.0% saved, asked for less than 10%"},
 		{"saved_less_than", 10, 1000, 1200, true, "20.0% bigger, asked for less than 10%"},
 		{"bigger", 0, 1000, 1200, true, "20.0% bigger"},
 		{"bigger", 0, 1000, 999, false, "0.1% saved"},
+		{"bigger", 0, 1000, 1000, false, "0.0% saved"}, // review-582: the same size is not bigger
 		{"bigger", 0, 0, 999, false, "the sizes aren't known"},
 		{"", 0, 1000, 500, false, "no comparison is chosen"},
 	} {
