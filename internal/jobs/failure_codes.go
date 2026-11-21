@@ -357,7 +357,8 @@ var classifierOrder = []classifier{
 func ReasonCondition(code string) (cond string, args []any, ok bool) {
 	stored := map[string][]string{"no_space": {ReasonDiskFull, ReasonLowDiskSpace}, "output_not_writable": {ReasonCannotWrite},
 		"check_failed": {ReasonKeptOriginal}, "kept_original": {ReasonKeptOriginal}, "stalled": {ReasonStalled}, "worker_lost": {ReasonWorkerLost},
-		"settings_rejected": {ReasonSettingsRejected}, "check_differs": {ReasonCheckDiffers}, "output_damaged": {ReasonOutputDamaged}, "check_not_run": {ReasonCheckNotRun}}
+		"settings_rejected": {ReasonSettingsRejected}, "check_differs": {ReasonCheckDiffers}, "output_damaged": {ReasonOutputDamaged}, "check_not_run": {ReasonCheckNotRun},
+		"workflow_stopped": {ReasonWorkflowStopped}}
 	if codes, found := stored[code]; found {
 		marks := strings.Repeat(",?", len(codes)-1)
 		return "j.error_code IN (?" + marks + ")", anys(codes), true

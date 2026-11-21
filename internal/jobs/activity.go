@@ -602,10 +602,11 @@ const (
 	ReasonCheckNotRun      = "check_not_run"     // a refusal: a check could not run (the original stays)
 	ReasonSourceDamaged    = "source_damaged"    // a refusal: the original has errors (it stays)
 	ReasonSourceMissing    = "source_missing"    // a refusal: the original can't be read any more (it stays)
+	ReasonWorkflowStopped  = "workflow_stopped"  // the file's path ended in "Stop as failed": the job fails with the workflow's words
 )
 
 // JobReasonCodes are the codes a job's own reason can have (besides the skip codes and user_stopped).
 var JobReasonCodes = []string{ReasonConvertFailed, ReasonDiskFull, ReasonCannotRead, ReasonCannotWrite, ReasonStalled,
 	ReasonLowDiskSpace, ReasonKeptOriginal, ReasonNewFileBigger, ReasonRetryLater, ReasonRemoved, UserStoppedReason, ReasonWorkerLost,
 	ReasonSettingsRejected, ReasonShareDropped,
-	ReasonCheckDiffers, ReasonOutputDamaged, ReasonCheckNotRun, ReasonSourceDamaged, ReasonSourceMissing}
+	ReasonCheckDiffers, ReasonOutputDamaged, ReasonCheckNotRun, ReasonSourceDamaged, ReasonSourceMissing, ReasonWorkflowStopped}
