@@ -27,14 +27,14 @@ func TestFixedPrefixOfATemplatedFolder(t *testing.T) {
 		"/{{sub}}":                  "",
 		"{{sub}}/out":               "",
 		"/data/out/{{sub}}/":        "/data/out",
-		`C:\out\{{sub}}`:            `C:\out`,
+		`C:\out\{{sub}}`:            "C:/out",
 		"/data/out/{{file.name}}.d": "/data/out",
 		"/data/out/{{unclosed":      "/data/out",
 		"/other/{{x}}/../../lib":    "/lib", // review-592: cleaned first (and refused before it gets here: hasDotDot)
 		"/data/out/{{sub}}/../keep": "/data/out/keep",
 		"/data/out/sub/../{{sub}}":  "/data/out",
 	} {
-		if got := fixedPrefix(in); got != want {
+		if got := filepath.ToSlash(fixedPrefix(in)); got != want { // Clean writes the OS separator on Windows
 			t.Errorf("%q: %q, want %q", in, got, want)
 		}
 	}
