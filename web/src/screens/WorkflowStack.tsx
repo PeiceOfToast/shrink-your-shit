@@ -209,7 +209,11 @@ function convertField(k: string, s: JSONSchema, c: Record<string, unknown>, l: L
 
 export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unknown, more?: Record<string, unknown>) => void; issues: ValidationIssue[] }) {
   const { stepDef, libs, wf } = useReg(), def = stepDef(n.type)!, props = Object.fromEntries(Object.entries((def.configSchema.properties ?? {}) as Props).filter(([, s]) => !s.readOnly)) as Props, c = n.config;
-  const lad = useData(getLadder, []).data, conv = (k: string) => (n.type === "video.convert" ? convertField(k, props[k], c, lad) : props[k]);
+  const lad = useData(getLadder, []).data;
+  // x-onlyWhen: a setting the server reads only while another setting has one of the listed values (Compare the result's
+  // percent and seconds): the form shows it only then
+  const shown = (k: string) => Object.entries((props[k]["x-onlyWhen"] as Record<string, unknown[]> | undefined) ?? {}).every(([key, vals]) => vals.includes(c[key] ?? props[key]?.default));
+  const conv = (k: string) => (!shown(k) ? null : n.type === "video.convert" ? convertField(k, props[k], c, lad) : props[k]);
   // FB2b: a step's required settings come first, in the order the schema requires them (the server's object keys are alphabetical)
   const req = (def.configSchema.required as string[] | undefined) ?? [], rank = (k: string) => (req.includes(k) ? req.indexOf(k) : req.length);
   const keys = Object.keys(props).filter((k) => !(MORE[n.type] ?? []).includes(k)).sort((a, b) => rank(a) - rank(b)), more = (MORE[n.type] ?? []).filter((k) => props[k] && conv(k));

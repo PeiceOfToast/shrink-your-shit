@@ -1000,3 +1000,22 @@ func TestCompareTheResultBeforeTheSave(t *testing.T) {
 		t.Errorf("add: %+v", a)
 	}
 }
+
+// Follow-up to #602 (ui-shop): the form shows Compare the result's percent only for the size tests and its seconds
+// only for the running-time test, by the x-onlyWhen key on each; the server reads them the same way (validate.go).
+func TestCompareTheResultFieldsShowPerChoice(t *testing.T) {
+	d, ok := Definition(TypeCheckResult)
+	if !ok {
+		t.Fatal("no definition")
+	}
+	props := d.ConfigSchema["properties"].(map[string]any)
+	for k, want := range map[string][]any{"percent": {"saved_at_least", "saved_less_than"}, "seconds": {"runtime_within"}} {
+		only, _ := props[k].(map[string]any)["x-onlyWhen"].(map[string]any)
+		if got, _ := only["test"].([]any); !slices.Equal(got, want) {
+			t.Errorf("%s shown only when test is %v, want %v", k, got, want)
+		}
+	}
+	if _, has := props["test"].(map[string]any)["x-onlyWhen"]; has {
+		t.Error("the test itself is always shown")
+	}
+}
