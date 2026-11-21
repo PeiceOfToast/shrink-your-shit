@@ -863,6 +863,11 @@ func (w *Worker) watchStall(id int64) func() {
 		w.jobf(id, ": no progress for %s, stopping it", limit)
 		w.stop(id, stopStall)
 	}
+	stopCeiling := func(limit time.Duration) { // frames still grow, so the log says the position is what stopped it
+		w.stalledFor.Store(int64(limit))
+		w.jobf(id, ": its position has not moved for %s, though it is still writing; stopping it", limit)
+		w.stop(id, stopStall)
+	}
 	go func() {
 		t := time.NewTicker(max(after/20, 10*time.Millisecond))
 		defer t.Stop()
@@ -879,7 +884,7 @@ func (w *Worker) watchStall(id int64) func() {
 				}
 				ceiling := w.stallLimit(w.frozenFactor()*after, finishing)
 				if time.Since(time.Unix(0, w.positionAt.Load())) >= ceiling {
-					stopFor(ceiling) // frames or bytes still grow, but out_time has not moved for the ceiling
+					stopCeiling(ceiling) // frames or bytes still grow, but out_time has not moved for the ceiling
 					return
 				}
 				w.quietCheck(id, w.now()) // R9: ffmpeg printing nothing for a minute
@@ -907,6 +912,14 @@ func (w *Worker) watchRemoteStall(id int64, rj *RemoteJob) func() {
 				if still, judging := rj.stillFor(now); judging && still >= limit {
 					w.stalledFor.Store(int64(limit))
 					w.jobf(id, ": the remote encode made no progress for %s, stopping it", limit)
+					w.stop(id, stopStall)
+					return
+				}
+				// the frozen-position ceiling: frames or bytes may still grow, but out_time must move within it
+				ceiling := w.stallLimit(w.frozenFactor()*after, rj.finishing())
+				if still, judging := rj.posStillFor(now); judging && still >= ceiling {
+					w.stalledFor.Store(int64(ceiling))
+					w.jobf(id, ": the remote encode's position has not moved for %s, though it is still writing; stopping it", ceiling)
 					w.stop(id, stopStall)
 					return
 				}
