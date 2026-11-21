@@ -20,11 +20,12 @@ import (
 )
 
 // slowEncode is ffmpeg, but its encode takes long (then fails): a long conversion on the worker. It says when
-// the encode starts (started nil: don't say).
+// the encode starts and when it ends (a nil channel: don't say).
 type slowEncode struct {
 	media.OSExec
 	took    time.Duration
 	started chan struct{}
+	ended   chan struct{}
 }
 
 func (x slowEncode) Stream(ctx context.Context, onLine func(string), name string, args ...string) (string, error) {
@@ -40,15 +41,23 @@ func (x slowEncode) Stream(ctx context.Context, onLine func(string), name string
 			case <-time.After(x.took):
 			case <-ctx.Done():
 			}
+			if x.ended != nil {
+				select {
+				case x.ended <- struct{}{}:
+				default:
+				}
+			}
 			return "", context.Canceled
 		}
 	}
 	return x.OSExec.Stream(ctx, onLine, name, args...)
 }
 
-// V7d (orch-lead 15:02Z): a worker stays online through a long encode, since its heartbeats go on beside
-// its work (here an encode 3x the offline wait); once it stops it shows offline, once (worker.updated
-// fires on the change, not on every check), and the summary counts it; its load comes with its heartbeats.
+// V7d (orch-lead 15:02Z): a worker stays online through a long encode (here an encode 3x the offline wait),
+// since its calls go on beside its work: sampled every 100 ms across the encode it never reads offline for 5
+// reads in a row (one host pause about the offline window does not fail it), and from the encode's half point
+// a call moves last_seen on before the encode ends. Once it stops it shows offline, once (worker.updated
+// fires on the change, not on every check), and the summary counts it.
 func TestWorkerStaysOnlineThroughALongEncode(t *testing.T) {
 	needFFmpeg(t)
 	srv, st, lib := server(t)
@@ -119,7 +128,7 @@ func TestWorkerStaysOnlineThroughALongEncode(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	runDone, workDone := make(chan struct{}), make(chan struct{})
-	x := slowEncode{took: 3 * time.Second, started: make(chan struct{}, 1)}
+	x := slowEncode{took: 3 * time.Second, started: make(chan struct{}, 1), ended: make(chan struct{}, 1)}
 	go func() { c.Run(ctx); close(runDone) }()
 	go func() {
 		c.Work(ctx, Converter{Exec: x, FFmpeg: "ffmpeg", FFprobe: "ffprobe", Work: t.TempDir(),
@@ -131,19 +140,49 @@ func TestWorkerStaysOnlineThroughALongEncode(t *testing.T) {
 	case <-time.After(20 * time.Second):
 		t.Fatal("the encode never started")
 	}
-	// The heartbeats go on beside the encode: once it has run half its length, its last_seen still moves on,
-	// and a fresh one is not offline. Waiting for that beat is the sync here — sampling the 1 s offline window
-	// on a busy host read a long scheduling pause as offline (the 2026-11-21 flake, which this does not
-	// reproduce: fixed from what the test now observes, not by a longer sleep).
-	seen := lastSeen()
-	time.Sleep(x.took / 2) // let the encode run half its length
-	for end := time.Now().Add(x.took + 2*time.Second); ; time.Sleep(10 * time.Millisecond) {
-		if s := lastSeen(); s != "" && s != seen {
-			break
+	// Across the encode the status is sampled every 100 ms. One read is a busy host's pause, but the offline
+	// window is 1 s: 5 reads in a row (0.5 s offline) are the worker really offline while it converts (the
+	// old test failed on one read, which is what the 2026-11-21 flake would turn on a loaded host).
+	startedAt := time.Now()
+	half := startedAt.Add(x.took / 2)
+	var seen string
+	snapped, moved := false, false
+	bad := 0
+	lastSample := startedAt
+encode:
+	for hang := startedAt.Add(2 * time.Minute); ; time.Sleep(10 * time.Millisecond) {
+		select {
+		case <-x.ended:
+			break encode
+		default:
 		}
-		if time.Now().After(end) {
-			t.Fatalf("the worker's last_seen did not move on while it converted: %q", seen)
+		now := time.Now()
+		if now.After(half) {
+			// Any authenticated call moves last_seen on (the web's auth wrapper calls SeenWorker; the
+			// heartbeats are among those calls). The snapshot is taken with the encode half done, and a call
+			// must move it on before the encode ends: that is what "it goes on beside the work" means here.
+			if !snapped {
+				seen, snapped = lastSeen(), true
+			} else if !moved && lastSeen() != seen {
+				moved = true
+			}
 		}
+		if now.Sub(lastSample) >= 100*time.Millisecond {
+			lastSample = now
+			if s, _, _ := worker(); s == "offline" {
+				if bad++; bad >= 5 {
+					t.Fatalf("offline %d reads in a row while it converts", bad)
+				}
+			} else {
+				bad = 0
+			}
+		}
+		if now.After(hang) {
+			t.Fatal("the encode never ended")
+		}
+	}
+	if !moved {
+		t.Fatalf("the worker's last_seen did not move on from its half point until the encode ended: %q", seen)
 	}
 	if s, _, mem := worker(); s != "busy" || mem == nil {
 		t.Errorf("converting: %s, memory %v", s, mem)

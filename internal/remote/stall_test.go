@@ -282,7 +282,9 @@ func TestRemoteEncodeOfUnknownLengthKeepsItsLease(t *testing.T) {
 	// A hang bound, not a timing assumption: the work is about 25 s, and a loaded host stretched it to 32 s
 	// before this fix.
 	for end := time.Now().Add(2 * time.Minute); time.Now().Before(end); time.Sleep(50 * time.Millisecond) {
-		if n, err := st.RequeueExpiredLeases(0); err == nil { // what the server's sweep does
+		if n, err := st.RequeueExpiredLeases(0); err != nil { // what the server's sweep does
+			t.Errorf("the sweep failed: %v", err) // a sweep that errors would leave the count below empty
+		} else {
 			requeued += n
 		}
 		got, err := st.Get(id)
