@@ -150,11 +150,7 @@ func convertingTo(plan rules.Plan, src media.Info, gpu string) string {
 		return "repackaged as " + kind
 	}
 	depth := "8-bit"
-	if gpu != "" {
-		if plan.EncodeTenBit() { // the card's arguments are EncodeTenBit's
-			depth = "10-bit"
-		}
-	} else if rules.NeedsTenBit(plan, &src) { // the processor keeps the source's depth on every target
+	if rules.OutputDepth(plan, &src, gpu) == 10 { // the encoder that runs makes this depth (outputdepth.go)
 		depth = "10-bit"
 	}
 	name := "HEVC" // a Plan from before S6 has no Format

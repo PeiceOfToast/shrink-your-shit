@@ -1081,16 +1081,8 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	if exp.DurationSec <= 0 {
 		exp.DurationSec = job.DurationSec
 	}
-	// The job keeps what it is about to do and how the result will be judged. If that cannot be
-	// recorded, it does not start: nothing has been written yet.
-	snap := rules.Snapshot{Plan: plan, Expect: exp, Verify: w.verification(exp), Source: &src, Variables: vtable}
-	b, err := json.Marshal(snap)
-	if err == nil {
-		err = w.Queue.RecordPlan(job.ID, string(b), snap.Fingerprint())
-	}
-	if err != nil {
-		return "", retryable(failed("What this conversion will do could not be recorded, so it did not start. Your original was not touched. Press Retry.", err), retryGeneral)
-	}
+	// The main video's rules are filled in below, and the snapshot recorded, once the encoder that runs is
+	// known: a card and the processor can make different pictures from the same plan (slice 3).
 
 	// Where the new file goes: beside the original, at its name, or, in replace mode with another file
 	// type, at its name with the new extension (25a-2). A name the Save the result step's template made
@@ -1244,6 +1236,19 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		}
 		w.logLine(job.ID, secEncode, jobs.LevelInfo, line+". Settings: "+encoderDetail(args))
 	}
+	// The new file's rules, now that the encoder that runs is known: the main video by the plan's format,
+	// its height and width (±2 px) and the depth that encoder makes; every other stream as today.
+	exp.MainVideo = plan.MainVideoRules(src, gpu)
+	// The job keeps what it is about to do and how the result will be judged. If that cannot be
+	// recorded, it does not start: your original has not been touched.
+	snap := rules.Snapshot{Plan: plan, Expect: exp, Verify: w.verification(exp), Source: &src, Variables: vtable}
+	b, err := json.Marshal(snap)
+	if err == nil {
+		err = w.Queue.RecordPlan(job.ID, string(b), snap.Fingerprint())
+	}
+	if err != nil {
+		return "", retryable(failed("What this conversion will do could not be recorded, so it did not start. Your original was not touched. Press Retry.", err), retryGeneral)
+	}
 	if note := vbrAverageNote(plan.Video); note != "" {
 		w.jobf(job.ID, ": %s", note)
 	}
@@ -1307,6 +1312,26 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			gpuSlot.Release()
 		}
 	}
+	// The encoder that made the file: the card, unless it failed and the processor retried, or a remote
+	// worker's own choice, named in the arguments it reported.
+	ranOn := gpu
+	if fell {
+		ranOn = "" // the processor converted it after the card failed
+	}
+	if w.remote != nil {
+		ranOn = rules.GraphicsEncoderIn(args, plan.Video.Index)
+	}
+	if m := plan.MainVideoRules(src, ranOn); terr == nil && m != nil && (exp.MainVideo == nil || *m != *exp.MainVideo) {
+		// Another encoder made the file than the one chosen here (a fall-back, or a remote worker's own):
+		// judge it by the picture that encoder makes, and keep the record saying what it was judged by.
+		exp.MainVideo = m
+		snap.Expect = exp
+		if b, jerr := json.Marshal(snap); jerr == nil {
+			if rerr := w.Queue.RecordPlan(job.ID, string(b), snap.Fingerprint()); rerr != nil {
+				w.jobf(job.ID, ": the plan could not be recorded with the encoder that ran: %v", rerr)
+			}
+		}
+	}
 	w.recordEncode(job.ID, args, encStart, encErr, terr, probeSummary(src))
 	// Moved or deleted while converting: ffmpeg's read errors then say nothing about the file, so it is
 	// neither damaged nor the encoder's fault. Checked before the errors are read as damage.
@@ -1327,10 +1352,6 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		}
 	}
 	if terr == nil {
-		ranOn := gpu // the encoder that made the new file
-		if fell {
-			ranOn = "" // the processor converted it after the card failed
-		}
 		w.Queue.AddStep(job.ID, "converted", true, "Converted: "+convertingTo(plan, src, ranOn)+".")
 	}
 	if terr != nil {
