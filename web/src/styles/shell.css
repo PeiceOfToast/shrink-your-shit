@@ -73,6 +73,7 @@ code,.mono{font-family:var(--mono);font-size:max(.92em,var(--fs-sm))}
 body.conn-lost .connbar{display:flex}
 body.conn-lost .stale{color:var(--text-2)}
 .content{padding:var(--pad) var(--page-pad) 48px;display:flex;flex-direction:column;gap:calc(var(--gap)*1.4);min-width:0}
+.content.bare{width:100%;max-width:720px;margin:0 auto} /* U12: first run and sign-in, no rail: one centred column */
 .content.flush{padding:0;gap:0}
 .pagehead{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-height:56px}
 .pagehead .ptile{width:32px;height:32px;border-radius:var(--radius-sm);background:var(--raised);color:var(--accent-text);display:grid;place-items:center;flex:none}
