@@ -50,12 +50,16 @@ func v2Overview(api *http.ServeMux, store *jobs.Store, wv *workerView, libTotals
 			serverError(w, err)
 			return
 		}
-		live := func(id int64) (map[string]any, worker.LiveJob) {
+		// the encode's speed, ETA and fps are the converting step's: during the check they are not shown (12c)
+		live := func(id int64, running bool) (map[string]any, worker.LiveJob) {
 			j := map[string]any{"jobId": strconv.FormatInt(id, 10), "percent": nil, "fps": nil, "speed": nil, "etaS": nil}
 			l, ok := worker.Live(id)
 			if ok {
 				p := l.Progress
 				j["percent"] = p.Percent
+				if !running {
+					return j, l
+				}
 				if p.FPS > 0 {
 					j["fps"] = p.FPS
 				}
@@ -71,7 +75,9 @@ func v2Overview(api *http.ServeMux, store *jobs.Store, wv *workerView, libTotals
 		active := []map[string]any{}
 		byWorker := map[string][]map[string]any{}
 		for _, j := range working {
-			l, lj := live(j.ID)
+			steps, _ := store.Steps(j.ID) // staged as the jobs list and the live events stage it
+			state := v2State(string(jobs.Running), steps, livePercent(j.ID))
+			l, lj := live(j.ID, state == "running")
 			l["name"] = filepath.Base(j.Path)
 			byWorker[j.Worker] = append(byWorker[j.Worker], l)
 			saving, estimated, err := expectedSaving(store, j, lj)
@@ -82,8 +88,7 @@ func v2Overview(api *http.ServeMux, store *jobs.Store, wv *workerView, libTotals
 			act := map[string]any{"jobId": l["jobId"], "name": l["name"], "percent": l["percent"], "etaS": l["etaS"],
 				"speed": l["speed"], "fps": l["fps"], "stage": nil,
 				"expectedSavingBytes": saving, "expectedSavingEstimated": estimated, "library": nil}
-			steps, _ := store.Steps(j.ID) // staged as the jobs list and the live events stage it
-			act["stage"] = jobStage[v2State(string(jobs.Running), steps, livePercent(j.ID))]
+			act["stage"] = jobStage[state]
 			if j.LibraryID != 0 {
 				act["library"] = map[string]any{"id": strconv.FormatInt(j.LibraryID, 10), "name": j.LibraryName}
 			}

@@ -177,7 +177,9 @@ func (w *Worker) verify(ctx context.Context, src media.Info, exp rules.Expect, s
 	}
 	playStart := w.now()
 	packets, counted, err := w.decodeCheck(ctx, out, tmp)
-	if id != 0 {
+	if id != 0 && err != nil { // the failure line that follows says why; "Played in" would read as a pass
+		w.jobf(id, ": Playback stopped after %s.", waitWords(w.now().Sub(playStart)))
+	} else if id != 0 {
 		w.jobf(id, ": Played in %s.", waitWords(w.now().Sub(playStart)))
 	}
 	if err != nil {
@@ -201,9 +203,11 @@ func (w *Worker) verify(ctx context.Context, src media.Info, exp rules.Expect, s
 	// No size check: a checked conversion is kept even if it is not smaller ("always standardize",
 	// USER-REVIEW 2026-11-07). Its before and after sizes are recorded on the job and in the log.
 	if exp.VideoCopied { // repackaged (S4): the video is the same bytes, so there is no picture to compare
+		w.skippedPictureCheck("the video was only repackaged")
 		return nil
 	}
 	if w.remote != nil { // the remote worker compared the pictures itself, against its copy (Q4 a)
+		w.skippedPictureCheck("the remote worker compared the pictures itself")
 		return nil
 	}
 	id = w.runningJob()
@@ -216,6 +220,13 @@ func (w *Worker) verify(ctx context.Context, src media.Info, exp rules.Expect, s
 		w.jobf(id, ": Compared in %s.", waitWords(w.now().Sub(compareStart)))
 	}
 	return err
+}
+
+// skippedPictureCheck says in the job log that the picture comparison did not run, and why (12c).
+func (w *Worker) skippedPictureCheck(why string) {
+	if id := w.runningJob(); id != 0 {
+		w.jobf(id, ": Picture comparison skipped: %s.", why)
+	}
 }
 
 // ---- playback test ----
