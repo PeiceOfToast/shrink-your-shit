@@ -71,13 +71,11 @@ var softwareEncoders = []string{"libx265", "libx264", "libsvtav1", "libvpx-vp9"}
 
 // hardwareEncoders are the graphics encoders tested, in this order: per family HEVC, then H.264, then AV1
 // (HEVC first, so a family that has it keeps it as the default primary encoder).
-var hardwareEncoders = []string{
-	"hevc_nvenc", "h264_nvenc", "av1_nvenc",
-	"hevc_qsv", "h264_qsv", "av1_qsv",
-	"hevc_vaapi", "h264_vaapi", "av1_vaapi",
-	"hevc_amf", "h264_amf", "av1_amf",
+// The families with a profile come from it; VideoToolbox has none, so the worker never uses it: it is found and
+// reported, not used.
+var hardwareEncoders = append(rules.GraphicsEncoderNames(),
 	"hevc_videotoolbox", "h264_videotoolbox", "av1_videotoolbox",
-}
+)
 
 // has10Bit says whether enc gets the 10-bit test: HEVC and AV1 only (H.264 has no 10-bit profile here). It asks
 // about the encoder, not the job: that is rules.NeedsTenBit.
@@ -421,7 +419,8 @@ func (c *Checker) Decodes(ctx context.Context, fam, codec string, tenBit bool) b
 // transient: the context was cancelled or the probe timed out, so a false says nothing about the device.
 func (c *Checker) decodes(ctx context.Context, fam, codec string, tenBit bool) (ok, cacheable bool) {
 	s, known := decodeSamples[codec]
-	if !known || c.FFmpeg == "" || (fam != "qsv" && fam != "vaapi") {
+	full, has := rules.ProfileFor("hevc_" + fam) // only a family with a full graphics pipeline decodes here
+	if !known || c.FFmpeg == "" || !has || !full.FullPipeline() {
 		return false, true
 	}
 	dir, err := os.MkdirTemp("", "decode-probe")
