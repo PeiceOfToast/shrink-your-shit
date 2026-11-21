@@ -78,6 +78,45 @@ func addSteps(d Doc) map[string]AddStep {
 	return out
 }
 
+// stackable says whether the steps view can show d without loss (FB1d): a straight chain, or the main
+// path (Next and Yes ports) with, off each question's No, one end and nothing else. Any other edge (a
+// second converting path, an action chain off a No, a link from a Didn't work port) needs the graph.
+func stackable(d Doc) bool {
+	if _, ok := straightChain(d); ok {
+		return true
+	}
+	path, ok := mainPath(d)
+	if !ok {
+		return false
+	}
+	on := map[string]bool{}
+	for _, n := range path {
+		on[n.ID] = true
+	}
+	byID := map[string]Node{}
+	for _, n := range d.Nodes {
+		byID[n.ID] = n
+	}
+	hanging := map[string]bool{} // the ends off a No
+	for _, e := range d.Edges {
+		from, to := byID[e.From], byID[e.To]
+		switch {
+		case on[e.From] && (e.FromPort == "success" || e.FromPort == "match") && on[e.To]:
+			continue // the main path itself
+		case on[e.From] && e.FromPort == "else" && IsQuestion(from.Type) && IsEnd(to.Type):
+			hanging[e.To] = true
+		default:
+			return false
+		}
+	}
+	for _, n := range d.Nodes {
+		if !on[n.ID] && !hanging[n.ID] {
+			return false
+		}
+	}
+	return true
+}
+
 // mainPath is the chain from the input along Next and Yes ports (the steps view's rows; FB1b): ok is
 // false when there is no input or the chain loops.
 func mainPath(d Doc) ([]Node, bool) {
@@ -262,7 +301,7 @@ func Validate(d Doc) Result {
 			}
 		}
 	}
-	_, r.Stackable = straightChain(d)
+	r.Stackable = stackable(d)
 	if !r.Errors() {
 		_, issues := ToTemplate(d, rules.Template{})
 		for _, i := range issues {

@@ -56,11 +56,51 @@ func v2WorkflowVariables(api *http.ServeMux, store *jobs.Store) {
 			items = append(items, map[string]any{"name": v.Name, "description": v.Description,
 				"group": "Workflow", "value": ownValue(v), "fields": nil})
 		}
+		for _, p := range publishedVariables(store, id) { // FB1d: what a step before sets ("Set a variable")
+			items = append(items, map[string]any{"name": p.name, "description": p.words, "group": "Set by a step", "value": nil, "fields": nil})
+		}
 		writeJSON(w, map[string]any{
 			"sample":    map[string]any{"path": sample.path, "builtIn": sample.builtIn},
 			"variables": items,
 		})
 	})
+}
+
+// publishedVariables are the names the workflow's steps set for the steps after them, as its draft says
+// (else its newest published one): a "Set a variable" step's name, with the step's own words.
+type published struct{ name, words string }
+
+func publishedVariables(store *jobs.Store, flowID int64) []published {
+	var doc *workflow.Doc
+	if d, _, err := store.Draft(flowID); err == nil {
+		doc = &d.Doc
+	} else if rev, ok, err := store.LatestRevision(flowID); err == nil && ok {
+		doc = &rev.Doc
+	}
+	if doc == nil {
+		return nil
+	}
+	var out []published
+	seen := map[string]bool{}
+	for _, n := range doc.Nodes {
+		if n.Type != workflow.TypeSetVariable {
+			continue
+		}
+		name, _ := n.Config["name"].(string)
+		if name == "" || seen[name] || !workflow.NamePattern.MatchString(name) {
+			continue
+		}
+		seen[name] = true
+		words := "Set by the step “Set a variable”"
+		if n.Name != "" {
+			words = "Set by the step “" + n.Name + "”"
+		}
+		if v, _ := n.Config["value"].(string); v != "" {
+			words += " to " + v
+		}
+		out = append(out, published{name, words})
+	}
+	return out
 }
 
 // ownVariables are the workflow's own variables as its draft says (else its newest published one, for
