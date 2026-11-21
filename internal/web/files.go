@@ -182,14 +182,18 @@ func fileItem(store *jobs.Store, libs []jobs.Library, row jobs.FileRow, card str
 		if l, ok := worker.Live(row.JobID); ok {
 			p := l.Progress
 			it["percent"], it["convertingTo"], it["encoder"], it["decoder"], it["worker"] = p.Percent, l.ConvertingTo, l.Encoder, l.Decoder, l.Worker
-			if p.ETASeconds >= 0 {
-				it["etaSeconds"] = int(p.ETASeconds + 0.5)
-			}
-			if p.BitrateKbps > 0 {
-				it["bitrateKbps"] = int(p.BitrateKbps + 0.5)
-			}
-			if p.FPS > 0 {
-				it["fps"] = p.FPS
+			// the encode's ETA, bitrate and fps are the converting step's: not shown during the check (12c)
+			steps, _ := store.Steps(row.JobID)
+			if v2State(string(jobs.Running), steps, livePercent(row.JobID)) == "running" {
+				if p.ETASeconds >= 0 {
+					it["etaSeconds"] = int(p.ETASeconds + 0.5)
+				}
+				if p.BitrateKbps > 0 {
+					it["bitrateKbps"] = int(p.BitrateKbps + 0.5)
+				}
+				if p.FPS > 0 {
+					it["fps"] = p.FPS
+				}
 			}
 		}
 	case jobs.CardProcessed:
