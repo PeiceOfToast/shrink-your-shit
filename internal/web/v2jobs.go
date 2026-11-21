@@ -259,7 +259,11 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 				meta["before"] = json.RawMessage(raw)
 			}
 		}
-		if j.OutputPath != "" {
+		if raw, ok := store.OutputInfo(id); ok {
+			// what the new file turned out to be, as the job's own check probed it (foundation slice 4):
+			// kept too, whose temp file the probes table never saw
+			meta["after"] = json.RawMessage(raw)
+		} else if j.OutputPath != "" { // a job from before that, or one whose check read no file
 			if raw, ok := store.ProbeOfSize(j.OutputPath, j.SizeAfter); ok {
 				meta["after"] = json.RawMessage(raw)
 			}

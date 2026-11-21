@@ -54,7 +54,7 @@ func TestJobsStampCurrentRevisionOnUpgrade(t *testing.T) {
 	if err != nil || cur == 0 {
 		t.Fatalf("current revision %d %v", cur, err)
 	}
-	for _, q := range []string{`ALTER TABLE jobs DROP COLUMN tags`, `ALTER TABLE jobs DROP COLUMN subtitle_files`, `ALTER TABLE jobs DROP COLUMN workflow_rev`, `ALTER TABLE jobs DROP COLUMN queued_rev`, `PRAGMA user_version=50`} {
+	for _, q := range []string{`ALTER TABLE jobs DROP COLUMN tags`, `ALTER TABLE jobs DROP COLUMN output_info`, `ALTER TABLE jobs DROP COLUMN subtitle_files`, `ALTER TABLE jobs DROP COLUMN workflow_rev`, `ALTER TABLE jobs DROP COLUMN queued_rev`, `PRAGMA user_version=50`} {
 		if _, err := s.db.Exec(q); err != nil {
 			t.Fatal(q, err)
 		}

@@ -121,30 +121,36 @@ func codecName(c string) string {
 	return strings.ToUpper(c)
 }
 
+// kindWord names a file type as people read it: "MKV", "MP4", "WebM". kind is ffprobe's format name
+// ("matroska,webm", "mov") or a plan's container; ext is the file's extension (ffprobe names WebM
+// matroska, so the extension decides there, #97 QA).
+func kindWord(kind, ext string) string {
+	kind = strings.TrimPrefix(strings.ToLower(kind), ".")
+	if i := strings.IndexByte(kind, ','); i >= 0 {
+		kind = kind[:i]
+	}
+	if kind == "matroska" {
+		kind = "mkv"
+	}
+	if kind == "mov" {
+		kind = "mp4"
+	}
+	if ext == ".webm" {
+		kind = "webm"
+	}
+	if kind == "webm" {
+		return "WebM"
+	}
+	return strings.ToUpper(kind)
+}
+
 // convertingTo says what the new file will be: "HEVC · 10-bit · MKV" ("repackaged as MKV" when the
 // video is copied). gpu is the graphics encoder that runs, or "" for the processor: the depth is the
 // one that encoder's arguments make.
 func convertingTo(plan rules.Plan, src media.Info, gpu string) string {
-	kind := plan.Container
-	if kind == "" { // the original's type
-		kind = strings.TrimPrefix(strings.ToLower(src.Container), ".")
-		if i := strings.IndexByte(kind, ','); i >= 0 {
-			kind = kind[:i]
-		}
-		if kind == "matroska" {
-			kind = "mkv"
-		}
-		if kind == "mov" {
-			kind = "mp4"
-		}
-		if src.Ext == ".webm" { // ffprobe names WebM matroska (#97 QA)
-			kind = "webm"
-		}
-	}
-	if kind == "webm" {
-		kind = "WebM"
-	} else {
-		kind = strings.ToUpper(kind)
+	kind := kindWord(plan.Container, "")
+	if plan.Container == "" { // the original's type
+		kind = kindWord(src.Container, src.Ext)
 	}
 	if plan.Video.Copy {
 		return "repackaged as " + kind
@@ -158,6 +164,25 @@ func convertingTo(plan rules.Plan, src media.Info, gpu string) string {
 		name = f.Name
 	}
 	return name + " · " + depth + " · " + kind
+}
+
+// convertedWords says what the new file IS, from the check's own probe of it: "H.264 · 8-bit · MKV"
+// ("repackaged as MKV" when the video was copied). "" when the probe has no video: nothing was read
+// that can be named.
+func convertedWords(plan rules.Plan, info media.Info) string {
+	v := info.Video()
+	if v == nil {
+		return ""
+	}
+	kind := kindWord(info.Container, info.Ext)
+	if plan.Video.Copy {
+		return "repackaged as " + kind
+	}
+	depth := "8-bit"
+	if v.BitDepth > 8 { // what the encoder made, not what the plan predicted (foundation slice 4)
+		depth = strconv.Itoa(v.BitDepth) + "-bit"
+	}
+	return codecName(v.Codec) + " · " + depth + " · " + kind
 }
 
 func encoderWords(plan rules.Plan) string {

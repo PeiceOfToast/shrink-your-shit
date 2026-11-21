@@ -93,6 +93,11 @@ type Queue interface {
 	Skip(id int64, words, code string) error
 	// AddStep adds a line to a job's step summary (S5): converted, verified, kept, replaced.
 	AddStep(id int64, step string, ok bool, words string) error
+	// SetStepWords replaces the words of the job's latest step named step: the converted step says the
+	// prediction first and, once the check has read the new file, what it measured (foundation slice 4).
+	SetStepWords(id int64, step, words string) error
+	// SetOutputInfo stores the probe (JSON) of the new file the check read, on the job.
+	SetOutputInfo(id int64, info string) error
 	// AddDecision records a check's answer, or a card's words (FB1c), on the timeline with its node.
 	AddDecision(id int64, nodeID, port, words string) error
 	// PutProbe stores a file's probe (JSON) for its size and time: the new file's, for the Files view.
@@ -233,6 +238,10 @@ type Worker struct {
 	finishing  atomic.Bool        // the position is at the file's length: the stall watchdog gives the finishing allowance
 	stalledFor atomic.Int64       // the limit (ns) the watchdog last stopped an encode at: the message says it
 	positionAt atomic.Int64       // UnixNano of the running encode's last forward move of out_time (the frozen-position ceiling)
+	// the running local encode's output against its source at the last report: past twice the source (overSize), with the
+	// two sizes, so a stall stop can say why it stopped (stopOver: the stop that fired was for that size).
+	overSize, stopOver atomic.Bool
+	outBytes, srcBytes atomic.Int64
 	// the running job's run counters (log-spec L2 summary): the ffmpeg runs it needed and the bytes it wrote.
 	passes, bytesWritten atomic.Int64
 	statsCounting        atomic.Bool // false: this job's counters are not recorded (a remote job, whose runs are not all here)
@@ -450,6 +459,9 @@ func (w *Worker) runClaimed(ctx context.Context, job jobs.Job, jobCtx context.Co
 		case stopUser:
 			return true, w.Queue.UserStopped(job.ID)
 		case stopStall:
+			if w.stopOver.Load() {
+				return true, w.Queue.Fail(job.ID, jobs.ReasonStalled, "Stopped: the new file is more than twice the original's size and its position has stopped moving. The original is untouched; press Retry to try again.")
+			}
 			return true, w.Queue.Fail(job.ID, jobs.ReasonStalled, fmt.Sprintf("Stopped: no progress for %s. The original is untouched; press Retry to try again.", w.stalledLimit()))
 		}
 	}
@@ -891,14 +903,23 @@ func (w *Worker) watchStall(id int64) func() {
 	w.progressAt.Store(time.Now().UnixNano())
 	w.positionAt.Store(time.Now().UnixNano())
 	w.finishing.Store(false)
+	w.overSize.Store(false)
 	after := w.stallAfter()
 	done := make(chan struct{})
 	stopFor := func(limit time.Duration) {
 		w.stalledFor.Store(int64(limit))
-		w.jobf(id, ": no progress for %s, stopping it", limit)
+		if w.overSize.Load() { // past twice the source: the new file cannot save space, so say that, not "no progress"
+			w.stopOver.Store(true)
+			w.jobf(id, ": the new file is more than twice the original's size (%s, original %s), and its position has not moved for %s; stopping it",
+				rules.HumanBytes(w.outBytes.Load()), rules.HumanBytes(w.srcBytes.Load()), limit)
+		} else {
+			w.stopOver.Store(false)
+			w.jobf(id, ": no progress for %s, stopping it", limit)
+		}
 		w.stop(id, stopStall)
 	}
 	stopCeiling := func(limit time.Duration) { // frames still grow, so the log says the position is what stopped it
+		w.stopOver.Store(false)
 		w.stalledFor.Store(int64(limit))
 		w.jobf(id, ": its position has not moved for %s, though it is still writing; stopping it", limit)
 		w.stop(id, stopStall)
@@ -933,6 +954,7 @@ func (w *Worker) watchStall(id int64) func() {
 // job is stopped (stopStall, the same words and retry rules) when it hasn't moved on for stallAfter
 // while the worker says it is converting.
 func (w *Worker) watchRemoteStall(id int64, rj *RemoteJob) func() {
+	w.stopOver.Store(false) // a stop from an earlier local encode on this worker is not this stop's reason
 	after := w.stallAfter()
 	done := make(chan struct{})
 	go func() {
@@ -1273,6 +1295,52 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	if exp.DurationSec <= 0 {
 		exp.DurationSec = job.DurationSec
 	}
+	// A recording that starts mid-stream has no decodable picture in its first seconds: no player can show them,
+	// the original included, so they are not required of the new file (the damage count already treats that lead
+	// the same way). Only a lead no other kept stream covers shortens the expected duration: a copied sound track
+	// that starts at the container's start still fills it, and the new file is then as long as the original. The
+	// whole lead moves the picture comparison to the first picture that can be shown. A frame or two is inside
+	// the duration tolerance, and not worth saying.
+	// A copied video keeps its own packets and start: nothing is decoded, so nothing of it is left out.
+	if v := src.Video(); v != nil && exp.DurationSec > 0 && !exp.VideoCopied && src.MainVideoOrdinal() >= 0 {
+		lctx, lcancel := context.WithTimeout(ctx, quickTimeout)
+		videoLead, lerr := media.UndecodableLead(lctx, w.Exec, w.FFprobe, srcPath, src.MainVideoOrdinal(), v.StartTime)
+		lcancel()
+		if lerr == nil && videoLead >= minLeadInSec {
+			exp.LeadInSec = videoLead
+			// The new file's picture starts at the first picture that can be shown, so every copied stream's
+			// offset from the picture grows by the lead. (The encode shifts all timestamps together: sync is kept.)
+			for i := range exp.Streams {
+				if exp.Streams[i].Type != "video" {
+					exp.Streams[i].OffsetSec -= videoLead
+				}
+			}
+			// The container's start, and the new file's: its earliest kept stream, or the first picture when no
+			// kept stream starts before it. A stream the plan drops fills nothing, so it does not count.
+			dropped := map[int]bool{}
+			for _, o := range plan.Tracks {
+				if !o.Add && o.Drop {
+					dropped[o.Index] = true
+				}
+			}
+			start, earliest := v.StartTime, v.StartTime+videoLead
+			for k, s := range src.Streams {
+				if dropped[s.Index] || (s.Type != "video" && s.Type != "audio" && s.Type != "subtitle") {
+					continue
+				}
+				if s.StartTime < start {
+					start = s.StartTime
+				}
+				if k != src.MainVideoIndex() && s.StartTime < earliest {
+					earliest = s.StartTime
+				}
+			}
+			if lead := earliest - start; lead >= minLeadInSec && lead < exp.DurationSec {
+				exp.DurationSec -= lead
+			}
+			w.jobf(job.ID, ": the original starts mid-stream: its first %.1f seconds have no picture that can be decoded, so the new file is not required to have them", videoLead)
+		}
+	}
 	// The job keeps what it is about to do and how the result will be judged, recorded here so its log
 	// can show the variables even when a check below stops it (an output path it can't use, a card's
 	// slot it waits for). If that cannot be recorded, it does not start: nothing has been written yet.
@@ -1475,8 +1543,17 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			args = ran
 		}
 		var k *KeptError
-		if errors.As(terr, &k) || errors.Is(terr, errLeaseLost) {
+		if errors.As(terr, &k) {
+			// Its check refused the file, so it is not uploaded: the probe it took is the only one
+			// (foundation slice 4: a kept job's detail says what the new file was).
+			w.storeOutputInfo(job.ID, w.remote.Measured())
 			return "", terr
+		}
+		if errors.Is(terr, errLeaseLost) {
+			return "", terr
+		}
+		if terr == nil { // what its check measured, until this server's check reads the uploaded file
+			w.storeOutputInfo(job.ID, w.remote.Measured())
 		}
 	} else {
 		encErr, encLog, decoded, terr = w.encodeRun(ctx, job, args)
@@ -1727,6 +1804,10 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	checkStart := w.now()
 	verr := w.verify(ctx, src, exp, srcPath, tmp, before.Size())
 	w.recordCheck(job.ID, checkStart, verr)
+	var keptErr *KeptError
+	if verr == nil || errors.As(verr, &keptErr) { // what the new file is, for a done and a kept job alike
+		w.recordOutput(job.ID, plan, verr == nil)
+	}
 	if err := verr; err != nil {
 		var k *KeptError
 		if errors.As(err, &k) && plan.Video.PeakLimitKbps > 0 && strings.HasPrefix(k.Reason, pictureTooDifferent) {
@@ -2546,6 +2627,42 @@ func newFileSize(st os.FileInfo, measured int64) (size int64, note string) {
 	return 0, "Couldn't read the new file's size after it was put in place; size unknown."
 }
 
+// recordOutput keeps what the new file turned out to be, from the probe the check read: the job's
+// output_info (the job detail's metadata.after), the converted step's words (the prediction until now)
+// and, on success, the log's "New file" line a kept job's record already has. Nothing is kept when the
+// check read no file: a job that never produced a readable new file stays null.
+func (w *Worker) recordOutput(id int64, plan rules.Plan, logLine bool) {
+	if w.Queue == nil || w.verified.Video() == nil {
+		return
+	}
+	w.storeOutputInfo(id, w.verified)
+	if logLine {
+		if err := w.Queue.AppendLogLine(id, 1, secOutput, jobs.LevelInfo, "check", "New file: "+fileSummary(w.verified)); err != nil {
+			log.Printf("worker %s: job %d: the new file's log line: %v", w.ID, id, err)
+		}
+	}
+	if words := convertedWords(plan, w.verified); words != "" {
+		if err := w.Queue.SetStepWords(id, "converted", "Converted: "+words+"."); err != nil {
+			log.Printf("worker %s: job %d: the converted step's words: %v", w.ID, id, err)
+		}
+	}
+}
+
+// storeOutputInfo keeps the probe of the new file the check read on the job (JSON).
+func (w *Worker) storeOutputInfo(id int64, info media.Info) {
+	if w.Queue == nil || info.Video() == nil {
+		return
+	}
+	b, err := json.Marshal(info)
+	if err != nil {
+		log.Printf("worker %s: job %d: the new file's probe: %v", w.ID, id, err)
+		return
+	}
+	if err := w.Queue.SetOutputInfo(id, string(b)); err != nil {
+		log.Printf("worker %s: job %d: storing the new file's probe: %v", w.ID, id, err)
+	}
+}
+
 // recordCheck keeps the job's check step: the picture score, when the check ran (w.check, set by the picture comparison).
 func (w *Worker) recordCheck(id int64, started time.Time, verr error) {
 	if w.Queue == nil || w.check == nil {
@@ -2719,6 +2836,9 @@ func (w *Worker) encodeLocal(ctx context.Context, job jobs.Job, args []string) (
 		// most-behind stream, so it freezes in a subtitle gap while frames still go on (bug 2).
 		posMoved := p.OutTimeUS > at // a position further on: one that repeats is not progress
 		outputOK := outputWithin(job.SizeBefore, p.TotalSize)
+		w.overSize.Store(job.SizeBefore > 0 && !outputOK) // an unknown source size is not "over twice": there is no bound
+		w.outBytes.Store(p.TotalSize)
+		w.srcBytes.Store(job.SizeBefore)
 		alive := posMoved || (outputOK && (p.Frame > frames || p.TotalSize > wrote))
 		frames = p.Frame
 		if p.TotalSize > wrote {

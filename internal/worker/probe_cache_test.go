@@ -69,7 +69,8 @@ func ffprobeCalls(x *media.FakeExec, path string) int {
 	return n
 }
 
-// probeReadsExec runs real ffprobe and records each probe of a path, so a job can be checked for its source probes.
+// probeReadsExec runs real ffprobe and records each metadata probe of a path, so a job can be checked for its
+// source probes (its lead reads are not probes and are not recorded).
 type probeReadsExec struct {
 	media.Exec
 	mu     sync.Mutex
@@ -77,7 +78,13 @@ type probeReadsExec struct {
 }
 
 func (p *probeReadsExec) Output(ctx context.Context, name string, args ...string) ([]byte, error) {
-	if name == "ffprobe" && len(args) > 0 {
+	probe := false
+	for _, a := range args {
+		if a == "-show_format" { // media.Probe, the metadata probe; a lead read asks for packets or frames
+			probe = true
+		}
+	}
+	if name == "ffprobe" && probe {
 		p.mu.Lock()
 		p.probed = append(p.probed, args[len(args)-1])
 		p.mu.Unlock()
@@ -86,6 +93,8 @@ func (p *probeReadsExec) Output(ctx context.Context, name string, args ...string
 }
 
 // A real job probes its source once: the worker reads the probe cache first, and the first probe fills it.
+// A job may read the source again for its lead (the packets and first frames of its first seconds); that read is
+// not a probe, and the recorder counts the metadata probes only.
 func TestRealSourceIsProbedOncePerJob(t *testing.T) {
 	needTools(t)
 	dir := t.TempDir()
