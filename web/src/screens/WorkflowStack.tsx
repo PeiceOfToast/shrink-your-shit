@@ -49,7 +49,42 @@ function SrtFiles() {
 }
 
 // One option from the step's configSchema, as a native labelled control (design review rule 1).
-function Field({ id, name, s, value, set, wf }: { id: string; name: string; s: JSONSchema; value: unknown; set: (v: unknown) => void; wf: string }) {
+// W1 (#521): a typed setting marked x-variableRef may hold one whole {{name}} instead of its own value. The field then
+// shows a variable picker in place of its control, with a way back to typing a value; the server's words for a name
+// that doesn't fit (variable_wrong_type) or text around it (variable_ref_not_whole) come back on the field like any
+// other problem. The flow builder owns this screen (manager, 02:10Z).
+const isRef = (v: unknown) => typeof v === "string" && /^\{\{[a-z][a-z0-9_]*\}\}$/.test(v);
+const refName = (v: unknown) => (isRef(v) ? (v as string).slice(2, -2) : "");
+function RefPick({ fid, title, value, wf, set, back }: { fid: string; title: string; value: unknown; wf: string; set: (v: unknown) => void; back: () => void }) {
+  const vl = useData(() => varListFor(wf, true), [wf]).data, own = useContext(OwnVars);
+  const vars = vl ? withOwn(vl.variables, own) : [], groups = [...new Set(vars.map((v) => v.group))];
+  return (
+    <div className="field">
+      <label htmlFor={fid}>{title}</label>
+      <div className="row nw" style={{ gap: 8 }}>
+        <select id={fid} className="input" value={refName(value)} aria-describedby={fid + "-ref"} onChange={(e) => set(e.target.value ? "{{" + e.target.value + "}}" : "")}>
+          <option value="">Choose a variable…</option>
+          {groups.map((g) => <optgroup key={g} label={g}>{vars.filter((v) => v.group === g).map((v) => <option key={v.name} value={v.name}>{"{{" + v.name + "}}"}{v.value != null && v.value !== "" ? " · " + v.value : ""}</option>)}</optgroup>)}
+        </select>
+        <button className="btn sm ghost nowrap" type="button" onClick={back}>Type a value instead</button>
+      </div>
+      <span className="hint" id={fid + "-ref"}>One whole variable sets this; its value must fit the setting. A secret can't be used here.</span>
+    </div>);
+}
+
+function Field(props: { id: string; name: string; s: JSONSchema; value: unknown; set: (v: unknown) => void; wf: string }) {
+  const { id, name, s, value, set, wf } = props;
+  const title = (s.title as string) ?? name.charAt(0).toUpperCase() + name.slice(1).replace(/([A-Z])/g, " $1").toLowerCase(), fid = id + "-" + name;
+  const [refMode, setRefMode] = useState(false), typed = s["x-variableRef"] === true;
+  if (typed && (refMode || isRef(value))) return <RefPick fid={fid} title={title} value={value} wf={wf} set={set} back={() => { setRefMode(false); set(s.default); }} />;
+  return (
+    <>
+      <Control {...props} />
+      {typed && <button className="linkbtn sm" type="button" onClick={() => { setRefMode(true); set(""); }} aria-label={"Use a variable for " + title}>Use a variable</button>}
+    </>);
+}
+
+function Control({ id, name, s, value, set, wf }: { id: string; name: string; s: JSONSchema; value: unknown; set: (v: unknown) => void; wf: string }) {
   // The schema's title; without one (V1's "ignore" has none), the key in plain form.
   const title = (s.title as string) ?? name.charAt(0).toUpperCase() + name.slice(1).replace(/([A-Z])/g, " $1").toLowerCase(), fid = id + "-" + name;
   if (widget(s) === "slider") {
@@ -156,7 +191,10 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
   // a problem in a field under 'More options' opens it by itself (review c0189fa P3), also when the problems list picks
   // this step; it isn't closed again when the last one is fixed, so the field doesn't vanish while it's being edited
   const moreRef = useRef<HTMLDetailsElement>(null), moreBad = more.some((k) => bad(k).length > 0);
-  useEffect(() => { if (moreBad && moreRef.current) moreRef.current.open = true; }, [moreBad, n.id]);
+  // an open the page makes itself is not the person's choice: it must not switch the step to custom settings (W1 screen:
+  // a problem on a More-options field opened it, the toggle wrote kind=selectors, the draft went dirty and the live problems hid)
+  const byPage = useRef(false);
+  useEffect(() => { if (moreBad && moreRef.current && !moreRef.current.open) { byPage.current = true; moreRef.current.open = true; } }, [moreBad, n.id]);
   const problem = (path: string) => issues.filter((i) => i.nodeId === n.id && i.configPath === path).map((i) => <span key={i.code} className="hint" style={{ color: "var(--error-text)" }}>{i.message}</span>);
   if (n.type === "video.convert") {
     // A-API-SHAPE + engine #211 + SCREENS V3 'Convert video, revised 11-13' (01:05Z): the slider (rateControl quality), or
@@ -187,7 +225,7 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
           <Icon id="i-alert" /><div className="sp"><strong id={n.id + "-go"}>Go back to the slider?</strong> Your custom settings will be cleared.</div>
           <button className="btn sm primary" type="button" onClick={backToSlider}>Clear and use the slider</button>
           <button className="btn sm ghost" type="button" autoFocus onClick={keep}>Keep my settings</button></div>}
-        <details ref={moreRef} onToggle={(e) => (e.currentTarget.open ? !sel && custom() : sel && goBack())}><summary className="btn sm" style={{ display: "inline-flex" }}>More options</summary>
+        <details ref={moreRef} onToggle={(e) => { if (byPage.current) { byPage.current = false; return; } if (e.currentTarget.open) { if (!sel) custom(); } else if (sel) goBack(); }}><summary className="btn sm" style={{ display: "inline-flex" }}>More options</summary>
           <div className="grid cols2" style={{ marginTop: 12 }}>
             {field("format")}{field("resolution")}{field("speed")}
             {q && sel && field("quality")}
