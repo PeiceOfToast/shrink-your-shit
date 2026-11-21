@@ -52,7 +52,7 @@ func (p *Previewer) Sample(ctx context.Context, root, path string, st fs.FileInf
 	if plan.Video.Height > 0 {
 		video = fmt.Sprintf("Video: converted to the smaller format and made %d lines high (from %d), same length", plan.Video.Height, info.Video().Height)
 	}
-	if plan.Video.MaxRateKbps > 0 {
+	if plan.Video.MaxRateKbps > 0 && !plan.Video.IsVP9Target() {
 		video += fmt.Sprintf(", at most %d Mbps", plan.Video.MaxRateKbps/1000)
 	}
 	s.Lines = append(s.Lines, video)
