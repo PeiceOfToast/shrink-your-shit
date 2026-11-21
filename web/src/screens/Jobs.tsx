@@ -277,11 +277,11 @@ const copyBox = (title: string, ls: string[]) => ls.length > 0 && <div className
 const FoundRows = ({ rows }: { rows: [string, string][] }) => rows.length > 0 ? <table className="jd-found"><tbody>{rows.map(([k, v], i) => <tr key={i}><th scope="row">{k}</th><td style={{ whiteSpace: "pre-line", fontVariantNumeric: "tabular-nums" }}>{v}</td></tr>)}</tbody></table> : null;
 const Driver = ({ ls }: { ls: string[] }) => ls.length > 0 ? <details><summary className="sm" style={{ cursor: "pointer" }}>Driver messages ({ls.length})</summary>{copyBox("Driver messages", ls)}</details> : null;
 // A kept job: its own neutral section (keeping the original is the safe outcome, not an error).
-function CheckFound({ lines, reason }: { lines: string[]; reason: string }) {
-  const f = readFound(lines);
+function CheckFound({ lines, reason, code }: { lines: string[]; reason: string; code: string }) {
+  const f = readFound(lines), title = code === "workflow_stopped" ? whyHeading(code, false) : "What the check found";
   return (
-    <section className="note" role="region" aria-label="What the check found" style={{ display: "block" }}>
-      <h3><Icon id="i-info" /> What the check found</h3>
+    <section className="note" role="region" aria-label={title} style={{ display: "block" }}>
+      <h3><Icon id="i-info" /> {title}</h3>
       {reason && <p>{reason.charAt(0).toUpperCase() + reason.slice(1)}</p>}
       <FoundRows rows={f.rows} />
       {copyBox("What ffmpeg said", f.errors)}
@@ -669,7 +669,7 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
           {done && j?.warning && <div className="note warn"><Icon id="i-alert" /><div style={{ display: "grid", gap: 6 }}>{warnLines(j).map((w, i) => <div key={i}>{w}</div>)}</div></div>}
           {j?.removed && j.reason?.code === "removed" ? <div className="note"><Icon id="i-info" /><div>Its library was removed, so this file won't be converted.</div></div>
             : j?.failure ? <WhyFailed id={id} msg={reason} code={j.reason?.code ?? ""} worker={j.worker ?? null} f={j.failure} found={found.flatMap((st) => st.found!)} />
-            : found.length ? <CheckFound lines={found.flatMap((st) => st.found!)} reason={reason} />
+            : found.length ? <CheckFound lines={found.flatMap((st) => st.found!)} reason={reason} code={j?.reason?.code ?? ""} />
             : reason && <section><h3>{whyHeading(j?.reason?.code ?? "", false)}</h3><p>{reason}</p></section>}
           <section><h3>File</h3><dl className="kv">
             {(own?.path ?? j?.file?.path) && <><dt>Source</dt><dd className="mono sm">{slashWrap(own?.path ?? j?.file?.path ?? "")}</dd></>} {/* review 54ff228: no '-' when the server doesn't keep the path (a removed library's job) */}
