@@ -109,6 +109,10 @@ func TestHeaderSupport(t *testing.T) {
 	if line, ok := HeaderSupport("[mov,mp4 @ 0x3] moov atom not found"); ok || line != "" {
 		t.Errorf("a damaged source: %q %v", line, ok)
 	}
+	onlySupport := "[webm @ 0x1] Only VP8 or VP9 or AV1 video and Vorbis or Opus audio and WebVTT subtitles are supported for WebM."
+	if line, ok := HeaderSupport(onlySupport); ok || line != "" {
+		t.Errorf("a \"supported for\" line without the header stop: %q %v", line, ok)
+	}
 }
 
 // QA of #214: the key lines are the ones that matched the code (the QA run's real lines), not any line with "error".
@@ -206,6 +210,8 @@ func TestReasonConditionMatchesFailureCode(t *testing.T) {
 		{ReasonConvertFailed, []string{"[mov,mp4 @ 0x3] moov atom not found"}},
 		{ReasonConvertFailed, []string{"[webm @ 0x1] Only VP8 or VP9 or AV1 video and Vorbis or Opus audio and WebVTT subtitles are supported for WebM.",
 			"[out#0/webm @ 0x2] Could not write header (incorrect codec parameters ?): Invalid argument"}},
+		// a bare header stop is ffmpeg_error, so the settings_rejected filter must not select it (slice 15, review #580)
+		{ReasonConvertFailed, []string{"[out#0/webm @ 0x2] Could not write header (incorrect codec parameters ?): Invalid argument"}},
 		{ReasonConvertFailed, []string{"Conversion failed!"}},
 		{ReasonConvertFailed, nil},
 	} {
@@ -241,6 +247,54 @@ func TestReasonConditionMatchesFailureCode(t *testing.T) {
 		if len(got) == 0 {
 			t.Errorf("%s selected nothing", want)
 		}
+	}
+}
+
+// Slice 15, review #580: the reason filter's classifier table needs both header lines. A generic failure
+// stored before the code existed lists under ffmpeg_error for a bare header stop, but the full pair is the
+// file-type refusal and stays out of it (the settings_rejected filter itself is the stored code).
+func TestReasonConditionHeaderPairPinsBothLines(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "syp.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	s.SetPaused(false)
+	l, _ := s.AddLibrary("m", t.TempDir(), rules.SliderTemplate(3), true)
+	bare := "[out#0/webm @ 0x2] Could not write header (incorrect codec parameters ?): Invalid argument"
+	add := func(path string, lines []string) {
+		id, _ := s.Enqueue(Job{Library: "m", LibraryID: l.ID, Path: path})
+		s.Claim("t")
+		s.SetFailureSummary(id, FailureSummary{ExitCode: 1, KeyLines: lines})
+		s.Fail(id, ReasonConvertFailed, "x")
+	}
+	add("/m/bare.mkv", []string{bare})
+	add("/m/full.mkv", []string{
+		"[webm @ 0x1] Only VP8 or VP9 or AV1 video and Vorbis or Opus audio and WebVTT subtitles are supported for WebM.", bare})
+	selects := func(code string) []string {
+		t.Helper()
+		cond, args, ok := ReasonCondition(code)
+		if !ok {
+			t.Fatalf("no condition for %s", code)
+		}
+		rows, err := s.db.Query(`SELECT j.path FROM jobs j WHERE `+cond, args...)
+		if err != nil {
+			t.Fatalf("%s: %v", code, err)
+		}
+		defer rows.Close()
+		var got []string
+		for rows.Next() {
+			var p string
+			rows.Scan(&p)
+			got = append(got, p)
+		}
+		return got
+	}
+	if got := selects("ffmpeg_error"); len(got) != 1 || got[0] != "/m/bare.mkv" {
+		t.Errorf("ffmpeg_error selects %v, want only the bare header stop", got)
+	}
+	if got := selects("settings_rejected"); len(got) != 0 {
+		t.Errorf("settings_rejected selects %v, want none: these rows are stored as convert_failed", got)
 	}
 }
 

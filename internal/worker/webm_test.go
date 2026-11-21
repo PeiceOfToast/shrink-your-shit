@@ -156,6 +156,41 @@ func TestHeaderRefusalIsNotAnEncoderFailure(t *testing.T) {
 	}
 }
 
+// Slice 15, review #580: on the full GPU pipeline any failure steps down, so a file-type refusal must be
+// named as one there too: one encode, no step-down, no encoder-health change, and the header sentence.
+func TestHeaderRefusalOnTheFullPipelineDoesNotStepDown(t *testing.T) {
+	s := newScenario(t)
+	s.failFullGPU = true
+	s.fullGPUStderr = "[webm @ 0x1] Only VP8 or VP9 or AV1 video and Vorbis or Opus audio and WebVTT subtitles are supported for WebM.\n" +
+		"[out#0/webm @ 0x2] Could not write header (incorrect codec parameters ?): Invalid argument"
+	w := s.worker(Replace)
+	var asked string
+	w.GraphicsDecodes = decodeHook(true, &asked)
+	w.Encoder = func(string, bool, *rules.HDR) (string, string) { return "hevc_qsv", "" }
+	if _, err := w.RunOne(context.Background()); err == nil {
+		t.Errorf("RunOne: want the refusal to fail the job")
+	}
+	j, _ := s.store.Get(s.id)
+	if j.Status != jobs.Failed {
+		t.Errorf("status %s, error %q", j.Status, j.Error)
+	}
+	if enc := encodeCalls(s); len(enc) != 1 || !strings.Contains(enc[0], "-hwaccel") {
+		t.Errorf("encodes, want the full pipeline once and no step-down:\n%s", strings.Join(enc, "\n"))
+	}
+	if falls, err := s.store.EncoderFallbacksSince(time.Unix(0, 0)); err != nil || len(falls) != 0 {
+		t.Errorf("fall-backs %+v, %v: want none", falls, err)
+	}
+	if enc, _, err := s.store.EncoderLastFell(w.ID); err != nil || enc != "" {
+		t.Errorf("last fall %q, %v: want none", enc, err)
+	}
+	if n := logCount(t, s, "full GPU pipeline failed"); n != 0 {
+		t.Errorf("step-down line: %d, want none", n)
+	}
+	if !strings.Contains(j.Error, "supported for WebM") || !strings.HasSuffix(j.Error, "Your original was not touched.") {
+		t.Errorf("the job's message: %q", j.Error)
+	}
+}
+
 // ffmpeg stopping before the new file's header is written: the message says what the new type can't
 // hold, never that the file may be damaged (user bug 11-20).
 func TestHeaderWords(t *testing.T) {
