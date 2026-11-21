@@ -255,7 +255,11 @@ func builtinNames() []string {
 // nothing, and an unclosed {{ makes the rest of the text plain, as typed. A secret is refused too: it
 // fills text at run time, but a secret never goes in a file name, folder or title, where it would be
 // read by whoever sees the name.
-func CheckTemplates(d Doc) []Issue {
+func CheckTemplates(d Doc) []Issue { return CheckTemplatesWith(d, Scopes{}) }
+
+// CheckTemplatesWith is CheckTemplates with the other scopes (W2): a server-wide variable is a name a
+// template may use too (the workflow's own of the same name wins at run time, as the lookup order says).
+func CheckTemplatesWith(d Doc, sc Scopes) []Issue {
 	own := make([]string, 0, len(d.Variables))
 	secrets := map[string]bool{}
 	for _, v := range d.Variables {
@@ -266,6 +270,11 @@ func CheckTemplates(d Doc) []Issue {
 		own = append(own, v.Name)
 	}
 	own = append(own, PublishedNames(d)...) // FB1b: what a step before may have set
+	for name, g := range sc.Global {        // W2 (bug from ui-shop's QA of #586): a global counts as known
+		if g.Type != "secret" && !slices.Contains(own, name) {
+			own = append(own, name)
+		}
+	}
 	defs := map[string]StepDefinition{}
 	for _, def := range Definitions() {
 		defs[def.Type] = def
