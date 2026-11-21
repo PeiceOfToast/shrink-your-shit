@@ -33,7 +33,7 @@ const PILL: Partial<Record<JobState, string>> = { preparing: "run", running: "ru
 const ICON: Partial<Record<JobState, string>> = { completed: "i-check-c", failed: "i-x-c", skipped: "i-skip", cancelled: "i-stop", retry_wait: "i-clock", queued: "i-clock" };
 // V5b: a waiting file whose library is paused (subState library_disabled) reads "Library paused" (design SCREENS V5);
 // it has no place in the queue, so its '#' is '–'.
-type PillJob = { state: JobState; retryAt?: string | null; subState?: string | null; reason?: { code: string } | null; warning?: string | null };
+type PillJob = { state: JobState; retryAt?: string | null; subState?: string | null; reason?: { code: string; message?: string } | null; warning?: string | null; newFileRefused?: boolean };
 // steps that warn without failing the job: the processor fallback (#323) and a media app (Sonarr, Radarr, Plex, Jellyfin) that wasn't told (#333)
 const SOFT = ["encoder_fallback", "media_refresh"];
 // the top note, one line per warning: the server's warning names only the first (#333), so the steps give the rest
@@ -44,11 +44,11 @@ const warnLines = (j: JobDetail) => {
 };
 const fell = (j: PillJob) => j.state === "completed" && !!j.warning; // #323: done on the processor after the graphics encoder failed
 const libPaused = (j: PillJob) => j.state === "queued" && j.subState === "library_disabled";
-// de2f664: a check that refused the new file kept the original; the server lists it as failed (code kept_original), it reads "Original kept"
-const keptOrig = (j: PillJob) => j.state === "failed" && j.reason?.code === "kept_original";
+// de2f664: a check that refused the new file kept the original; the server lists it as failed, it reads "Original kept" and is neutral, not a failure
+const keptOrig = (j: PillJob) => j.state === "failed" && (j.newFileRefused === true || j.reason?.code === "kept_original" || j.reason?.code === "check_failed");
 const words = (j: PillJob) => (libPaused(j) ? "Library paused" : keptOrig(j) ? "Original kept" : fell(j) ? "Done, with a warning" : j.state === "retry_wait" && j.retryAt ? "Retry at " + clock(j.retryAt) : WORD[j.state]);
 function Pill({ j }: { j: PillJob }) {
-  return <span className={"pill " + (libPaused(j) || keptOrig(j) || fell(j) ? "warn" : PILL[j.state] ?? "")}><Icon id={libPaused(j) ? "i-pause" : keptOrig(j) ? "i-info" : fell(j) ? "i-alert" : ICON[j.state] ?? "i-play"} />{words(j)}</span>;
+  return <span className={"pill " + (libPaused(j) || fell(j) ? "warn" : keptOrig(j) ? "" : PILL[j.state] ?? "")} title={keptOrig(j) ? j.reason?.message ?? undefined : undefined}><Icon id={libPaused(j) ? "i-pause" : keptOrig(j) ? "i-info" : fell(j) ? "i-alert" : ICON[j.state] ?? "i-play"} />{words(j)}</span>;
 }
 const reasonText = (j: JobItem) => j.reason?.message ?? j.detail ?? ""; // #130: every row's reason is {code, message}
 const saved = (b?: number, a?: number) => {
@@ -124,11 +124,13 @@ export function Jobs() {
   useEffect(() => setSel([]), [tab]);
   const go = (t: Tab, job?: string | null) => navigate(query(t, library) +(job ? "&job=" + encodeURIComponent(job) : ""));
   const current = page.data?.for === scope ? page.data : undefined;
+  // a new tab, search or filter keeps the rows on screen, dimmed, until its rows arrive (the skeleton is for the first load only); an error shows as before
+  const busy = !current && !!page.data && !page.error, rows = current ?? (busy ? page.data : undefined);
   const noLibs = !!libs.data && libs.data.length === 0; // first run: no library yet, so no job can come
-  const items = (current?.items ?? []).map((j) => (live[j.id] && RUNS.includes(j.state) ? { ...j, progress: live[j.id] } : j)), counts = page.data?.counts;
+  const items = (rows?.items ?? []).map((j) => (live[j.id] && RUNS.includes(j.state) ? { ...j, progress: live[j.id] } : j)), counts = page.data?.counts;
   const firstRun = noLibs && !kept && !left && !!counts && TABS.every(([t]) => !counts[t]); // every tab empty: no bulk actions to offer
   shown.current = { tab, rows: new Map((current?.items ?? []).map((j) => [j.jobId ?? j.id, j.state])) };
-  const picked = items.filter((j) => sel.includes(j.id)), none = !picked.length;
+  const picked = items.filter((j) => sel.includes(j.id)), none = !picked.length || busy;
   const run = async (a: JobAction) => {
     if (a === "cancel" && !window.confirm("Cancel " + plural(picked.length, "file", "files") + "? The files stay as they are. Nothing is deleted.")) return;
     const r = await act(jobAction(a, picked.map((j) => j.id), a === "reprioritize" ? prio : undefined), setSaid);
@@ -189,17 +191,17 @@ export function Jobs() {
       </div>
       <p className="muted" role="status">{said}</p>
       {page.error && current && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{page.error.message}</span></p>}
-      {!current ? (page.error ? <LoadFailed error={page.error} reload={page.reload} /> : <Skeleton rows={5} />) : !items.length ? (q ? <div className="empty">No file matches.</div>
+      {!rows || (busy && !items.length) ? (page.error ? <LoadFailed error={page.error} reload={page.reload} /> : <Skeleton rows={5} />) : !items.length ? (q ?<div className="empty">No file matches.</div>
         : firstRun ? <Empty icon="i-jobs" text="No jobs yet. Jobs start when a library finds videos."><Link className="btn primary" to="/libraries/new"><Icon id="i-plus" />Add library</Link></Empty>
         : <Empty icon="i-jobs" text={kept ? TRASH_EMPTY : left ? LEFT_EMPTY : { waiting: "Nothing is waiting.", running: "Nothing is converting right now.", completed: "No file is done yet.", skipped: "No file was skipped.", failed: "Nothing has failed." }[tab]} />) : (
-        <div className={"list rows" + (selecting ? " selecting" : "")}><table className="tbl jobs">
+        <div className={"list rows" + (selecting ? " selecting" : "")}><table className="tbl jobs" aria-busy={busy || undefined} style={busy ? { opacity: 0.5, pointerEvents: "none" } : undefined}>
           {/* No table header (U4, C1): a codec and resolution tile, the file and its detail, one chip line of facts, one status pill and the size change. Waiting keeps its position column. */}
           <tbody>{items.map((j) => {
             const pct = j.progress ? (j.progress.percent ?? j.progress.workflowPercent) : null;
             return (
             <tr key={j.id} className={sel.includes(j.id) ? "sel" : undefined}>
               <td className="selc"><label className="hit"><input type="checkbox" aria-label={"Select " + j.name} checked={sel.includes(j.id)} onChange={(e) => setSel(e.target.checked ? [...sel, j.id] : sel.filter((x) => x !== j.id))} /></label></td>
-              {tab === "waiting" && <td className="posc" title={j.position != null ? "Place " + j.position + " in the queue" : "Not taken now"}>{j.position ?? "—"}</td>}
+              {tab === "waiting" && <td className="posc" title={j.position != null ? "Place " + j.position + " in the queue" : "Not taken now"}><span className="sr">Place in the queue </span>{j.position ?? "—"}</td>}
               <td className="tile"><span className="ltile codec">{tileOf(j)}</span></td>
               <td className="idc">
                 <div className="lname"><a className="ttl" href={"/jobs?tab=" + tab + "&job=" + encodeURIComponent(key(j))} data-job={key(j)} title={j.path}
@@ -446,7 +448,7 @@ function StepLog({ d, id, worker, failedIdx, kept, hasResult }: { d: { loaded: b
     const hit = q ? countIn(hitText, q) : 0;
     const took = st.tookMs != null ? "Took " + stepTime(st.tookMs) : "";
     const progress = st.speedX != null || st.avgKbps != null ? [took + (st.speedX != null ? (took ? " at " : "") + st.speedX + "× speed" : ""), st.avgKbps != null ? "average " + st.avgKbps.toLocaleString() + " kbps" : ""].filter(Boolean).join(", ") : "";
-    const pill = ["ok", "done", "completed"].includes(st.outcome) ? <span className="pill ok">Done</span> : st.outcome === "failed" ? (kept ? <span className="pill warn">Original kept</span> : <span className="pill bad">Failed</span>) : st.outcome === "skipped" ? <span className="pill">Skipped</span> : null;
+    const pill = ["ok", "done", "completed"].includes(st.outcome) ? <span className="pill ok"><Icon id="i-check-c" />Done</span> : st.outcome === "failed" ? (kept ? <span className="pill"><Icon id="i-info" />Original kept</span> : <span className="pill bad">Failed</span>) : st.outcome === "skipped" ? <span className="pill">Skipped</span> : null;
     const title = stepLabel(st.name, st.found, st.check != null);
     raw.push({ key: "step-" + i, id: "job-step-" + (i + 1), title, hits: hit, dflt: st.outcome === "failed" || st.outcome === "skipped" || i === failedIdx || (kept && st.check != null), show: !errOnly || (flagged && (!q || hit > 0)),
       head: <>
@@ -625,7 +627,7 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
   const sumS = log.data?.summary, subsRow = !!(sumS?.before?.subtitles || sumS?.after?.subtitles), lenRow = sumS?.before?.durationSec != null || sumS?.after?.durationSec != null;
   const showResult = !!(before || after || subsRow || lenRow), lenText = (x?: { durationSec?: number }) => (x?.durationSec != null ? elapsed(x.durationSec) : "—");
   const found = (log.data?.steps ?? []).filter((st) => (st.found?.length ?? 0) > 0);
-  const kept0 = !!state && keptOrig({ state, reason: j?.reason ?? own?.reason });
+  const kept0 = !!state && keptOrig({ state, reason: j?.reason ?? own?.reason, newFileRefused: j?.newFileRefused ?? own?.newFileRefused });
   // U10: the header's size delta, the list row's wording; a failed or skipped job has none, nor a restored original
   const delta = state === "completed" && own?.originalState !== "restored" ? saved(own?.beforeBytes, own?.afterBytes) : "";
   return (

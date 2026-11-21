@@ -49,6 +49,10 @@ type Queue interface {
 	// Get is the job as the store has it now (its final status and sizes for the summary line).
 	Get(id int64) (jobs.Job, error)
 	RecordRunStep(id int64, st jobs.RunStep) error
+	// RecordRunRevision records the workflow revision the job is starting with (revID, the one its template
+	// came from, foundation slice 9). An error is logged and the conversion goes on: it must not fail over
+	// a record.
+	RecordRunRevision(id, revID int64, tmpl rules.Template) error
 	SetFailureSummary(id int64, f jobs.FailureSummary) error
 	ClearFailureSummary(id int64) error
 	// UserStopped turns a job the person stopped into a file skipped as user_stopped.
@@ -176,9 +180,10 @@ type Worker struct {
 	FFmpeg string
 	// FFprobe checks the result before it replaces anything.
 	FFprobe string
-	// Template returns the template of a job's library's flow, compiled per file into the job's Plan.
+	// Template returns the template of a job's library's flow, compiled per file into the job's Plan, and
+	// the published revision it came from (0 when there is none to name).
 	// Nil: a legacy template from Rule and Mode for every job.
-	Template func(jobs.Job) (rules.Template, error)
+	Template func(jobs.Job) (rules.Template, int64, error)
 	// RunInfo returns what a job's workflow says about it (its library's name, its name and revision and
 	// its own variables) for the {{name}} values (W4b). Nil: the names have no value from it.
 	RunInfo func(jobs.Job) (jobs.RunInfo, error)
@@ -330,9 +335,9 @@ func (w *Worker) stop(id int64, why stopKind) bool {
 	return false
 }
 
-func (w *Worker) templateFor(job jobs.Job) (rules.Template, error) {
+func (w *Worker) templateFor(job jobs.Job) (rules.Template, int64, error) {
 	if w.Template == nil {
-		return rules.LegacyTemplate(w.Rule, string(w.Mode)), nil
+		return rules.LegacyTemplate(w.Rule, string(w.Mode)), 0, nil
 	}
 	return w.Template(job)
 }
@@ -591,6 +596,7 @@ func (w *Worker) runClaimed(ctx context.Context, job jobs.Job, jobCtx context.Co
 		for k, v := range vars.EndValues(final, job.SizeBefore, size) {
 			st.Vars[k] = v
 		}
+		st.Result = rules.Result{SizeBefore: job.SizeBefore, SizeAfter: size, DurationBefore: job.DurationSec, DurationAfter: w.verified.DurationSec}
 		env := flow.Env{Log: func(l string) { w.jobNote(job.ID, secReplace, jobs.LevelInfo, "(%s): %s", job.Path, l) }, Tag: w.tagger(job.ID)}
 		if w.Cards != nil {
 			e := w.Cards(job, final)
@@ -969,7 +975,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	if err := w.clearOwnSidecars(job.ID); err != nil {
 		return "", retryable(err, retryGeneral)
 	}
-	tmpl, err := w.templateFor(job)
+	tmpl, revID, err := w.templateFor(job)
 	if err != nil {
 		// #561 review ask 3: a global saved since the workflow was published can stop its settings
 		// resolving. The stored template was compiled with the old values, so the job stops, naming
@@ -984,6 +990,13 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			return "", ferr
 		}
 		return "", retryable(ferr, retryGeneral) // the database was busy
+	}
+	// Foundation slice 9: the job records the workflow revision it really runs with (the one the template
+	// read above came from), not the one newest when it was queued; before runInfo, so {workflow_revision}
+	// agrees. A record that can't be written is logged, and the conversion goes on.
+	if err := w.Queue.RecordRunRevision(job.ID, revID, tmpl); err != nil {
+		log.Printf("worker %s: job %d: the workflow revision it runs with was not recorded: %v", w.ID, job.ID, err)
+		w.logLine(job.ID, secVariables, jobs.LevelWarning, "The workflow revision this conversion uses could not be recorded. The conversion goes on.")
 	}
 	// Convert again (design 11:45Z): a file that replaced its original runs from the original kept in
 	// .syp-trash, never from our own output; the new file replaces our earlier one (replaceOwnOutput).
@@ -1048,7 +1061,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			return "", checkFailed(pctx, "reading the original", perr)
 		}
 		log.Printf("worker %s: %s: %v", w.ID, job.Path, perr)
-		return "", kept("the original can't be read any more, so it was left as it is")
+		return "", keptSourceMissing("the original can't be read any more, so it was left as it is")
 	}
 	w.inputLines(job.ID, srcPath, before, src)
 	if err := w.preflight(srcPath, before.Size()); err != nil {
@@ -1729,7 +1742,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 				w.Queue.AppendLogLine(job.ID, 1, secOutput, jobs.LevelInfo, "check", l)
 			}
 			log.Printf("worker %s: %s: the original has errors: %s", w.ID, job.Path, strings.Join(dmg.Lines, " | "))
-			return "", kept(reason)
+			return "", keptSourceDamaged("%s", reason)
 		}
 		w.Queue.AppendLogLine(job.ID, 0, secOutput, jobs.LevelWarning, "app", fmt.Sprintf("The original has a little damage (%s, up to %d%% are tolerated); converted anyway.",
 			damagedShare(dmg.Pictures, frames), maxDamagedPercent))
@@ -1764,6 +1777,14 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	for k := range plan.SubtitleFiles() { // each subtitle that was to be saved as a file was saved
 		if st, err := os.Lstat(rules.StagedSrt(tmp, k)); err != nil || !st.Mode().IsRegular() || st.Size() == 0 {
 			return "", kept("a subtitle could not be saved as a separate file")
+		}
+	}
+	// FB4b-3: the path's questions about the checked result, before anything moves. An outcome that leads to
+	// "Leave the file alone" (or nowhere) keeps the original: the workflow's own choice, so the file ends skipped
+	// with its own reason, like the size rule below; "Stop as failed" fails the job with its words.
+	if len(plan.BeforeSave) > 0 {
+		if err := w.compareRule(job, plan.BeforeSave, tmp, before.Size(), src.DurationSec); err != nil {
+			return "", err
 		}
 	}
 	// R8: a new file bigger than its original is kept when the workflow says so, before anything moves.
@@ -2192,16 +2213,16 @@ func sourceUnchanged(path string, before os.FileInfo, beforeState media.State) e
 		return failed(goneWords, err)
 	}
 	if err != nil || !os.SameFile(now, before) || now.Size() != before.Size() || !now.ModTime().Equal(before.ModTime()) {
-		return retryable(kept("the original file changed while it was being converted, so the new file is out of date"), retryGeneral) // still being written
+		return retryable(keptNotRun("the original file changed while it was being converted, so the new file is out of date"), retryGeneral) // still being written
 	}
 	// media.FileState too: on Windows it carries the change time, which the Stat above does not (an edit
 	// that keeps the size and puts the modification time back); unreadable now counts as changed
 	if st, err := readSourceState(path, now); err != nil || !st.Same(beforeState) {
-		return retryable(kept("the original file changed while it was being converted, so the new file is out of date"), retryGeneral) // still being written
+		return retryable(keptNotRun("the original file changed while it was being converted, so the new file is out of date"), retryGeneral) // still being written
 	}
 	if b, ok := media.ChangeTime(before); ok {
 		if n, ok := media.ChangeTime(now); !ok || !n.Equal(b) {
-			return retryable(kept("the original file changed while it was being converted, so the new file is out of date"), retryGeneral) // still being written
+			return retryable(keptNotRun("the original file changed while it was being converted, so the new file is out of date"), retryGeneral) // still being written
 		}
 	}
 	if media.LinkCount(path, now) > 1 { // another name appeared while converting (Windows has no ctime to see it)

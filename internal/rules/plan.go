@@ -45,6 +45,7 @@ type Plan struct {
 	Before     []Card   `json:"before,omitempty"`
 	Fail       bool     `json:"fail,omitempty"`
 	Requeue    *Requeue `json:"requeue,omitempty"`    // FB4: "Convert again later" with Skip's words
+	BeforeSave []Card   `json:"beforeSave,omitempty"` // FB4b-3: the questions about the checked result, before the save
 	After      []Card   `json:"after,omitempty"`      // FB2a: the actions on the saved result
 	FolderMode string   `json:"folderMode,omitempty"` // "next_to_library" (V5a): the library's own folder instead of OutputDir
 	Container  string   `json:"container,omitempty"`  // the new file's type (its extension, "mkv" or "mp4"); "" = the original's
@@ -126,6 +127,9 @@ type VideoEncode struct {
 	BufsizeKbps int `json:"bufsizeKbps,omitempty"`
 	// Height scales the picture down to this height, keeping its shape (selectors' resolution); 0 = as it is.
 	Height int `json:"height,omitempty"`
+	// SquarePixels: the source's pixels are square (probe SAR 1:1). A scaled software picture then gets setsar=1, so
+	// the rounded width still comes out 1:1; an anamorphic source keeps its SAR, which the scale carries (SAR 4:3 stays).
+	SquarePixels bool `json:"squarePixels,omitempty"`
 	// Copy: the video is copied as it is, not encoded (S4: an HEVC file only repackaged as MKV). The
 	// picture comparison is then skipped: the stream is the same bytes.
 	Copy bool `json:"copy,omitempty"`
@@ -208,7 +212,7 @@ func (t Template) CompileWith(info media.Info, f Facts) (p Plan) {
 		if len(p.Steps) > 0 && ok && b.Then != nil { // the checks' answers came before the path's own steps
 			p.Steps = append(checkSteps(ds), p.Steps...)
 		}
-		p.Path, p.Decisions, p.OnFailure, p.Before, p.After = b.Path, ds, b.OnFailure, b.Before, b.After
+		p.Path, p.Decisions, p.OnFailure, p.Before, p.BeforeSave, p.After = b.Path, ds, b.OnFailure, b.Before, b.BeforeSave, b.After
 		return p
 	}
 	p = Plan{Kind: t.Kind, CompilerVersion: t.CompilerVersion}
@@ -456,6 +460,9 @@ func (p Plan) ffmpegArgs(in, out, gpu string, full bool) []string {
 			vf = append(vf, profiles[fam].scale(p.Video.Height, ten10))
 		} else {
 			vf = append(vf, "scale=-2:"+strconv.Itoa(p.Video.Height))
+			if p.Video.SquarePixels { // the scale keeps the shape by carrying a SAR; rounding leaves 1280:1281, so a square source gets 1:1
+				vf = append(vf, "setsar=1")
+			}
 		}
 	}
 	if up := profiles[fam].Upload(ten10); up != nil && !full { // software frames go up to the device last, after any scale
@@ -924,7 +931,7 @@ func compileSelectors(p Plan, s Selectors, info media.Info, langs []string, basi
 	vf := VideoFormats[target]
 	src := sourceVideoKbps(info, v)
 	p.Video = VideoEncode{Codec: vf.Encoder, CRF: crf + vf.CRFOffset, Preset: vf.Presets[s.Speed], Tag: vf.Tag,
-		Index: info.MainVideoOrdinal(), Height: height}
+		Index: info.MainVideoOrdinal(), Height: height, SquarePixels: v.SquarePixels}
 	switch s.RateControl { // user review 11-13 item A; the *_legacy meanings compile as they did before it
 	case "level": // the level's figure is the average, its peak 1.5x (never above the source)
 		p.Video.TargetKbps = CapKbps(s.MaxBitrate, target, w, h, v, src)

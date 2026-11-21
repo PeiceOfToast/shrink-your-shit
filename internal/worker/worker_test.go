@@ -336,7 +336,8 @@ func (s *scenario) assertOriginalSafe() {
 }
 
 // assertKept: the job is "kept original" with a reason containing want, and the original is safe.
-func (s *scenario) assertKept(want string) {
+// assertKept: the job is kept, its words mention want, and its stored reason code is code (why it was kept).
+func (s *scenario) assertKept(want, code string) {
 	s.t.Helper()
 	j := s.job()
 	if j.Status != jobs.Kept {
@@ -344,6 +345,9 @@ func (s *scenario) assertKept(want string) {
 	}
 	if !strings.Contains(strings.ToLower(j.Error), strings.ToLower(want)) {
 		s.t.Errorf("reason %q should mention %q", j.Error, want)
+	}
+	if j.ErrorCode != code {
+		s.t.Errorf("stored code %q, want %q", j.ErrorCode, code)
 	}
 	s.assertOriginalSafe()
 }
@@ -464,68 +468,69 @@ func TestRejections(t *testing.T) {
 		name   string
 		mutate func(s *scenario)
 		reason string // a phrase the plain-words reason must contain
+		code   string // the stored reason code: why the original was kept
 	}{
-		{"truncated: far too short", func(s *scenario) { s.outSpec.duration = 40 }, "long but the original"},
-		{"no readable duration", func(s *scenario) { s.outSpec.duration = 0 }, "no readable duration"},
-		{"frames dropped", func(s *scenario) { s.outPackets = 1800 }, "video frames"},
+		{"truncated: far too short", func(s *scenario) { s.outSpec.duration = 40 }, "long but the original", "check_differs"},
+		{"no readable duration", func(s *scenario) { s.outSpec.duration = 0 }, "no readable duration", "check_differs"},
+		{"frames dropped", func(s *scenario) { s.outPackets = 1800 }, "video frames", "check_differs"},
 		{"audio track missing", func(s *scenario) {
 			s.srcSpec.streams = append(s.srcSpec.streams, aud("ac3", "jpn", 6))
 			s.outSpec.streams = goodOutput().streams
-		}, "audio"},
+		}, "audio", "check_differs"},
 		{"subtitle missing", func(s *scenario) {
 			s.outSpec.streams = []map[string]any{vid("hevc", 640, 360, "yuv420p"), aud("aac", "eng", 2), att("font.ttf")}
-		}, "subtitle"},
+		}, "subtitle", "check_differs"},
 		{"attachment missing", func(s *scenario) {
 			s.outSpec.streams = []map[string]any{vid("hevc", 640, 360, "yuv420p"), aud("aac", "eng", 2), sub("subrip", "eng", false)}
-		}, "attachment"},
+		}, "attachment", "check_differs"},
 		{"extra stream", func(s *scenario) {
 			s.outSpec.streams = append(goodOutput().streams, aud("aac", "eng", 2))
-		}, "audio"},
+		}, "audio", "check_differs"},
 		{"resolution changed", func(s *scenario) {
 			s.outSpec.streams[0] = vid("hevc", 320, 180, "yuv420p")
-		}, "picture size"},
+		}, "picture size", "check_differs"},
 		{"colour depth lost", func(s *scenario) {
 			s.srcSpec.streams[0] = vid("h264", 640, 360, "yuv420p10le")
 			s.outSpec.streams[0] = vid("hevc", 640, 360, "yuv420p")
-		}, "colour depth"},
-		{"video not hevc", func(s *scenario) { s.outSpec.streams[0] = vid("h264", 640, 360, "yuv420p") }, "format"},
+		}, "colour depth", "check_differs"},
+		{"video not hevc", func(s *scenario) { s.outSpec.streams[0] = vid("h264", 640, 360, "yuv420p") }, "format", "check_differs"},
 		{"HDR lost (S3)", func(s *scenario) {
 			s.srcSpec.streams[0] = hdrVid("h264", true)
 			s.outSpec.streams[0] = vid("hevc", 640, 360, "yuv420p10le")
-		}, "lost its HDR"},
+		}, "lost its HDR", "check_differs"},
 		{"HDR mastering display lost (S3)", func(s *scenario) {
 			s.srcSpec.streams[0] = hdrVid("h264", true)
 			s.outSpec.streams[0] = hdrVid("hevc", false)
-		}, "mastering display"},
-		{"audio language changed", func(s *scenario) { s.outSpec.streams[1] = aud("aac", "und", 2) }, "language"},
-		{"audio channels changed", func(s *scenario) { s.outSpec.streams[1] = aud("aac", "eng", 1) }, "channel"},
-		{"subtitle turned into another kind", func(s *scenario) { s.outSpec.streams[2] = sub("hdmv_pgs_subtitle", "eng", false) }, "kind"},
+		}, "mastering display", "check_differs"},
+		{"audio language changed", func(s *scenario) { s.outSpec.streams[1] = aud("aac", "und", 2) }, "language", "check_differs"},
+		{"audio channels changed", func(s *scenario) { s.outSpec.streams[1] = aud("aac", "eng", 1) }, "channel", "check_differs"},
+		{"subtitle turned into another kind", func(s *scenario) { s.outSpec.streams[2] = sub("hdmv_pgs_subtitle", "eng", false) }, "kind", "check_differs"},
 		{"forced flag lost", func(s *scenario) {
 			s.srcSpec.streams[2] = sub("subrip", "eng", true)
-		}, "forced"},
-		{"chapters lost", func(s *scenario) { s.outSpec.chapters = 0 }, "chapters"},
-		{"zero-byte output", func(s *scenario) { s.content = "" }, "empty"},
-		{"new file unreadable", func(s *scenario) { s.outProbeRaw = "this is not json" }, "cannot be read"},
+		}, "forced", "check_differs"},
+		{"chapters lost", func(s *scenario) { s.outSpec.chapters = 0 }, "chapters", "check_differs"},
+		{"zero-byte output", func(s *scenario) { s.content = "" }, "empty", "output_damaged"},
+		{"new file unreadable", func(s *scenario) { s.outProbeRaw = "this is not json" }, "cannot be read", "output_damaged"},
 		{"decode errors", func(s *scenario) {
 			s.decodeStderr = "[hevc @ 0x1] Invalid NAL unit size\nError while decoding stream #0:0"
-		}, "does not play cleanly"},
-		{"decode exits non-zero", func(s *scenario) { s.decodeErr = errors.New("exit status 69") }, "does not play cleanly"},
+		}, "does not play cleanly", "output_damaged"},
+		{"decode exits non-zero", func(s *scenario) { s.decodeErr = errors.New("exit status 69") }, "does not play cleanly", "output_damaged"},
 		{"picture too different", func(s *scenario) {
 			s.ssimStderr = "[Parsed_ssim_0] SSIM Y:0.50 U:0.50 V:0.50 All:0.500000 (3.0)"
-		}, "too different"},
-		{"ssim filter missing", func(s *scenario) { s.hasSSIM = false }, "cannot compare picture quality"},
-		{"ssim gives no result", func(s *scenario) { s.ssimStderr = "nothing useful" }, "gave no result"},
-		{"ssim run fails", func(s *scenario) { s.ssimErr = errors.New("exit status 1") }, "picture comparison at"},
-		{"not enough disk space", func(s *scenario) { s.freeBytes = 1 << 20 }, "not enough free disk space"},
-		{"cannot check disk space", func(s *scenario) { s.freeErr = errors.New("no such device") }, "free disk space"},
-		{"source cannot be read", func(s *scenario) { s.srcProbeFails = true }, "can't be read any more"},
+		}, "too different", "kept_original"},
+		{"ssim filter missing", func(s *scenario) { s.hasSSIM = false }, "cannot compare picture quality", "check_not_run"},
+		{"ssim gives no result", func(s *scenario) { s.ssimStderr = "nothing useful" }, "gave no result", "check_not_run"},
+		{"ssim run fails", func(s *scenario) { s.ssimErr = errors.New("exit status 1") }, "picture comparison at", "check_not_run"},
+		{"not enough disk space", func(s *scenario) { s.freeBytes = 1 << 20 }, "not enough free disk space", "low_disk_space"},
+		{"cannot check disk space", func(s *scenario) { s.freeErr = errors.New("no such device") }, "free disk space", "check_not_run"},
+		{"source cannot be read", func(s *scenario) { s.srcProbeFails = true }, "can't be read any more", "source_missing"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			s := newScenario(t)
 			c.mutate(s)
 			s.run(Replace)
-			s.assertKept(c.reason)
+			s.assertKept(c.reason, c.code)
 			assertPlain(t, s.job().Error)
 		})
 	}
@@ -585,7 +590,7 @@ func TestPreflightRunsBeforeAnyEncoding(t *testing.T) {
 	s := newScenario(t)
 	s.freeBytes = 1 << 20
 	s.run(Replace)
-	s.assertKept("not enough free disk space")
+	s.assertKept("not enough free disk space", "low_disk_space")
 	if s.count("libx265") != 0 {
 		t.Error("ffmpeg must not even start when the disk is too full")
 	}
@@ -595,7 +600,7 @@ func TestCheapChecksRunBeforeExpensiveOnes(t *testing.T) {
 	s := newScenario(t)
 	s.outSpec.streams = goodOutput().streams[:2] // subtitle and attachment missing
 	s.run(Replace)
-	s.assertKept("subtitle")
+	s.assertKept("subtitle", "check_differs")
 	if s.count("-xerror") != 0 || s.count("-lavfi") != 0 {
 		t.Error("the playback test and picture comparison are only for files that already look right")
 	}
@@ -676,11 +681,17 @@ func TestNoJob(t *testing.T) {
 type recQueue struct {
 	Queue
 	progress []float64
+	runs     []int64 // RecordRunRevision's job ids, in order (foundation slice 9)
 }
 
 func (r *recQueue) Progress(id int64, p float64) error {
 	r.progress = append(r.progress, p)
 	return r.Queue.Progress(id, p)
+}
+
+func (r *recQueue) RecordRunRevision(id, revID int64, tmpl rules.Template) error {
+	r.runs = append(r.runs, id)
+	return r.Queue.RecordRunRevision(id, revID, tmpl)
 }
 
 func TestProgressReported(t *testing.T) {
@@ -691,6 +702,21 @@ func TestProgressReported(t *testing.T) {
 	w.RunOne(context.Background())
 	if len(rq.progress) != 1 || rq.progress[0] != 50 {
 		t.Errorf("want [50] (50s of 100s), got %v", rq.progress)
+	}
+}
+
+// A job's workflow revision is recorded when the worker reads the workflow, before it converts (foundation
+// slice 9). The job here has no workflow (a legacy template), so nothing is stored, but the call is made once.
+func TestTheRunRevisionIsRecordedBeforeConverting(t *testing.T) {
+	s := newScenario(t)
+	w := s.worker(Replace)
+	rq := &recQueue{Queue: s.store}
+	w.Queue = rq
+	if _, err := w.RunOne(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(rq.runs) != 1 || rq.runs[0] != s.id {
+		t.Errorf("recorded for %v, want [%d]", rq.runs, s.id)
 	}
 }
 
@@ -766,7 +792,7 @@ func TestSSIMThresholdIsConfigurable(t *testing.T) {
 	s2 := newScenario(t)
 	s2.ssimStderr = "SSIM Y:0.9 U:0.9 V:0.9 All:0.900000 (10.0)"
 	s2.run(Replace) // default threshold 0.95
-	s2.assertKept("too different")
+	s2.assertKept("too different", "kept_original")
 }
 
 func TestSSIMWorstSegmentDecides(t *testing.T) {
@@ -787,7 +813,7 @@ func TestSSIMWorstSegmentDecides(t *testing.T) {
 		return inner(name, args)
 	}
 	s.run(Replace)
-	s.assertKept("0.700")
+	s.assertKept("0.700", "kept_original")
 	if n != 5 { // two good samples, then the bad one tried at three alignments
 		t.Errorf("expected 2 + 3 comparisons, got %d", n)
 	}
@@ -887,7 +913,7 @@ func TestSSIMGenuinelyBadStaysBadAtEveryAlignment(t *testing.T) {
 	s := newScenario(t)
 	s.ssimStderr = "SSIM Y:1 U:1 V:1 All:0.700000 (5.0)"
 	s.run(Replace)
-	s.assertKept("too different")
+	s.assertKept("too different", "kept_original")
 	if s.count("-lavfi") != 3 {
 		t.Errorf("the first sample is tried at 3 alignments and the file refused right there, was %d runs", s.count("-lavfi"))
 	}
@@ -905,7 +931,7 @@ func TestOriginalWithFileDamageIsNotConverted(t *testing.T) {
 		s := newScenario(t)
 		s.encodeStderr = stderr
 		s.run(Replace)
-		s.assertKept("the original file has errors")
+		s.assertKept("the original file has errors", "source_damaged")
 		if s.count("-xerror") != 0 {
 			t.Error("no point verifying a conversion of a damaged original")
 		}
@@ -961,19 +987,20 @@ func TestAHungCheckKeepsTheOriginalInsteadOfFreezingTheWorker(t *testing.T) {
 		name string
 		hang func(name string, args []string) bool
 		want string
+		code string // the stored reason code: each of these is a check that could not run
 	}{
 		{"probe of the new file", func(n string, a []string) bool {
 			return n == "ffprobe" && !strings.Contains(strings.Join(a, " "), "movie.mkv ") && strings.Contains(a[len(a)-1], ".syp-tmp") && !strings.Contains(strings.Join(a, " "), "count_packets")
-		}, "reading the new file took too long"},
+		}, "reading the new file took too long", "check_not_run"},
 		{"frame count of the new file", func(n string, a []string) bool {
 			return n == "ffprobe" && strings.Contains(strings.Join(a, " "), "count_packets") && strings.Contains(a[len(a)-1], ".syp-tmp")
-		}, "counting the new file's video frames took too long"},
+		}, "counting the new file's video frames took too long", "check_not_run"},
 		{"playback test", func(n string, a []string) bool {
 			return n == "ffmpeg" && strings.Contains(strings.Join(a, " "), "-xerror")
-		}, "playback test of the new file took too long"},
+		}, "playback test of the new file took too long", "check_not_run"},
 		{"picture comparison", func(n string, a []string) bool {
 			return n == "ffmpeg" && strings.Contains(strings.Join(a, " "), "-lavfi")
-		}, "picture comparison at 0:00:00 took too long"},
+		}, "picture comparison at 0:00:00 took too long", "check_not_run"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -985,7 +1012,7 @@ func TestAHungCheckKeepsTheOriginalInsteadOfFreezingTheWorker(t *testing.T) {
 			s.hang = c.hang
 			start := time.Now()
 			s.run(Replace)
-			s.assertKept(c.want)
+			s.assertKept(c.want, c.code)
 			if time.Since(start) > 10*time.Second {
 				t.Error("the worker took far too long to give up")
 			}
@@ -1115,7 +1142,7 @@ func TestWorkerRefusesLinksAndSharedFiles(t *testing.T) {
 			t.Skip(err)
 		}
 		s.run(Replace)
-		s.assertKept("shared with another folder")
+		s.assertKept("shared with another folder", "kept_original")
 		if n := s.count("libx265"); n != 0 {
 			t.Errorf("%d encodes", n)
 		}
@@ -1253,7 +1280,7 @@ func TestABiggerResultIsKept(t *testing.T) {
 	bad.content = "this output is much longer than the original bytes"
 	bad.ssimStderr = "[Parsed_ssim_0] SSIM Y:0.50 U:0.50 V:0.50 All:0.500000 (3.0)"
 	bad.run(Replace)
-	bad.assertKept("too different")
+	bad.assertKept("too different", "kept_original")
 }
 
 // Basic repackages an HEVC file it would only change around the picture (S4): the video is copied (no
@@ -1265,7 +1292,7 @@ func TestBasicRepackagesHEVC(t *testing.T) {
 	s.outSpec.streams = []map[string]any{vid("hevc", 640, 360, "yuv420p"), aud("aac", "eng", 2), sub("subrip", "eng", false), att("font.ttf")}
 	w := s.worker(Replace)
 	tmpl := rules.BasicTemplate(3, "")
-	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 	w.RunOne(context.Background())
 	if j := s.job(); j.Status != jobs.Done {
 		t.Fatalf("%s %q", j.Status, j.Error)
@@ -1323,7 +1350,7 @@ func TestQueuedDolbyVisionIsSkippedNotEncoded(t *testing.T) {
 			if plan := tmpl.Compile(must(media.ParseProbe([]byte(s.srcSpec.json())))); c.codec == "av1" && plan.SkipCode != rules.SkipModernFormat || c.legacy && plan.SkipCode == c.code {
 				t.Fatalf("the case does not take the path it is about: %q", plan.SkipCode)
 			}
-			w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+			w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 			w.RunOne(context.Background())
 			if s.count("libx265") != 0 {
 				t.Fatalf("encoded:\n%s", strings.Join(s.calls, "\n"))
@@ -1405,7 +1432,7 @@ func TestQueuedHDRToH264IsSkipped(t *testing.T) {
 	sel := rules.DefaultSelectors(3)
 	sel.Format = "h264"
 	tmpl := sel.Template()
-	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 	w.RunOne(context.Background())
 	if s.count("libx264") != 0 {
 		t.Fatalf("encoded:\n%s", strings.Join(s.calls, "\n"))
@@ -1432,7 +1459,7 @@ func TestSkippedPlanLogsNoActionNotes(t *testing.T) {
 	if p := tmpl.Compile(must(media.ParseProbe([]byte(s.srcSpec.json())))); !p.AudioFolded || p.Skip == "" {
 		t.Fatalf("the case does not take the path it is about: folded %v, skip %q", p.AudioFolded, p.Skip)
 	}
-	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 	w.RunOne(context.Background())
 	if s.count("libx265") != 0 {
 		t.Fatalf("encoded:\n%s", strings.Join(s.calls, "\n"))
@@ -1457,7 +1484,7 @@ func TestStyledSubtitlesNote(t *testing.T) {
 	sel := rules.DefaultSelectors(3)
 	sel.FileType, sel.AfterConverting = "mp4", "beside"
 	tmpl := sel.Template()
-	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 	w.RunOne(context.Background())
 	text := logTextOf(s.store, s.id)
 	if strings.Count(text, rules.StyledSubsNote) != 1 {

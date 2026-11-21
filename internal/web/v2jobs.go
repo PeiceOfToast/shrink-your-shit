@@ -162,6 +162,11 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 		}
 	})
 
+	// jobWorkflowView is a job detail's workflow object: the workflow's id, and the revision's id and number.
+	jobWorkflowView := func(rev jobs.Revision) map[string]any {
+		return map[string]any{"id": strconv.FormatInt(rev.WorkflowID, 10), "revisionId": strconv.FormatInt(rev.ID, 10), "version": rev.Number}
+	}
+
 	api.HandleFunc("GET /api/v2/jobs/{id}", func(w http.ResponseWriter, r *http.Request) {
 		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 		if err != nil || id <= 0 {
@@ -263,21 +268,28 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 		d["convertAgain"] = convertAgainOf(store, id, keepDays())
 		if lib, err := store.GetLibrary(j.LibraryID); err == nil {
 			d["library"] = map[string]any{"id": strconv.FormatInt(lib.ID, 10), "name": lib.Name}
-			// the revision it runs with: a waiting job (never started, or back to retry) runs the newest published
-			// at its next start; one that started ran the one published then (lead 22:23Z, 22:41Z)
-			var at string
-			for _, e := range events {
-				if e.To == string(jobs.Running) {
-					at = e.At
-				}
-			}
-			if j.Status == jobs.Queued {
+			// the revision it ran with (foundation slice 9): the one the worker recorded when it read the
+			// workflow. A queued job runs the newest published at its next start, even one waiting to retry
+			// whose last run is in its history: its next start records the newest too (review-593 finding 1).
+			started := j.Status != jobs.Queued
+			if !started {
 				if _, err := store.EnsureRevision(lib.FlowID); err == nil { // an old Save's template counts too
-					at = time.Now().UTC().Format(time.RFC3339)
+					if rev, ok, err := store.RevisionAt(lib.FlowID, time.Now().UTC().Format(time.RFC3339)); err == nil && ok {
+						d["workflow"] = jobWorkflowView(rev)
+					}
 				}
-			}
-			if rev, ok, err := store.RevisionAt(lib.FlowID, at); err == nil && ok {
-				d["workflow"] = map[string]any{"id": strconv.FormatInt(lib.FlowID, 10), "revisionId": strconv.FormatInt(rev.ID, 10), "version": rev.Number}
+			} else if ran, queued, err := store.JobRevisions(id); err == nil {
+				if rev, err := store.RevisionByIDAnyFlow(ran); err == nil {
+					wf := jobWorkflowView(rev)
+					// the workflow changed between queueing this job and starting it: the UI says so in
+					// design's words "Workflow changed after this job was queued (rev X → Y)"
+					if queued > 0 && queued != ran {
+						if q, err := store.RevisionByIDAnyFlow(queued); err == nil && q.Number != nil {
+							wf["queuedVersion"] = *q.Number
+						}
+					}
+					d["workflow"] = wf
+				}
 			}
 		}
 		writeJSON(w, d)
@@ -364,24 +376,28 @@ func v2JobItem(store *jobs.Store, it map[string]any, row jobs.FileRow, card stri
 	}
 	// reason: {code, message} | null, as every v2 reason (v1's item keeps the skip code as a string):
 	// a skip's code and words, or a failure's, kept original's or retry's (ui-shop 23:27Z)
+	status := jobs.Status(row.Status)
 	switch {
 	case card == jobs.CardSkipped:
 		it["reason"] = map[string]string{"code": row.Reason, "message": it["detail"].(string)}
 	case row.ErrorCode != "" && (card == jobs.CardFailed || card == jobs.CardUnprocessed && row.RetryAt != ""):
-		msg := row.Error // a retry keeps its own words; a failure gets design's sentence (11-13 E)
-		if card == jobs.CardFailed {
+		code, msg := failureCode(store, row.JobID, row.ErrorCode), row.Error // a retry keeps its own words
+		switch status {
+		case jobs.Failed: // design's code and sentence, as the detail shows a failed job (11-13 E)
 			msg = failureMessage(store, row.JobID, row.ErrorCode, row.Path, row.OutputPath, row.Error)
+		case jobs.Kept: // a kept job reads as its detail does: the stored code and words
+			code = row.ErrorCode
 		}
-		it["reason"] = map[string]string{"code": failureCode(store, row.JobID, row.ErrorCode), "message": msg}
+		it["reason"] = map[string]string{"code": code, "message": msg}
 	default:
 		it["reason"] = nil
 	}
 	// user review 11-13 item E: why a failed job failed, and whether its log is in the database
-	it["failure"], it["logState"] = nil, logState(store, row.JobID, jobs.Status(row.Status), row.ErrorCode)
+	it["failure"], it["logState"] = nil, logState(store, row.JobID, status, row.ErrorCode)
 	if jobs.Status(row.Status) == jobs.Kept { // the new file was refused and the original stayed: "Original kept"
 		it["newFileRefused"] = true
 	}
-	if card == jobs.CardFailed {
+	if card == jobs.CardFailed && status == jobs.Failed { // the failure panel is for a failed job, as the detail's is
 		it["failure"] = failureView(store, row.JobID, row.ErrorCode, row.Path, row.OutputPath, row.Error)
 	}
 	switch card {

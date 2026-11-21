@@ -541,8 +541,11 @@ func (s *Store) libraryChanged(id int64, removed bool) {
 }
 
 // TemplateFor returns the template of the job's library's flow, which the worker compiles into the
-// job's Plan. A job made before libraries were records is matched to its library by folder.
-func (s *Store) TemplateFor(j Job) (rules.Template, error) {
+// job's Plan, and the published revision that template came from (0 when there is none to name), so the
+// worker records the one it really read rather than reading the newest again after a publish could have
+// replaced it (review-593 finding 2). A job made before libraries were records is matched to its library
+// by folder.
+func (s *Store) TemplateFor(j Job) (rules.Template, int64, error) {
 	var flowID int64
 	var libVars string
 	var err error
@@ -552,20 +555,20 @@ func (s *Store) TemplateFor(j Job) (rules.Template, error) {
 		err = s.db.QueryRow(`SELECT COALESCE(flow_id,0), variables FROM libraries WHERE path=?`, canonical(j.Library)).Scan(&flowID, &libVars)
 	}
 	if errors.Is(err, sql.ErrNoRows) {
-		return rules.Template{}, fmt.Errorf("its library no longer exists: %w", ErrLibraryGone)
+		return rules.Template{}, 0, fmt.Errorf("its library no longer exists: %w", ErrLibraryGone)
 	}
 	if err != nil {
-		return rules.Template{}, err
+		return rules.Template{}, 0, err
 	}
 	var overrides []workflow.Variable
 	if libVars != "" {
 		if err := json.Unmarshal([]byte(libVars), &overrides); err != nil {
-			return rules.Template{}, fmt.Errorf("the library's variables can't be read: %w", err)
+			return rules.Template{}, 0, fmt.Errorf("the library's variables can't be read: %w", err)
 		}
 	}
 	f, err := s.GetFlow(flowID)
 	if err != nil {
-		return rules.Template{}, err
+		return rules.Template{}, 0, err
 	}
 	// W1: a workflow whose typed settings name a variable is compiled from its resolved doc, so the plan
 	// the job runs is the one the variable's value makes (the stored template already is, at publish; this
@@ -577,18 +580,24 @@ func (s *Store) TemplateFor(j Job) (rules.Template, error) {
 		// source.* stay references until the worker has the file.
 		g, gerr := s.GlobalVariables()
 		if gerr != nil {
-			return rules.Template{}, gerr
+			return rules.Template{}, 0, gerr
 		}
 		sc := workflow.Scopes{Library: workflow.VariableMap(overrides), Global: workflow.VariableMap(g), LeaveFile: true}
 		t, issues := workflow.ToTemplateWith(rev.Doc, f.Template, sc)
 		if len(issues) == 0 {
-			return s.WithHandoffs(t), nil
+			// the revision whose document these settings were compiled from: a template re-resolved from
+			// the globals matches no stored revision, so only this can name it (review-593 finding 2)
+			return s.WithHandoffs(t), rev.ID, nil
 		}
 		// #561 review ask 3: the stored template was compiled with the older values, so running it would
 		// convert with values the person has changed. Stop the job and say which variable and workflow.
-		return rules.Template{}, &SettingsUnresolvedError{Workflow: f.Name, Issues: issues}
+		return rules.Template{}, 0, &SettingsUnresolvedError{Workflow: f.Name, Issues: issues}
 	}
-	return s.WithHandoffs(f.Template), nil // FB4b: a path that hands the file to another workflow runs that workflow's paths
+	// FB4b: a path that hands the file to another workflow runs that workflow's paths. The revision is
+	// the one whose published template is the flow's (0: a Save since the last revision; recording its
+	// run makes that revision). A failed lookup names none: the run's record is not worth failing over.
+	revID, _ := s.revisionWithTemplate(flowID, f.Template)
+	return s.WithHandoffs(f.Template), revID, nil
 }
 
 // SettingsUnresolvedError says a published workflow's settings no longer resolve with the server's

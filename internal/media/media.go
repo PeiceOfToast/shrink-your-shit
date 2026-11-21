@@ -284,7 +284,8 @@ type Info struct {
 // 6 (R5): the headline codec and bitrate are the main picture's, not a cover image's.
 // 7 (R3): every stream's own duration (audio too), which the A/V length check reads; cached probes lack audio durations.
 // 8 (slice 13): VFR is marked when the average and nominal rates differ by more than 1% (3% before).
-const ProbeVersion = 8
+// 9 (SAR): the sample aspect ratio is read, so a square source's scaled picture is set to 1:1 (cached probes lack it).
+const ProbeVersion = 9
 
 // Probe runs ffprobe on path. For a video that may carry HDR or Dolby Vision (HEVC, AV1, or PQ/HLG) it
 // also reads the main video's first frame: in TS files and raw streams, the Dolby Vision RPU, the

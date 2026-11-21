@@ -30,6 +30,9 @@ import (
 // State is one run's state as the cards see it.
 type State struct {
 	Vars map[string]string // the built-ins, the workflow's own variables, and what cards set (vars.Resolve's values)
+	// Result is the measured result for a "Compare the result" question (FB4b): the sizes and running times
+	// the worker read. A size left 0 is read from the values (size_bytes, new_size_bytes) instead.
+	Result rules.Result
 	// After the save (FB2a): the new file in place, the original's path, and the library's root folder (a
 	// copy keeps the file's sub-folders under it).
 	Final       string
@@ -111,7 +114,7 @@ func After(cards []rules.Card, st *State, env Env) (notes []Note, warnings []str
 	}
 	for _, c := range cards {
 		if c.Check != nil { // FB4b: a question after the save: its answer, then the cards on that port
-			yes, why := c.Check.AskResult(sizeVar(st, "size_bytes"), sizeVar(st, "new_size_bytes"))
+			yes, why := c.Check.AskResult(st.result())
 			notes = append(notes, Note{NodeID: c.NodeID, Name: nameOf(c), Words: map[bool]string{true: "Yes", false: "No"}[yes] + " (" + why + ")"})
 			next := c.No
 			if yes {
@@ -129,6 +132,54 @@ func After(cards []rules.Card, st *State, env Env) (notes []Note, warnings []str
 		notes = append(notes, n)
 	}
 	return notes, warnings
+}
+
+// Verdict is what the questions between the check and the save decided (FB4b-3): the path goes on to the
+// save, the job fails with Words ("Stop as failed"), or the original is kept (neither: "Leave the file
+// alone", or a port with nothing on it). NodeID and Name are the card that decided, "" when nothing was
+// linked.
+type Verdict struct {
+	Save, Fail   bool
+	NodeID, Name string
+	Words        string // the end's reason, as the workflow has it
+}
+
+// BeforeSave asks the path's questions about the checked result (st.Result), before anything is saved: a
+// Check card's answer, then the cards on that port, down to a leaf (the save, an end, or nothing). Each
+// answer is a note for the timeline.
+func BeforeSave(cards []rules.Card, st *State) (v Verdict, notes []Note) {
+	for _, c := range cards {
+		switch {
+		case c.Check != nil:
+			yes, why := c.Check.AskResult(st.result())
+			notes = append(notes, Note{NodeID: c.NodeID, Name: nameOf(c), Words: map[bool]string{true: "Yes", false: "No"}[yes] + " (" + why + ")"})
+			next := c.No
+			if yes {
+				next = c.Yes
+			}
+			v, ns := BeforeSave(next, st)
+			return v, append(notes, ns...)
+		case c.Type == workflow.TypeCommit:
+			return Verdict{Save: true, NodeID: c.NodeID, Name: nameOf(c)}, notes
+		case c.Type == workflow.TypeFail || c.Type == workflow.TypeEnd:
+			reason, _ := c.Config["reason"].(string)
+			return Verdict{Fail: c.Type == workflow.TypeFail, NodeID: c.NodeID, Name: nameOf(c), Words: reason}, notes
+		}
+	}
+	return Verdict{}, notes // nothing led on to the save: the original is kept
+}
+
+// result is what a "Compare the result" question is asked about: the worker's measured result, with a size
+// it left 0 read from the values (vars.EndValues writes them as plain digits).
+func (st *State) result() rules.Result {
+	r := st.Result
+	if r.SizeBefore == 0 {
+		r.SizeBefore = sizeVar(st, "size_bytes")
+	}
+	if r.SizeAfter == 0 {
+		r.SizeAfter = sizeVar(st, "new_size_bytes")
+	}
+	return r
 }
 
 // sizeVar reads a size in bytes from the run's values (vars.EndValues writes them as plain digits); 0 when

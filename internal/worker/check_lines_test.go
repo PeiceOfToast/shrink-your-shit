@@ -17,7 +17,7 @@ func TestCheckStartAndEndLinesAreInOrder(t *testing.T) {
 	s := newScenario(t)
 	s.ssimStderr = "[Parsed_ssim_0] SSIM Y:0.99 U:0.99 V:0.99 All:0.990000 (20.0)"
 	w := s.worker(Replace)
-	w.Template = func(jobs.Job) (rules.Template, error) { return rules.SliderTemplate(3), nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return rules.SliderTemplate(3), 0, nil }
 	w.RunOne(context.Background())
 	lines, _ := s.store.LogLines(s.id)
 	want := []string{"Playing the new file to check it (about ", "Played in ",
@@ -45,7 +45,7 @@ func TestCheckFailureLineSaysStoppedNotPlayedIn(t *testing.T) {
 	s.decodeStdout = "out_time_us=3000000\nframe=72\nprogress=continue\n"
 	s.decodeStderr = "Error while decoding stream #0:0"
 	w := s.worker(Replace)
-	w.Template = func(jobs.Job) (rules.Template, error) { return rules.SliderTemplate(3), nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return rules.SliderTemplate(3), 0, nil }
 	w.RunOne(context.Background())
 	lines, _ := s.store.LogLines(s.id)
 	var stopped, playedIn int

@@ -231,7 +231,7 @@ func TestTempSwappedDuringEncodingIsNotUsed(t *testing.T) {
 	s := newScenario(t)
 	s.onEncode = func() { swapTemp(t, s, "unchecked") }
 	s.run(Replace)
-	s.assertKept("replaced by another file")
+	s.assertKept("replaced by another file", "kept_original")
 	if s.count("-lavfi") != 0 {
 		t.Error("checks ran on a file that is not ours")
 	}
@@ -242,7 +242,7 @@ func TestTempSwappedAfterTheChecksIsNotUsed(t *testing.T) {
 		s := newScenario(t)
 		s.afterChecks = func() { swapTemp(t, s, "unchecked") }
 		s.run(mode)
-		s.assertKept("replaced by another file")
+		s.assertKept("replaced by another file", "kept_original")
 	}
 }
 

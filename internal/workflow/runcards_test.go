@@ -875,3 +875,128 @@ func TestHasFileRefsAgreesWithTheResolver(t *testing.T) {
 		}
 	}
 }
+
+// FB4b-3: "Compare the result" between 'Check the result' and 'Save the result' compiles into the path's
+// before-save tree: the question, the save on its Yes, "Leave the file alone" on its No; a second question
+// nests; a port with nothing on it keeps the original; a question turned off is passed over. Anything else
+// there, a second save, or the question before the conversion, is refused with its own words.
+func TestCompareTheResultBeforeTheSave(t *testing.T) {
+	d, by := runDoc()
+	var verify, save Node
+	for _, n := range d.Nodes {
+		switch n.Type {
+		case TypeVerify:
+			verify = n
+		case TypeCommit:
+			save = n
+		}
+	}
+	// the chain's verify → save link is replaced by verify → compare → (yes) save, (no) leave
+	var edges []Edge
+	for _, e := range d.Edges {
+		if !(e.From == verify.ID && e.To == save.ID) {
+			edges = append(edges, e)
+		}
+	}
+	cmp := node(TypeCheckResult, "Worth it?", map[string]any{"test": "saved_at_least", "percent": float64(30)})
+	leave := node(TypeEnd, "", map[string]any{"reason": "Not worth it."})
+	d.Nodes = append(d.Nodes, cmp, leave)
+	d.Edges = append(edges, link(verify.ID, "success", cmp.ID), link(cmp.ID, "match", save.ID), link(cmp.ID, "else", leave.ID))
+	r := Validate(d)
+	if r.Errors() {
+		t.Fatalf("%+v", r.Issues)
+	}
+	if r.StepSummaries[cmp.ID] != "Only if at least 30% was saved" {
+		t.Errorf("summary %q", r.StepSummaries[cmp.ID])
+	}
+	tm, issues := ToTemplate(d, rules.Template{})
+	if len(issues) > 0 {
+		t.Fatalf("%v", issues)
+	}
+	yes := (*tm.Branches)[0]
+	if len(yes.BeforeSave) != 1 || yes.BeforeSave[0].Check == nil || yes.BeforeSave[0].Check.Test != "saved_at_least" || yes.BeforeSave[0].Check.Percent != 30 || yes.BeforeSave[0].Name != "Worth it?" {
+		t.Fatalf("the before-save question: %+v", yes.BeforeSave)
+	}
+	q := yes.BeforeSave[0]
+	if len(q.Yes) != 1 || q.Yes[0].Type != TypeCommit || q.Yes[0].NodeID != save.ID || len(q.No) != 1 || q.No[0].Type != TypeEnd || q.No[0].Config["reason"] != "Not worth it." {
+		t.Errorf("its leaves: yes %+v no %+v", q.Yes, q.No)
+	}
+	if i, j := slices.Index(yes.Path, cmp.ID), slices.Index(yes.Path, save.ID); i < 0 || j < 0 || i > j || !slices.Contains(yes.Path, leave.ID) {
+		t.Errorf("path %v: the question sits before the save", yes.Path)
+	}
+	if yes.Then == nil || len(yes.After) != 0 {
+		t.Errorf("the conversion compiles as before, with nothing after the save: %+v", yes)
+	}
+	// a running-time question nested on the No, with nothing on its own No: the original is kept there
+	again := node(TypeCheckResult, "", map[string]any{"test": "runtime_within", "seconds": 0.5})
+	d.Nodes = append(d.Nodes, again)
+	d.Edges = append(d.Edges[:len(d.Edges)-1], link(cmp.ID, "else", again.ID), link(again.ID, "match", save.ID))
+	r = Validate(d)
+	if r.Errors() {
+		t.Fatalf("nested: %+v", r.Issues)
+	}
+	if r.StepSummaries[again.ID] != "Only if the running time is within 0.5 seconds of the original's" {
+		t.Errorf("summary %q", r.StepSummaries[again.ID])
+	}
+	tm, _ = ToTemplate(d, rules.Template{})
+	q = (*tm.Branches)[0].BeforeSave[0]
+	if len(q.No) != 1 || q.No[0].Check == nil || q.No[0].Check.Test != "runtime_within" || q.No[0].Check.Seconds != 0.5 || len(q.No[0].Yes) != 1 || q.No[0].Yes[0].Type != TypeCommit || len(q.No[0].No) != 0 {
+		t.Errorf("nested: %+v", q.No)
+	}
+	// the first question turned off: the nested one is what remains
+	cmp.Enabled = false
+	d.Nodes[len(d.Nodes)-3] = cmp
+	if tm2, _ := ToTemplate(d, rules.Template{}); len((*tm2.Branches)[0].BeforeSave) != 1 || (*tm2.Branches)[0].BeforeSave[0].Check == nil || (*tm2.Branches)[0].BeforeSave[0].Check.Test != "saved_at_least" {
+		// off: its Yes goes on, which is the save itself
+		if bs := (*tm2.Branches)[0].BeforeSave; len(bs) != 1 || bs[0].Type != TypeCommit {
+			t.Errorf("off: %+v", bs)
+		}
+	}
+	cmp.Enabled = true
+	d.Nodes[len(d.Nodes)-3] = cmp
+	// the running-time test needs its seconds
+	again.Config = map[string]any{"test": "runtime_within"}
+	d.Nodes[len(d.Nodes)-1] = again
+	if !hasIssue(Validate(d).Issues, "invalid_config", again.ID) {
+		t.Error("a running-time test without its seconds is refused")
+	}
+	again.Config = map[string]any{"test": "runtime_within", "seconds": 0.5}
+	d.Nodes[len(d.Nodes)-1] = again
+	// an action between the check and the save is refused, in validation and in the compile
+	tag := node(TypeTag, "", map[string]any{"add": "x"})
+	d2 := d
+	d2.Nodes = append(slices.Clone(d.Nodes), tag)
+	d2.Edges = append(slices.Clone(d.Edges), link(again.ID, "else", tag.ID))
+	if res := Validate(d2); !hasIssue(res.Issues, "wrong_phase", tag.ID) {
+		t.Errorf("a tag between the check and the save: %+v", res.Issues)
+	}
+	if _, is := ToTemplate(d2, rules.Template{}); !hasIssue(is, "wrong_phase", tag.ID) {
+		t.Errorf("the compile: %+v", is)
+	}
+	// two different saves are refused
+	save2 := node(TypeCommit, "", map[string]any{})
+	d3 := d
+	d3.Nodes = append(slices.Clone(d.Nodes), save2)
+	d3.Edges = append(slices.Clone(d.Edges), link(again.ID, "else", save2.ID))
+	if _, is := ToTemplate(d3, rules.Template{}); !hasIssue(is, "two_saves", save2.ID) {
+		t.Errorf("two saves: %+v", is)
+	}
+	// the question before the conversion says where it belongs
+	early := node(TypeCheckResult, "", map[string]any{"test": "bigger"})
+	d4 := d
+	d4.Nodes = append(slices.Clone(d.Nodes), early)
+	d4.Edges = append(slices.Clone(d.Edges), link(by["note"].ID, "success", early.ID))
+	found := ""
+	for _, i := range Validate(d4).Issues {
+		if i.NodeID == early.ID && i.Code == "wrong_phase" {
+			found = i.Message
+		}
+	}
+	if !strings.Contains(found, "belongs after the file is checked") {
+		t.Errorf("before the conversion: %q", found)
+	}
+	// the add menu still puts a new one after the save (moving it up is the steps view's way to the check phase)
+	if a := r.AddSteps[TypeCheckResult]; !a.Addable || a.After != save.ID {
+		t.Errorf("add: %+v", a)
+	}
+}

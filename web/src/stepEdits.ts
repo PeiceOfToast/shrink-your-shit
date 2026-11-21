@@ -105,6 +105,14 @@ export function insertAfterSave(d: WorkflowDoc, afterId: ID | undefined, node: N
 // A step whose kind sits only after the save (an after action, or a question about the result: FB4b).
 export const afterOnly = (def?: StepDefinition) => !!def?.phase && !def.phase.includes("before") && def.phase.includes("after");
 
+// A question about the result that sits between the check and the save (FB4b-3): its kind may sit in the check
+// phase, and on the main path it comes before 'Save the result'. There its No can keep the original.
+export function beforeSave(d: WorkflowDoc, n: Node, def?: StepDefinition): boolean {
+  if (!def?.phase?.includes("check")) return false;
+  const ids = order(d).map((x) => x.id), save = ids.findIndex((id) => d.nodes.find((x) => x.id === id)?.type === "output.commit"), at = ids.indexOf(n.id);
+  return save >= 0 && at >= 0 && at < save;
+}
+
 // Add a step after the given step (or after the input when none is named) and link it into the chain.
 // An add never lands after the save step: a missing or save step as the anchor puts the new step just before it.
 export function insertAfter(d: WorkflowDoc, afterId: ID | undefined, node: Node): WorkflowDoc {

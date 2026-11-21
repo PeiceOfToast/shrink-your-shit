@@ -5,6 +5,7 @@ package rules
 import (
 	"fmt"
 	"hash/fnv"
+	"math"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -153,10 +154,12 @@ type Question struct {
 	Libraries []string `json:"libraries,omitempty"`
 	// random: this share of files (percent) answers Yes, the same answer for the same file every time (FB4)
 	Share int `json:"share,omitempty"`
-	// result (FB4b, after the save): how the new file compares with the original. Test is saved_at_least |
-	// saved_less_than (Percent of the original's size) | bigger (the new file is larger than the original).
-	Test    string `json:"test,omitempty"`
-	Percent int    `json:"percent,omitempty"`
+	// result (FB4b): how the new file compares with the original, after the check (before the save) or after the
+	// save. Test is saved_at_least | saved_less_than (Percent of the original's size) | bigger (the new file is
+	// larger than the original) | runtime_within (the new file's running time is within Seconds of the original's).
+	Test    string  `json:"test,omitempty"`
+	Percent int     `json:"percent,omitempty"`
+	Seconds float64 `json:"seconds,omitempty"`
 	// tag: the file's record carries any / all / none of these tags (FB2c)
 	Tags  string `json:"tags,omitempty"`  // comma-separated, as typed
 	TagOp string `json:"tagOp,omitempty"` // any | all | none (default any)
@@ -302,14 +305,39 @@ func (q Question) Empty() bool {
 	case "random":
 		return q.Share <= 0
 	case "result":
-		return q.Test == "" || (q.Test != "bigger" && q.Percent <= 0)
+		switch q.Test {
+		case "":
+			return true
+		case "bigger":
+			return false
+		case "runtime_within":
+			return q.Seconds <= 0
+		}
+		return q.Percent <= 0
 	}
 	return false
 }
 
-// AskResult answers a "Compare the result" question (FB4b) from the original's and the new file's sizes,
-// in bytes, with the reason in words. Sizes that aren't known answer No and say so.
-func (q Question) AskResult(before, after int64) (bool, string) {
+// Result is what a "Compare the result" question is asked about (FB4b): the original's and the new file's
+// sizes in bytes and running times in seconds. A value that isn't known is 0, and a test that needs it
+// answers No and says so.
+type Result struct {
+	SizeBefore, SizeAfter         int64
+	DurationBefore, DurationAfter float64
+}
+
+// AskResult answers a "Compare the result" question (FB4b) from the measured result, with the reason in
+// words. A size or a running time that isn't known answers No and says so.
+func (q Question) AskResult(r Result) (bool, string) {
+	if q.Test == "runtime_within" {
+		if r.DurationBefore <= 0 || r.DurationAfter <= 0 {
+			return false, "the running times aren't known"
+		}
+		off := math.Abs(r.DurationAfter - r.DurationBefore)
+		return off <= q.Seconds, fmt.Sprintf("running time %s against the original's %s, %s off, asked for within %s",
+			Clock(r.DurationAfter), Clock(r.DurationBefore), seconds(off), seconds(q.Seconds))
+	}
+	before, after := r.SizeBefore, r.SizeAfter
 	if before <= 0 || after <= 0 {
 		return false, "the sizes aren't known"
 	}
@@ -327,6 +355,15 @@ func (q Question) AskResult(before, after int64) (bool, string) {
 		return after > before, savedWords
 	}
 	return false, "no comparison is chosen"
+}
+
+// seconds is a number of seconds in words, to a tenth: "1 second", "2.5 seconds", "14 seconds".
+func seconds(s float64) string {
+	n := strconv.FormatFloat(math.Round(s*10)/10, 'f', -1, 64)
+	if n == "1" {
+		return "1 second"
+	}
+	return n + " seconds"
 }
 
 // Card is a step carried to the run as it was saved (FB1b): a before- or after-action the run engine
@@ -373,6 +410,11 @@ type Branch struct {
 	// FB4: "Convert again later": the path puts the file back in the queue for AfterSec seconds, at most
 	// MaxTries times in all (then it fails with End's words).
 	Requeue *Requeue `json:"requeue,omitempty"`
+	// FB4b-3: the questions about the checked result, before the save ("Compare the result" after "Check the
+	// result"), as a tree of cards: a Check card with the cards on its Yes and its No, down to a leaf that is
+	// the save (a card of the Save the result step's type), "Leave the file alone" (the original is kept) or
+	// "Stop as failed". A port with nothing on it keeps the original too.
+	BeforeSave []Card `json:"beforeSave,omitempty"`
 	// FB2a: the actions on the saved result, in order; a failure leaves the job done, with a warning.
 	After []Card `json:"after,omitempty"`
 	// FB4b: "Hand to another workflow": the path ends by sending the file to workflow Goto (handoff.go), from
@@ -390,6 +432,10 @@ type Requeue struct {
 
 // SkipLeftByWorkflow is a file a workflow's "Leave the file alone" step ended (V6a).
 const SkipLeftByWorkflow = "left_by_workflow"
+
+// SkipResultNotWanted is a file whose workflow compared the new file with the original before the save and
+// kept the original (FB4b-3): the conversion was done and thrown away, like a bigger file the Save step keeps.
+const SkipResultNotWanted = "result_not_wanted"
 
 // route is the first branch the file's answers lead down, with the decisions on the way (false: none;
 // validation makes every answer lead somewhere, so only a broken Template gets there).

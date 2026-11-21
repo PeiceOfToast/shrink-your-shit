@@ -26,7 +26,7 @@ func srtScenario(t *testing.T) (*scenario, *Worker, string) {
 	sel.Subtitles = "srt"
 	tmpl := sel.Template()
 	w := s.worker(Replace)
-	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 	w.Sidecars = s.store
 	return s, w, filepath.Join(s.dir, "movie.eng.srt")
 }

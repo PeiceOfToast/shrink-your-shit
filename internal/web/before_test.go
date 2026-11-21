@@ -48,7 +48,7 @@ func TestJobBeforeIsTheOriginal(t *testing.T) {
 	sel.FileType = "keep" // replace at the same name: the reported case
 	tmpl := sel.Template()
 	w := &worker.Worker{ID: "t", Queue: st, Exec: media.OSExec{}, FFmpeg: "ffmpeg", FFprobe: "ffprobe", Rule: r, Mode: worker.Replace,
-		Template: func(jobs.Job) (rules.Template, error) { return tmpl, nil }, KeepDays: func() int { return 7 }, Journal: st}
+		Template: func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }, KeepDays: func() int { return 7 }, Journal: st}
 	if _, err := w.RunOne(context.Background()); err != nil {
 		t.Fatal(err)
 	}

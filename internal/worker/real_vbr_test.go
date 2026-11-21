@@ -63,7 +63,7 @@ func realEncode720(t *testing.T, src string, tmpl rules.Template) string {
 	os.WriteFile(in, b, 0o644)
 	st, id := realJob(t, in, 12)
 	w := realWorker(st, media.OSExec{})
-	w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 	if err := w.run(t); err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +162,7 @@ func TestRealVBREveryFormatOffered(t *testing.T) {
 			tmpl := sel.Template()
 			st, id := realJob(t, in, 3)
 			w := realWorker(st, media.OSExec{})
-			w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+			w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 			w.KeepDays, w.Journal = func() int { return 7 }, st // a WebM replaces an MKV: a new name, recorded
 			if err := w.run(t); err != nil {
 				t.Fatal(err)
@@ -204,7 +204,7 @@ func TestRealVP9QualityWithEachLevel(t *testing.T) {
 			tmpl := sel.Template()
 			st, id := realJob(t, in, 2)
 			w := realWorker(st, media.OSExec{})
-			w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+			w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 			w.KeepDays, w.Journal = func() int { return 7 }, st
 			if err := w.run(t); err != nil {
 				t.Fatal(err)

@@ -88,7 +88,7 @@ func TestHandToAnotherWorkflowRunsItsPaths(t *testing.T) {
 	if p := run.Template.Compile(film); p.Skip != "" || p.Video.CRF != rules.SliderTemplate(2).Compile(film).Video.CRF {
 		t.Errorf("the scanner's plan converts with Plain's steps: %+v", p)
 	}
-	got, err := s.TemplateFor(Job{LibraryID: lib.ID})
+	got, _, err := s.TemplateFor(Job{LibraryID: lib.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +191,7 @@ func TestHandOverSurvivesAPerFileResolveAndReadsTheTargetsCurrentValues(t *testi
 		t.Fatal("the source should carry a typed reference")
 	}
 	// the worker's template, then the per-file resolve the worker and the scanner do
-	got, err := s.TemplateFor(Job{LibraryID: srcLib.ID, Path: "/films/Other.mkv"})
+	got, _, err := s.TemplateFor(Job{LibraryID: srcLib.ID, Path: "/films/Other.mkv"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,7 +224,7 @@ func TestHandOverSurvivesAPerFileResolveAndReadsTheTargetsCurrentValues(t *testi
 	if _, err := s.SetGlobalVariables([]workflow.Variable{{Name: "g", Type: "number", Value: float64(5)}}); err != nil {
 		t.Fatal(err)
 	}
-	got, _ = s.TemplateFor(Job{LibraryID: srcLib.ID, Path: "/films/Other.mkv"})
+	got, _, _ = s.TemplateFor(Job{LibraryID: srcLib.ID, Path: "/films/Other.mkv"})
 	if p := got.CompileWith(film, rules.Facts{Path: "/films/Other.mkv"}); p.Video.CRF != rules.SliderTemplate(5).Compile(film).Video.CRF {
 		t.Errorf("a changed global reaches the target: %+v", p.Video)
 	}

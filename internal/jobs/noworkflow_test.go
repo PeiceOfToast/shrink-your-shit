@@ -27,7 +27,7 @@ func TestLibraryWithoutWorkflowCannotBeStarted(t *testing.T) {
 	if _, err := s.GetFlow(l.FlowID); !errors.Is(err, ErrNotFound) {
 		t.Errorf("GetFlow(0): %v, want not found", err)
 	}
-	if _, err := s.TemplateFor(Job{LibraryID: l.ID}); err == nil {
+	if _, _, err := s.TemplateFor(Job{LibraryID: l.ID}); err == nil {
 		t.Error("a job of it has no setting to compile")
 	}
 	if err := s.StartLibrary(l.ID); !errors.Is(err, ErrNoWorkflow) {

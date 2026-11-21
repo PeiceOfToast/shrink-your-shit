@@ -2,11 +2,10 @@
 // (#109: step definitions, the draft, validate, publish), or the mock with ?mock=1 (mock/steps.ts mirrors V1). The step
 // words and problems come from the server's validate, asked again shortly after each change. Not here: drag to reorder
 // (W11's handle, behind a flag) and the graph's keyboard moves, Test run (V5), History, Export, Open graph (V4).
-import { PageHead } from "../PageHead";
 import { Component, Fragment, createContext, useContext, useEffect, useRef, useState, type FormEvent, type ReactNode, type RefObject } from "react";
 import { Icon } from "../Icon";
 import { SignedOut, failed, type Answer } from "../api";
-import { afterOnly, deleteNode, groupOf, insertAfter, insertAfterSave, insertQuestion, isQuestion, moveNode, newNode, order, otherwiseOf, setOtherwise, type Otherwise } from "../stepEdits"; // the steps in running order: a property of the document, not data
+import { afterOnly, beforeSave, deleteNode, groupOf, insertAfter, insertAfterSave, insertQuestion, isQuestion, moveNode, newNode, order, otherwiseOf, setOtherwise, type Otherwise } from "../stepEdits"; // the steps in running order: a property of the document, not data
 import { useData } from "../useData";
 import { getDraft, getLadder, getWorkflow, listTemplates, listWorkflows, patchWorkflow, publish, publishPreview, saveDraft, stepDefinitions, validateDoc, type Checked, type Ladder } from "../workflowApi";
 import { Link, navigate, onLeave } from "../router";
@@ -344,10 +343,13 @@ type Move = { fixed: boolean; reason?: string; up: boolean; down: boolean; del: 
 // FB1d: a question's row says what its No does: one of the ends, or another path the graph shows. FB4b: "hand to
 // another workflow" is an end with a setting, so the row shows the workflow picker under it (node: that end).
 type ElseKind = "leave" | "fail" | "goto" | "other" | "none";
-type Else = { kind: Otherwise; set: (k: ElseKind) => void; node?: Node; update?: (n: Node) => void };
+type Else = { kind: Otherwise; set: (k: ElseKind) => void; node?: Node; update?: (n: Node) => void; check?: boolean };
 const OTHERWISE: [Otherwise, string][] = [["leave", "leave the file alone"], ["fail", "stop as failed"], ["goto", "hand to another workflow"], ["other", "another path (in the graph)"]];
 // FB4b: after the save nothing ends the run, so a question there offers only "nothing more" or the graph
 const OTHERWISE_AFTER: [Otherwise, string][] = [["none", "nothing more"], ["other", "another path (in the graph)"]];
+// FB4b-3: between the check and the save a No keeps the original (the new file is thrown away) or stops the run;
+// a hand-over makes no sense there, since the conversion is done
+const OTHERWISE_CHECK: [Otherwise, string][] = [["leave", "leave the file alone"], ["fail", "stop as failed"], ["other", "another path (in the graph)"]];
 function Step({ n, i, mv, open, toggle, update, issues, otherwise, inline }: { n: Node; i: number; mv: Move; open: boolean; toggle: () => void; update: (n: Node) => void; issues: ValidationIssue[]; otherwise?: Else; inline?: boolean }) {
   const { stepDef, summary, wf } = useReg(), def = stepDef(n.type), mine = issues.filter((x) => x.nodeId === n.id);
   if (inline) open = true; // FB3, the simple view: every form is on the page, nothing folds
@@ -370,6 +372,13 @@ function Step({ n, i, mv, open, toggle, update, issues, otherwise, inline }: { n
         <div className="sp" title={(n.name ?? def.name) + ": " + summary(n)}><span className="snm" id={n.id + "-name"}>{n.name ?? def.name}</span> <span className="ssum">{summary(n)}</span></div>
         {mine.length > 0 && <span className="pill bad"><Icon id="i-alert" />{mine.length === 1 ? "1 problem" : mine.length + " problems"}</span>}
         {end ? <span className="muted sm nowrap">{end === "first" ? "Always first" : "Always last"}</span>
+          : otherwise && otherwise.check ? <label className="row nw otherwise"><span className="muted nowrap">Otherwise</span>
+              {/* FB4b-3: a question before the save: nothing on its No keeps the original, so it reads "leave the file alone" */}
+              <select className="input" aria-label={"Otherwise: what happens when " + nm + " answers No"} value={otherwise.kind === "none" ? "leave" : otherwise.kind}
+                onChange={(e) => otherwise.set(e.target.value as ElseKind)}>
+                {OTHERWISE_CHECK.filter(([k]) => k !== "other" || otherwise.kind === "other").map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                {otherwise.kind !== "other" && <option value="other">another path (in the graph)</option>}
+              </select></label>
           : otherwise && afterOnly(def) ? <label className="row nw otherwise"><span className="muted nowrap">Otherwise</span>
               {/* ui-shop review #582: a No that holds anything but nothing (a fail or a hand-over the graph built, another chain) reads
                   "another path", never "nothing more"; "leave" means the same as nothing after the save */}
@@ -451,7 +460,7 @@ function AddStepMenu({ wf, doc, defs, adds, onAdd, onClose }: { wf: string; doc:
     .map((d) => {
       const cond = d.outputs.some((o) => o.outcome === "branch"), a = adds?.[d.type], again = cond || d.category === "flow"; // a question or an action may appear more than once
       const on = cond ? !!a?.addable || !adds : (again || !have.has(d.type)) && !!a?.addable;
-      const line = cond ? (a?.addable ? (afterOnly(d) ? "Only if it answers Yes; otherwise nothing more happens. Goes after " : "Only if it answers Yes; otherwise the file is left alone. Goes after ") + nameOf(a.after) : "Splits files by a rule. Opens the graph.")
+      const line = cond ? (a?.addable ? (afterOnly(d) ? "Only if it answers Yes; otherwise nothing more happens. Goes after " : "Only if it answers Yes; otherwise the file is left alone. Goes after ") + nameOf(a.after) + (afterOnly(d) && d.phase?.includes("check") ? ". Move it above 'Save the result' to keep the original when it answers No" : "") : "Splits files by a rule. Opens the graph.")
         : have.has(d.type) && !again ? "Already in this workflow" : a?.addable ? "Goes after " + nameOf(a.after) : a?.reason || "Not available here yet.";
       return { d, g: groupOf(d), on, line, after: a?.after };
     })
@@ -740,9 +749,13 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
   const issues = checked || !dirty ? live.issues : [];
   // the variable problems to show on their rows: the last refused save's, else the server's live check of the document
   const nameIssues = refused.length ? refused : issues.filter((i) => VAR_CODES.includes(i.code));
-  const tools = <>
+  // U11 (ui-review C10): the steps view shares the graph's toolbar: undo/redo beside the view switch in the middle,
+  // Check and Save draft on the right beside the one primary, Publish
+  const undoRedo = <>
     <button className="btn sm icon ghost" type="button" title="Undo" aria-label="Undo" disabled={hist.at === 0} onClick={() => setHist({ ...hist, at: hist.at - 1 })}><Icon id="i-undo" /></button>
     <button className="btn sm icon ghost" type="button" title="Redo" aria-label="Redo" disabled={hist.at === hist.docs.length - 1} onClick={() => setHist({ ...hist, at: hist.at + 1 })}><Icon id="i-redo" /></button>
+  </>;
+  const tools = <>
     <button className="btn sm ghost" type="button" onClick={async () => { if (await ask(doc)) setChecked(true); }}><Icon id="i-checks" />Check</button>
     <button className="btn sm" type="button" disabled={!dirty} onClick={save}><Icon id="i-save" />Save draft</button>
   </>;
@@ -762,25 +775,32 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
   return (
     <Reg.Provider value={{ defs, words: live.stepSummaries, libs, wf: id }}>
     <OwnVars.Provider value={doc.variables ?? []}>
-    <div className="stack">
-      {/* the workflow's header row (clean pass W2) */}
-      <PageHead icon="i-workflow" crumbs={[["Workflows", "/workflows"]]}
-        title={renaming ? <form className="row" onSubmit={(e) => { e.preventDefault(); const v = (e.currentTarget.elements.namedItem("nm") as HTMLInputElement).value.trim(); if (v) rename(v); else setRenaming(false); }}>
+    <div className="editor stackpage">
+      {/* U11 (flow-builder.md 4.2, ui-review C10): the steps view is the same workspace as the graph: a 48 px toolbar
+          (name, status, the view switch and undo/redo in the middle, Check, Save draft and the one primary on the
+          right), then a frame that scrolls inside the window */}
+      <div className="edbar" role="toolbar" aria-label={"Editing " + w.name}>
+        <span className="muted crumb"><Link to="/workflows">Workflows</Link> /</span>
+        {renaming ? <form className="row" onSubmit={(e) => { e.preventDefault(); const v = (e.currentTarget.elements.namedItem("nm") as HTMLInputElement).value.trim(); if (v) rename(v); else setRenaming(false); }}>
             <label className="sr" htmlFor="wf-rename">Name</label><input id="wf-rename" name="nm" className="input" defaultValue={w.name} autoFocus style={{ width: "auto" }} />
-            <button className="btn sm" type="submit">Rename</button><button className="btn sm ghost" type="button" onClick={() => setRenaming(false)}>Cancel</button></form> : w.name}
-        after={<>
-          {!renaming && <button className="btn sm ghost" type="button" onClick={() => setRenaming(true)} aria-label={"Rename " + w.name}>Rename</button>}
-          <span className="pill">{w.version == null || w.draftDiffers || dirty ? "Draft" : "Published"}</span>
-          <span className="muted sm">{w.version == null ? "Not published yet" : "v" + w.version + " published" + (w.draftDiffers || dirty ? " · v" + (w.version + 1) + " draft" : "")}</span>
-        </>}>
-        {simple ? <Link className="btn sm ghost vlink" to={"/workflows/" + id}>All steps</Link> : <Link className="btn sm ghost vlink" to={"/workflows/" + id + "?view=simple"}>Simple view</Link>}
-        <Link className="btn sm ghost" to={"/workflows/" + id + "/graph"}>Graph</Link>
+            <button className="btn sm" type="submit">Rename</button><button className="btn sm ghost" type="button" onClick={() => setRenaming(false)}>Cancel</button></form>
+          : <><h1 className="nm">{w.name}</h1><button className="btn sm ghost" type="button" onClick={() => setRenaming(true)} aria-label={"Rename " + w.name}>Rename</button></>}
+        <span className="pill">{w.version == null || w.draftDiffers || dirty ? "Draft" : "Published"}</span>
+        <span className="muted nowrap desk edver">{w.version == null ? "Not published yet" : "v" + w.version + " published" + (w.draftDiffers || dirty ? " · v" + (w.version + 1) + " draft" : "")}</span>
+        <div className="mid">
+          <div className="edsegs" role="group" aria-label="View">
+            {simple ? <Link to={"/workflows/" + id} aria-pressed="false">Steps</Link> : <button type="button" aria-pressed="true">Steps</button>}
+            {simple ? <button type="button" aria-pressed="true">Simple</button> : <Link to={"/workflows/" + id + "?view=simple"} aria-pressed="false">Simple</Link>}
+            <Link to={"/workflows/" + id + "/graph"} aria-pressed="false">Graph</Link>
+          </div>
+          {canStack && <><span className="vr" aria-hidden="true" />{undoRedo}</>}
+        </div>
         {canStack && <>
-          <span className="desk">{tools}</span>
-          <details className="menu phone"><summary className="btn sm icon ghost" aria-label="More actions"><Icon id="i-more" /></summary><div className="pop" role="menu">{tools}</div></details>
+          {tools}
           <button className="btn sm primary" type="button" disabled={varBad.length > 0} title={varBad.length ? "Fix the variable names first" : undefined} onClick={openPublish}>Publish</button>
         </>}
-      </PageHead>
+      </div>
+      <div className="edframe stackframe"><div className="stackbody">
       {canStack && (checked || !dirty) && (issues.length === 0 ? <p className="st ok checkline"><Icon id="i-check-c" /><span>Check: no problems</span></p>
         : <p className="st bad checkline"><Icon id="i-alert" /><span>Check: {issues.length === 1 ? "1 problem" : issues.length + " problems"}. Publish waits until {issues.length === 1 ? "it's" : "they're"} fixed. <button className="linkbtn" type="button" onClick={() => setOpen(issues[0].nodeId ?? null)}>Show</button></span></p>)}
       {canStack && varBad.length > 0 && <p className="st bad" role="alert"><Icon id="i-alert" /><span>Fix {varBad.length === 1 ? "1 field" : varBad.length + " fields"} before publishing. <button className="linkbtn" type="button" onClick={() => setOpen(varBad[0].nodeId)}>{varBad[0].title}</button></span></p>}
@@ -817,7 +837,7 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
           const mv: Move = { fixed, reason: p?.fixedReason, up: !fixed && !simple && i > 1 && i <= lastMovable, down: !fixed && !simple && i >= 1 && i < lastMovable, del: !fixed && !simple && i >= 1 && i <= lastMovable, // the simple view shows no place badge or menu: moving and deleting live in the steps view (ui-shop review #543)
             act: (w) => (w === "del" ? deleteStep(n.id) : moveStep(n.id, w === "up" ? -1 : 1)) };
           const ow = isQuestion(n) ? otherwiseOf(doc, n) : undefined;
-          const otherwise: Else | undefined = ow ? { kind: ow.kind, set: (k) => setElse(n, k), node: ow.node, update } : undefined;
+          const otherwise: Else | undefined = ow ? { kind: ow.kind, set: (k) => setElse(n, k), node: ow.node, update, check: beforeSave(doc, n, defs.find((d) => d.type === n.type)) } : undefined;
           return <Step key={n.id} n={n} i={i} mv={mv} open={open === n.id} toggle={() => setOpen(open === n.id ? null : n.id)} update={update} issues={issues} otherwise={otherwise} inline={simple} />;
         })}{simple && fold(after, "after the file is saved")}</ol>
         {!only && !simple && <button className="btn sm ghost" type="button" onClick={openAdd}><Icon id="i-plus" />Add step</button>}
@@ -827,6 +847,7 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
         {gone && hist.at === gone.at && <div className="note" onPointerEnter={() => setHold(true)} onPointerLeave={() => setHold(false)} onFocus={() => setHold(true)} onBlur={() => setHold(false)}>
           <Icon id="i-undo" /><span className="sp">{gone.text}</span><button className="btn sm ghost" type="button" onClick={undoGone}>Undo</button></div>}
       </> : <ReadOnly doc={doc} id={id} />}
+      </div></div>
     </div>
     </OwnVars.Provider>
     </Reg.Provider>);

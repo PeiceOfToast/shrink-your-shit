@@ -20,7 +20,7 @@ func TestUpgradeLogsOneLineWithVersionsAndBackup(t *testing.T) {
 		t.Fatal(err)
 	}
 	dropLogSections(t, s)
-	for _, q := range []string{`ALTER TABLE jobs DROP COLUMN tags`, `ALTER TABLE files DROP COLUMN decided_at`, `ALTER TABLE jobs DROP COLUMN subtitle_files`, `ALTER TABLE jobs DROP COLUMN workflow_rev`, `ALTER TABLE jobs DROP COLUMN output_gone_at`, `DROP INDEX IF EXISTS jobs_newest`, `PRAGMA user_version=47`} {
+	for _, q := range []string{`ALTER TABLE jobs DROP COLUMN tags`, `ALTER TABLE files DROP COLUMN decided_at`, `ALTER TABLE jobs DROP COLUMN subtitle_files`, `ALTER TABLE jobs DROP COLUMN workflow_rev`, `ALTER TABLE jobs DROP COLUMN queued_rev`, `ALTER TABLE jobs DROP COLUMN output_gone_at`, `DROP INDEX IF EXISTS jobs_newest`, `PRAGMA user_version=47`} {
 		if _, err := s.db.Exec(q); err != nil {
 			t.Fatal(q, err)
 		}

@@ -42,7 +42,7 @@ func TestRealReplaceKeepsTheOriginalInTrash(t *testing.T) {
 				t.Fatal("the job id should not be 1 here")
 			}
 			w := realWorker(st, media.OSExec{})
-			w.Template = func(jobs.Job) (rules.Template, error) { return tmpl, nil }
+			w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
 			w.KeepDays, w.Journal = func() int { return 7 }, st
 			w.run(t)
 			if j, _ := st.Get(id); j.Status != jobs.Done {
