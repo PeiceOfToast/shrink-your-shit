@@ -257,33 +257,48 @@ func (x slowThenReal) silent(ctx context.Context) error {
 func TestRemoteEncodeOfUnknownLengthKeepsItsLease(t *testing.T) {
 	needFFmpeg(t)
 	oldLease, oldPoll, oldEvery, oldRenew := jobs.LeaseFor, PlanPoll, ProgressEvery, RenewEvery
+	// The fixture's own lengths set the lease: it reports its position for movesOn, then each check after the
+	// encode is silent for silent (three of them, 15 s). The lease is two of those silences long: longer than a
+	// busy host's pause between renewals (the 2026-11-21 flake: a 3 s lease here lost the job whenever a loaded
+	// host delayed the renewal by more than that), and shorter than the three silences together, so a worker
+	// that stopped renewing after the encode would still be taken back before the job ends.
+	const movesOn, silent = 6 * time.Second, 5 * time.Second
 	// ffmpeg prints its position about every 0.5 s (its -progress cadence): the lease must outlast that and the
 	// real encode's start, or a slow run loses it between two reports (ffmpeg 8 CI, 2026-11-12). The worker
-	// renews between reports (keepLease), every RenewEvery: well inside LeaseFor even on a loaded host, where
-	// the checks and upload after the encode can take longer than LeaseFor (the 2026-11-14 flake).
-	jobs.LeaseFor, PlanPoll, ProgressEvery, RenewEvery = 3*time.Second, 50*time.Millisecond, 20*time.Millisecond, 300*time.Millisecond
+	// renews between reports (keepLease), every RenewEvery: many times inside LeaseFor even on a loaded host,
+	// where the checks and upload after the encode can take longer than LeaseFor (the 2026-11-14 flake).
+	jobs.LeaseFor, PlanPoll, ProgressEvery, RenewEvery = 2*silent, 50*time.Millisecond, 20*time.Millisecond, 300*time.Millisecond
 	defer func() { jobs.LeaseFor, PlanPoll, ProgressEvery, RenewEvery = oldLease, oldPoll, oldEvery, oldRenew }()
-	srv, st, lib := stallServer(t, 5*time.Second)
+	srv, st, lib := stallServer(t, silent)
 	id := remoteJobLen(t, st, lib, 0)
 	c := pairClient(t, srv, st)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go c.Work(ctx, Converter{Exec: slowThenReal{for_: 6 * time.Second, after: 5 * time.Second, encoded: new(atomic.Bool)}, FFmpeg: "ffmpeg", FFprobe: "ffprobe", Work: t.TempDir(),
+	go c.Work(ctx, Converter{Exec: slowThenReal{for_: movesOn, after: silent, encoded: new(atomic.Bool)}, FFmpeg: "ffmpeg", FFprobe: "ffprobe", Work: t.TempDir(),
 		FreeSpace: func(string) (uint64, error) { return 1 << 40, nil }})
 	var j jobs.Job
-	for end := time.Now().Add(30 * time.Second); time.Now().Before(end); time.Sleep(50 * time.Millisecond) {
-		st.RequeueExpiredLeases(0) // what the server's sweep does
+	var lastErr error
+	requeued := 0
+	// A hang bound, not a timing assumption: the work is about 25 s, and a loaded host stretched it to 32 s
+	// before this fix.
+	for end := time.Now().Add(2 * time.Minute); time.Now().Before(end); time.Sleep(50 * time.Millisecond) {
+		if n, err := st.RequeueExpiredLeases(0); err == nil { // what the server's sweep does
+			requeued += n
+		}
 		got, err := st.Get(id)
 		if err != nil { // a read that failed is not the job's state: look again
-			t.Logf("reading the job: %v", err)
+			lastErr = err
 			continue
 		}
 		if j = got; j.Status != jobs.Queued && j.Status != jobs.Running {
 			break
 		}
 	}
+	if requeued != 0 {
+		t.Errorf("the sweep took the job back %d time(s) while the worker kept renewing its lease", requeued)
+	}
 	if j.Status != jobs.Done || j.Attempts > 1 {
-		t.Errorf("%s %q, %d tries", j.Status, j.Error, j.Attempts)
+		t.Errorf("%s %q, %d tries (last read: %v)", j.Status, j.Error, j.Attempts, lastErr)
 	}
 }
 

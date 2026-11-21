@@ -19,15 +19,23 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/web"
 )
 
-// slowEncode is ffmpeg, but its encode takes long (then fails): a long conversion on the worker.
+// slowEncode is ffmpeg, but its encode takes long (then fails): a long conversion on the worker. It says when
+// the encode starts (started nil: don't say).
 type slowEncode struct {
 	media.OSExec
-	took time.Duration
+	took    time.Duration
+	started chan struct{}
 }
 
 func (x slowEncode) Stream(ctx context.Context, onLine func(string), name string, args ...string) (string, error) {
 	for _, a := range args {
 		if a == "libx265" {
+			if x.started != nil {
+				select {
+				case x.started <- struct{}{}:
+				default:
+				}
+			}
 			select {
 			case <-time.After(x.took):
 			case <-ctx.Done():
@@ -96,22 +104,96 @@ func TestWorkerStaysOnlineThroughALongEncode(t *testing.T) {
 		json.NewDecoder(res.Body).Decode(&w)
 		return w.Status, w.Live.CPUPercent, w.Live.MemTotalBytes
 	}
+	lastSeen := func() string {
+		rws, err := st.RemoteWorkers()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, rw := range rws {
+			if rw.ID == state.WorkerID {
+				return rw.LastSeen
+			}
+		}
+		return ""
+	}
 	ctx, cancel := context.WithCancel(context.Background())
-	go c.Run(ctx)
-	go c.Work(ctx, Converter{Exec: slowEncode{took: 3 * time.Second}, FFmpeg: "ffmpeg", FFprobe: "ffprobe", Work: t.TempDir(),
-		FreeSpace: func(string) (uint64, error) { return 1 << 40, nil }})
-	for end := time.Now().Add(2500 * time.Millisecond); time.Now().Before(end); time.Sleep(100 * time.Millisecond) {
-		if s, _, _ := worker(); s == "offline" {
-			t.Fatalf("offline while it converts")
+	defer cancel()
+	runDone, workDone := make(chan struct{}), make(chan struct{})
+	x := slowEncode{took: 3 * time.Second, started: make(chan struct{}, 1)}
+	go func() { c.Run(ctx); close(runDone) }()
+	go func() {
+		c.Work(ctx, Converter{Exec: x, FFmpeg: "ffmpeg", FFprobe: "ffprobe", Work: t.TempDir(),
+			FreeSpace: func(string) (uint64, error) { return 1 << 40, nil }})
+		close(workDone)
+	}()
+	select {
+	case <-x.started:
+	case <-time.After(20 * time.Second):
+		t.Fatal("the encode never started")
+	}
+	// The heartbeats go on beside the encode: once it has run half its length, its last_seen still moves on,
+	// and a fresh one is not offline. Waiting for that beat is the sync here — sampling the 1 s offline window
+	// on a busy host read a long scheduling pause as offline (the 2026-11-21 flake, which this does not
+	// reproduce: fixed from what the test now observes, not by a longer sleep).
+	seen := lastSeen()
+	time.Sleep(x.took / 2) // let the encode run half its length
+	for end := time.Now().Add(x.took + 2*time.Second); ; time.Sleep(10 * time.Millisecond) {
+		if s := lastSeen(); s != "" && s != seen {
+			break
+		}
+		if time.Now().After(end) {
+			t.Fatalf("the worker's last_seen did not move on while it converted: %q", seen)
 		}
 	}
 	if s, _, mem := worker(); s != "busy" || mem == nil {
 		t.Errorf("converting: %s, memory %v", s, mem)
 	}
+	// A busy host's pause during the encode is not this test's claim: count the offline events from the stop on.
+	for len(events) > 0 {
+		<-events
+	}
 	cancel() // it stops answering
-	time.Sleep(1500 * time.Millisecond)
-	if s, _, _ := worker(); s != "offline" {
-		t.Errorf("after it stopped: %s", s)
+	for _, done := range []struct {
+		name string
+		c    chan struct{}
+	}{{"run", runDone}, {"work", workDone}} {
+		select {
+		case <-done.c:
+		case <-time.After(30 * time.Second):
+			t.Fatalf("the worker's %s did not stop", done.name)
+		}
+	}
+	time.Sleep(100 * time.Millisecond) // any call in flight has landed: no heartbeat may set last_seen after the clear
+	if err := st.ClearSeen(state.WorkerID); err != nil {
+		t.Fatal(err)
+	}
+	// A worker whose last_seen is cleared reads offline whatever the window (the explicit sync, as in
+	// TestWorkerHoldingBack): wait for that read, and then for the check that records the change.
+	offline := 0
+	isOffline := func(line string) bool {
+		return strings.Contains(line, `"status":"offline"`) && strings.Contains(line, state.WorkerID)
+	}
+	collect := func(d time.Duration) { // count this worker's offline events for d
+		for end := time.Now().Add(d); time.Now().Before(end); {
+			select {
+			case line := <-events:
+				if isOffline(line) {
+					offline++
+				}
+			case <-time.After(50 * time.Millisecond):
+			}
+		}
+	}
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+		if s, _, _ := worker(); s == "offline" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the worker did not read offline after it stopped")
+		}
+	}
+	for deadline := time.Now().Add(5 * time.Second); offline == 0 && time.Now().Before(deadline); {
+		collect(50 * time.Millisecond)
 	}
 	res, _ := http.Get(srv.URL + "/api/v2/summary")
 	var sum struct{ Badges struct{ WorkersOffline int } }
@@ -120,13 +202,7 @@ func TestWorkerStaysOnlineThroughALongEncode(t *testing.T) {
 	if sum.Badges.WorkersOffline != 1 {
 		t.Errorf("workersOffline %d", sum.Badges.WorkersOffline)
 	}
-	time.Sleep(300 * time.Millisecond) // more checks: no more events without a change
-	offline := 0
-	for len(events) > 0 {
-		if line := <-events; strings.Contains(line, `"status":"offline"`) && strings.Contains(line, state.WorkerID) {
-			offline++
-		}
-	}
+	collect(300 * time.Millisecond) // more checks: no more events without a change
 	if offline != 1 {
 		t.Errorf("worker.updated offline events: %d", offline)
 	}
