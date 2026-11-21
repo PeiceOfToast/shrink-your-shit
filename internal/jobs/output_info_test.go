@@ -43,6 +43,34 @@ func TestMigration60AddsOutputInfoAndOldJobsHaveNone(t *testing.T) {
 	}
 }
 
+// Review #608: a statement after a comma in Exec is a bind argument, so output_info survived the rewind and a
+// test that rewound to 59 and called only rewindDecidedAt would fail on Open ("duplicate column name"). This
+// pins the split: the column is gone, and opening at 59 again works.
+func TestRewindDecidedAtTakesOutputInfoAway(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "syp.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewindDecidedAt(t, s)
+	var n int
+	if err := s.db.QueryRow(`SELECT count(*) FROM pragma_table_info('jobs') WHERE name='output_info'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("output_info survives rewindDecidedAt: migration 60 would add a duplicate column on the next open")
+	}
+	if _, err := s.db.Exec(`PRAGMA user_version=59`); err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	s, err = Open(path)
+	if err != nil {
+		t.Fatalf("opening at 59 after the rewind: %v", err) // migration 60 runs again
+	}
+	defer s.Close()
+}
+
 // SetStepWords replaces the latest step of that name (a retry adds another converted step) and leaves the
 // others alone.
 func TestSetStepWordsUpdatesTheLatestStepOfItsName(t *testing.T) {
