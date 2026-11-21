@@ -113,7 +113,7 @@ export function Overview() {
       // 5 s worker.heartbeat refreshes the figures without dropping the live progress; a job or library change does drop it.
       // A new step (e.g. "Checking the result") takes its figures as sent, nulls included, so the last converting speed and time left go
       if (type === "job.progress") { const e = data as JobProgressEvent, p = { percent: e.progress.percent, fps: e.progress.fps, speed: e.progress.speed, etaS: e.progress.etaS, stage: e.progress.stage };
-        setLive((m) => { const newStep = p.stage != null && p.stage !== m[e.jobId]?.stage;
+        setLive((m) => { const newStep = p.stage != null && m[e.jobId]?.stage != null && p.stage !== m[e.jobId].stage;
           return { ...m, [e.jobId]: { ...m[e.jobId], ...(newStep ? p : Object.fromEntries(Object.entries(p).filter(([, x]) => x != null))) } }; }); return; }
       if (type === "job.state" || type === "library.changed" || type === "resync" || type.startsWith("processing.") || type.startsWith("worker.")) {
         clear ||= type !== "worker.heartbeat"; clearTimeout(t);
