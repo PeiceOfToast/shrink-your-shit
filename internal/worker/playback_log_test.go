@@ -24,7 +24,7 @@ func TestPlaybackKeptLogSaysWhy(t *testing.T) {
 		"line a", "line b", "line c", "line d", "line e",
 	}, "\n")
 	s.run(Replace)
-	s.assertKept("does not play cleanly")
+	s.assertKept("does not play cleanly", "output_damaged")
 	assertPlain(t, s.job().Error)
 	if !strings.Contains(s.job().Error, "9 errors") {
 		t.Errorf("reason %q does not give the error count", s.job().Error)

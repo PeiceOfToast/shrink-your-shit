@@ -155,6 +155,15 @@ func FailureWords(code string, f FailureFacts) (message, hint string) {
 		return msg, "Play the file around that point to check it. Retry won't help with the same file."
 	case "source_missing":
 		return "Couldn't read " + f.Path + ": the file is missing.", "Check that the file is still there, then Retry."
+	case "check_differs":
+		return "The new file isn't what the workflow asked for: " + firstProblem(f.Stored) + ". The original is untouched.",
+			"Open the Check step in the Log to see what differs. Retrying gives the same result. If the workflow asks for something this encoder can't make, change its Convert step."
+	case "output_damaged":
+		return "The new file came out damaged: " + firstProblem(f.Stored) + ". The original is untouched.",
+			"Retry. If it happens again, convert this file on the processor."
+	case "check_not_run":
+		return "A check couldn't run, so the original is kept: " + firstProblem(f.Stored) + ".",
+			"Retry later. If it keeps happening, Settings > About says what is wrong."
 	case "check_failed":
 		// only the picture-similarity refusal is about quality; a size, stream or could-not-run refusal is not
 		if strings.Contains(f.Stored, PictureTooDifferentWords) {
@@ -323,11 +332,20 @@ var classifierOrder = []classifier{
 func ReasonCondition(code string) (cond string, args []any, ok bool) {
 	stored := map[string][]string{"no_space": {ReasonDiskFull, ReasonLowDiskSpace}, "output_not_writable": {ReasonCannotWrite},
 		"check_failed": {ReasonKeptOriginal}, "stalled": {ReasonStalled}, "worker_lost": {ReasonWorkerLost},
-		"settings_rejected": {ReasonSettingsRejected}}
+		"settings_rejected": {ReasonSettingsRejected}, "check_differs": {ReasonCheckDiffers}, "output_damaged": {ReasonOutputDamaged}, "check_not_run": {ReasonCheckNotRun}}
 	if codes, found := stored[code]; found {
 		marks := strings.Repeat(",?", len(codes)-1)
 		return "j.error_code IN (?" + marks + ")", anys(codes), true
 	}
+	cond, args, ok = keyLinesCondition(code)
+	if ok && (code == "source_damaged" || code == "source_missing") { // a refusal of the original stores the code; a failed job shows its key lines
+		return "(j.error_code=? OR " + cond + ")", append(anys([]string{code}), args...), true
+	}
+	return cond, args, ok
+}
+
+// keyLinesCondition is ReasonCondition for a code the stored code does not name: a failed job's key lines.
+func keyLinesCondition(code string) (cond string, args []any, ok bool) {
 	keys := `lower(COALESCE((SELECT key_lines FROM job_failures WHERE job_id=j.id), ''))`
 	anyOf := func(patterns []string) string {
 		parts := make([]string, len(patterns))
@@ -375,6 +393,12 @@ func ReasonCondition(code string) (cond string, args []any, ok bool) {
 		}
 	}
 	return strings.Join(conds, " AND "), args, true
+}
+
+// firstProblem is the first of a refusal's reasons (they are joined with "; "), without its full stop.
+func firstProblem(stored string) string {
+	first, _, _ := strings.Cut(stored, "; ")
+	return strings.TrimSuffix(first, ".")
 }
 
 func anys(ss []string) []any {

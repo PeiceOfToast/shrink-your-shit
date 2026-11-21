@@ -49,7 +49,7 @@ func TestNewFileCountFromThePlaybackRunIsWhatIsChecked(t *testing.T) {
 	s := newScenario(t)
 	s.decodeStderr = reportLine(1800)
 	s.run(Replace)
-	s.assertKept("video frames")
+	s.assertKept("video frames", "check_differs")
 	if n := newFileCountReads(s); n != 0 {
 		t.Errorf("the new file was read %d more times to count it; calls: %v", n, s.calls)
 	}

@@ -56,9 +56,9 @@ func checkFailed(cctx context.Context, what string, err error) error {
 	log.Printf("check failed: %s: %v", what, err) // the technical detail, for the log and Settings > About
 	// both may pass (a slow or busy disk, a crash of the tool): tried again later (DD-2)
 	if errors.Is(cctx.Err(), context.DeadlineExceeded) {
-		return retryable(kept("%s took too long, so the original is kept. Press Retry later; a very slow disk or a damaged file can cause this", what), retryGeneral)
+		return retryable(keptNotRun("%s took too long, so the original is kept. Press Retry later; a very slow disk or a damaged file can cause this", what), retryGeneral)
 	}
-	return retryable(kept("%s could not be done, so the original is kept. Press Retry; if it keeps failing, the file may be damaged", what), retryGeneral)
+	return retryable(keptNotRun("%s could not be done, so the original is kept. Press Retry; if it keeps failing, the file may be damaged", what), retryGeneral)
 }
 
 // KeptError means a safety check refused the new file (or could not run): the original is kept.
@@ -73,7 +73,40 @@ func (e *KeptError) Error() string { return "kept original: " + e.Reason }
 const pictureTooDifferent = jobs.PictureTooDifferentWords
 
 func kept(format string, a ...any) error {
-	return &KeptError{Code: jobs.ReasonKeptOriginal, Reason: fmt.Sprintf(format, a...)}
+	return keptCoded(jobs.ReasonKeptOriginal, format, a...)
+}
+
+// The kinds of refusal (slice 14): a site picks one of these, so each stores why the original was kept.
+// keptDiffers: the new file is not what the plan said. keptDamaged: the new file is broken. keptNotRun: a check
+// could not run. keptUnwritable: the folder for originals can't be written. keptSourceMissing and keptSourceDamaged:
+// the original itself can't be read, or has errors.
+func keptDiffers(format string, a ...any) error {
+	return keptCoded(jobs.ReasonCheckDiffers, format, a...)
+}
+
+func keptDamaged(format string, a ...any) error {
+	return keptCoded(jobs.ReasonOutputDamaged, format, a...)
+}
+
+func keptNotRun(format string, a ...any) error {
+	return keptCoded(jobs.ReasonCheckNotRun, format, a...)
+}
+
+func keptUnwritable(format string, a ...any) error {
+	return keptCoded(jobs.ReasonCannotWrite, format, a...)
+}
+
+func keptSourceMissing(format string, a ...any) error {
+	return keptCoded(jobs.ReasonSourceMissing, format, a...)
+}
+
+func keptSourceDamaged(format string, a ...any) error {
+	return keptCoded(jobs.ReasonSourceDamaged, format, a...)
+}
+
+// keptCoded is a refusal with its code. Only the constructors above name a code.
+func keptCoded(code, format string, a ...any) error {
+	return &KeptError{Code: code, Reason: fmt.Sprintf(format, a...)}
 }
 
 // verification is the judging settings in force for a result checked against exp.
@@ -125,7 +158,7 @@ func (w *Worker) preflight(sourcePath string, sourceSize int64) error {
 	free, err := w.freeSpace(dir)
 	if err != nil {
 		log.Printf("free space of %s: %v", dir, err)
-		return retryable(kept("the free disk space could not be checked, so converting did not start. Press Retry"), retryGeneral)
+		return retryable(keptNotRun("the free disk space could not be checked, so converting did not start. Press Retry"), retryGeneral)
 	}
 	need := SpaceNeeded(sourceSize)
 	if free < need {
@@ -145,10 +178,10 @@ func (w *Worker) verify(ctx context.Context, src media.Info, exp rules.Expect, s
 	st, err := os.Stat(tmp)
 	if err != nil {
 		log.Printf("new file %s: %v", tmp, err)
-		return kept("the new file is missing")
+		return keptDamaged("the new file is missing")
 	}
 	if st.Size() == 0 {
-		return kept("the new file is empty")
+		return keptDamaged("the new file is empty")
 	}
 	pctx, cancel := context.WithTimeout(ctx, quickTimeout)
 	out, err := media.Probe(pctx, w.Exec, w.FFprobe, tmp)
@@ -158,17 +191,17 @@ func (w *Worker) verify(ctx context.Context, src media.Info, exp rules.Expect, s
 			return checkFailed(pctx, "reading the new file", err)
 		}
 		log.Printf("reading the new file %s: %v", tmp, err)
-		return kept("the new file cannot be read")
+		return keptDamaged("the new file cannot be read")
 	}
 	w.verified = out // the new file's probe, kept for the Files view once it is in place (S5)
 	if exp.VideoPackets > 0 && out.MainVideoOrdinal() < 0 {
-		return kept("the new file has no video")
+		return keptDamaged("the new file has no video")
 	}
 	// The shape is checked before the playback run, as before: a wrong file is refused without playing it.
 	// The frame count is the exception: it is known only after playback has read the file (P1), so it is
 	// checked below, after the run has reported what it read.
 	if problems := exp.Compare(out, -1); len(problems) > 0 {
-		return kept("%s", strings.Join(problems, "; "))
+		return keptDiffers("%s", strings.Join(problems, "; "))
 	}
 	// 12c: the job log says when each check starts and how long it took, so a long check is not silent
 	id := w.runningJob()
@@ -197,7 +230,7 @@ func (w *Worker) verify(ctx context.Context, src media.Info, exp rules.Expect, s
 		}
 		// Only the frame count can be added here: the rest of the shape passed above.
 		if problems := exp.Compare(out, outPackets); len(problems) > 0 {
-			return kept("%s", strings.Join(problems, "; "))
+			return keptDiffers("%s", strings.Join(problems, "; "))
 		}
 	}
 	// No size check: a checked conversion is kept even if it is not smaller ("always standardize",
@@ -380,7 +413,7 @@ func (w *Worker) decodeRun(ctx context.Context, tmp string, out media.Info, star
 
 // playedNothingKept is the refusal for a sampled playback test that decoded no frames.
 func playedNothingKept(progress []byte, start, length, fps float64) error {
-	ke := kept("the playback test of the new file played nothing from its sample, so the original is kept").(*KeptError)
+	ke := keptDamaged("the playback test of the new file played nothing from its sample, so the original is kept").(*KeptError)
 	where := "Where: playback did not report how far it got"
 	if frame, ok := progressFrame(progress); ok {
 		where = fmt.Sprintf("Where: playback reached frame %d", frame)
@@ -435,7 +468,7 @@ func playbackKept(progress []byte, stderr string, start, length, playSec, fps fl
 			where += fmt.Sprintf(" (about %s)", rules.Clock(start+float64(frame)/fps))
 		}
 	}
-	ke := kept("%s", reason).(*KeptError)
+	ke := keptDamaged("%s", reason).(*KeptError)
 	ke.Detail = append([]string{check, where, fmt.Sprintf("Errors: %d error lines from ffmpeg, %d different", n, len(seen))}, shown...)
 	return ke
 }
@@ -471,15 +504,15 @@ var ssimRe = regexp.MustCompile(`SSIM\b.*\bAll:([0-9.]+)`)
 func (w *Worker) ssimCheck(ctx context.Context, src, out media.Info, srcPath, tmp string, planSSIM float64) error {
 	sv, ov := src.MainVideoOrdinal(), out.MainVideoOrdinal()
 	if sv < 0 || ov < 0 {
-		return kept("there is no video to compare")
+		return keptDiffers("there is no video to compare")
 	}
 	has, err := w.hasFilter(ctx, "ssim")
 	if err != nil {
 		log.Printf("picture comparison filter: %v", err)
-		return kept("it could not be checked whether picture quality can be compared. Press Retry; if it keeps failing, Settings > About says what is wrong")
+		return keptNotRun("it could not be checked whether picture quality can be compared. Press Retry; if it keeps failing, Settings > About says what is wrong")
 	}
 	if !has {
-		return kept("the installed converter cannot compare picture quality, which is needed before a file is replaced. Settings > About says what to install")
+		return keptNotRun("the installed converter cannot compare picture quality, which is needed before a file is replaced. Settings > About says what to install")
 	}
 	threshold := w.minSSIM()
 	if planSSIM > 0 { // the flow's own threshold (a slider position's SSIM gate)
@@ -692,11 +725,11 @@ func (w *Worker) ssimSegment(ctx context.Context, srcPath, tmp string, sv, ov in
 	}
 	m := ssimRe.FindSubmatch(stderr)
 	if m == nil {
-		return 0, nil, kept("the picture comparison at %s gave no result", rules.Clock(seg.start))
+		return 0, nil, keptNotRun("the picture comparison at %s gave no result", rules.Clock(seg.start))
 	}
 	score, perr := strconv.ParseFloat(string(m[1]), 64)
 	if perr != nil {
-		return 0, nil, kept("the picture comparison at %s gave an unreadable result", rules.Clock(seg.start))
+		return 0, nil, keptNotRun("the picture comparison at %s gave an unreadable result", rules.Clock(seg.start))
 	}
 	return score, parseFrameScores(stdout), nil
 }

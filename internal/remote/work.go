@@ -241,7 +241,7 @@ func (c *Client) workOne(ctx context.Context, cv Converter) (did bool, err error
 	if err != nil {
 		var k *worker.KeptError
 		if errors.As(err, &k) {
-			return true, c.report(ctx, l, map[string]any{"kept": k.Reason, "stderr": stderr, "steps": steps, "args": ran})
+			return true, c.report(ctx, l, map[string]any{"kept": k.Reason, "kept_code": k.Code, "stderr": stderr, "steps": steps, "args": ran})
 		}
 		return true, c.report(ctx, l, map[string]any{"ok": false, "message": "the checks didn't finish: " + err.Error(), "stderr": stderr, "steps": steps, "args": ran})
 	}
