@@ -60,6 +60,7 @@ func Handler(store *jobs.Store, access *Access, eng Engine) http.Handler {
 	v2JobStreams(api, store)                // V3d: /api/v2/activity, per-job streams
 	v2Workflows(api, store, eng)            // UI rebuild, V1: /api/v2 workflows
 	v2WorkflowVariables(api, store)         // W4a: the names a workflow's {{name}} fields take
+	v2GlobalVariables(api, store)           // W2: the server's global variables, and what a save affects
 	v2Setup(api, store, ss, eng)            // one-command setup: the install's role, GET /api/v2/setup
 	notifier := eng.Notify
 	if notifier == nil { // no background sender here (tests): the routes still answer, nothing is sent

@@ -1054,6 +1054,14 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	// the result must look like. Whether to convert it was the scanner's decision (as before Plans);
 	// only a flow that cannot say how to convert stops the job here.
 	facts := w.runFacts(job, src, before) // FB1c: what the path's questions beyond the probe ask about
+	// W2: the workflow's typed settings may name the file's own values (file.*, source.*), which only
+	// now are known; they are also read again with the globals as they are now. used is what the job
+	// log's variables table shows, with where each value came from.
+	var used []workflow.Usage
+	tmpl, used, err = w.resolveForFile(job, src, tmpl)
+	if err != nil {
+		return "", err
+	}
 	plan := tmpl.CompileWith(src, facts)
 	if fb, err := w.Queue.FallbackOf(job.ID); err == nil && fb != "" { // V6b: it falls back to another path
 		var b rules.Branch
@@ -1187,7 +1195,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	// W4b: the values the Save the result step's {{name}} fields take, and its track title. The title
 	// goes on every audio track of the new file, so it is resolved before the snapshot: a remote worker
 	// encodes the plan it is given.
-	vals, vtable, err := w.runValues(job, src, plan, published)
+	vals, vtable, err := w.runValues(job, src, plan, published, used)
 	if err == nil {
 		w.mu.Lock()
 		w.cardVars = vals // the after-save cards resolve their {{name}}s with the run's values (FB2a)

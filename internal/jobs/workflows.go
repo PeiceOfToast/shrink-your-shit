@@ -814,6 +814,10 @@ type RunInfo struct {
 	Workflow  string
 	Revision  int
 	Variables []workflow.Variable
+	// W2: the workflow's typed settings as published (with their references) and the server's global
+	// variables: the worker resolves them with the file it has, and records which value came from where.
+	Doc    workflow.Doc
+	Global []workflow.Variable
 }
 
 // RunInfoFor reads the RunInfo of job j. A library that is gone (or a job made before libraries were
@@ -854,7 +858,13 @@ func (s *Store) RunInfoFor(j Job) (RunInfo, error) {
 				return out, &SecretUnreadableError{Names: unreadable}
 			}
 			out.Variables = vars
+			out.Doc = rev.Doc // W2: its typed settings are resolved per file, with the globals below
 		}
+		g, gerr := s.GlobalVariables()
+		if gerr != nil {
+			return out, gerr
+		}
+		out.Global = g
 	}
 	return out, nil
 }

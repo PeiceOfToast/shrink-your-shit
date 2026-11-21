@@ -555,7 +555,13 @@ func (s *Store) TemplateFor(j Job) (rules.Template, error) {
 	// keeps a job on it even for a template written before the workflow's settings were resolved). A
 	// workflow with no such reference keeps its template exactly as it is.
 	if rev, ok, rerr := s.LatestRevision(flowID); rerr == nil && ok && workflow.HasRefs(rev.Doc) {
-		t, issues := workflow.ToTemplate(rev.Doc, f.Template)
+		// W2: the globals as they are now, so a job that starts after someone saves one runs the new
+		// value; file.* and source.* stay references until the worker has the file.
+		g, gerr := s.GlobalVariables()
+		if gerr != nil {
+			return rules.Template{}, gerr
+		}
+		t, issues := workflow.ToTemplateWith(rev.Doc, f.Template, workflow.Scopes{Global: workflow.VariableMap(g), LeaveFile: true})
 		if len(issues) == 0 {
 			return t, nil
 		}

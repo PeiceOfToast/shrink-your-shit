@@ -170,34 +170,27 @@ func (r Result) Errors() bool {
 	return slices.ContainsFunc(r.Issues, func(i Issue) bool { return i.Severity == "error" })
 }
 
-// Validate checks d (spec 5.6): one trigger, every node reachable, no cycle (no loop nodes yet), known
-// node types, ports and config values, edges between existing ports, always-on steps on, and whether
-// this version can run it. A node's unwired "error" port means stop: the job fails and the original
-// stays, as the engine has always done.
 var hhmmRe = regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9]$`)
 
 // Policy is what this install allows a workflow to do (FB2b): the Safety switch for Run a command.
-// Validate alone assumes everything is allowed; the server passes the live policy to ValidateWith.
+// Validate alone assumes everything is allowed; the server passes the live policy in Scopes.
 type Policy struct {
 	CommandsAllowed bool
 }
 
-// ValidateWith is Validate under a policy: a card the policy forbids is an error naming the switch, so
-// the draft is kept but can't be published until the switch is on.
-func ValidateWith(d Doc, p Policy) Result {
-	r := Validate(d)
-	if !p.CommandsAllowed {
-		for _, n := range d.Nodes {
-			if n.Type == TypeCommand {
-				r.Issues = append(r.Issues, Issue{Code: "commands_off", Severity: "error", NodeID: n.ID,
-					Message: "'" + nodeName(n) + "' can't run until \"Workflows may run commands\" is on in Settings > Safety."})
-			}
-		}
-	}
-	return r
+// Validate checks d (spec 5.6): one trigger, every node reachable, no cycle (no loop nodes yet), known
+// node types, ports and config values, edges between existing ports, always-on steps on, and whether
+// this version can run it. A node's unwired "error" port means stop: the job fails and the original
+// stays, as the engine has always done.
+func Validate(d Doc) Result {
+	return ValidateWith(d, Scopes{Policy: Policy{CommandsAllowed: true}})
 }
 
-func Validate(d Doc) Result {
+// ValidateWith is Validate in the live scopes (W2): the workflow's own variables, then its library's,
+// then the server's global ones; file.* and source.* stay references with s.LeaveFile, so a published
+// workflow may name a file it does not have yet. Under the install's policy (FB2b), a card it forbids
+// is an error naming the switch, so the draft is kept but can't be published until the switch is on.
+func ValidateWith(d Doc, s Scopes) Result {
 	r := Result{Issues: []Issue{}, StepSummaries: map[string]string{}, StepPlaces: map[string]StepPlace{}, AddSteps: map[string]AddStep{}}
 	add := func(i Issue) {
 		if i.Severity == "" {
@@ -216,7 +209,7 @@ func Validate(d Doc) Result {
 	// W1: a setting that takes a typed value may hold one whole variable. It is resolved here, so the
 	// checks below read what the run will use; a setting whose reference Resolve already reported is
 	// not checked a second time as a literal (that would say the same thing twice, in other words).
-	resolved, refIssues := Resolve(d)
+	resolved, refIssues, _ := resolveOnce(d, s)
 	for _, i := range refIssues {
 		add(i)
 	}
@@ -267,7 +260,7 @@ func Validate(d Doc) Result {
 		if !def.Available { // a card this build can't run yet (FB1b): a draft may hold it, Publish refuses it
 			add(Issue{Code: "not_runnable_yet", NodeID: n.ID, Message: "'" + nodeName(n) + "' can't run in this version. Remove it, or keep the workflow as a draft."})
 		}
-		for _, i := range checkConfig(n, def, badRef) {
+		for _, i := range checkConfig(n, def, badRef, s.LeaveFile) {
 			add(i)
 		}
 		if n.Type == TypeTag && len(rules.CleanTags(strOf(n.Config, "add", ""))) == 0 && len(rules.CleanTags(strOf(n.Config, "remove", ""))) == 0 { // review2-542 P2: an empty card would fail every job
@@ -351,9 +344,17 @@ func Validate(d Doc) Result {
 	}
 	r.Stackable = stackable(d)
 	if !r.Errors() {
-		_, issues := ToTemplate(d, rules.Template{})
+		_, issues := ToTemplateWith(d, rules.Template{}, s)
 		for _, i := range issues {
 			add(i)
+		}
+	}
+	if !s.Policy.CommandsAllowed { // FB2b: the Safety switch counts in what the editor shows and in what may be published
+		for _, n := range d.Nodes {
+			if n.Type == TypeCommand {
+				add(Issue{Code: "commands_off", Severity: "error", NodeID: n.ID,
+					Message: "'" + nodeName(n) + "' can't run until \"Workflows may run commands\" is on in Settings > Safety."})
+			}
 		}
 	}
 	return r
@@ -409,7 +410,7 @@ func phaseIssue(from, to Node, e Edge, defs map[string]StepDefinition) []Issue {
 // array's items, and required keys without a default (ui-shop 12:32Z: a minimum of 0 wasn't enforced).
 // Each problem names the step and the setting. A key the schema doesn't know is kept and warned about
 // (research: never drop it silently).
-func checkConfig(n Node, def StepDefinition, badRef map[[2]string]bool) []Issue {
+func checkConfig(n Node, def StepDefinition, badRef map[[2]string]bool, leaveFile bool) []Issue {
 	var out []Issue
 	if def.ReadOnly { // kept as it is: nothing to check against a form
 		return nil
@@ -443,6 +444,15 @@ func checkConfig(n Node, def StepDefinition, badRef map[[2]string]bool) []Issue 
 		}
 		if badRef[[2]string{n.ID, k}] {
 			continue // Resolve said what is wrong with the reference this setting holds
+		}
+		if leaveFile {
+			if str, ok := v.(string); ok {
+				if name, whole := wholeRef(str); whole {
+					if _, isFile := ReservedNames[name]; isFile {
+						continue // W2: the job fills this from the file; Resolve checked its kind
+					}
+				}
+			}
 		}
 		if msg := valueProblem(p, v, titleOf(p, k)); msg != "" {
 			bad(k, msg)
