@@ -23,14 +23,14 @@ func TestFixedPrefixOfATemplatedFolder(t *testing.T) {
 		"/data/out/{{sub}}":         "/data/out",
 		"/data/out/{{a}}/{{b}}":     "/data/out",
 		"/data/out/films-{{year}}":  "/data/out",
-		"/data/{{sub}}/out":         "/srv",
-		"/{{sub}}":                 "",
-		"{{sub}}/out":              "",
+		"/data/{{sub}}/out":         "/data",
+		"/{{sub}}":                  "",
+		"{{sub}}/out":               "",
 		"/data/out/{{sub}}/":        "/data/out",
-		`C:\out\{{sub}}`:           `C:\out`,
+		`C:\out\{{sub}}`:            `C:\out`,
 		"/data/out/{{file.name}}.d": "/data/out",
 		"/data/out/{{unclosed":      "/data/out",
-		"/other/{{x}}/../../lib":   "/lib", // review-592: cleaned first (and refused before it gets here: hasDotDot)
+		"/other/{{x}}/../../lib":    "/lib", // review-592: cleaned first (and refused before it gets here: hasDotDot)
 		"/data/out/{{sub}}/../keep": "/data/out/keep",
 		"/data/out/sub/../{{sub}}":  "/data/out",
 	} {
@@ -111,7 +111,7 @@ func TestPublishNeverMakesATemplatedFolder(t *testing.T) {
 		t.Fatal(err)
 	}
 	// review-592 round 3: any ".." in a templated folder is refused (an empty value would let it climb past the
-	// checked part: /srv/lib/{{a}}/../.. with a = "" is /), so the two ".." cases are refused for that reason
+	// checked part: /data/lib/{{a}}/../.. with a = "" is /), so the two ".." cases are refused for that reason
 	dots := "can't use '..'"
 	for folder, want := range map[string]string{"{{sub}}/out": "not_writable", root + "/other/{{sub}}/../../lib": dots, lib + "/{{sub}}/../..": dots, filepath.Join(root, "out", "{{sub}}", "keep"): ""} {
 		_, body = send("GET", "/api/v2/workflows/"+id+"/draft", "", "") // the publish took the draft; a fresh one
