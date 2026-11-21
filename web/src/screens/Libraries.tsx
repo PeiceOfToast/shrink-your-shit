@@ -271,7 +271,7 @@ export function WorkflowField({ value, onChange, workflows, self, none }: { valu
             {none && <option value="0">No workflow yet</option>}
             {workflows.map((w) => <option key={w.id} value={w.id} disabled={!w.usable}>{w.name}{w.usable ? "" : " (not published yet)"}</option>)}
           </select>
-          {value && value !== "0" && <Link className="btn sm ghost" to={"/workflows/" + value}>Edit this workflow</Link>}
+          {value && value !== "0" && <Link className="btn sm ghost" to={"/workflows/" + value + "?view=simple"}>Edit this workflow</Link>}
         </div>
         <span id="lib-wf-hint" className="hint">{hint}</span>
         {workflows.length === 0 && <span className="hint">No workflows yet. <Link to="/workflows">Make one in Workflows</Link>.</span>}
