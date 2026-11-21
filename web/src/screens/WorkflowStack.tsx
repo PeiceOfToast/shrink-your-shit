@@ -55,9 +55,11 @@ function SrtFiles() {
 // other problem. The flow builder owns this screen (manager, 02:10Z).
 const isRef = (v: unknown) => typeof v === "string" && /^\{\{[a-z][a-z0-9_]*\}\}$/.test(v);
 const refName = (v: unknown) => (isRef(v) ? (v as string).slice(2, -2) : "");
-function RefPick({ fid, title, value, wf, set, back, selectRef, none }: { fid: string; title: string; value: unknown; wf: string; set: (v: unknown) => void; back: () => void; selectRef: RefObject<HTMLSelectElement | null>; none: unknown }) {
-  const vl = useData(() => varListFor(wf, true), [wf]).data, own = useContext(OwnVars);
-  const vars = vl ? withOwn(vl.variables, own) : [], groups = [...new Set(vars.map((v) => v.group))], cur = refName(value);
+function RefPick({ fid, title, value, set, back, selectRef, none }: { fid: string; title: string; value: unknown; set: (v: unknown) => void; back: () => void; selectRef: RefObject<HTMLSelectElement | null>; none: unknown }) {
+  // only the workflow's own variables can set a typed setting (W1's resolver, internal/workflow/resolve.go); the
+  // built-ins fill text fields only (ui-shop review2 #559). A secret never sets one, so it is listed but can't be chosen.
+  const own = useContext(OwnVars), cur = refName(value);
+  const vars = own.map((v) => ({ name: v.name, value: v.type === "secret" ? null : v.hasValue === false || v.value == null ? null : String(v.value), secret: v.type === "secret" }));
   const known = vars.some((v) => v.name === cur);
   return (
     <div className="field">
@@ -65,17 +67,18 @@ function RefPick({ fid, title, value, wf, set, back, selectRef, none }: { fid: s
       <div className="row nw" style={{ gap: 8 }}>
         <select ref={selectRef} id={fid} className="input" value={cur} aria-describedby={fid + "-ref"} onChange={(e) => { const next = e.target.value ? "{{" + e.target.value + "}}" : none; if (next !== value) set(next); }}>
           <option value="">Choose a variable…</option>
-          {cur && !known && <option value={cur}>{"{{" + cur + "}}"} · not a variable here</option>}
-          {groups.map((g) => <optgroup key={g} label={g}>{vars.filter((v) => v.group === g).map((v) => <option key={v.name} value={v.name}>{"{{" + v.name + "}}"}{v.value != null && v.value !== "" ? " · " + v.value : ""}</option>)}</optgroup>)}
+          {cur && !known && <option value={cur}>{"{{" + cur + "}}"} · not a variable of this workflow</option>}
+          <optgroup label="Your variables">{vars.map((v) => <option key={v.name} value={v.name} disabled={v.secret}>{"{{" + v.name + "}}"}{v.secret ? " · a secret can't set this" : v.value != null && v.value !== "" ? " · " + v.value : ""}</option>)}</optgroup>
+          {vars.length === 0 && <option value="" disabled>This workflow has no variables yet: add one in Variables above</option>}
         </select>
         <button className="btn sm ghost nowrap" type="button" onClick={back}>Type a value instead</button>
       </div>
-      <span className="hint" id={fid + "-ref"}>One whole variable sets this; its value must fit the setting. A secret can't be used here.</span>
+      <span className="hint" id={fid + "-ref"}>One of this workflow's own variables sets this; its value must fit the setting. A secret can't be used here.</span>
     </div>);
 }
 
 function Field(props: { id: string; name: string; s: JSONSchema; value: unknown; set: (v: unknown) => void; wf: string }) {
-  const { id, name, s, value, set, wf } = props;
+  const { id, name, s, value, set } = props;
   const title = (s.title as string) ?? name.charAt(0).toUpperCase() + name.slice(1).replace(/([A-Z])/g, " $1").toLowerCase(), fid = id + "-" + name;
   const [refMode, setRefMode] = useState(false), typed = s["x-variableRef"] === true;
   // ui-shop review #559: the typed value is kept across a round trip (F1), nothing is written when nothing changes (F2),
@@ -87,7 +90,7 @@ function Field(props: { id: string; name: string; s: JSONSchema; value: unknown;
   const inRef = typed && (refMode || isRef(value));
   // "Choose a variable…" picked again puts the typed value back (never "" into a number or a choice: ui-shop N1)
   const none = typedValue.current !== undefined ? typedValue.current : s.default;
-  if (inRef) return <RefPick fid={fid} title={title} value={value} wf={wf} set={set} selectRef={pick} none={none} back={() => {
+  if (inRef) return <RefPick fid={fid} title={title} value={value} set={set} selectRef={pick} none={none} back={() => {
     const restore = typedValue.current !== undefined ? typedValue.current : s.default;
     setRefMode(false); setFocusTyped((n) => n + 1);
     if (isRef(value)) { if (restore !== value) set(restore); } // a plain value already there is left as it is
