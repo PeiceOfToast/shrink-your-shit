@@ -59,7 +59,7 @@ function Field({ id, name, s, value, set, wf }: { id: string; name: string; s: J
         <strong className="slnow phone" aria-hidden="true">{opts[i][1]}</strong>
         <input id={fid} type="range" min={0} max={opts.length - 1} step={1} value={i} aria-valuetext={`${i + 1} of ${opts.length}, ${opts[i][1]}`} onChange={(e) => set(opts[Number(e.target.value)][0])} />
         <div className="row sm muted hide-sm" style={{ justifyContent: "space-between", flexWrap: "nowrap", gap: 2 }} aria-hidden="true">
-          {opts.map((o, k) => (k === i ? <strong key={k} style={{ color: "var(--text)" }}>{o[1]}</strong> : <span key={k}>{o[1]}</span>))}</div>
+          {opts.map((o, k) => (k === i ? <strong key={k} className="slider-on">{o[1]}</strong> : <span key={k}>{o[1]}</span>))}</div>
         {/* phones (design, step 4): the chosen name above, only the two ends under the slider */}
         <div className="row sm muted phone slends" aria-hidden="true"><span>{opts[0][1]}</span><span>{opts[opts.length - 1][1]}</span></div>
         <Hint text={hintFor(s, value)} />
