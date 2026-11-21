@@ -38,8 +38,29 @@ type RemoteResult struct {
 	Command []string             // the ffmpeg arguments it ran: the job log records these, not the server's plan
 	Kept    string               // its checks said no: the original is kept, as a local check would
 	Err     error                // it failed to convert
+	Code    string               // its failure's code when it is not the general one (slice 15: settings_rejected); "" from an older worker
 	Steps   []jobs.RunStep       // the run steps (encode, probe, check) with the remote's own timings
 	Failure *jobs.FailureSummary // the remote's failure summary (exit code, key lines, etc.)
+}
+
+// remoteFailure is a remote worker's conversion failure with the code its result carried: "" from an
+// older worker, whose failure keeps today's code (slice 15).
+type remoteFailure struct {
+	code string
+	err  error
+}
+
+func (e *remoteFailure) Error() string { return e.err.Error() }
+func (e *remoteFailure) Unwrap() error { return e.err }
+
+// remoteFailureCode is the code a remote worker's result carried. ok is true for a remote failure even
+// when the code is "" (an older worker): the server does not work one out from its stderr then.
+func remoteFailureCode(err error) (string, bool) {
+	var rf *remoteFailure
+	if errors.As(err, &rf) {
+		return rf.code, true
+	}
+	return "", false
 }
 
 // RemoteJob joins the server's run of a leased job with the remote worker converting it.
@@ -204,7 +225,7 @@ func (r *RemoteJob) convert(ctx context.Context, w *Worker, job jobs.Job, snap r
 			case res.Kept != "":
 				return res.Stderr, res.Command, kept("%s", res.Kept)
 			case res.Err != nil:
-				return res.Stderr, res.Command, res.Err
+				return res.Stderr, res.Command, &remoteFailure{code: res.Code, err: res.Err}
 			}
 			return res.Stderr, res.Command, nil // the upload is in tmp already
 		}

@@ -29,6 +29,8 @@ func FailureCode(errorCode string, keyLines []string) string {
 		return "worker_lost"
 	case ReasonKeptOriginal:
 		return "check_failed"
+	case ReasonSettingsRejected:
+		return "settings_rejected"
 	case ReasonConvertFailed, "":
 		return classifyKeyLines(keyLines)
 	}
@@ -56,6 +58,10 @@ func containsAny(text string, phrases []string) bool {
 func classifyKeyLines(lines []string) string {
 	text := strings.ToLower(strings.Join(lines, "\n"))
 	switch {
+	case strings.Contains(text, "could not write header") && strings.Contains(text, "supported for"):
+		// s4: ffmpeg stopped at the new file's header because its type can't hold a track the plan maps
+		// in. Both lines are needed: a bare "Could not write header" stays ffmpeg_error (slice 15).
+		return "settings_rejected"
 	case containsAny(text, encoderUnavailablePhrases()):
 		return "encoder_unavailable"
 	case strings.Contains(text, "no space left on device"):
@@ -161,6 +167,14 @@ func FailureWords(code string, f FailureFacts) (message, hint string) {
 	case "stalled":
 		return "The conversion stopped making progress and was stopped.",
 			"Retry. If it stops again at the same point, the last ffmpeg lines above show where."
+	case "settings_rejected":
+		// slice 15: the worker's own sentence is headerWords' ("ffmpeg couldn't write the new file: …
+		// Your original was not touched."), which it stored as the job's words
+		if f.Stored != "" {
+			return f.Stored, "Change the workflow: this file type can't hold a track the way the workflow maps it. Retrying gives the same result."
+		}
+		return "ffmpeg couldn't write the new file. Your original was not touched.",
+			"Change the workflow: this file type can't hold a track the way the workflow maps it. Retrying gives the same result."
 	case "ffmpeg_error":
 		// ffmpeg never ran (a folder setup failure, say): the worker's own sentence is the true one
 		if !f.FfmpegRan && f.ExitCode < 0 && f.Stored != "" {
@@ -179,6 +193,25 @@ func FailureWords(code string, f FailureFacts) (message, hint string) {
 		return "ffmpeg stopped with an error.", ""
 	}
 	return f.Stored, ""
+}
+
+// HeaderSupport is ffmpeg's own sentence about what the new file's type supports, when it stopped at
+// the file's header because the type can't hold a track as the plan maps it: a "Could not write header"
+// line and a "… supported for …" one, s4's WebM refusal (slice 15). ok is false otherwise, so a bare
+// header stop or a damaged file is never called a file type's limit.
+func HeaderSupport(stderr string) (line string, ok bool) {
+	if !strings.Contains(stderr, "Could not write header") {
+		return "", false
+	}
+	for _, l := range strings.Split(stderr, "\n") {
+		if !strings.Contains(l, "supported for") {
+			continue
+		}
+		if i := strings.Index(l, "] "); i >= 0 { // "[webm @ 0x...] Only VP8 ... are supported for WebM."
+			line = strings.TrimSpace(l[i+2:])
+		}
+	}
+	return line, line != ""
 }
 
 // InfoLine returns true for ffmpeg informational lines that should not be key lines.
@@ -265,16 +298,22 @@ func DeniedFolder(lines []string) string {
 	return ""
 }
 
-// classifierOrder is classifyKeyLines' precedence: the first code whose lines match is the failure's.
-var classifierOrder = []struct {
+// classifier is one code in classifyKeyLines' precedence: patterns match when any of their lines does,
+// all only when every one of them does.
+type classifier struct {
 	code     string
 	patterns []string
-}{
-	{"encoder_unavailable", encoderUnavailablePhrases()},
-	{"no_space", []string{"no space left on device"}},
-	{"output_not_writable", []string{"permission denied", "read-only file system", "access is denied"}},
-	{"source_missing", []string{"no such file or directory"}},
-	{"source_damaged", []string{"invalid data found when processing input", "moov atom not found", "error while decoding",
+	all      []string
+}
+
+// classifierOrder is classifyKeyLines' precedence: the first code whose lines match is the failure's.
+var classifierOrder = []classifier{
+	{code: "settings_rejected", all: []string{"could not write header", "supported for"}},
+	{code: "encoder_unavailable", patterns: encoderUnavailablePhrases()},
+	{code: "no_space", patterns: []string{"no space left on device"}},
+	{code: "output_not_writable", patterns: []string{"permission denied", "read-only file system", "access is denied"}},
+	{code: "source_missing", patterns: []string{"no such file or directory"}},
+	{code: "source_damaged", patterns: []string{"invalid data found when processing input", "moov atom not found", "error while decoding",
 		"decode_slice_header error", "non-existing pps", "invalid nal unit"}},
 }
 
@@ -283,17 +322,34 @@ var classifierOrder = []struct {
 // classifyKeyLines would give it. ok is false for a code no failure has. Its args go in order.
 func ReasonCondition(code string) (cond string, args []any, ok bool) {
 	stored := map[string][]string{"no_space": {ReasonDiskFull, ReasonLowDiskSpace}, "output_not_writable": {ReasonCannotWrite},
-		"check_failed": {ReasonKeptOriginal}, "stalled": {ReasonStalled}, "worker_lost": {ReasonWorkerLost}}
+		"check_failed": {ReasonKeptOriginal}, "stalled": {ReasonStalled}, "worker_lost": {ReasonWorkerLost},
+		"settings_rejected": {ReasonSettingsRejected}}
 	if codes, found := stored[code]; found {
 		marks := strings.Repeat(",?", len(codes)-1)
 		return "j.error_code IN (?" + marks + ")", anys(codes), true
 	}
 	keys := `lower(COALESCE((SELECT key_lines FROM job_failures WHERE job_id=j.id), ''))`
-	match := func(patterns []string) string {
+	anyOf := func(patterns []string) string {
 		parts := make([]string, len(patterns))
 		for i, p := range patterns {
 			parts[i] = keys + " LIKE ?"
 			args = append(args, "%"+p+"%")
+		}
+		return "(" + strings.Join(parts, " OR ") + ")"
+	}
+	// match is one classifier's lines: any of its patterns, or every one of its all
+	match := func(c classifier) string {
+		parts := []string{}
+		if len(c.patterns) > 0 {
+			parts = append(parts, anyOf(c.patterns))
+		}
+		if len(c.all) > 0 {
+			alls := make([]string, len(c.all))
+			for i, p := range c.all {
+				alls[i] = keys + " LIKE ?"
+				args = append(args, "%"+p+"%")
+			}
+			parts = append(parts, "("+strings.Join(alls, " AND ")+")")
 		}
 		return "(" + strings.Join(parts, " OR ") + ")"
 	}
@@ -309,13 +365,13 @@ func ReasonCondition(code string) (cond string, args []any, ok bool) {
 		return "", nil, false
 	}
 	for i := 0; i < pos; i++ { // an earlier code's lines win over this one
-		conds = append(conds, "NOT "+match(classifierOrder[i].patterns))
+		conds = append(conds, "NOT "+match(classifierOrder[i]))
 	}
 	if code != "ffmpeg_error" {
-		conds = append(conds, match(classifierOrder[pos].patterns))
+		conds = append(conds, match(classifierOrder[pos]))
 	} else {
 		for _, c := range classifierOrder {
-			conds = append(conds, "NOT "+match(c.patterns))
+			conds = append(conds, "NOT "+match(c))
 		}
 	}
 	return strings.Join(conds, " AND "), args, true
