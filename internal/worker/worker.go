@@ -2493,7 +2493,8 @@ func shortReason(reason string) string {
 // can do this plan. The job log says which, and why the full pipeline is not used.
 func (w *Worker) graphicsArgs(ctx context.Context, job jobs.Job, plan rules.Plan, src media.Info, srcPath, tmp, want string) (args []string, full, ok bool) {
 	fam := rules.GraphicsFamily(want)
-	if v := src.Video(); v != nil && w.GraphicsDecodes != nil && (fam == "qsv" || fam == "vaapi") {
+	prof, _ := rules.ProfileFor(want) // a family without a full graphics pipeline is decoded by the processor
+	if v := src.Video(); v != nil && w.GraphicsDecodes != nil && prof.FullPipeline() {
 		if w.GraphicsDecodes(ctx, fam, v.Codec, rules.NeedsTenBit(plan, &src)) { // one rule for 10-bit, here and at the encoder
 			if args, full = plan.FFmpegArgsFullGPU(srcPath, tmp, want); full {
 				w.jobf(job.ID, ": decoding and encoding on the graphics card (full GPU pipeline)")

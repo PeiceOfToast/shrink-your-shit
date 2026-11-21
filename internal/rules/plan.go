@@ -299,6 +299,21 @@ var graphicsEncoders = func() map[string]bool {
 	return m
 }()
 
+// GraphicsEncoderNames are the graphics encoders of every family that has a profile, in the doctor's order: per
+// family HEVC, then H.264, then AV1.
+func GraphicsEncoderNames() []string {
+	var out []string
+	for _, fam := range graphicsFamilies {
+		if _, ok := profiles[fam]; !ok {
+			continue
+		}
+		for _, prefix := range []string{"hevc", "h264", "av1"} {
+			out = append(out, prefix+"_"+fam)
+		}
+	}
+	return out
+}
+
 // GraphicsFamily is the graphics family of an encoder name: "qsv" for hevc_qsv, "" for a processor's name.
 func GraphicsFamily(enc string) string {
 	return enc[strings.LastIndex(enc, "_")+1:]
@@ -342,7 +357,7 @@ func (p Plan) FFmpegArgsWith(in, out, enc string) ([]string, bool) {
 // encoder, or when FFmpegArgsWith wouldn't use enc, ok is false and the arguments are FFmpegArgsWith's.
 func (p Plan) FFmpegArgsFullGPU(in, out, enc string) ([]string, bool) {
 	args, ok := p.FFmpegArgsWith(in, out, enc)
-	if fam := GraphicsFamily(enc); !ok || (fam != "qsv" && fam != "vaapi") {
+	if prof, has := ProfileFor(enc); !ok || !has || !prof.FullPipeline() {
 		return args, false
 	}
 	return p.ffmpegArgs(in, out, enc, true), true
@@ -368,13 +383,13 @@ func (p Plan) ffmpegArgs(in, out, gpu string, full bool) []string {
 	v := "v:" + strconv.Itoa(p.Video.Index)
 	fam := GraphicsFamily(gpu) // "" for the processor
 	args := []string{"-y", "-nostdin", "-v", "error", "-progress", "pipe:1", "-nostats"}
-	if p, ok := profiles[fam]; ok { // a hardware device is set up before the input (the family's profile)
-		args = append(args, p.Setup(vaapiDevice())...)
+	device := "" // only VAAPI's set-up names a render node, so the node is looked up for VAAPI alone
+	if fam == "vaapi" {
+		device = vaapiDevice()
 	}
-	if p, ok := profiles[fam]; full && ok && p.FullDecode() != nil { // the device decodes too, so the frames never come down to software
-		args = append(args, p.FullDecode()...)
-	} else if full {
-		args = append(args, "-hwaccel", fam, "-hwaccel_output_format", fam, "-hwaccel_device", map[string]string{"qsv": "qsv", "vaapi": "va"}[fam])
+	args = append(args, profiles[fam].Setup(device)...) // a hardware device is set up before the input (the family's profile)
+	if full {                                           // the device decodes too, so the frames never come down to software
+		args = append(args, profiles[fam].FullDecode()...)
 	}
 	args = append(args, "-i", in,
 		"-map", "0", "-map", "-0:d",
@@ -399,7 +414,7 @@ func (p Plan) ffmpegArgs(in, out, gpu string, full bool) []string {
 		args = append(args, "-c:"+v, gpu, "-b:"+v, kbps)
 	default:
 		args = append(args, "-c:"+v, gpu)
-		args = append(args, gpuQuality(fam, p.Video.CRF)...)
+		args = append(args, profiles[fam].quality(p.Video.CRF)...)
 	}
 	if gpu == "" && p.Video.Preset != "" { // a graphics encoder has no x265 presets
 		args = append(args, "-preset", p.Video.Preset)
@@ -434,7 +449,7 @@ func (p Plan) ffmpegArgs(in, out, gpu string, full bool) []string {
 	var vf []string
 	if p.Video.Height > 0 {
 		if full {
-			vf = append(vf, gpuScale(fam, p.Video.Height, ten10))
+			vf = append(vf, profiles[fam].scale(p.Video.Height, ten10))
 		} else {
 			vf = append(vf, "scale=-2:"+strconv.Itoa(p.Video.Height))
 		}
@@ -471,39 +486,6 @@ func withOutput(args []string, out string) []string {
 		args = append(args, "-movflags", "+faststart")
 	}
 	return append(args, out)
-}
-
-// gpuScale is the scale filter of the full graphics pipeline (frames stay on the device): QSV's keeps the frames'
-// format; VAAPI's also sets it, p010 for HDR or a 10-bit source and nv12 otherwise. scale_qsv refuses w=-2 ("Size
-// values less than -1 are not acceptable"), so QSV's width is an expression: trunc(H*iw/ih/2+0.5)*2 keeps the
-// aspect ratio, rounds half up and is even, the same width ScaledWidth plans (a plan of 854 must not encode as 852).
-// H*iw is multiplied first: iw/ih rounded early lands an exact .5 tie a pixel low (328x1280 at 480: 122, not 124).
-func gpuScale(fam string, h int, tenBit bool) string {
-	if p, ok := profiles[fam]; ok && p.scale != nil {
-		return p.scale(h, tenBit)
-	}
-	size := "w=-2:h=" + strconv.Itoa(h)
-	if fam != "vaapi" {
-		hs := strconv.Itoa(h)
-		return "scale_qsv=w=trunc(" + hs + "*iw/ih/2+0.5)*2:h=" + hs
-	}
-	format := "nv12"
-	if tenBit {
-		format = "p010"
-	}
-	return "scale_vaapi=" + size + ":format=" + format
-}
-
-// gpuQuality is a graphics family's constant-quality arguments at crf, in its encoders' names. The same
-// family's H.264 and AV1 encoders take the same options as its HEVC one.
-func gpuQuality(fam string, crf int) []string {
-	if p, ok := profiles[fam]; ok && p.quality != nil {
-		return p.quality(crf)
-	}
-	if fam == "vaapi" {
-		return []string{"-rc_mode", "CQP", "-qp", strconv.Itoa(crf)}
-	}
-	return nil
 }
 
 // withoutSoftwareParams drops a software encoder's own parameter options and their values (libx265's, SVT-AV1's,

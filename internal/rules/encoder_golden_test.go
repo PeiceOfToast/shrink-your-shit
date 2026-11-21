@@ -33,7 +33,7 @@ func goldenCases() []goldenCase {
 			if (depth == "hdr" && codec != "libx265") || (depth == "10bit" && codec == "libvpx-vp9") {
 				continue
 			}
-			for _, scale := range []int{0, 1080} {
+			for _, scale := range []int{0, 480, 1080} {
 				for _, enc := range encs {
 					v := VideoEncode{Codec: codec, CRF: 22, Preset: "medium", Height: scale, Format: format[codec]}
 					switch depth {

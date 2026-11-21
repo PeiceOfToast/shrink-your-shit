@@ -43,6 +43,10 @@ func (p EncoderProfile) Setup(device string) []string {
 // FullDecode is the family's decode arguments for the full graphics pipeline: nil when it has none.
 func (p EncoderProfile) FullDecode() []string { return p.fullDecode }
 
+// FullPipeline is whether the family has a full graphics pipeline (its frames stay on the device from decode to
+// encode): the family has decode arguments for it.
+func (p EncoderProfile) FullPipeline() bool { return p.fullDecode != nil }
+
 // Upload is the family's hybrid upload filter chain for frames of the given depth: nil when it has none.
 func (p EncoderProfile) Upload(tenBit bool) []string {
 	if p.upload == nil {
