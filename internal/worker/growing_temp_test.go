@@ -5,6 +5,7 @@ package worker
 import (
 	"context"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -25,13 +26,15 @@ type growingExec struct {
 	grow  []int64
 	hang  bool
 
-	mu   sync.Mutex
-	size int64 // the fake temp file's size, read by the watchdog's stat
+	mu    sync.Mutex
+	size  int64    // the fake temp file's size, read by the watchdog's stat
+	paths []string // every path the watchdog stat'd
 }
 
-func (x *growingExec) onDisk(string) (int64, error) {
+func (x *growingExec) onDisk(path string) (int64, error) {
 	x.mu.Lock()
 	defer x.mu.Unlock()
+	x.paths = append(x.paths, path)
 	return x.size, nil
 }
 
@@ -88,6 +91,14 @@ func runGrowing(t *testing.T, grow []int64, hang bool) (*scenario, jobs.Job) {
 	case <-done:
 	case <-time.After(60 * time.Second):
 		t.Fatal("the job did not end")
+	}
+	// the watchdog must stat the one staged temp file, the same path for the whole encode
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	for _, p := range x.paths {
+		if p != x.paths[0] || strings.HasSuffix(p, ".srt") {
+			t.Fatalf("the watchdog stat'd %q, want one temp file (first %q)", p, x.paths[0])
+		}
 	}
 	return s, s.job()
 }

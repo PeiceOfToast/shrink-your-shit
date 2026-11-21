@@ -940,7 +940,9 @@ func (w *Worker) watchStall(job jobs.Job, out string) func() {
 	go func() {
 		t := time.NewTicker(max(after/20, 10*time.Millisecond))
 		defer t.Stop()
-		var seen int64 // the temp file's size at the last check
+		// the temp file's size at the last check. Growth counts only past this peak: a file that shrinks and regrows
+		// below its old size is not seen as growth until it passes the peak (a known limit, accepted; see the review).
+		var seen int64
 		for {
 			select {
 			case <-done:
@@ -954,7 +956,7 @@ func (w *Worker) watchStall(job jobs.Job, out string) func() {
 					w.diskBytes.Store(n)
 					if outputWithin(job.SizeBefore, n) {
 						w.progressAt.Store(now.UnixNano())
-					} else {
+					} else if job.SizeBefore > 0 { // an unknown source size is no bound, so it is not "over twice"
 						w.overSize.Store(true)
 					}
 				}
@@ -1606,7 +1608,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		// the processor takes over. Each run keeps its own start time for the record of the rung.
 		run := func(ctx context.Context, rargs []string) (string, error) {
 			encStart = w.now()
-			_, raw, frames, err := w.encodeRun(ctx, job, rargs)
+			_, raw, frames, err := w.encodeRun(ctx, job, rargs, tmp)
 			decoded = frames
 			return raw, err
 		}
@@ -2835,19 +2837,20 @@ func (w *Worker) stalled() bool {
 // encodeRun is encodeLocal with the encode's log split in two: the raw log, where ffmpeg's end-of-run
 // report says what it read and decoded (slice 13), and the error lines alone, which every other reader of
 // the log expects (as -v error wrote it).
-func (w *Worker) encodeRun(ctx context.Context, job jobs.Job, args []string) (errText, raw string, frames int64, err error) {
+func (w *Worker) encodeRun(ctx context.Context, job jobs.Job, args []string, out string) (errText, raw string, frames int64, err error) {
 	w.recordEncodeStart(job.ID, args, w.now())
-	raw, frames, err = w.encodeLocal(ctx, job, args)
+	raw, frames, err = w.encodeLocal(ctx, job, args, out)
 	return media.ErrorLines([]byte(raw)), raw, frames, err
 }
 
 // encodeLocal runs ffmpeg for the local worker's job: its progress, stall watch and live figures.
-func (w *Worker) encodeLocal(ctx context.Context, job jobs.Job, args []string) (string, int64, error) {
+func (w *Worker) encodeLocal(ctx context.Context, job jobs.Job, args []string, out string) (string, int64, error) {
 	var encErr string
 	var terr error
-	frames := int64(-1)      // the last frame count ffmpeg reported
-	wrote := int64(0)        // the most bytes it reported writing in this attempt (the run counters, L2)
-	out := args[len(args)-1] // the output (the temp file) is the last argument (rules.Plan.FFmpegArgs)
+	frames := int64(-1) // the last frame count ffmpeg reported
+	wrote := int64(0)   // the most bytes it reported writing in this attempt (the run counters, L2)
+	// out is the staged temp file the encode writes: the watchdog stats it, not the last argument, which is a
+	// subtitle file when the plan extracts subtitles to .srt (rules.Plan.withSubtitleFiles appends them)
 	stopWatch := w.watchStall(job, out)
 	w.quietOn.Store(true) // R9's quiet warning: the stall watcher checks it with this clock
 	w.outputSeen(w.stallNow())
