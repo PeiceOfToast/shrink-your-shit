@@ -78,7 +78,8 @@ var hardwareEncoders = []string{
 	"hevc_videotoolbox", "h264_videotoolbox", "av1_videotoolbox",
 }
 
-// has10Bit says whether enc gets the 10-bit test: HEVC and AV1 only (H.264 has no 10-bit profile here).
+// has10Bit says whether enc gets the 10-bit test: HEVC and AV1 only (H.264 has no 10-bit profile here). It asks
+// about the encoder, not the job: that is rules.NeedsTenBit.
 func has10Bit(enc string) bool {
 	return strings.HasPrefix(enc, "hevc_") || strings.HasPrefix(enc, "av1_")
 }
@@ -291,7 +292,8 @@ func (c *Checker) Retest(ctx context.Context) Tools {
 // stale result is refreshed in the background, one refresh at a time: a page that only shows the graphics
 // card never waits for the hardware test's encodes (S2, ui-shop's 1.5 s stop answer).
 //
-// While a check holds the lock its answer is the last complete result, not "nothing": a caller that takes
+// While a check holds the lock its answer is the last complete result, not "nothing", and a Retest that has
+// cleared the hardware result answers the same way until its test stores a new one: a caller that takes
 // "nothing" for an empty capability list would pick the processor on a computer whose card passed (user
 // bug 11-20: Quick Sync passed, card idle, "Chosen: x265 (processor)" with no reason).
 func (c *Checker) ToolsNow() (Tools, bool) {
@@ -305,6 +307,10 @@ func (c *Checker) ToolsNow() (Tools, bool) {
 	stale := !ok || time.Since(c.hwAt) >= toolsTTL || time.Since(c.toolsAt) >= toolsTTL
 	if ok {
 		t = c.tools.withEncoders(*c.hw, c.hwAt)
+	} else if k := c.known.Load(); k != nil {
+		// A Retest cleared the hardware result while its test runs: until the new result is stored, the
+		// last complete one stands (the same answer a caller gets while the lock is held).
+		t, ok = *k, true
 	}
 	start := stale && !c.refreshing
 	if start {
