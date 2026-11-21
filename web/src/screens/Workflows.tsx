@@ -136,8 +136,8 @@ export function Workflows() {
         {wfs.error && wfs.data && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{wfs.error.message}</span></p>}
         {!wfs.loaded ? <div className="empty">Loading…</div> : wfs.error && !wfs.data ? <LoadFailed error={wfs.error} reload={wfs.reload} /> : rows.length === 0 ? (all.length ? <div className="empty">No workflow matches.</div>
           : <Empty icon="i-workflow" text="No workflows yet. A workflow says what happens to each file.">{!wizard && <button className="btn primary" type="button" onClick={() => (setWizard(true), setSaid(""))}><Icon id="i-plus" />New workflow</button>}</Empty>) : (
-          <div className="list"><table className="tbl">
-            <thead><tr><th>Name</th><th data-p="2">Libraries</th><th data-p="3">Version</th><th data-p="6">Recent runs</th>{hasTags && <th data-p="6">Tags</th>}<th className="stc">Check</th><th className="actc">Enabled</th><th className="actc"><span className="sr">Menu</span></th></tr></thead>
+          <div className="list rows"><table className="tbl wflist">
+            <thead><tr><th>Name</th><th data-p="2">Libraries</th><th data-p="3">Version</th>{hasTags && <th data-p="6">Tags</th>}<th className="stc">Check</th><th className="actc">Enabled</th><th className="actc"><span className="sr">Menu</span></th></tr></thead>
             <tbody>{rows.map((w) => {
               const problems = w.validation.errors + w.validation.warnings;
               const used = w.libraries.length ? w.libraries.map((l) => l.name).join(", ") : "No library";
@@ -147,11 +147,10 @@ export function Workflows() {
                   <td className="idc"><span className="row nw">
                     <button className="btn sm icon ghost over star" type="button" aria-pressed={w.favourite} aria-label={"Favourite: " + w.name} onClick={async () => { if (await act(patchWorkflow(w.id, { favourite: !w.favourite }), setSaid)) wfs.reload(); }}
                       style={w.favourite ? { color: "var(--warning-text)" } : undefined}><Icon id="i-star" /></button>
-                    <span><Link className="ttl" to={"/workflows/" + w.id}>{w.name}</Link><span className="sub" title={w.description}>{w.description}</span>
-                      <span className="sub phone">{used} · {version}</span><span className="sub phone runs"><Runs r={w.lastRun} /></span></span></span></td>
-                  <td data-p="2">{w.libraries.length ? used : <span className="muted">None</span>}</td>
+                    <span><Link className="ttl" to={"/workflows/" + w.id}>{w.name}</Link><span className="sub runs"><Runs r={w.lastRun} /></span>{w.description && <span className="sub" title={w.description}>{w.description}</span>}
+                      <span className="sub phone">{used} · {version}</span></span></span></td>
+                  <td data-p="2">{w.libraries.length ? used : <span className="muted">{used}</span>}</td>
                   <td className="nowrap" data-p="3">{version}</td>
-                  <td data-p="6"><Runs r={w.lastRun} /></td>
                   {hasTags && <td data-p="6"><span className="chips">{w.tags.map((t) => <span className="mchip" key={t}>{t}</span>)}</span></td>}
                   <td className="stc">{problems ? <span className={"pill " + (w.validation.errors ? "bad" : "warn")}><Icon id="i-alert" />{plural(problems, "problem", "problems")}</span>
                     : <span className="pill"><Icon id="i-check-c" />OK</span>}</td>
