@@ -160,12 +160,13 @@ func (s *Store) ConvertAgain(id int64) error {
 		return AgainError{c}
 	}
 	// a fresh run: it runs with the library's workflow as it is now, so it records that revision
-	r, err := s.db.Exec(`UPDATE jobs SET status=?, progress=0, error='', error_code='', worker='', attempts=0, retry_at='', fallback='', again_from=?, updated=?, workflow_rev=`+jobRevSQL+` WHERE id=? AND status=?`,
-		Queued, c.originalID, s.stamp(), id, Done)
+	n, err := s.moveWhere(s.db, Done, Queued,
+		`, progress=0, error='', error_code='', worker='', attempts=0, retry_at='', fallback='', again_from=?, workflow_rev=`+jobRevSQL,
+		[]any{c.originalID}, `id=?`, id)
 	if err != nil {
 		return err
 	}
-	if n, _ := r.RowsAffected(); n == 0 { // it changed meanwhile
+	if n == 0 { // it changed meanwhile
 		return AgainError{AgainCheck{Code: AgainNotDone, Message: "Only a converted file can be converted again."}}
 	}
 	return nil
