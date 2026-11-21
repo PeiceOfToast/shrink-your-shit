@@ -237,6 +237,9 @@ func fileItem(store *jobs.Store, libs []jobs.Library, row jobs.FileRow, card str
 // setting with no template is itself. A setting whose first folder is already templated is "" (not a
 // full path, so the check refuses it: a fixed root is needed to know where the files will go).
 func fixedPrefix(dir string) string {
+	if strings.Contains(dir, "{{") { // review-592: a ".." after the template must not slip past the checks: clean the whole text first, as the job's Join will
+		dir = filepath.Clean(dir)
+	}
 	i := strings.Index(dir, "{{")
 	if i < 0 {
 		return dir

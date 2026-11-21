@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/workflow"
 )
 
@@ -29,6 +30,9 @@ func TestFixedPrefixOfATemplatedFolder(t *testing.T) {
 		`C:\out\{{sub}}`:           `C:\out`,
 		"/srv/out/{{file.name}}.d": "/srv/out",
 		"/srv/out/{{unclosed":      "/srv/out",
+		"/other/{{x}}/../../lib":   "/lib", // review-592: cleaned first, so a ".." after the template can't slip past the checks
+		"/srv/out/{{sub}}/../keep": "/srv/out/keep",
+		"/srv/out/sub/../{{sub}}":  "/srv/out",
 	} {
 		if got := fixedPrefix(in); got != want {
 			t.Errorf("%q: %q, want %q", in, got, want)
@@ -41,7 +45,7 @@ func TestFixedPrefixOfATemplatedFolder(t *testing.T) {
 // made as an untemplated folder is today, and the rest is left to the job. On dev the literal
 // "out/{{sub}}" folder appears at publish.
 func TestPublishNeverMakesATemplatedFolder(t *testing.T) {
-	srv, _, _, _ := libServer(t, false)
+	srv, st, _, _ := libServer(t, false)
 	send := func(method, path, body, ifMatch string) (int, string) {
 		t.Helper()
 		req, _ := http.NewRequest(method, srv.URL+path, strings.NewReader(body))
@@ -93,21 +97,37 @@ func TestPublishNeverMakesATemplatedFolder(t *testing.T) {
 	if st, err := os.Stat(filepath.Join(root, "out")); err != nil || !st.IsDir() { // the fixed part is checked and made, as an untemplated folder is
 		t.Errorf("the fixed part should be made: %v", err)
 	}
-	// a setting that starts with a template has no fixed root: refused like any folder that isn't a full path
-	_, body = send("GET", "/api/v2/workflows/"+id+"/draft", "", "") // the publish took the draft; a fresh one
-	d3 := decode[v2Rev](t, body)
-	for i := range doc.Nodes {
-		if doc.Nodes[i].Type == workflow.TypeCommit {
-			doc.Nodes[i].Config["folder"] = "{{sub}}/out"
+	// a setting that starts with a template has no fixed root: refused like any folder that isn't a full path;
+	// a ".." after the template that lands in a library is refused as inside_library (review-592); one that
+	// stays in an allowed folder passes
+	lib := filepath.Join(root, "lib")
+	os.MkdirAll(lib, 0o755)
+	if _, err := st.AddLibrary("Lib", lib, rules.SliderTemplate(3), false); err != nil {
+		t.Fatal(err)
+	}
+	for folder, want := range map[string]string{"{{sub}}/out": "not_writable", filepath.Join(root, "other", "{{x}}", "..", "..", "lib"): "inside_library", filepath.Join(root, "out", "{{sub}}", "..", "keep"): ""} {
+		_, body = send("GET", "/api/v2/workflows/"+id+"/draft", "", "") // the publish took the draft; a fresh one
+		d3 := decode[v2Rev](t, body)
+		for i := range doc.Nodes {
+			if doc.Nodes[i].Type == workflow.TypeCommit {
+				doc.Nodes[i].Config["folder"] = folder
+			}
+		}
+		put, _ = json.Marshal(map[string]any{"workflow": doc, "layout": d.Layout})
+		code, body = send("PUT", "/api/v2/workflows/"+id+"/draft", string(put), d3.Etag)
+		d4 := decode[v2Rev](t, body)
+		if code != 200 {
+			t.Fatalf("save %q: %d %s", folder, code, body)
+		}
+		code, body = send("POST", "/api/v2/workflows/"+id+"/publish", `{"etag":"`+d4.Etag+`"}`, "")
+		switch {
+		case want == "" && code != 200:
+			t.Errorf("%q should publish: %d %s", folder, code, body)
+		case want != "" && (code != 400 || errCode(body) != want):
+			t.Errorf("%q should be refused as %s: %d %s", folder, want, code, body)
 		}
 	}
-	put, _ = json.Marshal(map[string]any{"workflow": doc, "layout": d.Layout})
-	code, body = send("PUT", "/api/v2/workflows/"+id+"/draft", string(put), d3.Etag)
-	d4 := decode[v2Rev](t, body)
-	if code != 200 {
-		t.Fatalf("save %d %s", code, body)
-	}
-	if code, body := send("POST", "/api/v2/workflows/"+id+"/publish", `{"etag":"`+d4.Etag+`"}`, ""); code != 400 || errCode(body) != "not_writable" || !strings.Contains(body, "full path") {
-		t.Errorf("a folder with no fixed root is refused at publish: %d %s", code, body)
+	if _, err := os.Stat(filepath.Join(root, "out", "keep")); err != nil {
+		t.Errorf("the cleaned fixed part should be made: %v", err)
 	}
 }
