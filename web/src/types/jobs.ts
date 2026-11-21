@@ -40,7 +40,7 @@ export interface JobEvent { seq: number; at: Time; from: JobState | null; to: Jo
 export interface JobDetail {
   id: ID; state: JobState; removed: boolean; reason: Reason | null; failure?: Failure | null; events: JobEvent[]; steps: JobStep[];
   file?: { path: string; bytes: number }; attempts?: number; retryAt?: Time | null; error?: string | null; worker?: string | null;
-  createdAt?: Time; updatedAt?: Time; library?: { id: ID; name: string }; workflow?: { id: ID; revisionId: ID; version: number };
+  createdAt?: Time; updatedAt?: Time; library?: { id: ID; name: string }; workflow?: { id: ID; revisionId: ID; version: number; queuedVersion?: number }; // queuedVersion: only when the workflow changed between queueing and running
   metadata?: { before: Probe | null; after: Probe | null };
   subtitleFiles?: string[]; // the .srt base names saved beside the new file; [] when none (workshop, #462)
   // #163: a Done job converts again from its original, when the server says it can; else why not (its own words)
