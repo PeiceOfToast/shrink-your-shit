@@ -16,6 +16,7 @@ var SkipWords = map[string]string{
 	SkipCannotKeepTrack:  "its subtitles could not be kept in its file type",
 	SkipSettingCannotRun: "this setting can't convert files yet",
 	SkipUnreadable:       "it can't be read",
+	SkipHandedToWorkflow: "it is handed to another workflow, which decides what happens to it", // FB4b: a plan made without the other workflow's paths (a preview)
 	"restored":           "you put its original back, so it is left as it is",
 	"user_stopped":       "you stopped it",
 	SkipSharedFile:       "it is shared with another folder, so converting it would free no space",

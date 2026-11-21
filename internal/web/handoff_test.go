@@ -4,11 +4,17 @@ package web
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/workflow"
 )
 
@@ -124,4 +130,57 @@ func TestHandToAnotherWorkflowAPI(t *testing.T) {
 		}
 	}
 	t.Errorf("a loop through the other workflow: %+v", tv.Validation)
+}
+
+// review2-579 P3-3: the library preview of a saved setting that hands files to another workflow reads
+// them as that workflow converts them, not "this setting does not convert it".
+func TestPreviewOfAHandoffSaysWhatTheOtherWorkflowDoes(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	publish := func(name string, target int64) jobs.Flow {
+		t.Helper()
+		f, err := st.AddWorkflow(name, workflow.Preset())
+		if err != nil {
+			t.Fatal(err)
+		}
+		d, _, err := st.Draft(f.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tmpl := rules.SliderTemplate(3)
+		if target != 0 {
+			in := d.Doc.Nodes[0]
+			g := workflow.Node{ID: workflow.NewID(), Type: workflow.TypeGoto, TypeVersion: 1, Enabled: true, Config: map[string]any{"workflow": strconv.FormatInt(target, 10)}}
+			d.Doc.Nodes = []workflow.Node{in, g}
+			d.Doc.Edges = []workflow.Edge{{ID: workflow.NewID(), From: in.ID, FromPort: "success", To: g.ID, ToPort: "in"}}
+			var issues []workflow.Issue
+			if tmpl, issues = workflow.ToTemplate(d.Doc, rules.Template{}); len(issues) > 0 {
+				t.Fatalf("%+v", issues)
+			}
+		}
+		saved, err := st.SaveDraft(f.ID, d.Doc, d.Layout, d.Etag)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.Publish(f.ID, saved.Etag, tmpl); err != nil {
+			t.Fatal(err)
+		}
+		return f
+	}
+	target := publish("Plain", 0)
+	source := publish("Hands over", target.ID)
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "a.mkv"), make([]byte, 1_000_000), 0o644)
+	l, err := st.AddLibraryOnFlow("Movies", dir, source.ID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, b := post(t, srv, "POST", fmt.Sprintf("/api/libraries/%d/preview", l.ID), fmt.Sprintf(`{"sampleFile":%q}`, filepath.Join(dir, "a.mkv")))
+	if code != 200 || strings.Contains(b, "does not convert it") || strings.Contains(b, "handed to another workflow") {
+		t.Fatalf("%d %s", code, b)
+	}
+	var out previewOut
+	json.Unmarshal([]byte(b), &out)
+	if out.Sample == nil || len(out.Sample.Lines) == 0 || !strings.Contains(strings.Join(out.Sample.Lines, " "), "Video: converted") {
+		t.Errorf("the sample should describe the other workflow's conversion: %s", b)
+	}
 }

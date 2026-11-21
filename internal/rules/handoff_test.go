@@ -150,11 +150,40 @@ func TestKeepHandoffsAndTheHopBound(t *testing.T) {
 	expanded := WithHandoffs(fresh, look)
 	kept := KeepHandoffs(fresh, expanded)
 	if len(*kept.Branches) != 3 || (*kept.Branches)[0].Goto != 0 || (*kept.Branches)[0].Then == nil || (*kept.Branches)[0].Handoffs[0].Name != "Plain" ||
-		(*kept.Branches)[1].Goto != 3 || (*kept.Branches)[2].Then == nil {
+		!(*kept.Branches)[1].Fail || (*kept.Branches)[1].GotoNode != "g2" || (*kept.Branches)[2].Then == nil { // the gone target's path stays the failed one (P3-1)
 		t.Errorf("kept: %+v", *kept.Branches)
+	}
+	if k := KeepHandoffs(fresh, fresh); (*k.Branches)[1].Goto != 3 { // nothing expanded for it: the bare hand-over stays
+		t.Errorf("an unexpanded hand-over stays: %+v", (*k.Branches)[1])
 	}
 	if k := KeepHandoffs(fresh, plain); k.Branches != fresh.Branches { // nothing expanded: unchanged
 		t.Error("a straight expanded template changes nothing")
+	}
+	// review2-579 P3-1: a hand-over that can't happen (a gone target) is a failed path in the expanded template,
+	// and the per-file compile keeps that failure, never a "handed to another workflow" skip
+	if k := KeepHandoffs(fresh, WithHandoffs(fresh, func(int64) (Template, string, string) { return Template{}, "", HandoffGone })); !(*k.Branches)[0].Fail || (*k.Branches)[0].Goto != 0 || !strings.Contains((*k.Branches)[0].End, "isn't published any more") {
+		t.Errorf("a gone target through the per-file compile: %+v", (*k.Branches)[0])
+	}
+	// review2-579 P3-4: a nested hand-over sits after the outer path's checks too (AfterChecks counts both)
+	chk := func(id string) BranchCheck {
+		return BranchCheck{NodeID: id, Port: "match", Check: Question{VideoCheck: VideoCheck{Name: id, Resolution: 1}}}
+	}
+	cT := Template{Kind: KindBranches, Branches: &[]Branch{{Checks: []BranchCheck{chk("qc")}, Then: &plain, Path: []string{"cin", "qc", "cconv"}}}}
+	bT := Template{Kind: KindBranches, Branches: &[]Branch{{Checks: []BranchCheck{chk("qb")}, Goto: 3, GotoNode: "gb", Path: []string{"bin", "qb", "gb"}}}}
+	aT := Template{Kind: KindBranches, Branches: &[]Branch{{Checks: []BranchCheck{chk("qa")}, Goto: 2, GotoNode: "ga", Path: []string{"ain", "qa", "ga"}}}}
+	nested := WithHandoffs(aT, func(id int64) (Template, string, string) {
+		return map[int64]Template{2: bT, 3: cT}[id], map[int64]string{2: "B", 3: "C"}[id], ""
+	})
+	nb := (*nested.Branches)[0]
+	if len(nb.Handoffs) != 2 || nb.Handoffs[0] != (Handoff{NodeID: "ga", Name: "B", AfterChecks: 1}) || nb.Handoffs[1] != (Handoff{NodeID: "gb", Name: "C", AfterChecks: 2}) {
+		t.Errorf("nested hand-overs: %+v", nb.Handoffs)
+	}
+	var order []string
+	for _, d := range nested.CompileWith(media.Info{SizeBytes: 1 << 30, Ext: ".mkv", DurationSec: 100, VideoCodec: "h264", Streams: []media.Stream{{Type: "video", Codec: "h264", Width: 1920, Height: 1080}}}, Facts{}).Decisions {
+		order = append(order, d.NodeID)
+	}
+	if strings.Join(order, ",") != "qa,ga,qb,gb,qc" {
+		t.Errorf("the timeline's order: %v", order)
 	}
 	// the hop bound: workflow i hands to i+1; the last one converts
 	chain := func(hops int) HandoffLookup {
