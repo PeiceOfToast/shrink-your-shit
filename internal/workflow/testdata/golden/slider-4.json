@@ -1,0 +1,132 @@
+{
+  "schemaVersion": 1,
+  "nodes": [
+    {
+      "id": "f22bc8d7-95c3-4413-bef5-cd21d6580bf3",
+      "type": "input.library",
+      "typeVersion": 1,
+      "config": {
+        "ignore": []
+      },
+      "enabled": true
+    },
+    {
+      "id": "81d8f5f7-04e1-4be0-8ffd-df2f909f3f3c",
+      "type": "filter.video_skips",
+      "typeVersion": 1,
+      "config": {
+        "includeDolbyVision": false
+      },
+      "enabled": true
+    },
+    {
+      "id": "6b2fc6d9-4e53-4f3b-8e61-f67e9f67da9e",
+      "type": "video.convert",
+      "typeVersion": 1,
+      "config": {
+        "format": "hevc",
+        "maxBitrate": "none",
+        "quality": 4,
+        "resolution": "keep",
+        "speed": "normal"
+      },
+      "enabled": true
+    },
+    {
+      "id": "5f4b2bea-b22d-4a1f-904a-be09622b4d47",
+      "type": "audio.tracks",
+      "typeVersion": 1,
+      "config": {
+        "audio": "stereo_aac",
+        "onlyMyLanguages": true
+      },
+      "enabled": true
+    },
+    {
+      "id": "f03f3989-5d89-42ae-b371-b174caaeab95",
+      "type": "subtitles.tracks",
+      "typeVersion": 1,
+      "config": {
+        "subtitles": "keep_all"
+      },
+      "enabled": true
+    },
+    {
+      "id": "c9d497e9-24b1-43f7-aebf-3133de07bd60",
+      "type": "container.output",
+      "typeVersion": 1,
+      "config": {
+        "fileType": "mkv"
+      },
+      "enabled": true
+    },
+    {
+      "id": "18160e3e-9bdf-472a-a9b0-1318f48802e8",
+      "type": "verify.output",
+      "typeVersion": 1,
+      "config": {},
+      "enabled": true
+    },
+    {
+      "id": "6e39fe0e-8eb8-444e-bf64-2c0696f34aff",
+      "type": "output.commit",
+      "typeVersion": 1,
+      "config": {
+        "policy": "replace"
+      },
+      "enabled": true
+    }
+  ],
+  "edges": [
+    {
+      "id": "b62fbb85-ce85-40ce-87bc-e5ff5f4b01a0",
+      "from": "f22bc8d7-95c3-4413-bef5-cd21d6580bf3",
+      "fromPort": "success",
+      "to": "81d8f5f7-04e1-4be0-8ffd-df2f909f3f3c",
+      "toPort": "in"
+    },
+    {
+      "id": "620bbc9e-67ac-4b23-908a-f147f6766d70",
+      "from": "81d8f5f7-04e1-4be0-8ffd-df2f909f3f3c",
+      "fromPort": "success",
+      "to": "6b2fc6d9-4e53-4f3b-8e61-f67e9f67da9e",
+      "toPort": "in"
+    },
+    {
+      "id": "76ea9e31-64b9-498f-a61d-61c7d0b743a9",
+      "from": "6b2fc6d9-4e53-4f3b-8e61-f67e9f67da9e",
+      "fromPort": "success",
+      "to": "5f4b2bea-b22d-4a1f-904a-be09622b4d47",
+      "toPort": "in"
+    },
+    {
+      "id": "04a448bf-938f-437e-bdc3-bea0c3fbfd1e",
+      "from": "5f4b2bea-b22d-4a1f-904a-be09622b4d47",
+      "fromPort": "success",
+      "to": "f03f3989-5d89-42ae-b371-b174caaeab95",
+      "toPort": "in"
+    },
+    {
+      "id": "ddb49b37-8fc6-49cb-8d82-7b3e31e69ece",
+      "from": "f03f3989-5d89-42ae-b371-b174caaeab95",
+      "fromPort": "success",
+      "to": "c9d497e9-24b1-43f7-aebf-3133de07bd60",
+      "toPort": "in"
+    },
+    {
+      "id": "b984af3e-61c8-49ff-8983-c48816752f11",
+      "from": "c9d497e9-24b1-43f7-aebf-3133de07bd60",
+      "fromPort": "success",
+      "to": "18160e3e-9bdf-472a-a9b0-1318f48802e8",
+      "toPort": "in"
+    },
+    {
+      "id": "75d03501-e38a-4d71-a9a5-2ea87a62927d",
+      "from": "18160e3e-9bdf-472a-a9b0-1318f48802e8",
+      "fromPort": "success",
+      "to": "6e39fe0e-8eb8-444e-bf64-2c0696f34aff",
+      "toPort": "in"
+    }
+  ],
+  "variables": []
+}

@@ -557,11 +557,15 @@ func (s *Store) ForgetGoneJobSteps() (map[int64]bool, error) {
 	return ids, rows.Err()
 }
 
-// LatestProbe is the newest stored probe (JSON) of path, whatever size and time it was taken at: the
-// Files view's codec, resolution and length (S5). false if it was never probed.
-func (s *Store) LatestProbe(path string) (string, bool) {
+// ProbeOfSize is the stored probe (JSON) of path if it was taken of a file of this size. A file replaced in
+// place has another size, so its probe is not shown for the original, or the other way round. false if the
+// size is unknown (0) or no probe of that size is stored.
+func (s *Store) ProbeOfSize(path string, size int64) (string, bool) {
+	if size <= 0 {
+		return "", false
+	}
 	var info string
-	err := s.db.QueryRow(`SELECT info FROM probes WHERE path=? ORDER BY rowid DESC LIMIT 1`, path).Scan(&info)
+	err := s.db.QueryRow(`SELECT info FROM probes WHERE path=? AND size=?`, path, size).Scan(&info)
 	return info, err == nil
 }
 

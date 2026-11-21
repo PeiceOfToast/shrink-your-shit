@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "nodes": [
+    {
+      "id": "cf92c9b5-e446-4d5e-b0d5-7da68f29f5ed",
+      "type": "input.library",
+      "typeVersion": 1,
+      "config": {
+        "ignore": []
+      },
+      "enabled": true
+    },
+    {
+      "id": "c176ecdf-52b9-4f4f-a8a2-c38bf65035b5",
+      "type": "video.legacy_settings",
+      "typeVersion": 1,
+      "config": {
+        "template": {
+          "compilerVersion": 1,
+          "kind": "legacy",
+          "params": {
+            "crf": 26,
+            "fromCodec": "h264",
+            "minBitrateKbps": 4000,
+            "output": "replace",
+            "preset": "medium"
+          }
+        }
+      },
+      "enabled": true
+    }
+  ],
+  "edges": [
+    {
+      "id": "eba32b3d-0478-415d-89b2-d5cc9c0b3c98",
+      "from": "cf92c9b5-e446-4d5e-b0d5-7da68f29f5ed",
+      "fromPort": "success",
+      "to": "c176ecdf-52b9-4f4f-a8a2-c38bf65035b5",
+      "toPort": "in"
+    }
+  ],
+  "variables": []
+}

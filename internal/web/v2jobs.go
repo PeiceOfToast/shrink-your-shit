@@ -247,12 +247,12 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 			// a job planned before that was recorded: its original's probe is still the one at its
 			// name only when the new file went elsewhere; after a replace at the same name it would be
 			// the new file's, so before stays null (dev-review 04:27Z)
-			if raw, ok := store.LatestProbe(j.Path); ok {
+			if raw, ok := store.ProbeOfSize(j.Path, j.SizeBefore); ok {
 				meta["before"] = json.RawMessage(raw)
 			}
 		}
 		if j.OutputPath != "" {
-			if raw, ok := store.LatestProbe(j.OutputPath); ok {
+			if raw, ok := store.ProbeOfSize(j.OutputPath, j.SizeAfter); ok {
 				meta["after"] = json.RawMessage(raw)
 			}
 		}
@@ -460,11 +460,14 @@ func livePercent(id int64) *float64 {
 	return nil
 }
 
+// jobStage names a job's step as the progress object and the Dashboard's Converting now rows show it.
+var jobStage = map[string]string{"preparing": "Looking at the file", "running": "Converting video",
+	"validating": "Checking the result", "committing": "Saving the result"}
+
 // v2Progress is truthful progress (spec 7): the step's own percent, and the whole job's from the
 // steps done (probing 0-5, converting 5-85, checking 90, saving 97), never ffmpeg's as the job's.
 func v2Progress(state string, id int64, pct *float64) map[string]any {
-	p := map[string]any{"stage": map[string]string{"preparing": "Looking at the file", "running": "Converting video",
-		"validating": "Checking the result", "committing": "Saving the result"}[state], "percent": nil, "workflowPercent": 0,
+	p := map[string]any{"stage": jobStage[state], "percent": nil, "workflowPercent": 0,
 		"elapsedS": nil, "speed": nil, "etaS": nil, "fps": nil, "bitrateKbps": nil}
 	switch state {
 	case "preparing":

@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "nodes": [
+    {
+      "id": "71fa4d56-5dcb-4fe8-8cd8-e161a3b1d268",
+      "type": "input.library",
+      "typeVersion": 1,
+      "config": {
+        "ignore": []
+      },
+      "enabled": true
+    },
+    {
+      "id": "2463312c-bcd5-48cc-946f-5174a5e0ef00",
+      "type": "video.legacy_settings",
+      "typeVersion": 1,
+      "config": {
+        "template": {
+          "compilerVersion": 1,
+          "kind": "slider",
+          "params": {}
+        }
+      },
+      "enabled": true
+    }
+  ],
+  "edges": [
+    {
+      "id": "0df108ef-9d38-4519-a0eb-4ed4e12bed7b",
+      "from": "71fa4d56-5dcb-4fe8-8cd8-e161a3b1d268",
+      "fromPort": "success",
+      "to": "2463312c-bcd5-48cc-946f-5174a5e0ef00",
+      "toPort": "in"
+    }
+  ],
+  "variables": []
+}
