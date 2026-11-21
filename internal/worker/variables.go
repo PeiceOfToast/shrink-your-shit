@@ -135,8 +135,12 @@ func libraryValue(info jobs.RunInfo, v workflow.Variable) (workflow.Variable, bo
 // taking the library's value (W3).
 func ownValues(info jobs.RunInfo) []vars.Own {
 	out := make([]vars.Own, 0, len(info.Global)+len(info.Variables))
+	owned := map[string]bool{} // review-591: an own variable wins in every case, a secret included (Values skips a secret, so the global must never get in)
+	for _, v := range info.Variables {
+		owned[v.Name] = true
+	}
 	for _, g := range info.Global {
-		if g.Type != "secret" {
+		if g.Type != "secret" && !owned[g.Name] {
 			out = append(out, vars.Own{Name: g.Name, Type: g.Type, Value: g.Value})
 		}
 	}
