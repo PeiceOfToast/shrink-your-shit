@@ -242,7 +242,7 @@ func TestReplaceMovesInOrderWithFailedChown(t *testing.T) {
 // Review #491 P3: an AMF encode's quality is -qp_i (with -rc cqp), which the Settings line must name rather than
 // say "none".
 func TestEncoderLineNamesAMFsQuality(t *testing.T) {
-	got := encoderDetail([]string{"-c:v", "hevc_amf", "-rc", "cqp", "-qp_i", "24", "-qp_p", "26"})
+	got := encoderDetail([]string{"-c:v", "hevc_amf", "-rc:v:0", "cqp", "-qp_i:v:0", "24", "-qp_p:v:0", "26"}) // the plan's spelling
 	if !strings.Contains(got, "hevc_amf, -qp_i 24, ") {
 		t.Errorf("encoder line %q, want the AMF quality", got)
 	}
