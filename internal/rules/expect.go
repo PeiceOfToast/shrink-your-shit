@@ -61,6 +61,10 @@ type Expect struct {
 	Container string `json:",omitempty"`
 	// HDR is the HDR the new file's main video must carry (S3); nil = not checked (an SDR original).
 	HDR *HDRExpect `json:",omitempty"`
+	// MainVideo, when set, judges the plan's main video by rules from the plan and the encoder that runs
+	// instead of against the original exactly; the worker fills it once the encoder is chosen, so the
+	// snapshot shows what the file was judged against. Nil for a copied video (the exact comparison).
+	MainVideo *MainVideo `json:",omitempty"`
 }
 
 // HDRExpect is an HDR original's colour description and static metadata, as the new file must show
@@ -207,6 +211,12 @@ func (e Expect) Compare(out media.Info, outPackets int64) []string {
 			continue
 		}
 		for i, w := range want {
+			if t == "video" && e.MainVideo != nil && i == e.MainVideo.Index {
+				// The plan's main video: judged by its rules (format, height, width within ±2 and even,
+				// the depth of the encoder that ran), not against the original's exact numbers.
+				problems = append(problems, compareMainVideo(*e.MainVideo, got[i], i+1)...)
+				continue
+			}
 			problems = append(problems, compareStream(w, got[i], i+1)...)
 			problems = append(problems, compareTiming(w, got[i], i+1, out)...)
 		}
