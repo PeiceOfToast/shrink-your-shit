@@ -711,10 +711,17 @@ func TestHandToAnotherWorkflow(t *testing.T) {
 	if !hasIssue(Validate(d).Issues, "invalid_config", goTo.ID) {
 		t.Error("a hand-over without a workflow is refused")
 	}
+	for _, bad := range []any{"", "0", "x", float64(7)} { // review2-579: the placeholder picked again, and other non-ids
+		goTo.Config = map[string]any{"workflow": bad}
+		d.Nodes[len(d.Nodes)-1] = goTo
+		if !hasIssue(Validate(d).Issues, "invalid_config", goTo.ID) {
+			t.Errorf("workflow %#v should be refused", bad)
+		}
+	}
 	goTo.Config = map[string]any{"workflow": "7"}
 	d.Nodes[len(d.Nodes)-1] = goTo
 	// the other workflows, as the store would tell them: 7 is published and hands to 8; 8 hands back to 5 (this one); 9 is a draft
-	others := map[int64]OtherWorkflow{7: {Name: "Big films", Published: true, HandsTo: []int64{8}}, 8: {Name: "Back", Published: true, HandsTo: []int64{5}}, 9: {Name: "Draft", Published: false}}
+	others := map[int64]OtherWorkflow{7: {Name: "Big films", Published: true, HandsTo: []int64{8}}, 8: {Name: "Back", Published: true, HandsTo: []int64{5}}, 9: {Name: "Draft", Published: false}, 10: {Name: "By file", Published: true, FileValues: true}}
 	look := func(id int64) (OtherWorkflow, bool) { o, ok := others[id]; return o, ok }
 	code := func(self int64, target string) (string, string) {
 		goTo.Config = map[string]any{"workflow": target}
@@ -735,6 +742,7 @@ func TestHandToAnotherWorkflow(t *testing.T) {
 		{5, "7", "handoff_loop", "leads back to this workflow through 'Big films'"},
 		{6, "7", "", "Hands the file to Big films"},
 		{5, "9", "handoff_unpublished", "'Draft', which hasn't been published yet"},
+		{5, "10", "handoff_file_values", "'By file', whose settings use the file's own values"},
 		{5, "42", "invalid_config", "isn't there any more"},
 	} {
 		if got, words := code(c.self, c.target); got != c.code || !strings.Contains(words, c.words) {

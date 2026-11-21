@@ -190,6 +190,9 @@ type OtherWorkflow struct {
 	Name      string
 	Published bool
 	HandsTo   []int64
+	// FileValues: a typed setting of its names one of the file's own values (file.*, source.*), which a
+	// hand-over can't fill (review-579), so it can't be a target.
+	FileValues bool
 }
 
 // handoffIssue checks one "Hand to another workflow" step against the other workflows (FB4b): the
@@ -213,6 +216,9 @@ func handoffIssue(n Node, p Policy) (*Issue, string) {
 	}
 	if !w.Published {
 		return bad("handoff_unpublished", "hands the file to '"+w.Name+"', which hasn't been published yet. Publish it first.")
+	}
+	if w.FileValues {
+		return bad("handoff_file_values", "hands the file to '"+w.Name+"', whose settings use the file's own values ({{file.…}} or {{source.…}}), which a hand-over can't fill. Choose another workflow, or give that setting a plain value.")
 	}
 	// the other workflow's own hand-overs, breadth first: one that leads back here is a loop
 	seen := map[int64]bool{id: true}
@@ -336,9 +342,9 @@ func ValidateWith(d Doc, s Scopes) Result {
 				add(Issue{Code: "invalid_config", NodeID: n.ID, ConfigPath: "/until", Field: "until", Message: "In '" + nodeName(n) + "', the time must read like 02:00."})
 			}
 		}
-		if n.Type == TypeGoto { // FB4b: a workflow to hand to, by id; the policy checks it is there and published (above). An empty one is checkConfig's "needs a value" already.
-			if v := strOf(n.Config, "workflow", ""); v != "" {
-				if id, err := strconv.ParseInt(v, 10, 64); err != nil || id <= 0 {
+		if n.Type == TypeGoto { // FB4b: a workflow to hand to, by id. A missing key is checkConfig's "needs a value"; an empty or unreadable one (review2-579: the picker's placeholder picked again) is refused here, so it never fails every file at run time.
+			if v, present := n.Config["workflow"]; present {
+				if id, err := strconv.ParseInt(strOf(n.Config, "workflow", ""), 10, 64); v == "" || err != nil || id <= 0 {
 					add(Issue{Code: "invalid_config", NodeID: n.ID, ConfigPath: "/workflow", Field: "workflow", Message: "In '" + nodeName(n) + "', choose the workflow to hand the file to."})
 				}
 			}

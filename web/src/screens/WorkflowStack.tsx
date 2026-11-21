@@ -108,7 +108,7 @@ function WorkflowPick({ fid, title, value, set, wf, description }: { fid: string
   const known = list.some((w) => w.id === value);
   return (
     <div className="field"><label htmlFor={fid}>{title}</label>
-      <select id={fid} className="input" value={value} onChange={(e) => set(e.target.value)} aria-describedby={fid + "-h"}>
+      <select id={fid} className="input" value={value} onChange={(e) => set(e.target.value === "" ? undefined : e.target.value)} aria-describedby={fid + "-h"}>
         <option value="">Choose a workflow…</option>
         {value && !known && <option value={value}>{value === wf ? "This workflow" : all.data && !failed(all.data) ? "A workflow that isn't published, or isn't there" : "Workflow " + value}</option>}
         {list.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}

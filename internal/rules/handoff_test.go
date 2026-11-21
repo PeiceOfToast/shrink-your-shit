@@ -37,9 +37,15 @@ func TestWithHandoffs(t *testing.T) {
 		t    Template
 		name string
 	}{2: {b, "Big films"}, 3: {straight, "Plain"}}
-	look := func(id int64) (Template, string, bool) {
+	look := func(id int64) (Template, string, string) {
+		if id == 5 { // a target whose settings use the file's own values (review-579)
+			return Template{}, "By file", HandoffFileValues
+		}
 		f, ok := flows[id]
-		return f.t, f.name, ok
+		if !ok {
+			return Template{}, "", HandoffGone
+		}
+		return f.t, f.name, ""
 	}
 
 	got := WithHandoffs(a, look)
@@ -90,6 +96,11 @@ func TestWithHandoffs(t *testing.T) {
 	if p := WithHandoffs(a, look).CompileWith(film, Facts{}); !p.Fail || !strings.Contains(p.Skip, "isn't published any more") {
 		t.Errorf("a gone target: %+v", p)
 	}
+	// a target whose settings use the file's own values: the path fails and says so
+	(*a.Branches)[0].Goto = 5
+	if p := WithHandoffs(a, look).CompileWith(film, Facts{}); !p.Fail || !strings.Contains(p.Skip, "file's own values") {
+		t.Errorf("a file-values target: %+v", p)
+	}
 	// a loop: A hands to C, C hands to A
 	c := Template{Kind: KindBranches, Branches: &[]Branch{{Goto: 1, GotoNode: "cg", Path: []string{"cin", "cg"}}}}
 	flows[1], flows[4] = struct {
@@ -130,11 +141,11 @@ func TestKeepHandoffsAndTheHopBound(t *testing.T) {
 		{Goto: 3, GotoNode: "g2", Path: []string{"in", "g2"}},
 		{Then: &plain, Path: []string{"in", "conv"}},
 	}}
-	look := func(id int64) (Template, string, bool) {
+	look := func(id int64) (Template, string, string) {
 		if id == 2 {
-			return plain, "Plain", true
+			return plain, "Plain", ""
 		}
-		return Template{}, "", false
+		return Template{}, "", HandoffGone
 	}
 	expanded := WithHandoffs(fresh, look)
 	kept := KeepHandoffs(fresh, expanded)
@@ -147,11 +158,11 @@ func TestKeepHandoffsAndTheHopBound(t *testing.T) {
 	}
 	// the hop bound: workflow i hands to i+1; the last one converts
 	chain := func(hops int) HandoffLookup {
-		return func(id int64) (Template, string, bool) {
+		return func(id int64) (Template, string, string) {
 			if int(id) > hops {
-				return plain, "Last", true
+				return plain, "Last", ""
 			}
-			return Template{Kind: KindBranches, Branches: &[]Branch{{Goto: id + 1, GotoNode: "g", Path: []string{"in", "g"}}}}, "W" + strconvItoa(int(id)), true
+			return Template{Kind: KindBranches, Branches: &[]Branch{{Goto: id + 1, GotoNode: "g", Path: []string{"in", "g"}}}}, "W" + strconvItoa(int(id)), ""
 		}
 	}
 	first := Template{Kind: KindBranches, Branches: &[]Branch{{Goto: 1, GotoNode: "g0", Path: []string{"in", "g0"}}}}

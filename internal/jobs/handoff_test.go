@@ -210,6 +210,17 @@ func TestHandOverSurvivesAPerFileResolveAndReadsTheTargetsCurrentValues(t *testi
 	if want := rules.SliderTemplate(4).Compile(film).Video.CRF; p.Video.CRF != want {
 		t.Errorf("the target's quality should follow the global (CRF %d), got %d", want, p.Video.CRF)
 	}
+	// review-579: a target whose typed setting names one of the file's own values can't be handed files: the
+	// store says so to validation, and a run that reaches it stops as failed with words, never with raw text
+	s.db.Exec(`UPDATE flows SET name='Typed (global)' WHERE id=?`, target.ID) // qualityFlow names its flow "Typed"; make room for a second
+	_, byFile := qualityFlow(t, s, nil, "{{file.size}}", rules.SliderTemplate(3))
+	if o, ok := s.OtherWorkflow(byFile.ID); !ok || !o.FileValues {
+		t.Errorf("a file-values target for validation: %+v", o)
+	}
+	_, toFile := gotoFlow(t, s, "To by-file", byFile.ID, rules.Template{})
+	if p := mustRun(t, s, toFile.ID).Compile(film); !p.Fail || !strings.Contains(p.Skip, "file's own values") {
+		t.Errorf("a run into a file-values target: %+v", p)
+	}
 	if _, err := s.SetGlobalVariables([]workflow.Variable{{Name: "g", Type: "number", Value: float64(5)}}); err != nil {
 		t.Fatal(err)
 	}

@@ -21,9 +21,16 @@ type Handoff struct {
 // workflows lead round in a loop, or chain further than anyone meant.
 const MaxHandoffs = 8
 
-// HandoffLookup is a published workflow by id: its template as published and its name; ok false when
-// there is no such workflow, or it was never published.
-type HandoffLookup func(id int64) (t Template, name string, ok bool)
+// HandoffLookup is a published workflow by id: its template as it would run and its name. A non-empty
+// why says the hand-over can't happen, and names the reason: there is no such workflow, it was never
+// published, or its settings use the file's own values, which a hand-over can't fill (review-579).
+type HandoffLookup func(id int64) (t Template, name string, why string)
+
+// Why a hand-over can't happen, as the lookup and the failed path's words say it.
+const (
+	HandoffGone       = "the workflow it hands to isn't published any more"
+	HandoffFileValues = "the workflow it hands to uses the file's own values in its settings, which a hand-over can't fill"
+)
 
 // SkipHandedToWorkflow is a path that hands the file to another workflow, compiled without the store's
 // lookup (a preview): the file is not left alone for good, it goes on elsewhere.
@@ -55,9 +62,9 @@ func expandHandoffs(t Template, look HandoffLookup, depth int) Template {
 			out = append(out, handoffFailed(b, "its workflows hand the file round in a loop, or on more than 8 times"))
 			continue
 		}
-		target, name, ok := look(b.Goto)
-		if !ok {
-			out = append(out, handoffFailed(b, "the workflow it hands to isn't published any more"))
+		target, name, why := look(b.Goto)
+		if why != "" {
+			out = append(out, handoffFailed(b, why))
 			continue
 		}
 		hop := Handoff{NodeID: b.GotoNode, Name: name, AfterChecks: len(b.Checks)}
