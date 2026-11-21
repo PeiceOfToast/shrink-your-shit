@@ -529,7 +529,7 @@ function LibraryVars({ v, reload }: { v: Library; reload: () => void }) {
   if (noWf) return <section className="card" aria-labelledby="lv-h">{head}<div className="bd"><p className="muted">Pick a workflow first.</p></div></section>;
   if (!pub.loaded) return <section className="card" aria-labelledby="lv-h">{head}<div className="bd"><p className="muted">Loading…</p></div></section>;
   if (pub.error && !pub.data) return <section className="card" aria-labelledby="lv-h">{head}<div className="bd"><p className="st bad" role="alert"><Icon id="i-alert" /><span>{pub.error.message}</span></p></div></section>;
-  const vars = (pub.data?.variables ?? []).filter((x) => x.templateParam);
+  const vars = (pub.data?.variables ?? []).filter((x) => x.templateParam && x.type !== "secret"); // the server refuses a library value for a secret
   if (!vars.length) return <section className="card" aria-labelledby="lv-h">{head}<div className="bd"><p className="muted">This library's workflow has nothing a library can change.</p></div></section>;
   // keyed by the saved values: a successful save remounts from the list the server answered with
   return <LibraryVarsForm key={v.workflowId + sortedJSON(v.variables)} v={v} vars={vars} reload={reload} />;
@@ -569,8 +569,9 @@ function LibraryVarsForm({ v, vars, reload }: { v: Library; vars: Variable[]; re
           const label = <>{x.description ? x.description + " " : ""}<span className="mono">{"{{" + x.name + "}}"}</span></>;
           const input = x.type === "bool" ? (
             <label className="row" style={{ gap: 8, alignItems: "center" }}>
-              <input id={id} type="checkbox" role="switch" checked={typeof d === "boolean" ? d : !!x.value} onChange={(e) => set(x.name, e.target.checked)} aria-describedby={describedBy} />
-              <span>{typeof d === "boolean" ? (d ? "Yes" : "No") : "Workflow's value"}</span>
+              <input id={id} type="checkbox" role="switch" checked={typeof d === "boolean" ? d : !!x.value} onChange={(e) => set(x.name, e.target.checked)} aria-describedby={describedBy}
+                aria-labelledby={`${id}-name ${id}-state`} />
+              <span id={id + "-state"}>{typeof d === "boolean" ? (d ? "Yes" : "No") : "Workflow's value"}</span>
             </label>
           ) : x.type === "enum" ? (
             <select id={id} className="input" value={typeof d === "string" ? d : ""} onChange={(e) => set(x.name, e.target.value || null)} aria-describedby={describedBy} aria-invalid={!!errs[x.name]}>
@@ -584,11 +585,11 @@ function LibraryVarsForm({ v, vars, reload }: { v: Library; vars: Variable[]; re
           );
           return (
             <div className="field" key={x.name}>
-              {x.type === "bool" ? <span className="lab">{label}</span> : <label htmlFor={id}>{label}</label>}
+              {x.type === "bool" ? <span className="lab" id={id + "-name"}>{label}</span> : <label htmlFor={id}>{label}</label>}
               {input}
               <span className="hint" id={hint}>Workflow's value: {WORKFLOW_VALUE(x)}.{x.type === "bool" || x.type === "enum" ? "" : " Leave it empty to use the workflow's value."}</span>
               {errs[x.name] && <p className="st bad" id={err} role="alert"><Icon id="i-alert" /><span>{errs[x.name]}</span></p>}
-              <div><button className="btn sm" type="button" disabled={busy || d === null} onClick={() => set(x.name, null)}>Use the workflow's value</button></div>
+              <div><button className="btn sm" type="button" disabled={busy || d === null} aria-label={"Use the workflow's value for {{" + x.name + "}}"} onClick={() => set(x.name, null)}>Use the workflow's value</button></div>
             </div>
           );
         })}
