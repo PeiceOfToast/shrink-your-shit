@@ -21,6 +21,7 @@ import (
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/scanner"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/worker"
 )
@@ -454,8 +455,9 @@ func decodeArgs(fam, device, in string) []string {
 		args = append(args, "-init_hw_device", "vaapi=va:"+device, "-filter_hw_device", "va",
 			"-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi", "-hwaccel_device", "va")
 	} else {
-		args = append(args, "-init_hw_device", "qsv=qsv:hw",
-			"-hwaccel", "qsv", "-hwaccel_output_format", "qsv", "-hwaccel_device", "qsv")
+		p, _ := rules.ProfileFor("hevc_" + fam) // QSV: the profile's set-up and full-pipeline decode
+		args = append(args, p.Setup(device)...)
+		args = append(args, p.FullDecode()...)
 	}
 	return append(args, "-i", in, "-f", "null", "-")
 }
@@ -485,7 +487,8 @@ func encodeArgs(enc string, tenBit bool, device string) []string {
 	case strings.HasSuffix(enc, "_vaapi"):
 		args = append(args, "-init_hw_device", "vaapi=va:"+device, "-filter_hw_device", "va")
 	case strings.HasSuffix(enc, "_qsv"):
-		args = append(args, "-init_hw_device", "qsv=qsv:hw")
+		p, _ := rules.ProfileFor(enc)
+		args = append(args, p.Setup(device)...)
 	}
 	args = append(args, "-f", "lavfi", "-i", "color=c=black:s=256x256:d=0.1", "-frames:v", "1")
 	switch {
