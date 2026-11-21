@@ -231,6 +231,18 @@ func fileItem(store *jobs.Store, libs []jobs.Library, row jobs.FileRow, card str
 	return it
 }
 
+// hasDotDot reports whether a folder setting has a ".." segment (either separator). A templated folder
+// is refused with one: a {{name}} that comes out empty at run time would let the ".." climb past the
+// folder the publish check looked at (review-592 round 3).
+func hasDotDot(dir string) bool {
+	for _, seg := range strings.FieldsFunc(dir, func(r rune) bool { return r == '/' || r == '\\' }) {
+		if seg == ".." {
+			return true
+		}
+	}
+	return false
+}
+
 // fixedPrefix is the part of a folder setting that is known before a job fills its {{name}} variables
 // (W3, from ui-shop's QA of #587): the folders before the first one that holds a template. A save or
 // publish checks and makes only that part; the rest is made by the job, with the values it has. A
@@ -258,6 +270,10 @@ func fixedPrefix(dir string) string {
 func outputBlockers(store *jobs.Store, except int64, dir string, moreLibraries ...string) []map[string]string {
 	out := []map[string]string{}
 	add := func(code, msg string) { out = append(out, map[string]string{"code": code, "message": msg}) }
+	if strings.Contains(dir, "{{") && hasDotDot(dir) { // review-592 round 3: an empty value would let ".." climb out of the checked part
+		add("not_writable", "A folder with a {{name}} can't use '..'. Write the folder out in full.")
+		return out
+	}
 	dir = fixedPrefix(dir) // a templated folder: the part before its first {{name}} is what can be checked and made now
 	if !filepath.IsAbs(dir) {
 		add("not_writable", "Enter the folder's full path.")

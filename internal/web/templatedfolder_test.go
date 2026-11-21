@@ -30,12 +30,17 @@ func TestFixedPrefixOfATemplatedFolder(t *testing.T) {
 		`C:\out\{{sub}}`:           `C:\out`,
 		"/srv/out/{{file.name}}.d": "/srv/out",
 		"/srv/out/{{unclosed":      "/srv/out",
-		"/other/{{x}}/../../lib":   "/lib", // review-592: cleaned first, so a ".." after the template can't slip past the checks
+		"/other/{{x}}/../../lib":   "/lib", // review-592: cleaned first (and refused before it gets here: hasDotDot)
 		"/srv/out/{{sub}}/../keep": "/srv/out/keep",
 		"/srv/out/sub/../{{sub}}":  "/srv/out",
 	} {
 		if got := fixedPrefix(in); got != want {
 			t.Errorf("%q: %q, want %q", in, got, want)
+		}
+	}
+	for in, want := range map[string]bool{"/srv/lib/{{a}}/../..": true, "/srv/out/{{sub}}/../keep": true, `C:\out\..\{{sub}}`: true, "/srv/out/{{sub}}/keep": false, "/srv/out/..x/{{sub}}": false, "/srv/out/{{sub}}": false} {
+		if got := hasDotDot(in); got != want {
+			t.Errorf("hasDotDot(%q) = %v", in, got)
 		}
 	}
 }
@@ -105,7 +110,10 @@ func TestPublishNeverMakesATemplatedFolder(t *testing.T) {
 	if _, err := st.AddLibrary("Lib", lib, rules.SliderTemplate(3), false); err != nil {
 		t.Fatal(err)
 	}
-	for folder, want := range map[string]string{"{{sub}}/out": "not_writable", filepath.Join(root, "other", "{{x}}", "..", "..", "lib"): "inside_library", filepath.Join(root, "out", "{{sub}}", "..", "keep"): ""} {
+	// review-592 round 3: any ".." in a templated folder is refused (an empty value would let it climb past the
+	// checked part: /srv/lib/{{a}}/../.. with a = "" is /), so the two ".." cases are refused for that reason
+	dots := "can't use '..'"
+	for folder, want := range map[string]string{"{{sub}}/out": "not_writable", root + "/other/{{sub}}/../../lib": dots, lib + "/{{sub}}/../..": dots, filepath.Join(root, "out", "{{sub}}", "keep"): ""} {
 		_, body = send("GET", "/api/v2/workflows/"+id+"/draft", "", "") // the publish took the draft; a fresh one
 		d3 := decode[v2Rev](t, body)
 		for i := range doc.Nodes {
@@ -123,11 +131,18 @@ func TestPublishNeverMakesATemplatedFolder(t *testing.T) {
 		switch {
 		case want == "" && code != 200:
 			t.Errorf("%q should publish: %d %s", folder, code, body)
-		case want != "" && (code != 400 || errCode(body) != want):
+		case want == dots && (code != 400 || errCode(body) != "not_writable" || !strings.Contains(body, dots)):
+			t.Errorf("%q should be refused for its '..': %d %s", folder, code, body)
+		case want != "" && want != dots && (code != 400 || errCode(body) != want):
 			t.Errorf("%q should be refused as %s: %d %s", folder, want, code, body)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(root, "out", "keep")); err != nil {
-		t.Errorf("the cleaned fixed part should be made: %v", err)
+	for _, p := range []string{filepath.Join(root, "out"), lib} { // the fixed part is made; nothing climbed out of it
+		if st, err := os.Stat(p); err != nil || !st.IsDir() {
+			t.Errorf("%s: %v", p, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "out", "keep")); err == nil {
+		t.Error("the templated part is the job's to make, not the publish check's")
 	}
 }
