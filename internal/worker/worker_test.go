@@ -513,7 +513,7 @@ func TestCheapChecksRunBeforeExpensiveOnes(t *testing.T) {
 	s := newScenario(t)
 	s.outSpec.streams = goodOutput().streams[:2] // subtitle and attachment missing
 	s.run(Replace)
-	s.assertKept("subtitle", "kept_original")
+	s.assertKept("subtitle", "check_differs")
 	if s.count("-xerror") != 0 || s.count("-lavfi") != 0 {
 		t.Error("the playback test and picture comparison are only for files that already look right")
 	}
