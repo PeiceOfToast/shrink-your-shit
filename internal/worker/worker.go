@@ -443,6 +443,32 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 	return w.runClaimed(ctx, job, jobCtx, cancel, lease, true)
 }
 
+// hasTell says whether cards, or any card's Yes, No or Didn't work path, has a card of this type: a tell card
+// anywhere means that kind of connection is the workflow's to tell, not the legacy global tell's.
+func hasTell(cards []rules.Card, kind string) bool {
+	for _, c := range cards {
+		if c.Type == kind || hasTell(c.Yes, kind) || hasTell(c.No, kind) || hasTell(c.OnError, kind) {
+			return true
+		}
+	}
+	return false
+}
+
+// cardTypes maps each card's NodeID to its type, walking the Yes, No and Didn't work paths too, so a note from
+// the after run says which kind of card it came from. Cards without a NodeID are left out: an empty key can't
+// tell two cards apart, and falling back to the global tell is the direction that still tells someone.
+func cardTypes(cards []rules.Card, into map[string]string) map[string]string {
+	for _, c := range cards {
+		if c.NodeID != "" {
+			into[c.NodeID] = c.Type
+		}
+		cardTypes(c.Yes, into)
+		cardTypes(c.No, into)
+		cardTypes(c.OnError, into)
+	}
+	return into
+}
+
 // runClaimed runs job, claimed for this worker (current, cancelJob and lease set), and records its
 // outcome. renew: this worker renews its lease (a local job; a remote worker renews its own, V7b2).
 func (w *Worker) runClaimed(ctx context.Context, job jobs.Job, jobCtx context.Context, cancel context.CancelFunc, lease string, renew bool) (bool, error) {
@@ -665,28 +691,11 @@ func (w *Worker) runClaimed(ctx context.Context, job jobs.Job, jobCtx context.Co
 	w.mu.Lock()
 	after, cardVars := w.after, w.cardVars
 	w.mu.Unlock()
-	// A tell card makes that kind of connection per workflow; the other kind is still told as it always has been
-	// (flow-builder.md section 10; review2-538 P3b: per kind, not per path). Without any tell card the global
-	// tell runs unchanged.
-	hasMedia, hasDownloader := false, false
-	for _, c := range after {
-		hasMedia = hasMedia || c.Type == workflow.TypeMediaServer
-		hasDownloader = hasDownloader || c.Type == workflow.TypeDownloader
+	var e flow.Env
+	if w.Cards != nil {
+		e = w.Cards(job, final)
 	}
-	switch {
-	case !hasMedia && !hasDownloader:
-		if w.OnDone != nil {
-			w.OnDone(job, final)
-		}
-	case w.Cards != nil:
-		e := w.Cards(job, final)
-		if !hasMedia && e.TellMediaServer != nil {
-			e.TellMediaServer("all") // "none connected" is not news here: the global tell never said so either
-		}
-		if !hasDownloader && e.TellDownloader != nil {
-			e.TellDownloader("all")
-		}
-	}
+	var notes []flow.Note
 	if len(after) > 0 { // FB2a: the path's cards on the saved result; one that doesn't work is a warning, never a failure
 		st := &flow.State{Vars: maps.Clone(cardVars), Final: final, Original: job.Path, LibraryRoot: job.Library}
 		if st.Vars == nil {
@@ -696,12 +705,10 @@ func (w *Worker) runClaimed(ctx context.Context, job jobs.Job, jobCtx context.Co
 			st.Vars[k] = v
 		}
 		st.Result = rules.Result{SizeBefore: job.SizeBefore, SizeAfter: size, DurationBefore: job.DurationSec, DurationAfter: w.verified.DurationSec}
-		env := flow.Env{Log: func(l string) { w.jobNote(job.ID, secReplace, jobs.LevelInfo, "(%s): %s", job.Path, l) }, Tag: w.tagger(job.ID)}
-		if w.Cards != nil {
-			e := w.Cards(job, final)
-			env.TellMediaServer, env.TellDownloader, env.Notify, env.Exec = e.TellMediaServer, e.TellDownloader, e.Notify, e.Exec
-		}
-		notes, warnings := flow.After(after, st, env)
+		env := flow.Env{Log: func(l string) { w.jobNote(job.ID, secReplace, jobs.LevelInfo, "(%s): %s", job.Path, l) }, Tag: w.tagger(job.ID),
+			TellMediaServer: e.TellMediaServer, TellDownloader: e.TellDownloader, Notify: e.Notify, Exec: e.Exec}
+		var warnings []string
+		notes, warnings = flow.After(after, st, env)
 		for _, n := range notes {
 			if n.Failed {
 				w.Queue.AddStep(job.ID, "after", false, n.Words)
@@ -712,6 +719,26 @@ func (w *Worker) runClaimed(ctx context.Context, job jobs.Job, jobCtx context.Co
 		for _, msg := range warnings {
 			w.jobNote(job.ID, secReplace, jobs.LevelWarning, "(%s): %s", job.Path, msg)
 		}
+	}
+	// Exactly one tell of each kind on the path that ran (flow-builder.md section 10; review2-538 P3b): the
+	// cards above have run, so a tell card of a kind that ran — worked or failed, it was attempted — already
+	// told that connection and the global tell stays quiet for it. A tell card on a path this run did not
+	// take told nothing, so that kind still gets the global tell. Without any tell card the global tell runs
+	// unchanged.
+	types := cardTypes(after, map[string]string{})
+	told := map[string]bool{}
+	for _, n := range notes {
+		told[types[n.NodeID]] = true
+	}
+	if hasTell(after, workflow.TypeMediaServer) || hasTell(after, workflow.TypeDownloader) {
+		if !told[workflow.TypeMediaServer] && e.TellMediaServer != nil {
+			e.TellMediaServer("all") // "none connected" is not news here: the global tell never said so either
+		}
+		if !told[workflow.TypeDownloader] && e.TellDownloader != nil {
+			e.TellDownloader("all")
+		}
+	} else if w.OnDone != nil {
+		w.OnDone(job, final)
 	}
 	return true, nil
 }
