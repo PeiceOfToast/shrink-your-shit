@@ -23,6 +23,14 @@ import (
 // to arrive.
 func speedReport(t *testing.T, report string) (int, worker.RemoteResult) {
 	t.Helper()
+	code, res, _, _ := speedReportTo(t, report)
+	return code, res
+}
+
+// speedReportTo is speedReport and also gives the store and the reported job's id, so a test can read what the
+// handler kept.
+func speedReportTo(t *testing.T, report string) (int, worker.RemoteResult, *jobs.Store, int64) {
+	t.Helper()
 	_, st, a, _ := libServer(t, true)
 	answers := make(chan worker.RemoteResult, 1)
 	srv := httptest.NewServer(Handler(st, a, Engine{RunRemote: func(_ jobs.Job, _ string, rj *worker.RemoteJob) {
@@ -41,7 +49,8 @@ func speedReport(t *testing.T, report string) (int, worker.RemoteResult) {
 	}
 
 	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
-	if _, err := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: filepath.Join(lib.Path, "a.mkv"), SizeBefore: 1000}); err != nil {
+	id, err := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: filepath.Join(lib.Path, "a.mkv"), SizeBefore: 1000})
+	if err != nil {
 		t.Fatal(err)
 	}
 	c, b = workerCall(t, srv, "lease", w.Token, `{"slots":1}`, WorkerAPILevel)
@@ -60,9 +69,9 @@ func speedReport(t *testing.T, report string) (int, worker.RemoteResult) {
 	srv.Config.Handler.ServeHTTP(rec, req)
 	select {
 	case res := <-answers:
-		return rec.Code, res
+		return rec.Code, res, st, id
 	case <-time.After(10 * time.Second):
-		return rec.Code, worker.RemoteResult{}
+		return rec.Code, worker.RemoteResult{}, st, id
 	}
 }
 
@@ -126,5 +135,35 @@ func TestReportStepsAreChecked(t *testing.T) {
 	}
 	if steps[0].Name != "encode" || steps[1].Index != 7 {
 		t.Errorf("the check changed a step beyond its figures: %+v", steps)
+	}
+}
+
+// F7 review #638 M3: the report handler stores its steps through the figure check, so a bad row never reaches
+// the store. checkedSteps' own test cannot see this: replacing the handler's call with `_ = in.Steps` passed
+// every other test, and only reading job_run_steps back shows what the server actually kept.
+func TestTheReportHandlerStoresOnlyPossibleStepFigures(t *testing.T) {
+	code, _, st, id := speedReportTo(t, `{"kept":"the picture differs","kept_code":"`+jobs.ReasonCheckDiffers+`","steps":[
+		{"Index":0,"Name":"encode","Encoder":"hevc_qsv","Speed":3.5,"FPS":118},
+		{"Index":7,"Name":"encode","Encoder":"totally-made-up","Speed":1e9,"FPS":1e9},
+		{"Index":8,"Name":"encode","Encoder":"libx265","Speed":50,"FPS":1e9}]}`)
+	if code != http.StatusAccepted {
+		t.Fatalf("report %d, want 202", code)
+	}
+	steps, err := st.RunSteps(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byIndex := map[int]jobs.RunStep{}
+	for _, s := range steps {
+		byIndex[s.Index] = s
+	}
+	if s := byIndex[0]; s.Encoder != "hevc_qsv" || s.Speed != 3.5 || s.FPS != 118 {
+		t.Errorf("a possible step figure was dropped: %+v", s)
+	}
+	if s := byIndex[7]; s.Encoder != "" || s.Speed != 0 || s.FPS != 0 {
+		t.Errorf("an impossible step figure reached the store: %+v", s)
+	}
+	if s := byIndex[8]; s.Encoder != "libx265" || s.Speed != 50 || s.FPS != 0 {
+		t.Errorf("a step's fps outside any encode reached the store: %+v", s)
 	}
 }
