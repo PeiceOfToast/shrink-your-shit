@@ -214,7 +214,7 @@ func (t Template) CompileWith(info media.Info, f Facts) (p Plan) {
 		if v := info.Video(); v != nil && v.BitDepth > 8 && p.Video.Codec != "" && !p.Video.Copy {
 			p.Video.TenBit = true
 		}
-		p = withStepDecisions(p, info)
+		p = orderSteps(withStepDecisions(p, info), t.StepOrder)
 	}()
 	if t.Branches != nil { // V6a: the path the file's answers lead down
 		b, ds, ok := route(*t.Branches, info, f)

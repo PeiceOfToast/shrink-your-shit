@@ -171,9 +171,13 @@ func ToTemplateWith(d Doc, current rules.Template, sc Scopes) (rules.Template, [
 		}
 		return t, nil
 	}
-	if !slices.Equal(types, PresetOrder) {
+	if !samePresetSteps(types) {
 		return rules.Template{}, []Issue{chainIssue(order)}
 	}
+	if iss, bad := orderIssue(order); bad { // W11: every step is here, in an order the engine can't honour
+		return rules.Template{}, []Issue{iss}
+	}
+	stepOrder := stepOrderOf(types)
 	s, issues := selectorsOf(order, sc.LeaveFile)
 	if len(issues) > 0 {
 		return rules.Template{}, issues
@@ -181,11 +185,11 @@ func ToTemplateWith(d Doc, current rules.Template, sc Scopes) (rules.Template, [
 	if cur, ok := current.SelectorsView(); ok {
 		cur.Notes = nil
 		cur.Audio, cur.OnlyMyLanguages, _ = rules.StandardAudio(cur.Audio, cur.OnlyMyLanguages)
-		if reflect.DeepEqual(cur, s) {
+		if reflect.DeepEqual(cur, s) && current.StepOrder == stepOrder {
 			return current, nil
 		}
 	}
-	return rules.Template{Kind: rules.KindSelectors, Selectors: &s, CompilerVersion: rules.CompilerVersion}, nil
+	return rules.Template{Kind: rules.KindSelectors, Selectors: &s, CompilerVersion: rules.CompilerVersion, StepOrder: stepOrder}, nil
 }
 
 // selectorsOf reads the preset chain's configs (missing keys take their defaults; a turned-off audio,
@@ -371,6 +375,78 @@ func chainIssue(order []Node) Issue {
 		}
 	}
 	return notRunnable("The steps that convert run in the Shrink videos order. Put this path's steps in that order."+draft, "")
+}
+
+// samePresetSteps is true when the path has each Shrink videos step once and no other step.
+func samePresetSteps(types []string) bool {
+	if len(types) != len(PresetOrder) {
+		return false
+	}
+	for _, t := range PresetOrder {
+		if !slices.Contains(types, t) {
+			return false
+		}
+	}
+	return true
+}
+
+// orderIssue says which step a path puts out of order (W11), or false when the order can be run. Every
+// step after the input; skips before the convert; the convert, audio, subtitles and file type before the
+// verify (it checks the finished file); the commit last. Audio, subtitles and file type run in the same
+// ffmpeg process as the convert, so their order among those steps changes no result.
+func orderIssue(order []Node) (Issue, bool) {
+	pos := map[string]int{}
+	byType := map[string]Node{}
+	for i, n := range order {
+		pos[n.Type] = i
+		byType[n.Type] = n
+	}
+	type check struct{ first, then string } // first must come before then
+	var checks []check
+	for _, t := range PresetOrder {
+		if t != TypeInput {
+			checks = append(checks, check{TypeInput, t})
+		}
+	}
+	checks = append(checks, check{TypeSkips, TypeConvert})
+	for _, t := range []string{TypeConvert, TypeAudio, TypeSubtitles, TypeContainer} {
+		checks = append(checks, check{t, TypeVerify})
+	}
+	for _, t := range PresetOrder {
+		if t != TypeCommit {
+			checks = append(checks, check{t, TypeCommit})
+		}
+	}
+	for _, c := range checks {
+		if pos[c.first] > pos[c.then] {
+			n := byType[c.then]
+			return notRunnable("'"+nodeName(n)+"' must come after '"+nodeName(byType[c.first])+"'. You can save the workflow as a draft meanwhile.", n.ID), true
+		}
+	}
+	return Issue{}, false
+}
+
+// stepLabelOf is a workflow step's name in the job log's step sections (rules.StepDecision.Label), for the
+// steps that have a section.
+var stepLabelOf = map[string]string{TypeConvert: rules.StepConvertVideo, TypeAudio: rules.StepAudio,
+	TypeSubtitles: rules.StepSubtitles, TypeContainer: rules.StepFileType}
+
+// stepOrderOf is the job log's step-section order for a path's steps (W11), labels joined by commas. It is ""
+// when the path runs them in the Shrink videos order, so a stored flow keeps its bytes.
+func stepOrderOf(types []string) string {
+	labels := func(ts []string) string {
+		var out []string
+		for _, t := range ts {
+			if l, ok := stepLabelOf[t]; ok {
+				out = append(out, l)
+			}
+		}
+		return strings.Join(out, ",")
+	}
+	if got, def := labels(types), labels(PresetOrder); got != def {
+		return got
+	}
+	return ""
 }
 
 func notRunnable(msg, nodeID string) Issue {
