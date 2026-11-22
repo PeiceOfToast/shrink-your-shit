@@ -221,7 +221,8 @@ func selectorsOf(order []Node, leaveFile bool) (rules.Selectors, []Issue) {
 	if s.HardwareFail == "next" {
 		s.HardwareFail = ""
 	}
-	s.RateControl = strOf(cv, "rateControl", "") // item A; the *_legacy values keep a saved flow's files
+	s.RemoveBlackBars = boolOf(cv, "removeBlackBars", false) // F4: off unless the step asks for it
+	s.RateControl = strOf(cv, "rateControl", "")             // item A; the *_legacy values keep a saved flow's files
 	if s.RateControl == "quality" {
 		s.RateControl = "" // the default is saved as absent, so an unchanged flow keeps its template
 	}
@@ -440,6 +441,9 @@ func convertConfig(s rules.Selectors) map[string]any {
 	}
 	if s.CPUQuality != 0 {
 		c["cpuQuality"] = s.CPUQuality
+	}
+	if s.RemoveBlackBars { // F4: only when asked for, so a flow saved without it reads back exactly as it was
+		c["removeBlackBars"] = true
 	}
 	if s.RateControl != "" && s.RateControl != "quality" {
 		c["rateControl"] = s.RateControl
