@@ -564,3 +564,32 @@ func TestAfterErrorPathRunsInsteadOfTheRest(t *testing.T) {
 		t.Errorf("unwired: sent %v, notes %+v, warnings %v", sent, notes, warnings)
 	}
 }
+
+// W9 pin: a failing card inside a Check's Yes branch runs its error path, skips the rest of that Yes branch,
+// and never takes the No branch.
+func TestErrorPathInsideAYesBranchStaysInIt(t *testing.T) {
+	var sent, tags []string
+	env := Env{
+		Notify: func(target, kind, text string) (string, error) {
+			sent = append(sent, target)
+			if target == "t1" {
+				return "", errors.New("the phone is off")
+			}
+			return "Sent", nil
+		},
+		Tag: func(add, remove []string) ([]string, error) { tags = append(tags, add...); return add, nil },
+		Log: func(string) {},
+	}
+	notify := func(id, target string, onErr ...rules.Card) rules.Card {
+		return rules.Card{NodeID: id, Type: workflow.TypeNotify, Name: "Send a notification", Config: map[string]any{"target": target, "kind": "good", "text": "x"}, OnError: onErr}
+	}
+	q := rules.Question{Kind: "result", Test: "saved_at_least", Percent: 30}
+	cards := []rules.Card{{NodeID: "q", Type: workflow.TypeCheckResult, Name: "Worth it?", Check: &q,
+		Yes: []rules.Card{notify("a", "t1", notify("e", "t2")), {NodeID: "tg", Type: workflow.TypeTag, Name: "Tag the file", Config: map[string]any{"add": "after-fail"}}},
+		No:  []rules.Card{notify("n", "t9")}}}
+	st := &State{Vars: map[string]string{"size_bytes": "1000", "new_size_bytes": "600", "saved_percent": "40"}}
+	notes, warnings := After(cards, st, env)
+	if fmt.Sprint(sent) != "[t1 t2]" || len(tags) != 0 || len(warnings) != 1 {
+		t.Errorf("sent %v, tags %v, warnings %v, notes %+v", sent, tags, warnings, notes)
+	}
+}

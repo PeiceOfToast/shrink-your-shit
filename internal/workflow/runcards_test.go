@@ -1052,3 +1052,23 @@ func TestCompareTheResultFieldsShowPerChoice(t *testing.T) {
 		t.Error("the test itself is always shown")
 	}
 }
+
+// W9 pin: an after-save step whose error link leads back onto itself is refused at publish. ToTemplate drops
+// the link silently, so Validate is what keeps the loop out of a published workflow.
+func TestAnAfterStepsErrorLinkCannotLoopOntoItself(t *testing.T) {
+	d, _ := runDoc()
+	save := d.Nodes[len(d.Nodes)-1]
+	act := node(TypeNotify, "", map[string]any{"text": "x"})
+	d.Nodes = append(d.Nodes, act)
+	d.Edges = append(d.Edges, link(save.ID, "success", act.ID), link(act.ID, "error", act.ID))
+	r := Validate(d)
+	found := false
+	for _, i := range r.Issues {
+		if i.Code == "cycle_without_loop" {
+			found = true
+		}
+	}
+	if !found || !r.Errors() {
+		t.Errorf("a self error link: %+v", r.Issues)
+	}
+}
