@@ -125,6 +125,9 @@ export function Workflows() {
     setImp({ id: r.id, name: r.name, lines: importLines(r.import, secrets, "Settings > Variables") });
     wfs.reload();
   };
+  // A finished import moves focus to its result, so keyboard users land on what it says (a failure keeps focus on Import…; its alert speaks)
+  const impFocus = useRef<HTMLParagraphElement>(null);
+  useEffect(() => { if (imp) impFocus.current?.focus(); }, [imp]);
   return (
     <div className="stack">
       <PageHead icon="i-workflow" title="Workflows" help="What happens to each file. A library uses one workflow." />
@@ -135,13 +138,14 @@ export function Workflows() {
       </div>
       <p className="muted" role="status">{said}</p>
       {impErr && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{impErr}</span></p>}
-      {imp && <section className="card" aria-label="Import result"><div className="bd stack">
-        <div role="status" className="stack" style={{ gap: 6 }}>
-          <p>Imported as a draft: {imp.name}. <Link to={"/workflows/" + encodeURIComponent(imp.id)}>Open it</Link></p>
+      {/* always mounted, so the screen reader announces the result when it arrives; hidden (not removed) when there is none */}
+      <div role="status" className={imp ? "card" : "sr"} aria-label={imp ? "Import result" : undefined}>{imp && <div className="bd stack">
+        <div className="stack" style={{ gap: 6 }}>
+          <p ref={impFocus} tabIndex={-1}>Imported as a draft: {imp.name}. <Link to={"/workflows/" + encodeURIComponent(imp.id)}>Open it</Link></p>
           {imp.lines.map((l, i) => <p key={i} className={"st " + (l.kind === "error" ? "bad" : l.kind === "warn" ? "warn" : "ok")}><Icon id={l.kind === "ok" ? "i-check-c" : "i-alert"} /><span>{l.kind === "error" ? <span className="sr">Error: </span> : l.kind === "warn" ? <span className="sr">Warning: </span> : null}{l.text}</span></p>)}
         </div>
         <div className="row"><button className="btn sm ghost" type="button" onClick={() => setImp(null)}>Dismiss</button></div>
-      </div></section>}
+      </div>}</div>
       {tab === "templates" ? (tpl.error && !tpl.data ? <LoadFailed error={tpl.error} reload={tpl.reload} /> :
         <div className="list"><table className="tbl">
           <thead><tr><th>Template</th><th data-p="3">What it does</th><th data-p="4">Steps it uses</th><th className="stc">Changes originals</th></tr></thead>

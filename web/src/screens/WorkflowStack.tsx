@@ -816,7 +816,7 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
         </div>
         {canStack && tools}
         <button className="btn sm ghost" type="button" onClick={exportFile}>Export</button>
-        {exportNote && <span className="muted" role="status">{exportNote}</span>}
+        <span role="status" className={exportNote ? "muted" : "sr"}>{exportNote}</span>{/* always mounted for the announcement; visually hidden when empty */}
         {canStack && <button className="btn sm primary" type="button" disabled={varBad.length > 0} title={varBad.length ? "Fix the variable names first" : undefined} onClick={openPublish}>Publish</button>}
       </div>
       <div className="edframe stackframe"><div className="stackbody">
