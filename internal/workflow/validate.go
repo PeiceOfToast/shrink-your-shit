@@ -380,6 +380,14 @@ func ValidateWith(d Doc, s Scopes) Result {
 			add(Issue{Code: "dangling_edge", EdgeID: e.ID, Message: "A connection leads to a step that isn't there."})
 			continue
 		}
+		_, knownFrom := defs[from.Type]
+		_, knownTo := defs[to.Type]
+		if !knownFrom || !knownTo {
+			// unknown_node_type already names the step. Its ports are unknown too, so checking them would
+			// name a step with no name. Keep the link, so the steps after it aren't reported as unreachable.
+			out[e.From] = append(out[e.From], e.To)
+			continue
+		}
 		if !hasPort(defs[from.Type].Outputs, e.FromPort) {
 			add(Issue{Code: "unknown_port", EdgeID: e.ID, NodeID: from.ID, Port: e.FromPort, Message: fmt.Sprintf("%s has no %q outcome.", defs[from.Type].Name, e.FromPort)})
 			continue
