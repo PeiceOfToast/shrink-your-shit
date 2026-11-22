@@ -5,6 +5,7 @@ package worker
 import (
 	"context"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -101,6 +102,9 @@ func TestACheckThatStopsTheJobIsTheOnlyStep(t *testing.T) {
 		s.wantOnlyTheFailedCheck(t, "no graphics encoder")
 	})
 	t.Run("folder for new files can't be written", func(t *testing.T) {
+		if runtime.GOOS == "windows" || os.Geteuid() == 0 { // chmod can't make a folder read-only on Windows
+			t.Skip("needs a folder this user cannot write (POSIX, not root)")
+		}
 		s := newScenario(t)
 		dir := t.TempDir()
 		if err := os.Chmod(dir, 0o555); err != nil {
@@ -126,6 +130,47 @@ func TestAJobStoppedByALaterCheckGivesTheCardBack(t *testing.T) {
 	s.assertKept("not enough free disk space", jobs.ReasonLowDiskSpace)
 	if n := GPURunning(); n != 0 {
 		t.Errorf("graphics used after a job the free-space check stopped: %d, want 0", n)
+	}
+}
+
+// A job that passes the checks and finishes leaves the card free: the encode's own release at its end, with the
+// defer in process behind it.
+func TestAPassingGraphicsJobGivesTheCardBack(t *testing.T) {
+	oneTry(t)
+	s := newScenario(t)
+	if _, err := graphicsSlotWorker(s, "t1").RunOne(context.Background()); err != nil {
+		t.Fatalf("RunOne: %v", err)
+	}
+	if j := s.job(); j.Status != jobs.Done {
+		t.Fatalf("status %s, error %q", j.Status, j.Error)
+	}
+	if enc := encodeCalls(s); len(enc) != 1 || !strings.Contains(enc[0], "hevc_nvenc") {
+		t.Fatalf("encodes, want one on the card (the slot really was taken):\n%s", strings.Join(enc, "\n"))
+	}
+	if n := GPURunning(); n != 0 {
+		t.Errorf("graphics used after a passing job: %d, want 0", n)
+	}
+}
+
+// The card's place also comes back when a job fails after the checks passed: the staging folder cannot be made
+// beside a read-only original's folder, which returns before the encode's release. The defer in process is the only
+// thing that gives the place back there (review 646 §2, mutation Mb).
+func TestAJobWhoseStagingFailsAfterTheChecksGivesTheCardBack(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 { // chmod can't make a folder read-only on Windows
+		t.Skip("needs a folder this user cannot write (POSIX, not root)")
+	}
+	oneTry(t)
+	s := newScenario(t)
+	if err := os.Chmod(s.dir, 0o555); err != nil { // the original's folder itself, not the store's
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(s.dir, 0o755) })
+	graphicsSlotWorker(s, "t1").RunOne(context.Background())
+	if j := s.job(); j.Status == jobs.Done {
+		t.Fatalf("status %s, want a failure: no staging folder can be made in a read-only folder", j.Status)
+	}
+	if n := GPURunning(); n != 0 {
+		t.Errorf("graphics used after a staging failure below the checks: %d, want 0", n)
 	}
 }
 

@@ -1697,7 +1697,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		return "", err
 	}
 	gpuSlot := enc.slot // the card's place this job holds while its graphics encode runs
-	if gpuSlot != nil { // given back here, before staging: a failure below must not keep the card (L1 fix)
+	if gpuSlot != nil { // held until this job's processing ends: a failure below must not keep the card (L1 fix)
 		defer gpuSlot.Release()
 	}
 	stageNear := job.Path

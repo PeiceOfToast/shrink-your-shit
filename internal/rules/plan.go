@@ -395,9 +395,14 @@ func (p Plan) FFmpegArgsWith(in, out, enc string) ([]string, bool) {
 func (p Plan) CanEncodeWith(enc string) bool { return p.usesGraphics(enc) }
 
 // HasFullPipeline reports whether enc can decode and encode in one graphics pipeline (FFmpegArgsFullGPU's ok).
-func (p Plan) HasFullPipeline(enc string) bool {
+func (p Plan) HasFullPipeline(enc string) bool { return p.fullPipeline(enc) }
+
+// fullPipeline is the one condition behind HasFullPipeline and FFmpegArgsFullGPU, so a log line or a check that asks
+// "is this the full pipeline?" can't drift from the arguments that run. F4: a crop is a processor filter, so the card
+// cannot decode and scale the picture alone.
+func (p Plan) fullPipeline(enc string) bool {
 	prof, ok := ProfileFor(enc)
-	return p.usesGraphics(enc) && ok && prof.FullPipeline()
+	return p.usesGraphics(enc) && ok && prof.FullPipeline() && p.Video.CropRect == nil
 }
 
 // usesGraphics is whether FFmpegArgsWith uses enc for the plan's video: an encoder of the plan's format's family,
@@ -412,12 +417,11 @@ func (p Plan) usesGraphics(enc string) bool {
 // its frames stay on the device through the scale to the encoder. Only QSV and VAAPI have one; for any other
 // encoder, or when FFmpegArgsWith wouldn't use enc, ok is false and the arguments are FFmpegArgsWith's.
 func (p Plan) FFmpegArgsFullGPU(in, out, enc string) ([]string, bool) {
-	args, ok := p.FFmpegArgsWith(in, out, enc)
-	// F4: a crop is a processor filter, so the card cannot decode and scale the picture alone (no full pipeline).
-	if prof, has := ProfileFor(enc); !ok || !has || !prof.FullPipeline() || p.Video.CropRect != nil {
-		return args, false
+	if p.fullPipeline(enc) {
+		return p.ffmpegArgs(in, out, enc, true), true
 	}
-	return p.ffmpegArgs(in, out, enc, true), true
+	args, _ := p.FFmpegArgsWith(in, out, enc)
+	return args, false
 }
 
 // tenBitTargets are the targets a graphics encoder keeps 10-bit when the source is 10-bit: HEVC (main10) and AV1
