@@ -101,3 +101,32 @@ func TestV1SettingSaveKeepsAReorderedStepOrder(t *testing.T) {
 		t.Errorf("the step order was reset to %q", got.Template.StepOrder)
 	}
 }
+
+// The old page echoes back the three fields GET shows (rateControl, hardware, keepIfBigger) but never
+// sends a new value for them. A save with one setting changed must succeed and keep their stored values.
+func TestV1SettingSaveKeepsTheFieldsItEchoes(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	first, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	standard := `{"quality":3,"speed":"normal","format":"hevc","resolution":"keep","maxBitrate":"none","audio":"keep_all","subtitles":"keep_all","fileType":"keep","afterConverting":"replace","ignore":[],"skipHdr":true,"skipSmall":true,"minSavingPct":10,"order":"newest"}`
+	if code, body := post(t, srv, "PUT", fmt.Sprintf("/api/libraries/%d/setting", first.ID), standard); code != 200 {
+		t.Fatalf("standard: %d %s", code, body)
+	}
+	f, _ := st.GetFlow(first.FlowID)
+	tm := f.Template
+	tm.Selectors.RateControl, tm.Selectors.Hardware, tm.Selectors.KeepIfBigger = "level", "only", true
+	l, _ := st.AddLibrary("Echoed", t.TempDir(), tm, true)
+	echo := `,"rateControl":"level","hardware":"only","keepIfBigger":true`
+	body := strings.Replace(standard, `"speed":"normal"`, `"speed":"slower"`, 1)
+	body = strings.TrimSuffix(body, "}") + echo + "}"
+	if code, out := post(t, srv, "PUT", fmt.Sprintf("/api/libraries/%d/setting", l.ID), body); code != 200 {
+		t.Fatalf("echo save: %d %s", code, out)
+	}
+	got, _ := st.GetFlow(l.FlowID)
+	s := got.Template.Selectors
+	if s == nil || s.Speed != "slower" {
+		t.Fatalf("the one setting was not saved: %+v", s)
+	}
+	if s.RateControl != "level" || s.Hardware != "only" || !s.KeepIfBigger {
+		t.Errorf("echoed fields were not kept: rateControl=%q hardware=%q keepIfBigger=%v", s.RateControl, s.Hardware, s.KeepIfBigger)
+	}
+}

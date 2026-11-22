@@ -61,7 +61,8 @@ var selectorFields = map[string]bool{"speed": true, "format": true, "resolution"
 // the current page keeps working.
 // settingEcho are the fields a setting answer carries that a client may send back unchanged: ignored.
 var settingEcho = map[string]bool{"kind": true, "positions": true, "order": true, "availableformats": true, "availableaudio": true,
-	"availablesubtitles": true, "availablefiletypes": true, "warnings": true, "sharedflowchoice": true, "fitsbasic": true, "becomes": true, "bitrateladder": true, "notes": true, "minsavingpct": true, "skipsmall": true, "skiphdr": true, "editablehere": true, "reason": true}
+	"availablesubtitles": true, "availablefiletypes": true, "warnings": true, "sharedflowchoice": true, "fitsbasic": true, "becomes": true, "bitrateladder": true, "notes": true, "minsavingpct": true, "skipsmall": true, "skiphdr": true, "editablehere": true, "reason": true,
+	"keepifbigger": true, "ratecontrol": true, "hardware": true}
 
 // unchangedFrom is the body without the fields whose values are the ones the setting shows now: a page that
 // saves back what GET showed has chosen none of those.
@@ -476,6 +477,9 @@ func settingTemplate(w http.ResponseWriter, store *jobs.Store, body map[string]j
 			t := s.Template()
 			if cur.Kind == rules.KindSelectors && t.Kind == rules.KindSelectors {
 				t.StepOrder = cur.StepOrder // this page never adds, removes or reorders steps: a set order stays
+				if cur.Selectors != nil {   // and it never sends these: the stored values stay
+					t.Selectors.KeepIfBigger, t.Selectors.RateControl, t.Selectors.Hardware = cur.Selectors.KeepIfBigger, cur.Selectors.RateControl, cur.Selectors.Hardware
+				}
 			}
 			return t, true
 		}
