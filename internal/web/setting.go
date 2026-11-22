@@ -212,15 +212,14 @@ func settingRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 				cur = f.Template
 			}
 		}
+		var unchangedView map[string]any // a whole GET answer sent back with nothing changed: saves nothing
 		if l, err := store.GetLibrary(id); err == nil && len(body) > 0 {
 			if f, err := store.GetFlow(l.FlowID); err == nil {
 				rest := unchangedFrom(body, withWarnings(store, f))
-				_, whole := body["kind"]     // a whole GET answer, sent back
-				if len(rest) == 0 && whole { // it chose nothing: nothing is saved
-					writeJSON(w, withWarnings(store, f))
-					return
-				}
-				if _, _, basic := readBasic(rest); len(rest) > 0 && basic && cur.Kind == rules.KindSlider {
+				_, whole := body["kind"] // a whole GET answer, sent back
+				if len(rest) == 0 && whole {
+					unchangedView = withWarnings(store, f)
+				} else if _, _, basic := readBasic(rest); len(rest) > 0 && basic && cur.Kind == rules.KindSlider {
 					if q, ok := body["quality"]; ok {
 						rest["quality"] = q // a slider save needs its position
 					}
@@ -228,7 +227,11 @@ func settingRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 				}
 			}
 		}
-		if refusedHere(w, cur) {
+		if refusedHere(w, cur) { // a flow this page can't edit keeps its 409, even for an echo
+			return
+		}
+		if unchangedView != nil {
+			writeJSON(w, unchangedView)
 			return
 		}
 		t, ok := settingTemplate(w, store, body, cur)

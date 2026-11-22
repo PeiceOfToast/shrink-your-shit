@@ -57,3 +57,19 @@ func TestLibrarySettingReadOnlyFieldsAreNotWritten(t *testing.T) {
 		t.Errorf("only quality should change: %+v", f.Template)
 	}
 }
+
+// A flow this page can't edit answers its own GET echo with 409 (the same as any save), and writes nothing.
+func TestBranchesLibraryEchoIsRefusedNotSaved(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	branches := rules.Template{Kind: rules.KindBranches, Branches: &[]rules.Branch{{End: "Left alone."}}}
+	l, _ := st.AddLibrary("Paths", t.TempDir(), branches, true)
+	path := fmt.Sprintf("/api/libraries/%d/setting", l.ID)
+	_, get, _ := do(t, nil, srv, call{method: "GET", path: path})
+	code, body, _ := do(t, nil, srv, call{method: "PUT", path: path, body: get, ctype: "application/json"})
+	if code != 409 || errCode(body) != "edit_in_new_ui" {
+		t.Fatalf("echo of a branches setting: %d %s", code, body)
+	}
+	if f, _ := st.GetFlow(l.FlowID); f.Template.Kind != rules.KindBranches || (*f.Template.Branches)[0].End != "Left alone." {
+		t.Errorf("the branches flow changed: %+v", f.Template)
+	}
+}
