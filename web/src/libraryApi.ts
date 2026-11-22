@@ -55,7 +55,7 @@ export async function scanLibrary(id: string): Promise<Answer<unknown>> {
 }
 
 export async function getSettings(): Promise<Answer<FirstRunSettings>> {
-  if (MOCK) { const s = mock.mockState().settings; return { firstRunDone: s.firstRunDone, firstRunStep: s.firstRunStep, firstRunLibrary: s.firstRunLibrary ?? null, scanEvery: s.scanEvery, scanEverySource: s.scanEverySource, scanEveryMin: 15, scanEveryMax: 86400, languages: s.languages ?? ["eng"], keepOriginalsDays: s.keepOriginalsDays ?? 7, logKeepDays: s.logKeepDays ?? 30, trashPath: "Kept next to each file, in a folder called .syp-trash", authRequired: true, checkForUpdates: s.checkForUpdates !== false }; }
+  if (MOCK) { const s = mock.mockState().settings; return { firstRunDone: s.firstRunDone, firstRunStep: s.firstRunStep, firstRunLibrary: s.firstRunLibrary ?? null, scanEvery: s.scanEvery, scanEverySource: s.scanEverySource, scanEveryMin: 15, scanEveryMax: 86400, languages: s.languages ?? ["eng"], keepOriginalsDays: s.keepOriginalsDays ?? 7, logKeepDays: s.logKeepDays ?? 30, trashPath: "Kept next to each file, in a folder called .syp-trash", authRequired: true, checkForUpdates: s.checkForUpdates !== false, gpuJobsSeparate: !!s.gpuJobsSeparate }; }
   return call("GET", "/api/v2/settings"); // #111: v1's settings at the v2 path
 }
 // #324 update notice: GET is the last check, kept (asks GitHub for nothing); POST check asks now (409 updates_off when off).
