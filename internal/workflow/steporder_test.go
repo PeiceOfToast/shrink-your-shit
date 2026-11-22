@@ -71,14 +71,14 @@ func TestReorderedStepsCompileInTheirOrder(t *testing.T) {
 	}
 }
 
-// The steps the engine can't honour come back as one issue that names the step out of place. (An input that
-// is not first never reaches this check: straightChain fails and the existing branch path answers, unchanged by W11.)
+// The steps the engine can't honour come back as one issue that names the step out of place.
 func TestUnhonourableStepOrderNamesTheStep(t *testing.T) {
 	for _, c := range []struct {
 		name    string
 		order   []string
 		subject string // the step out of place: the issue's NodeID
 	}{
+		{"input not first", []string{TypeSkips, TypeInput, TypeConvert, TypeAudio, TypeSubtitles, TypeContainer, TypeVerify, TypeCommit}, TypeSkips},
 		{"convert before skips", []string{TypeInput, TypeConvert, TypeSkips, TypeAudio, TypeSubtitles, TypeContainer, TypeVerify, TypeCommit}, TypeConvert},
 		{"verify before the convert", []string{TypeInput, TypeSkips, TypeVerify, TypeConvert, TypeAudio, TypeSubtitles, TypeContainer, TypeCommit}, TypeVerify},
 		{"audio after the verify", []string{TypeInput, TypeSkips, TypeConvert, TypeVerify, TypeAudio, TypeSubtitles, TypeContainer, TypeCommit}, TypeVerify},

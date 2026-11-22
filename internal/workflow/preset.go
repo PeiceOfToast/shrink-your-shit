@@ -152,6 +152,11 @@ func ToTemplateWith(d Doc, current rules.Template, sc Scopes) (rules.Template, [
 	}
 	d = resolved
 	order, ok := straightChain(d)
+	if !ok { // W11: a path of the Shrink videos steps whose input is not first has no straight chain; name the step out of place
+		if iss, bad := pathOrderIssue(d); bad {
+			return rules.Template{}, []Issue{iss}
+		}
+	}
 	if !ok || hasOnError(d) || hasRunCards(d) { // V6a: checks; V6b: a step's own failure choice; FB1b: actions and ends on the chain
 		t, issues := branchTemplate(d)
 		if len(issues) == 0 { // FB4b: a hand-over's other workflow lives in the template the store read for the run, never in this document
@@ -424,6 +429,51 @@ func orderIssue(order []Node) (Issue, bool) {
 		}
 	}
 	return Issue{}, false
+}
+
+// pathOrderIssue (W11) is orderIssue for a path whose input is not its first step: straightChain starts at the
+// input, so such a path has no straight chain. It takes the path from the one step nothing leads into, and only
+// when that path is the Shrink videos steps, each once.
+func pathOrderIssue(d Doc) (Issue, bool) {
+	next := map[string]string{}
+	leadsTo := map[string]bool{}
+	for _, e := range d.Edges {
+		if e.FromPort != "success" || e.ToPort != "in" {
+			return Issue{}, false
+		}
+		next[e.From] = e.To
+		leadsTo[e.To] = true
+	}
+	byID := map[string]Node{}
+	var start string
+	for _, n := range d.Nodes {
+		byID[n.ID] = n
+		if !leadsTo[n.ID] {
+			if start != "" {
+				return Issue{}, false
+			}
+			start = n.ID
+		}
+	}
+	var order []Node
+	for id := start; id != ""; id = next[id] {
+		n, ok := byID[id]
+		if !ok || len(order) == len(d.Nodes) {
+			return Issue{}, false
+		}
+		order = append(order, n)
+	}
+	if start == "" || len(order) != len(d.Nodes) {
+		return Issue{}, false
+	}
+	types := make([]string, len(order))
+	for i, n := range order {
+		types[i] = n.Type
+	}
+	if !samePresetSteps(types) {
+		return Issue{}, false
+	}
+	return orderIssue(order)
 }
 
 // stepLabelOf is a workflow step's name in the job log's step sections (rules.StepDecision.Label), for the
