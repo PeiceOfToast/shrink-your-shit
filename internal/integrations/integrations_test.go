@@ -481,3 +481,45 @@ func TestLookupAnswersFromTheInstanceThatOwnsTheFile(t *testing.T) {
 		t.Error("no downloader of that kind: want an error")
 	}
 }
+
+// Per server (11-22): a Plex tell card tells the Plex connection, and the run's global tell still tells Jellyfin,
+// with Plex told once and not again. The run's record is cleared once the rest has passed it.
+func TestRestTellSkipsOnlyTheConnectionACardTold(t *testing.T) {
+	plex := newFakeMedia(t, "X-Plex-Token", plexToken, map[string]string{
+		"/library/sections":           plexSecs,
+		"/library/sections/1/refresh": "",
+	})
+	auth := `MediaBrowser Token="` + jellyKey + `"`
+	jelly := newFakeMedia(t, "Authorization", auth, map[string]string{
+		"/Library/VirtualFolders": jellyFoldersJSON,
+		"/Library/Media/Updated":  "",
+		"/Items":                  `{"Items":[]}`,
+	})
+	h := newHarness(t)
+	saveInstance(t, h, Plex, plex.srv.URL, plexToken, nil)
+	saveInstance(t, h, Jellyfin, jelly.srv.URL, jellyKey, nil)
+	file := "/data/movies/Film/film.mkv"
+	id := h.job(t, file)
+	if words, err := h.svc.TellKinds(id, file, file, []Kind{Plex}); err != nil || words != "Told Home" {
+		t.Fatalf("the card: %q %v", words, err)
+	}
+	if words, err := h.svc.TellRest(id, file, file, []Kind{Plex, Jellyfin}); err != nil || words != "Told Home" {
+		t.Fatalf("the rest: %q %v", words, err)
+	}
+	h.svc.Wait()
+	refreshes := 0
+	for _, c := range plex.seen() {
+		if c.Path == "/library/sections/1/refresh" {
+			refreshes++
+		}
+	}
+	if refreshes != 1 {
+		t.Errorf("Plex was told %d times, want 1", refreshes)
+	}
+	if len(jelly.posted) != 1 {
+		t.Errorf("Jellyfin got %d updates, want 1 (the rest of the run)", len(jelly.posted))
+	}
+	if got := h.svc.told[id]; got != nil {
+		t.Errorf("the run's record was not cleared: %v", got)
+	}
+}

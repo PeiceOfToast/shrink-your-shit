@@ -454,21 +454,6 @@ func hasTell(cards []rules.Card, kind string) bool {
 	return false
 }
 
-// cardTypes maps each card's NodeID to its type, walking the Yes, No and Didn't work paths too, so a note from
-// the after run says which kind of card it came from. Cards without a NodeID are left out: an empty key can't
-// tell two cards apart, and falling back to the global tell is the direction that still tells someone.
-func cardTypes(cards []rules.Card, into map[string]string) map[string]string {
-	for _, c := range cards {
-		if c.NodeID != "" {
-			into[c.NodeID] = c.Type
-		}
-		cardTypes(c.Yes, into)
-		cardTypes(c.No, into)
-		cardTypes(c.OnError, into)
-	}
-	return into
-}
-
 // runClaimed runs job, claimed for this worker (current, cancelJob and lease set), and records its
 // outcome. renew: this worker renews its lease (a local job; a remote worker renews its own, V7b2).
 func (w *Worker) runClaimed(ctx context.Context, job jobs.Job, jobCtx context.Context, cancel context.CancelFunc, lease string, renew bool) (bool, error) {
@@ -720,22 +705,16 @@ func (w *Worker) runClaimed(ctx context.Context, job jobs.Job, jobCtx context.Co
 			w.jobNote(job.ID, secReplace, jobs.LevelWarning, "(%s): %s", job.Path, msg)
 		}
 	}
-	// Exactly one tell of each kind on the path that ran (flow-builder.md section 10; review2-538 P3b): the
-	// cards above have run, so a tell card of a kind that ran — worked or failed, it was attempted — already
-	// told that connection and the global tell stays quiet for it. A tell card on a path this run did not
-	// take told nothing, so that kind still gets the global tell. Without any tell card the global tell runs
-	// unchanged.
-	types := cardTypes(after, map[string]string{})
-	told := map[string]bool{}
-	for _, n := range notes {
-		told[types[n.NodeID]] = true
-	}
+	// Exactly one tell per connection (flow-builder.md section 10; review2-538 P3b): the cards above have run, and
+	// a connection a tell card of this run told (worked or failed, it was attempted) is not told again. The rest
+	// get the global tell, so a Plex card does not silence Jellyfin (per server, 11-22). Without any tell card the
+	// global tell runs unchanged.
 	if hasTell(after, workflow.TypeMediaServer) || hasTell(after, workflow.TypeDownloader) {
-		if !told[workflow.TypeMediaServer] && e.TellMediaServer != nil {
-			e.TellMediaServer("all") // "none connected" is not news here: the global tell never said so either
+		if e.TellMediaRest != nil {
+			e.TellMediaRest() // "none connected" is not news here: the global tell never said so either
 		}
-		if !told[workflow.TypeDownloader] && e.TellDownloader != nil {
-			e.TellDownloader("all")
+		if e.TellDownloaderRest != nil {
+			e.TellDownloaderRest()
 		}
 	} else if w.OnDone != nil {
 		w.OnDone(job, final)

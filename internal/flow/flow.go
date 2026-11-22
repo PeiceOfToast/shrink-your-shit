@@ -46,7 +46,11 @@ type Env struct {
 	// FB2a: the connections and the notification targets. Each answers in words, or with an error.
 	TellMediaServer func(which string) (string, error) // "all" | plex | jellyfin
 	TellDownloader  func(which string) (string, error) // "all" | sonarr | radarr
-	Notify          func(target, kind, text string) (string, error)
+	// TellMediaRest and TellDownloaderRest are the run's global tell: each connection of the kind that no tell
+	// card of this run told (per connection, 11-22). The worker calls them after the cards.
+	TellMediaRest      func() (string, error)
+	TellDownloaderRest func() (string, error)
+	Notify             func(target, kind, text string) (string, error)
 	// FB2b: a program run on the saved result (nil when "Workflows may run commands" is off in Settings > Safety),
 	// and the downloaders' answer about a file (the values to publish, and words for the log).
 	Exec   func(program string, args []string, dir string, timeout time.Duration, onLine func(string)) (output string, err error)
