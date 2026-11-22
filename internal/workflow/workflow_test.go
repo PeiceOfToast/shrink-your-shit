@@ -81,6 +81,8 @@ func TestMigrationKeepsBehaviour(t *testing.T) {
 		func(s *rules.Selectors) { s.Hardware, s.HardwareFail, s.CPUQuality = "", "fail", 0 }, // the default "auto"/"next" load as "" too
 		// F5: even loudness, saved and loaded both ways.
 		func(s *rules.Selectors) { s.EvenLoudness = true },
+		// F4: cutting the black bars, saved and loaded both ways.
+		func(s *rules.Selectors) { s.RemoveBlackBars = true },
 	} {
 		s := rules.DefaultSelectors(3)
 		f(&s)
@@ -285,6 +287,61 @@ func TestEvenLoudnessSetting(t *testing.T) {
 	}
 	if even(nil) { // a workflow saved before the choice existed: the sound is left as it is
 		t.Error("a workflow that does not ask compiles to a plan that evens the loudness out")
+	}
+}
+
+// F4: the Convert step's black-bars choice is in the workflow: a boolean that is off unless the step asks
+// for it, saved and read back both ways, and it reaches the plan the worker compiles.
+func TestRemoveBlackBarsSetting(t *testing.T) {
+	cv, _ := Definition(TypeConvert)
+	props := cv.ConfigSchema["properties"].(map[string]any)
+	if p, _ := props["removeBlackBars"].(map[string]any); p["type"] != "boolean" || p["default"] != false {
+		t.Errorf("the Convert step's black-bars choice: %v", props["removeBlackBars"])
+	}
+	crop := func(config map[string]any) bool {
+		d := FromTemplate(rules.SliderTemplate(3), nil)
+		for i := range d.Nodes {
+			if d.Nodes[i].Type == TypeConvert {
+				for k, v := range config {
+					d.Nodes[i].Config[k] = v
+				}
+			}
+		}
+		d = roundTrip(t, d)
+		if r := Validate(d); !r.Stackable || len(r.Issues) != 0 { // also: the schema knows the key
+			t.Fatalf("%+v", r.Issues)
+		}
+		tm, issues := ToTemplate(d, rules.Template{})
+		if len(issues) > 0 || tm.Selectors == nil {
+			t.Fatalf("%+v %+v", tm.Selectors, issues)
+		}
+		if tm.Selectors.RemoveBlackBars != (config["removeBlackBars"] == true) {
+			t.Errorf("the template's choice for %v: %v", config, tm.Selectors.RemoveBlackBars)
+		}
+		return tm.Compile(files()[0]).Video.Crop
+	}
+	if !crop(map[string]any{"removeBlackBars": true}) {
+		t.Error("a workflow that asks for the bars to be cut compiles to a plan that does not cut them")
+	}
+	if crop(nil) { // a workflow saved before the choice existed: the picture is left as it is
+		t.Error("a workflow that does not ask compiles to a plan that cuts the bars")
+	}
+	// Off, the key is in no Convert step's config, so a flow saved without it reads back exactly as it was
+	// (review 647: a convertConfig that always wrote the key survived every test).
+	for name, d := range map[string]Doc{"the preset": Preset(), "the slider's": FromTemplate(rules.SliderTemplate(3), nil)} {
+		for _, n := range d.Nodes {
+			if n.Type != TypeConvert {
+				continue
+			}
+			if _, ok := n.Config["removeBlackBars"]; ok {
+				t.Errorf("%s Convert step config has removeBlackBars: %v", name, n.Config)
+			}
+		}
+	}
+	tm := rules.Template{Kind: rules.KindSelectors, Selectors: ptr(rules.DefaultSelectors(3)), CompilerVersion: rules.CompilerVersion}
+	doc := roundTrip(t, FromTemplate(tm, nil))
+	if got, issues := ToTemplate(doc, tm); len(issues) > 0 || !reflect.DeepEqual(got, tm) {
+		t.Errorf("a flow saved without the choice does not read back as it was:\n got %+v\nwant %+v\n%+v", got, tm, issues)
 	}
 }
 
