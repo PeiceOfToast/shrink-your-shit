@@ -481,3 +481,120 @@ func TestLookupAnswersFromTheInstanceThatOwnsTheFile(t *testing.T) {
 		t.Error("no downloader of that kind: want an error")
 	}
 }
+
+// Per server (11-22): a Plex tell card tells the Plex connection, and the run's global tell still tells Jellyfin,
+// with Plex told once and not again. The run's record is cleared once the rest has passed it.
+func TestRestTellSkipsOnlyTheConnectionACardTold(t *testing.T) {
+	plex := newFakeMedia(t, "X-Plex-Token", plexToken, map[string]string{
+		"/library/sections":           plexSecs,
+		"/library/sections/1/refresh": "",
+	})
+	auth := `MediaBrowser Token="` + jellyKey + `"`
+	jelly := newFakeMedia(t, "Authorization", auth, map[string]string{
+		"/Library/VirtualFolders": jellyFoldersJSON,
+		"/Library/Media/Updated":  "",
+		"/Items":                  `{"Items":[]}`,
+	})
+	h := newHarness(t)
+	saveInstance(t, h, Plex, plex.srv.URL, plexToken, nil)
+	saveInstance(t, h, Jellyfin, jelly.srv.URL, jellyKey, nil)
+	file := "/data/movies/Film/film.mkv"
+	id := h.job(t, file)
+	if words, err := h.svc.TellKinds(id, file, file, []Kind{Plex}); err != nil || words != "Told Home" {
+		t.Fatalf("the card: %q %v", words, err)
+	}
+	if words, err := h.svc.TellRest(id, file, file, []Kind{Plex, Jellyfin}); err != nil || words != "Told Home" {
+		t.Fatalf("the rest: %q %v", words, err)
+	}
+	h.svc.Wait()
+	refreshes := 0
+	for _, c := range plex.seen() {
+		if c.Path == "/library/sections/1/refresh" {
+			refreshes++
+		}
+	}
+	if refreshes != 1 {
+		t.Errorf("Plex was told %d times, want 1", refreshes)
+	}
+	if len(jelly.posted) != 1 {
+		t.Errorf("Jellyfin got %d updates, want 1 (the rest of the run)", len(jelly.posted))
+	}
+	if got := h.svc.told[id]; got == nil {
+		t.Errorf("the record was cleared before the run ended: the downloader's rest would tell Plex again")
+	}
+	h.svc.ForgetTold(id)
+	if got := h.svc.told[id]; got != nil {
+		t.Errorf("the run's record was not cleared: %v", got)
+	}
+}
+
+// A connection disabled between its card and the run's rest tell is not told, and its card's record must not
+// outlive the run: when the job is run again (a retry) and the connection is back on, it is told.
+func TestAStaleTellRecordDoesNotSurviveTheRun(t *testing.T) {
+	plex := newFakeMedia(t, "X-Plex-Token", plexToken, map[string]string{
+		"/library/sections":           plexSecs,
+		"/library/sections/1/refresh": "",
+	})
+	h := newHarness(t)
+	plexID := saveInstance(t, h, Plex, plex.srv.URL, plexToken, nil)
+	file := "/data/movies/Film/film.mkv"
+	id := h.job(t, file)
+	refreshes := func() int {
+		n := 0
+		for _, c := range plex.seen() {
+			if c.Path == "/library/sections/1/refresh" {
+				n++
+			}
+		}
+		return n
+	}
+
+	if words, err := h.svc.TellKinds(id, file, file, []Kind{Plex}); err != nil || words != "Told Home" {
+		t.Fatalf("the card: %q %v", words, err)
+	}
+	h.svc.Wait()
+	if _, err := h.svc.Update(plexID, Patch{Enabled: boolp(false)}); err != nil {
+		t.Fatal(err)
+	}
+	if words, err := h.svc.TellRest(id, file, file, []Kind{Plex}); err != nil || words != "" {
+		t.Fatalf("the rest with Plex off: %q %v, want nothing told", words, err)
+	}
+	h.svc.ForgetTold(id) // the worker's defer, at the end of the run
+
+	if _, err := h.svc.Update(plexID, Patch{Enabled: boolp(true)}); err != nil {
+		t.Fatal(err)
+	}
+	if words, err := h.svc.TellRest(id, file, file, []Kind{Plex}); err != nil || words != "Told Home" {
+		t.Fatalf("the retry's rest: %q %v, want Plex told", words, err)
+	}
+	h.svc.Wait()
+	if got := refreshes(); got != 2 {
+		t.Errorf("Plex was refreshed %d times, want 2 (the card, then the retry's rest)", got)
+	}
+}
+
+// A Sonarr card leaves Sonarr alone in the run's rest tell; the Radarr rest is what gets told.
+func TestDownloaderRestTellsOnlyTheOtherInstance(t *testing.T) {
+	sonarr := newFakeArr(t, "/tv/The Show")
+	radarr := newFakeArr(t, "/nowhere")
+	h := newHarness(t)
+	h.svc.Create(NewIntegration{Kind: Sonarr, Name: "TV box", URL: sonarr.srv.URL, APIKey: goodKey,
+		PathMappings: []Mapping{{TheirPath: "/tv", OurPath: "/mnt/media/tv"}}})
+	h.svc.Create(NewIntegration{Kind: Radarr, Name: "Film box", URL: radarr.srv.URL, APIKey: goodKey})
+	file := "/mnt/media/tv/The Show/s01e01.mkv"
+	id := h.job(t, file)
+
+	if words, err := h.svc.TellKinds(id, "", file, []Kind{Sonarr}); err != nil || words != "Told TV box" {
+		t.Fatalf("the Sonarr card: %q %v", words, err)
+	}
+	if words, err := h.svc.TellRest(id, "", file, []Kind{Sonarr, Radarr}); err != nil || words != "Told Film box" {
+		t.Fatalf("the rest: %q %v, want only the Radarr told", words, err)
+	}
+	h.svc.Wait()
+	h.svc.ForgetTold(id)
+	sonarr.mu.Lock()
+	defer sonarr.mu.Unlock()
+	if len(sonarr.commands) != 1 {
+		t.Errorf("Sonarr got %d rescans, want 1 (the card only)", len(sonarr.commands))
+	}
+}
