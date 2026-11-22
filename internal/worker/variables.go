@@ -96,7 +96,12 @@ func (w *Worker) resolveForFile(job jobs.Job, src media.Info, tmpl rules.Templat
 func (w *Worker) runFacts(job jobs.Job, src media.Info, st os.FileInfo) rules.Facts {
 	info, err := w.runInfo(job)
 	if err != nil { // review2-536 P3a: the facts route the file, so say when they come from nothing
-		w.jobNote(job.ID, secEncode, jobs.LevelWarning, "(%s): the workflow's details could not be read (%v); its questions answer from the file alone", job.Path, err)
+		var unset *jobs.SecretUnsetError
+		if errors.As(err, &unset) {
+			w.jobNote(job.ID, secEncode, jobs.LevelWarning, "(%s): the workflow's secret has no value; its questions answer from the file alone", job.Path)
+		} else {
+			w.jobNote(job.ID, secEncode, jobs.LevelWarning, "(%s): the workflow's details could not be read (%v); its questions answer from the file alone", job.Path, err)
+		}
 	}
 	source := vars.Source{Path: job.Path, Library: info.Library, LibraryRoot: job.Library, SizeBytes: job.SizeBefore,
 		Info: &src, Workflow: info.Workflow, Revision: info.Revision, Worker: w.ID, Variables: ownValues(info)}

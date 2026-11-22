@@ -241,16 +241,6 @@ func flowRoutes(api *http.ServeMux, store *jobs.Store, ss *settingsStore, eng En
 			storeErr(w, err)
 			return
 		}
-		if len(imp.Layout.Nodes) > 0 || len(imp.Layout.Groups) > 0 {
-			d, _, err := store.Draft(f.ID)
-			if err == nil {
-				_, err = store.SaveDraft(f.ID, imp.Doc, imp.Layout, d.Etag)
-			}
-			if err != nil {
-				serverError(w, err)
-				return
-			}
-		}
 		v, err := workflowView(store, f.ID)
 		if err != nil {
 			serverError(w, err)

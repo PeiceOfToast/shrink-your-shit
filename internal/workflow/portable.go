@@ -67,6 +67,7 @@ func Export(name string, d Doc, l Layout, appVersion string, now time.Time) Port
 // Import is a portable file read for this machine, before anything is saved. Doc is the workflow upgraded to
 // this build's shape. MissingGlobals are the global variables it names that this machine does not have;
 // UnknownSteps are its step types this build does not have. Both are reported, and the draft is still saved.
+// The web import also reports the validator's issues for the draft; they are not part of this struct.
 type Import struct {
 	Name           string
 	Doc            Doc
@@ -76,8 +77,9 @@ type Import struct {
 }
 
 // ReadPortable parses a portable file and checks it against this machine's global variables (globals, by
-// name). A file that is not a workflow export, or that is from a newer format than this build reads, is an
-// error and nothing is read from it further.
+// name). It refuses, with an error and nothing read further, a file that is not a workflow export, one with no
+// workflow object, one from a newer format, a workflow whose schema is not this build's, and a step whose
+// typeVersion is newer than this build's. The validation issues of the workflow are the caller's to report.
 func ReadPortable(raw []byte, globals map[string]Variable) (Import, error) {
 	var p Portable
 	if err := json.Unmarshal(raw, &p); err != nil {
