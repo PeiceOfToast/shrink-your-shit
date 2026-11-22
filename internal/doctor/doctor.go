@@ -64,6 +64,9 @@ type Tools struct {
 	// capabilities come from real test encodes, never from a list).
 	Software, SoftwareListed []string
 	TestedAt                 time.Time // when the encoders were tested (zero: not yet)
+	// Devices is each graphics family's measured record (decode, scale), from the same test run as the
+	// encoders; empty when none was measured.
+	Devices []DeviceRecord
 }
 
 // softwareEncoders are the formats' software encoders, tested like the hardware ones.
@@ -131,6 +134,8 @@ type Checker struct {
 	probes map[string]Probe
 	// decodeOK is Decodes' cache: "family codec bits" -> whether the family's hardware decoder reads it.
 	decodeOK map[string]bool
+	// dev is the device record of the test whose result is in hw (nil: none measured).
+	dev []DeviceRecord
 }
 
 const toolsTTL = 10 * time.Minute
@@ -151,9 +156,9 @@ func (c *Checker) tested(ctx context.Context, maxAge time.Duration) (Tools, map[
 	c.mu.Lock()
 	for {
 		if c.hw != nil && time.Since(c.hwAt) < maxAge { // fresh: shared
-			hw, at, probes := *c.hw, c.hwAt, c.probes
+			hw, at, probes, dev := *c.hw, c.hwAt, c.probes, c.dev
 			c.mu.Unlock()
-			return t.withEncoders(hw, at), probes
+			return t.withEncoders(hw, at).withDevices(dev), probes
 		}
 		if run := c.hwRun; run != nil { // one test at a time (GPU session limits, review c66c66b): wait for it
 			c.mu.Unlock()
@@ -170,13 +175,14 @@ func (c *Checker) tested(ctx context.Context, maxAge time.Duration) (Tools, map[
 		c.run = map[string]Probe{}
 		c.mu.Unlock()
 		hw := c.hardwareTest(ctx, t)
+		dev := c.deviceTest(ctx, hw[0])
 		c.mu.Lock()
 		at := time.Now()
 		probes := c.run
 		c.run = nil
 		stored := ctx.Err() == nil // a test cut short by its caller is not a result: the next caller runs it again
 		if stored {
-			c.hw, c.hwAt, c.probes = &hw, at, probes
+			c.hw, c.hwAt, c.probes, c.dev = &hw, at, probes, dev
 			c.publishLocked()
 		}
 		c.hwRun = nil
@@ -185,7 +191,7 @@ func (c *Checker) tested(ctx context.Context, maxAge time.Duration) (Tools, map[
 		if stored && c.OnTested != nil {
 			c.OnTested(at, resultsOf(hw))
 		}
-		return t.withEncoders(hw, at), probes
+		return t.withEncoders(hw, at).withDevices(dev), probes
 	}
 }
 
@@ -305,7 +311,7 @@ func (c *Checker) ToolsNow() (Tools, bool) {
 	t, ok := Tools{}, c.tools != nil && c.hw != nil
 	stale := !ok || time.Since(c.hwAt) >= toolsTTL || time.Since(c.toolsAt) >= toolsTTL
 	if ok {
-		t = c.tools.withEncoders(*c.hw, c.hwAt)
+		t = c.tools.withEncoders(*c.hw, c.hwAt).withDevices(c.dev)
 	} else if k := c.known.Load(); k != nil {
 		// A Retest cleared the hardware result while its test runs: until the new result is stored, the
 		// last complete one stands (the same answer a caller gets while the lock is held).
@@ -368,7 +374,7 @@ func (c *Checker) publishLocked() {
 	if c.tools == nil || c.hw == nil {
 		return
 	}
-	t := c.tools.withEncoders(*c.hw, c.hwAt)
+	t := c.tools.withEncoders(*c.hw, c.hwAt).withDevices(c.dev)
 	c.known.Store(&t)
 }
 
@@ -418,6 +424,12 @@ func (c *Checker) Decodes(ctx context.Context, fam, codec string, tenBit bool) b
 // decodes makes the sample and decodes it on the family's hardware. cacheable is false when the answer may be
 // transient: the context was cancelled or the probe timed out, so a false says nothing about the device.
 func (c *Checker) decodes(ctx context.Context, fam, codec string, tenBit bool) (ok, cacheable bool) {
+	return c.onDevice(ctx, fam, codec, tenBit, "")
+}
+
+// onDevice makes the sample and decodes it on the family's hardware, then runs vf on the device's frames ("" for
+// none): the probe behind Decodes and the scale test. cacheable is as for decodes.
+func (c *Checker) onDevice(ctx context.Context, fam, codec string, tenBit bool, vf string) (ok, cacheable bool) {
 	s, known := decodeSamples[codec]
 	full, has := rules.ProfileFor("hevc_" + fam) // only a family with a full graphics pipeline decodes here
 	if !known || c.FFmpeg == "" || !has || !full.FullPipeline() {
@@ -440,7 +452,7 @@ func (c *Checker) decodes(ctx context.Context, fam, codec string, tenBit bool) (
 		"color=c=black:s=256x256:d=0.1", "-frames:v", "1", "-pix_fmt", pix, "-c:v", s[0], "-f", s[1], sample); err != nil {
 		return false, !interrupted()
 	}
-	if _, err := c.Exec.Output(tctx, c.FFmpeg, decodeArgs(fam, media.VAAPIDevice(), sample)...); err != nil {
+	if _, err := c.Exec.Output(tctx, c.FFmpeg, decodeArgsWith(fam, media.VAAPIDevice(), sample, vf)...); err != nil {
 		return false, !interrupted()
 	}
 	return true, true
@@ -449,11 +461,21 @@ func (c *Checker) decodes(ctx context.Context, fam, codec string, tenBit bool) (
 // decodeArgs decodes in on the family's hardware and discards the frames: the same device setup the full
 // GPU pipeline uses (rules.FFmpegArgsFullGPU), without the encode.
 func decodeArgs(fam, device, in string) []string {
+	return decodeArgsWith(fam, device, in, "")
+}
+
+// decodeArgsWith is decodeArgs with the video filter vf run on the decoded frames before they are discarded
+// ("" for none).
+func decodeArgsWith(fam, device, in, vf string) []string {
 	args := []string{"-hide_banner", "-v", "error"}
 	p, _ := rules.ProfileFor("hevc_" + fam) // the family's set-up and full-pipeline decode (QSV, VAAPI)
 	args = append(args, p.Setup(device)...)
 	args = append(args, p.FullDecode()...)
-	return append(args, "-i", in, "-f", "null", "-")
+	args = append(args, "-i", in)
+	if vf != "" {
+		args = append(args, "-vf", vf)
+	}
+	return append(args, "-f", "null", "-")
 }
 
 // lastErrorLine is the last line of an ffmpeg failure, without the "ffmpeg: exit status 1:" prefix.
