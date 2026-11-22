@@ -337,6 +337,28 @@ func TestAnUnopenableSecretStopsTheJob(t *testing.T) {
 	}
 }
 
+// A setting that uses a workflow secret with no value stops the job before anything is converted, naming the
+// secret: the run never goes on with the secret read as empty (the same rule as an unopenable secret).
+func TestAnUnsetSecretStopsTheJob(t *testing.T) {
+	s := newScenario(t)
+	w := selectorsWorker(s, func(sel *rules.Selectors) { sel.AfterConverting = "beside" })
+	w.RunInfo = func(jobs.Job) (jobs.RunInfo, error) {
+		return jobs.RunInfo{}, &jobs.SecretUnsetError{Names: []string{"api_key"}}
+	}
+	w.RunOne(context.Background()) // the failure is the job's, checked below
+	j := s.job()
+	if j.Status != jobs.Failed || !strings.Contains(j.Error, "The workflow secret “api_key” has no value, so converting did not start.") ||
+		!strings.Contains(j.Error, "Give it a value in the workflow, then press Retry.") {
+		t.Fatalf("status %s, error %q", j.Status, j.Error)
+	}
+	if n := len(encodeCalls(s)); n != 0 {
+		t.Errorf("%d encode(s) ran before the secret was checked", n)
+	}
+	if read(s.src) != "original-bytes" {
+		t.Errorf("the original is %q", read(s.src))
+	}
+}
+
 // logTexts are the job's log lines as text.
 func logTexts(t *testing.T, s *scenario) []string {
 	t.Helper()

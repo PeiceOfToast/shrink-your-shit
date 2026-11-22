@@ -401,3 +401,44 @@ func nameOrEmpty(name string) string {
 	}
 	return fmt.Sprintf("“%s”", name)
 }
+
+// configRefs are the names every node's settings refer to ({{name}}), built-ins and the workflow's own included.
+func configRefs(d Doc) map[string]bool {
+	seen := map[string]bool{}
+	var walk func(v any)
+	walk = func(v any) {
+		switch x := v.(type) {
+		case string:
+			refs, _ := vars.Refs(x)
+			for _, r := range refs {
+				seen[r.Name] = true
+			}
+		case map[string]any:
+			for _, e := range x {
+				walk(e)
+			}
+		case []any:
+			for _, e := range x {
+				walk(e)
+			}
+		}
+	}
+	for _, n := range d.Nodes {
+		walk(n.Config)
+	}
+	return seen
+}
+
+// UnsetSecrets are the secrets without a value that d's settings refer to. A run would fill them with nothing,
+// so the job names them and stops instead.
+func UnsetSecrets(d Doc) []string {
+	refs := configRefs(d)
+	var out []string
+	for _, v := range d.Variables {
+		if v.Type == "secret" && (v.Value == nil || v.Value == "") && refs[v.Name] && !slices.Contains(out, v.Name) {
+			out = append(out, v.Name)
+		}
+	}
+	slices.Sort(out)
+	return out
+}

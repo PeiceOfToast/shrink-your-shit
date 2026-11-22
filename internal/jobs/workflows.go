@@ -414,6 +414,12 @@ func (s *Store) RevisionByIDAnyFlow(revID int64) (Revision, error) {
 // AddWorkflow is a new workflow, never published (status draft), whose draft is doc. Its flow's
 // template is the engine's default until it is published; the old pages don't list it meanwhile.
 func (s *Store) AddWorkflow(name string, doc workflow.Doc) (Flow, error) {
+	return s.AddWorkflowWithLayout(name, doc, workflow.Layout{})
+}
+
+// AddWorkflowWithLayout is AddWorkflow with the drawing the draft is saved with, in the same transaction: a
+// workflow is never stored without its layout, and no second write can fail half way.
+func (s *Store) AddWorkflowWithLayout(name string, doc workflow.Doc, layout workflow.Layout) (Flow, error) {
 	if err := s.nameFree(s.db, name, 0); err != nil {
 		return Flow{}, err
 	}
@@ -433,8 +439,9 @@ func (s *Store) AddWorkflow(name string, doc workflow.Doc) (Flow, error) {
 	if _, err := tx.Exec(`UPDATE flows SET status='draft' WHERE id=?`, id); err != nil {
 		return Flow{}, err
 	}
+	normalLayout(&layout)
 	if _, err := tx.Exec(`INSERT INTO workflow_revisions(workflow_id,number,status,doc,layout,logic_hash,etag,created) VALUES(?,NULL,'draft',?,?,?,?,?)`,
-		id, mustJSON(doc), mustJSON(workflow.Layout{}), workflow.LogicHash(doc), workflow.NewID(), s.stamp()); err != nil {
+		id, mustJSON(doc), mustJSON(layout), workflow.LogicHash(doc), workflow.NewID(), s.stamp()); err != nil {
 		return Flow{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -919,6 +926,9 @@ func (s *Store) RunInfoFor(j Job) (RunInfo, error) {
 			}
 			// the one place a stored secret is opened: a job resolves its workflow's variables here, and a
 			// secret this computer can't open must stop it, never run as an empty string
+			if unset := workflow.UnsetSecrets(rev.Doc); len(unset) > 0 {
+				return out, &SecretUnsetError{Names: unset}
+			}
 			vars, unreadable := openVariables(rev.Doc)
 			if len(unreadable) > 0 {
 				return out, &SecretUnreadableError{Names: unreadable}
