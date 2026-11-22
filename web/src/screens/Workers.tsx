@@ -177,7 +177,7 @@ function AddWorker({ workers, reload }: { workers: Worker[]; reload: () => void 
     setSaid(ok ? "Command copied." : "Select the command and copy it.");
   };
   return <>
-    <span className="addw"><button className="btn sm" type="button" aria-expanded={open} aria-controls={group} onClick={() => { if (open) return setOpen(false); setOpen(true); if (came || !p || gone) make(); }}><Icon id="i-plus" />Add a worker</button>
+    <span className="addw"><button className="btn sm primary" type="button" aria-expanded={open} aria-controls={group} onClick={() => { if (open) return setOpen(false); setOpen(true); if (came || !p || gone) make(); }}><Icon id="i-plus" />Add a worker</button>
       {said && <span className="muted sm" role="status">{said}</span>}</span>
     {open && <div className="swask addpanel" id={group} role="region" aria-label="Add a worker">
       <p className="sm">Easiest: run the install command on the other computer. It finds this server and asks to join here.</p>
@@ -334,7 +334,7 @@ export function Workers() {
   };
   return (
     <div className="stack">
-      <PageHead icon="i-worker" title="Workers" help="The computers that convert your files. Nothing converts until a worker is started.">
+      <PageHead icon="i-worker" title="Workers" sub="Nothing converts until a worker is on.">
         {!ws.loaded && <span className="skel-ph skel-sw" aria-hidden="true" />}
         {list.length > 0 && <WorkersSwitch n={n} m={list.length} busy={busyAny} finishing={fin} onSet={set} />}
         {/* user item 2: Add a worker pairs another computer (V7b) */}

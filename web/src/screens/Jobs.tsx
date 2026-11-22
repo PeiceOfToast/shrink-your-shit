@@ -160,7 +160,9 @@ export function Jobs() {
   </>;
   return (
     <div className="stack">
-      <PageHead icon="i-jobs" title="Jobs" help="Every file the workers look at: waiting, converting, done, skipped and failed." />
+      <PageHead icon="i-jobs" title="Jobs" sub="Every file the workers look at: waiting, converting, done, skipped and failed.">
+        {!firstRun && <button className="btn sm ghost" type="button" aria-pressed={selecting} onClick={() => (selecting && setSel([]), setSelecting(!selecting))}>{selecting ? "Done" : "Select"}</button>}
+      </PageHead>
       {off && <p className="st warn" role="status"><Icon id="i-alert" /><span>{off === "offline"
         ? <>No worker is connected. <Link to="/workers">See Workers.</Link></>
         : <>No worker is running. <Link to="/workers">Turn workers on.</Link></>}</span></p>}
@@ -175,7 +177,6 @@ export function Jobs() {
       </div>
       <div className="ltools" role="toolbar" aria-label="Jobs">
         {!firstRun && <>
-          <button className="btn sm ghost" type="button" aria-pressed={selecting} onClick={() => (selecting && setSel([]), setSelecting(!selecting))}>{selecting ? "Done" : "Select"}</button>
           {(selecting || sel.length > 0) && <label className="hit selall"><input type="checkbox" aria-label="Select all files" checked={items.length > 0 && sel.length === items.length} onChange={(e) => setSel(e.target.checked ? items.map((j) => j.id) : [])} /><span className="sm">All</span></label>}
           {(selecting || sel.length > 0) && <span className="desk">{actions}</span>}
           {selecting && <details className="menu phone"><summary className="btn sm icon ghost" aria-label="More actions"><Icon id="i-more" /></summary><div className="pop" role="menu">{actions}</div></details>}

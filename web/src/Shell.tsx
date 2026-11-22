@@ -1,6 +1,7 @@
 // The shell (spec 2; DESIGN/v2 IA.md and mockups/shell.html): the grouped rail, the top bar and the page.
-// Nav badges: Workers shows the join requests waiting (ONE-COMMAND-SETUP.md section 9). Not here yet, until their data
-// exists: the other badges, the activity link, the "New" menu and the connection-lost bar.
+// Nav badges: Workers shows the join requests waiting (ONE-COMMAND-SETUP.md section 9) and a red count of workers with a
+// problem. The top bar shows "Converting N files" while any file converts. Not here yet, until their data exists: the
+// other badges, the "New" menu and the connection-lost bar.
 import { SampleDataPage, ScreenGuard } from "./PageHead";
 import { onLive, useLiveStatus } from "./live";
 import { MOCK } from "./api";
@@ -15,6 +16,7 @@ import { Palette } from "./Palette";
 import { ACCENTS, THEMES, keep, keepRail, railCollapsed, useAppearance } from "./prefs";
 import { Link, usePath } from "./router";
 import { noWorker } from "./workersApi";
+import { convertingLabel, problemWorkers } from "./topbarBadges";
 
 const mac = /Mac|iPhone|iPad/.test(navigator.platform);
 
@@ -90,12 +92,15 @@ export function Shell({ title, proto, children }: { title: string; proto: boolea
   }, []);
   const toggleRail = () => (keepRail(!collapsed), setCollapsed(!collapsed));
   // the summary's badges: every 30 s, and at once when a worker asks to join
-  const sum = useData<{ badges: { joinRequestsWaiting?: number }; workers?: { status: string }[] | null }>(() => (MOCK ? Promise.resolve(summary(mockState())) : getSummary()), [], 30000);
+  const sum = useData<{ badges: { joinRequestsWaiting?: number; workersOffline?: number | null }; activity?: { converting: number }; workers?: { status: string }[] | null }>(() => (MOCK ? Promise.resolve(summary(mockState())) : getSummary()), [], 30000);
   const again = useRef(sum.reload); again.current = sum.reload;
   useEffect(() => onLive((t) => { if (t === "workers.changed" || t === "resync") again.current(); }), []);
   const joins = sum.data?.badges.joinRequestsWaiting ?? 0, waiting = plural(joins, "worker", "workers") + " waiting to join";
   // parity item 8: no worker running shows "Stopped" on Workers (some paused) or "Offline" (all offline)
   const off = noWorker(sum.data?.workers ?? []), offWord = off === "offline" ? "Offline" : "Stopped";
+  // M1: a red count when a worker has a problem replaces the grey "Stopped"/"Offline" word, which stays for the others
+  const converting = convertingLabel(sum.data?.activity?.converting), problems = problemWorkers(sum.data?.badges.workersOffline);
+  const workersBadge = [joins > 0 && waiting, problems && problems.words, !problems && off].filter(Boolean).join(", ");
   return (
     // On a narrow screen the open menu's scrim is shell.css's .app.nav-open::after, so a tap on it is a click on .app
     // itself (review P2): that closes the menu. Escape closes it too.
@@ -106,11 +111,12 @@ export function Shell({ title, proto, children }: { title: string; proto: boolea
           {NAV.map(([group, items]) => [
             <div className="grp" key={group} aria-hidden="true" />, // clean pass 2 (7.1): groups by a 14 px gap, no eyebrow label
             ...items.map((n) => (
-              <Link key={n.to} to={n.to} title={n.to === "/workers" && (joins || off) ? n.label + ": " + [joins && waiting, off].filter(Boolean).join(", ") : n.label} aria-current={current === n ? "page" : undefined}>
+              <Link key={n.to} to={n.to} title={n.to === "/workers" && workersBadge ? n.label + ": " + workersBadge : n.label} aria-current={current === n ? "page" : undefined}>
                 <Icon id={n.icon} /><span className="lbl">{n.label}</span>
                 {n.planned && <span className="lbl muted sm">Planned</span>}
                 {n.to === "/workers" && joins > 0 && <><span className="badge info" aria-hidden="true">{joins}</span><span className="sr">, {waiting}</span></>}
-                {n.to === "/workers" && off && <><span className="badge off" aria-hidden="true">{offWord}</span><span className="sr">, {off}</span></>}
+                {n.to === "/workers" && problems && <><span className="badge" aria-hidden="true">{problems.count}</span><span className="sr">, {problems.words}</span></>}
+                {n.to === "/workers" && !problems && off && <><span className="badge off" aria-hidden="true">{offWord}</span><span className="sr">, {off}</span></>}
               </Link>
             )),
           ])}
@@ -129,6 +135,7 @@ export function Shell({ title, proto, children }: { title: string; proto: boolea
           <button className="search" type="button" aria-label="Search or jump to" onClick={() => setPalette(true)}>
             <Icon id="i-search" /><span className="txt">Search or jump to…</span><span className="k">{mac ? "⌘ K" : "Ctrl K"}</span>
           </button>
+          {converting && <Link className="activity" to="/jobs?tab=running" aria-label={converting}><Icon id="i-play" /><span className="txt">{converting}</span></Link>}
           <ThemeMenu />
         </header>
         <ConnBar />
