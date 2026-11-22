@@ -233,7 +233,7 @@ func TestEventsMigrationKeepsSeq(t *testing.T) {
 	}
 	dropLogSections(t, s)
 	l, _ := s.AddLibrary("Movies", "/m", rules.SliderTemplate(3), true)
-	for _, q := range append(append([]string{}, rewindShareMigrations...), // back to version 21's shape, with history at seq 41 and 42
+	for _, q := range append(append(append([]string{}, rewindShareMigrations...), rewindEncoderSpeeds...), // back to version 21's shape, with history at seq 41 and 42
 		`DROP TRIGGER events_job_insert`, `DROP TRIGGER events_job_status`, `DROP TRIGGER events_job_removed`, `DROP TABLE events`,
 		`CREATE TABLE job_events (seq INTEGER PRIMARY KEY AUTOINCREMENT, job_id INTEGER NOT NULL, at TEXT NOT NULL,
 		  from_status TEXT, to_status TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '', worker TEXT NOT NULL DEFAULT '')`,
@@ -299,7 +299,7 @@ func TestReasonCodesMigration(t *testing.T) {
 	if err := s.Fail(id, ReasonConvertFailed, "Converting did not finish."); err != nil {
 		t.Fatal(err)
 	}
-	for _, q := range append(append([]string{}, rewindShareMigrations...), // back to version 22: the sentence was the code
+	for _, q := range append(append(append([]string{}, rewindShareMigrations...), rewindEncoderSpeeds...), // back to version 22: the sentence was the code
 		`UPDATE events SET reason='Converting did not finish.', data=NULL WHERE kind='job' AND to_status='failed'`,
 		`INSERT INTO events(kind, job_id, at, from_status, to_status, reason) VALUES ('job', 99, '2026-11-01T00:00:00Z', 'running', 'cancelled', 'user_stopped')`,
 		// the worker's own sentences: a low-space retry and a stall (review abe2b0e: not legacy retry_later)

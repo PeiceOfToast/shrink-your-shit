@@ -45,6 +45,11 @@ type RemoteResult struct {
 	// Info is the remote worker's own probe of the new file it made (foundation slice 4): an older
 	// worker sends none, and the server's check of the uploaded file measures it here instead.
 	Info media.Info
+	// F7: how fast its encode ran, in its own measurement. Encoder is "" from a worker built before
+	// speeds, or for a copy: nothing measured it then.
+	Encoder string
+	Speed   float64 // the realtime multiple: the job's length over the encode's seconds
+	FPS     float64 // average frames encoded per second, 0 when its ffmpeg did not say
 }
 
 // remoteFailure is a remote worker's conversion failure with the code its result carried: "" from an
@@ -88,6 +93,9 @@ type RemoteJob struct {
 	// measured is the probe the remote worker's own check took of the new file (foundation slice 4): a
 	// worker built before that sends none.
 	measured media.Info
+	// the encode's speed as the remote worker measured it (F7): "" from a worker built before it
+	enc        string
+	speed, fps float64
 	// the remote encode, for the stall stop (row 17:40Z, orch-lead 19:13Z): judged only between the
 	// worker's "converting" (with its position) and its next stage, and only for a worker that sends one
 	judging bool
@@ -259,6 +267,7 @@ func (r *RemoteJob) convert(ctx context.Context, w *Worker, job jobs.Job, snap r
 		case res := <-r.result:
 			r.mu.Lock()
 			r.measured = res.Info
+			r.enc, r.speed, r.fps = res.Encoder, res.Speed, res.FPS
 			r.mu.Unlock()
 			switch {
 			case res.Kept != "":
@@ -277,6 +286,15 @@ func (r *RemoteJob) Measured() media.Info {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.measured
+}
+
+// figures is how fast the encode the remote worker ran went, by its own clock and the frames its ffmpeg
+// reported: the server's clock also counts the transfer, so it cannot measure this. Empty from a worker
+// built before F7.
+func (r *RemoteJob) figures() encodeFigures {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return encodeFigures{encoder: r.enc, speed: r.speed, fps: r.fps}
 }
 
 // keptRemote is a refusal a remote worker reported: its code when it is one a remote check can give, else

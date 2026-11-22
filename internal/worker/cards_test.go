@@ -198,9 +198,21 @@ func TestOnlyTheTellThatRanReplacesTheGlobalTell(t *testing.T) {
 			w := s.worker(Beside)
 			w.Template = func(jobs.Job) (rules.Template, int64, error) { return tm, 0, nil }
 			var told []string
+			cardTold := false // the one media connection here: a card that told it leaves the run's global tell nothing
 			w.OnDone = func(jobs.Job, string) { told = append(told, "global") }
 			w.Cards = func(jobs.Job, string) flow.Env {
-				e := flow.Env{TellMediaServer: func(which string) (string, error) { told = append(told, "media:"+which); return "Told Plex", nil }}
+				e := flow.Env{
+					TellMediaServer: func(which string) (string, error) {
+						told, cardTold = append(told, "media:"+which), true
+						return "Told Plex", nil
+					},
+					TellMediaRest: func() (string, error) {
+						if !cardTold {
+							told = append(told, "media:all")
+						}
+						return "", nil
+					},
+				}
 				if !c.mute {
 					e.Notify = func(target, kind, text string) (string, error) { return "Sent to phone", nil }
 				}
@@ -288,6 +300,9 @@ func TestAfterCardsRunOnTheSavedFile(t *testing.T) {
 				told3 = append(told3, "downloader:"+which)
 				return "Told Sonarr", nil
 			},
+			// the media card told its connection, so the run's media tell has none left; no downloader card ran
+			TellMediaRest:      func() (string, error) { return "", nil },
+			TellDownloaderRest: func() (string, error) { told3 = append(told3, "downloader:all"); return "", nil },
 		}
 	}
 	w3.RunOne(context.Background())

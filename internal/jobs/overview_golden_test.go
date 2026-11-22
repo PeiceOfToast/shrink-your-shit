@@ -217,6 +217,9 @@ func TestOverviewTimings(t *testing.T) {
 	raw.Exec(`ALTER TABLE jobs DROP COLUMN queued_rev`)     // and step 59
 	raw.Exec(`ALTER TABLE jobs DROP COLUMN subtitle_files`) // and step 52
 	raw.Exec(`ALTER TABLE jobs DROP COLUMN output_info`)    // and step 60
+	for _, q := range rewindEncoderSpeeds {                 // and step 61
+		raw.Exec(q)
+	}
 	raw.Exec(`PRAGMA user_version = 50`)
 	raw.Close()
 	start := time.Now()

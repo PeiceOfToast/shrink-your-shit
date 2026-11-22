@@ -83,6 +83,10 @@ type RunStep struct {
 	CheckPassed *bool
 	OutputLines int // the ffmpeg lines this step wrote to the log
 	Result      string
+	// F7: the encode step's speed, 0 when it is not known (an older row, a copy, a failure).
+	Encoder string  // the encoder the command names: hevc_qsv, libx265, ...
+	Speed   float64 // the realtime multiple: the media's length over the encode's seconds
+	FPS     float64 // average frames encoded per second
 }
 
 // FailureSummary says why a job failed: the step, when, the ffmpeg exit code and the error lines that matter.
@@ -148,15 +152,16 @@ func (s *Store) LogLines(id int64) ([]LogLine, error) {
 // RecordRunStep stores step idx of job id (replacing an earlier record of the same step).
 func (s *Store) RecordRunStep(id int64, st RunStep) error {
 	_, err := s.db.Exec(`INSERT OR REPLACE INTO job_run_steps(job_id, idx, name, started_at, took_ms, outcome, command, probe,
-  check_score, check_min, check_passed, output_lines, result) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+  check_score, check_min, check_passed, output_lines, result, encoder, speed, fps) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		id, st.Index, st.Name, st.StartedAt, st.TookMs, st.Outcome, st.Command, st.Probe,
-		st.CheckScore, st.CheckMin, st.CheckPassed, st.OutputLines, st.Result)
+		st.CheckScore, st.CheckMin, st.CheckPassed, st.OutputLines, st.Result, st.Encoder, st.Speed, st.FPS)
 	return err
 }
 
 // RunSteps is job id's steps, in order.
 func (s *Store) RunSteps(id int64) ([]RunStep, error) {
-	rows, err := s.db.Query(`SELECT idx, name, started_at, took_ms, outcome, command, probe, check_score, check_min, check_passed, output_lines, result
+	rows, err := s.db.Query(`SELECT idx, name, started_at, took_ms, outcome, command, probe, check_score, check_min, check_passed, output_lines, result,
+  encoder, speed, fps
 FROM job_run_steps WHERE job_id=? ORDER BY idx`, id)
 	if err != nil {
 		return nil, err
@@ -167,7 +172,8 @@ FROM job_run_steps WHERE job_id=? ORDER BY idx`, id)
 		var st RunStep
 		var score, min sql.NullFloat64
 		var passed sql.NullBool
-		if err := rows.Scan(&st.Index, &st.Name, &st.StartedAt, &st.TookMs, &st.Outcome, &st.Command, &st.Probe, &score, &min, &passed, &st.OutputLines, &st.Result); err != nil {
+		if err := rows.Scan(&st.Index, &st.Name, &st.StartedAt, &st.TookMs, &st.Outcome, &st.Command, &st.Probe, &score, &min, &passed, &st.OutputLines, &st.Result,
+			&st.Encoder, &st.Speed, &st.FPS); err != nil {
 			return nil, err
 		}
 		if score.Valid {

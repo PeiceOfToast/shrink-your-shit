@@ -454,21 +454,6 @@ func hasTell(cards []rules.Card, kind string) bool {
 	return false
 }
 
-// cardTypes maps each card's NodeID to its type, walking the Yes, No and Didn't work paths too, so a note from
-// the after run says which kind of card it came from. Cards without a NodeID are left out: an empty key can't
-// tell two cards apart, and falling back to the global tell is the direction that still tells someone.
-func cardTypes(cards []rules.Card, into map[string]string) map[string]string {
-	for _, c := range cards {
-		if c.NodeID != "" {
-			into[c.NodeID] = c.Type
-		}
-		cardTypes(c.Yes, into)
-		cardTypes(c.No, into)
-		cardTypes(c.OnError, into)
-	}
-	return into
-}
-
 // runClaimed runs job, claimed for this worker (current, cancelJob and lease set), and records its
 // outcome. renew: this worker renews its lease (a local job; a remote worker renews its own, V7b2).
 func (w *Worker) runClaimed(ctx context.Context, job jobs.Job, jobCtx context.Context, cancel context.CancelFunc, lease string, renew bool) (bool, error) {
@@ -694,6 +679,9 @@ func (w *Worker) runClaimed(ctx context.Context, job jobs.Job, jobCtx context.Co
 	var e flow.Env
 	if w.Cards != nil {
 		e = w.Cards(job, final)
+		if e.TellForget != nil {
+			defer e.TellForget() // the run's tell record ends with the run, even when a card panics
+		}
 	}
 	var notes []flow.Note
 	if len(after) > 0 { // FB2a: the path's cards on the saved result; one that doesn't work is a warning, never a failure
@@ -720,22 +708,16 @@ func (w *Worker) runClaimed(ctx context.Context, job jobs.Job, jobCtx context.Co
 			w.jobNote(job.ID, secReplace, jobs.LevelWarning, "(%s): %s", job.Path, msg)
 		}
 	}
-	// Exactly one tell of each kind on the path that ran (flow-builder.md section 10; review2-538 P3b): the
-	// cards above have run, so a tell card of a kind that ran — worked or failed, it was attempted — already
-	// told that connection and the global tell stays quiet for it. A tell card on a path this run did not
-	// take told nothing, so that kind still gets the global tell. Without any tell card the global tell runs
-	// unchanged.
-	types := cardTypes(after, map[string]string{})
-	told := map[string]bool{}
-	for _, n := range notes {
-		told[types[n.NodeID]] = true
-	}
+	// Exactly one tell per connection (flow-builder.md section 10; review2-538 P3b): the cards above have run, and
+	// a connection a tell card of this run told (worked or failed, it was attempted) is not told again. The rest
+	// get the global tell, so a Plex card does not silence Jellyfin (per server, 11-22). Without any tell card the
+	// global tell runs unchanged.
 	if hasTell(after, workflow.TypeMediaServer) || hasTell(after, workflow.TypeDownloader) {
-		if !told[workflow.TypeMediaServer] && e.TellMediaServer != nil {
-			e.TellMediaServer("all") // "none connected" is not news here: the global tell never said so either
+		if e.TellMediaRest != nil {
+			e.TellMediaRest() // "none connected" is not news here: the global tell never said so either
 		}
-		if !told[workflow.TypeDownloader] && e.TellDownloader != nil {
-			e.TellDownloader("all")
+		if e.TellDownloaderRest != nil {
+			e.TellDownloaderRest()
 		}
 	} else if w.OnDone != nil {
 		w.OnDone(job, final)
@@ -815,9 +797,32 @@ func (w *Worker) recordEncodeStart(id int64, args []string, started time.Time) {
 		Command: "ffmpeg " + strings.Join(args, " ")})
 }
 
+// encodeFigures is how fast the encode ran, for the remembered encoder speeds (F7): the encoder the command
+// names, the realtime multiple (the media's length over the encode's seconds) and the average frames per
+// second. Empty when nothing measured it: a copy, a failed encode, or an older remote worker's report.
+type encodeFigures struct {
+	encoder    string
+	speed, fps float64
+}
+
+// figuresOf is the local worker's own measurement: its encode's wall time and the frames ffmpeg reported.
+// A remote worker sends its own numbers instead: the server's clock includes the transfer.
+func (w *Worker) figuresOf(job jobs.Job, args []string, plan rules.Plan, started time.Time, frames int64, terr error) encodeFigures {
+	secs := w.now().Sub(started).Seconds()
+	if terr != nil || secs <= 0 || plan.Video.Copy || job.DurationSec <= 0 {
+		return encodeFigures{}
+	}
+	f := encodeFigures{encoder: rules.VideoEncoderIn(args, plan.Video.Index), speed: job.DurationSec / secs}
+	if frames > 0 {
+		f.fps = float64(frames) / secs
+	}
+	return f
+}
+
 // recordEncode keeps the encode step in the database: its command, how long it took, the ffmpeg lines it wrote
 // and, when it failed, the failure summary (the last error lines of ffmpeg, or the last lines if none report one).
-func (w *Worker) recordEncode(id int64, args []string, started time.Time, encErr string, terr error, probe string) {
+// figures is the encode's speed (F7), kept on the step for the per-worker and per-encoder medians.
+func (w *Worker) recordEncode(id int64, args []string, started time.Time, encErr string, terr error, probe string, figures encodeFigures) {
 	if w.Queue == nil {
 		return
 	}
@@ -837,7 +842,8 @@ func (w *Worker) recordEncode(id int64, args []string, started time.Time, encErr
 		outcome = "failed"
 	}
 	w.Queue.RecordRunStep(id, jobs.RunStep{Index: 0, Name: "encode", StartedAt: started.UTC().Format(time.RFC3339),
-		TookMs: w.now().Sub(started).Milliseconds(), Outcome: outcome, Command: "ffmpeg " + strings.Join(args, " "), Probe: probe, OutputLines: len(lines)})
+		TookMs: w.now().Sub(started).Milliseconds(), Outcome: outcome, Command: "ffmpeg " + strings.Join(args, " "), Probe: probe, OutputLines: len(lines),
+		Encoder: figures.encoder, Speed: figures.speed, FPS: figures.fps})
 	if terr == nil {
 		return
 	}
@@ -1795,7 +1801,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 					Decoder: decoderWords(src, false), Progress: media.Progress{ETASeconds: -1}})
 			},
 			Failed: func(r Rung, errText string, err error) {
-				w.recordEncode(job.ID, r.Args, encStart, errText, err, probeSummary(src))
+				w.recordEncode(job.ID, r.Args, encStart, errText, err, probeSummary(src), encodeFigures{})
 			},
 			Note:    func(text string) { w.jobf(job.ID, ": %s", text) },
 			Stopped: w.stalled,
@@ -1861,7 +1867,15 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			}
 		}
 	}
-	w.recordEncode(job.ID, args, encStart, encErr, terr, probeSummary(src))
+	figures := encodeFigures{}
+	if terr == nil {
+		if w.remote != nil {
+			figures = w.remote.figures()
+		} else {
+			figures = w.figuresOf(job, args, plan, encStart, decoded, terr)
+		}
+	}
+	w.recordEncode(job.ID, args, encStart, encErr, terr, probeSummary(src), figures)
 	// Moved or deleted while converting: ffmpeg's read errors then say nothing about the file, so it is
 	// neither damaged nor the encoder's fault. Checked before the errors are read as damage.
 	if ctx.Err() == nil && sourceGone(srcPath) {

@@ -429,6 +429,35 @@ func (p Plan) EncodeTenBit() bool {
 	return p.Video.HDR != nil || (p.Video.TenBit && tenBitTargets[p.Video.Codec])
 }
 
+// Filter is one video filter in a plan's order: Text is ffmpeg's filter, and Card says whether it runs on the
+// graphics card (true) or the processor (false). Video only for now; audio filters will get their own list.
+type Filter struct {
+	Text string
+	Card bool
+}
+
+// filterChain is the filter text for -filter:v, in order. The frames start on the card when onCard (the full
+// pipeline decodes there) and on the processor otherwise. The family's upload goes in front of the first card
+// filter that meets processor frames, and at the end when a card encoder (encoderOnCard) meets them. A processor
+// filter after card frames would need a download, which nothing builds yet: it panics, as a plan is built in code.
+func filterChain(entries []Filter, onCard bool, upload []string, encoderOnCard bool) []string {
+	var out []string
+	for _, f := range entries {
+		switch {
+		case f.Card && !onCard:
+			out = append(out, upload...)
+			onCard = true
+		case !f.Card && onCard:
+			panic("rules: processor filter " + f.Text + " after card frames needs a download, which is not built")
+		}
+		out = append(out, f.Text)
+	}
+	if encoderOnCard && !onCard {
+		out = append(out, upload...)
+	}
+	return out
+}
+
 // ffmpegArgs builds the arguments; gpu is a graphics encoder's name, or "" for the processor's. full is the full
 // graphics pipeline (FFmpegArgsFullGPU): the decode and the scale stay on the device, with no upload.
 func (p Plan) ffmpegArgs(in, out, gpu string, full bool) []string {
@@ -504,22 +533,19 @@ func (p Plan) ffmpegArgs(in, out, gpu string, full bool) []string {
 			args = append(args, "-pix_fmt:"+v, pixFmt10(fam))
 		}
 	}
-	var vf []string
+	var vf []Filter
 	if p.Video.Height > 0 {
 		if full {
-			vf = append(vf, profiles[fam].scale(p.Video.Height, ten10))
+			vf = append(vf, Filter{Text: profiles[fam].scale(p.Video.Height, ten10), Card: true})
 		} else {
-			vf = append(vf, "scale=-2:"+strconv.Itoa(p.Video.Height))
+			vf = append(vf, Filter{Text: "scale=-2:" + strconv.Itoa(p.Video.Height)})
 			if p.Video.SquarePixels { // the scale keeps the shape by carrying a SAR; rounding leaves 1280:1281, so a square source gets 1:1
-				vf = append(vf, "setsar=1")
+				vf = append(vf, Filter{Text: "setsar=1"})
 			}
 		}
 	}
-	if up := profiles[fam].Upload(ten10); up != nil && !full { // software frames go up to the device last, after any scale
-		vf = append(vf, up...)
-	}
-	if len(vf) > 0 {
-		args = append(args, "-filter:"+v, strings.Join(vf, ","))
+	if chain := filterChain(vf, full, profiles[fam].Upload(ten10), gpu != ""); len(chain) > 0 {
+		args = append(args, "-filter:"+v, strings.Join(chain, ","))
 	}
 	args = append(args, p.trackArgs()...)
 	args = append(args, p.subtitleDispositionArgs()...)
