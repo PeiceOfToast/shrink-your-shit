@@ -18,7 +18,8 @@ import (
 // most-behind stream and freezes while the encode goes on). frames says whether frame= grows with each report;
 // sizeStep is how far total_size= grows per report (0: no total_size=). Each report advances the worker's fake
 // clock by tick: the stall stop and the 30 s warning both read that clock, so a late report under load cannot
-// move them (waiting on real time here was the flake). With ticks 0 it reports until the stall stop cancels it.
+// move them (waiting on real time here was the flake). With ticks 0 it reports until the stall stop cancels it;
+// stop, if set, is sent the cancellation (the stop itself), so a test can wait for it rather than for a clock.
 type outFrozenExec struct {
 	*media.FakeExec
 	clock    *fakeClockAt
@@ -27,6 +28,7 @@ type outFrozenExec struct {
 	frames   bool
 	sizeStep int64
 	gap      time.Duration // real time per report (0: 50 ms)
+	stop     chan struct{} // sent once when the encode's context is canceled (nil: say nothing)
 }
 
 func (x *outFrozenExec) Stream(ctx context.Context, onLine func(string), name string, args ...string) (string, error) {
@@ -40,6 +42,12 @@ func (x *outFrozenExec) Stream(ctx context.Context, onLine func(string), name st
 	for i := 0; x.ticks == 0 || i < x.ticks; i++ {
 		select {
 		case <-ctx.Done():
+			if x.stop != nil {
+				select {
+				case x.stop <- struct{}{}:
+				default:
+				}
+			}
 			return "", ctx.Err()
 		case <-time.After(gap):
 		}
@@ -139,10 +147,27 @@ func TestFrozenOutTimeStopsPastTheOutputBound(t *testing.T) {
 	w := s.worker(Replace)
 	w.stallClock = clock.now
 	w.StallAfter = 45 * time.Second
-	w.Exec = &outFrozenExec{FakeExec: s.exec, clock: clock, tick: 10 * time.Second, frames: true, sizeStep: 1000}
+	// It reports until the stop cancels it: a fixed count would end the encode before the watchdog's first
+	// check, which is paced in real time (2.25 s here), so the stop would never come.
+	x := &outFrozenExec{FakeExec: s.exec, clock: clock, tick: 10 * time.Second, frames: true, sizeStep: 1000,
+		stop: make(chan struct{}, 1)}
+	w.Exec = x
 	done := make(chan struct{})
 	go func() { w.RunOne(context.Background()); close(done) }()
-	waitDone(t, done)
+	// Wait for the stop itself (the product canceling the encode's context), not for a wall-clock guess: a
+	// loaded Windows runner took the 10 s waitDone bound here (run 44961493941). The two minutes below is a
+	// hang bound for a stuck test; the work is about five reports of 50 ms, plus the failure write.
+	select {
+	case <-x.stop: // the stop
+	case <-done: // it ended without the stop: the assertions below say what happened
+	case <-time.After(2 * time.Minute):
+		t.Fatal("the job did not stop and the encode did not end")
+	}
+	select {
+	case <-done:
+	case <-time.After(2 * time.Minute):
+		t.Fatal("the job did not stop")
+	}
 	j := s.job()
 	// Past the bound the stop says why: the new file is over twice the original, so the words are not "no progress".
 	if j.Status != jobs.Failed || !strings.Contains(j.Error, "more than twice the original's size") || strings.Contains(j.Error, "no progress") {
