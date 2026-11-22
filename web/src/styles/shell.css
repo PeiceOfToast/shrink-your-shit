@@ -150,7 +150,7 @@ textarea.input{min-height:72px;font-family:var(--mono);font-size:var(--fs-sm)}
 .card>.hd h2 a:hover,.card>.hd h3 a:hover{text-decoration:underline}
 /* SettingRow (web/src/SettingRow.tsx): title and muted description left, controls right, a divider between rows; the controls move under the text on a phone */
 .setrow{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,45%);gap:var(--s3) var(--s4);align-items:center;padding:12px var(--pad)}
-.bd>.setrow+.setrow,.bd>.setrow+p,.bd>p+.setrow,.bd>.setrow+div{border-top:1px solid var(--border)}
+.bd>.setrow+.setrow,.bd>.setrow+p:not(:empty),.bd>p+.setrow,.bd>.setrow+div{border-top:1px solid var(--border)}
 .setrow .ttl{font-weight:600}
 .setrow .sub{margin:2px 0 0}
 .setrow .ctl{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;align-items:center;min-width:0}

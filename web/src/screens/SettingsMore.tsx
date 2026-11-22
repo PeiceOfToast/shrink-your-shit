@@ -49,9 +49,9 @@ function General({ start, auth, saved }: { start: string[]; auth: boolean; saved
       <div className="bd stack" style={{ padding: 0, gap: 0 }}><Access auth={auth} /></div></section>
     <div className="stack" style={{ gap: 8 }}>
       <p className={bad ? "st bad" : "muted"} role="status" style={{ margin: 0 }}>{said}</p>
-      <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
-        <span className="muted">Nothing is saved until you press Save.</span>
+      <div className="row" style={{ justifyContent: "flex-start", flexWrap: "wrap", gap: 12 }}>
         <button className="btn primary" type="button" disabled={!dirty} onClick={save}>Save</button>
+        <span className="muted">Nothing is saved until you press Save.</span>
       </div>
     </div>
   </>);
@@ -166,7 +166,7 @@ function Access({ auth }: { auth: boolean }) {
   const make = async () => { setAsk(false); const r = await act(rotateToken(), setSaid); if (r) (setTok(r.token), setSaid("New token made. Use it to sign in on other devices.")); };
   const out = async () => { if (await act(signOut(), setSaid)) navigate("/signin"); };
   return (<>
-    <SettingRow title={<label htmlFor="tok">Access token</label>} desc={<span id="tok-h">{auth ? "" : "Not needed on this computer. "}Needed to open shrink-your-shit from another device.</span>}>
+    <SettingRow title={<label htmlFor="tok">Access token</label>} desc={<span id="tok-h">{auth ? "" : "Not needed on this computer. "}Needed to open the app from another device.</span>}>
       <input id="tok" className="input mono" readOnly value={tok ?? "••••••••••••"} aria-describedby="tok-h" style={{ width: 200, maxWidth: "100%", minWidth: 0 }} />
       <button className="btn" type="button" aria-controls="tok" onClick={show}>{tok ? "Hide" : "Show"}</button>
       {tok && navigator.clipboard && <button className="btn" type="button" onClick={() => navigator.clipboard.writeText(tok).then(() => setSaid("Copied."), () => {})}>Copy</button>}
@@ -174,7 +174,7 @@ function Access({ auth }: { auth: boolean }) {
     </SettingRow>
     {ask && <div className="note" role="alertdialog" aria-labelledby="tok-ask" style={{ margin: "0 16px 12px" }}><Icon id="i-alert" /><div className="sp"><strong id="tok-ask">Make a new token?</strong> {auth ? "The old one stops working, so other devices must use the new one." : "This server doesn't ask for one now. Making one turns sign-in on for every browser and script, and they will need the token from then on."}</div>
       <button className="btn sm primary" type="button" onClick={make}>Make it</button><button className="btn sm ghost" type="button" onClick={() => setAsk(false)}>Cancel</button></div>}
-    <p className="muted" role="status" style={{ margin: said ? "0 16px 12px" : 0 }}>{said}</p>
+    <p className="muted" role="status" style={{ margin: said ? "0 16px 12px" : 0 }}>{said || null}</p>
     {auth && <SettingRow title="Sign out of this browser" desc="Only shown when the server needs the token.">
       <button className="btn" type="button" aria-label="Sign out of this browser" onClick={out}>Sign out</button>
     </SettingRow>}
