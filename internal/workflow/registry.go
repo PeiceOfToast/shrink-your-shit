@@ -265,7 +265,7 @@ func Definitions() []StepDefinition {
 						"Only the graphics card. If it can't convert the file, the job fails.", "Always the processor. The graphics card is not used."}), "auto", "Hardware", "segmented"),
 				"hardwareFail": withDefault(hinted(enum([]any{"next", "fail"}, []string{"Try the next way", "Fail the job"}),
 					[]string{"If the graphics card fails, convert on the processor, as before.",
-						"If the graphics card fails, stop the job and say why. The file is not tried again."}), "next", "If the hardware fails", "segmented"),
+						"If the graphics card fails, stop the job at once and say why, with no step down to another way or the processor. The file is not tried again by itself."}), "next", "If the hardware fails", "segmented"),
 				"cpuQuality": map[string]any{"type": "integer", "minimum": 0, "maximum": 5, "default": 0, "title": "CPU quality",
 					"description": "0: the same as Quality. 1 to 5: the processor's own quality, on the same scale."},
 			}, []string{"quality", "format", "resolution", "maxBitrate", "speed"})}),

@@ -288,6 +288,10 @@ func failureReport(err error, stderr string, ran []string) map[string]any {
 	if _, ok := jobs.HeaderSupport(stderr); ok {
 		body["code"] = jobs.ReasonSettingsRejected
 	}
+	var hs *hardwareStop
+	if errors.As(err, &hs) { // the Convert step's choice stopped it: plain words, not retried (W7 round 2)
+		body["code"] = jobs.ReasonHardwareChoice
+	}
 	return body
 }
 
@@ -476,8 +480,14 @@ func (c *Client) convert(ctx context.Context, cv Converter, l *Lease, snap rules
 		return c.call(cctx, "leases/"+l.ID+"/progress", body, nil)
 	}
 	args, enc, note := encoderArgs(snap.Plan, l.Primary, c.Caps, snap.Source, src, out)
+	if snap.Plan.Video.Hardware == "only" { // the processor is never used here: the note says why, without that
+		note = strings.TrimSuffix(note, "; using the processor")
+	}
 	if note != "" {
 		c.note(ctx, l, note)
+	}
+	if enc == "" && snap.Plan.Video.Hardware == "only" && !snap.Plan.Video.Copy { // no card can take the file: refused before ffmpeg runs
+		return "", nil, &hardwareStop{words: worker.HardwareOnlyNoEncoderWords, err: errors.New("no graphics encoder for this file")}
 	}
 	if !snap.Plan.Video.Copy { // the same Chosen line the local worker logs (a copy is not encoded, so no line)
 		why := "" // the processor was chosen: the note above says why, and this line does not repeat it (as local)
@@ -540,6 +550,11 @@ func (c *Client) convert(ctx context.Context, cv Converter, l *Lease, snap rules
 	})
 	args = res.Args
 	stderr, err := res.Errors, res.Err
+	if err != nil && enc != "" && !res.Fell && rep.lost() == nil {
+		if words := worker.HardwareStopWords(snap.Plan.Video, err); words != "" { // the card's failure stands: plain words, not retried
+			err = &hardwareStop{words: words, err: err}
+		}
+	}
 	if err == nil && rep.lost() == nil {
 		if res.Fell {
 			c.noteFell(ctx, l, failed, res.FellReason) // the processor converted it, so the graphics encoder was the fault
@@ -663,6 +678,9 @@ func (r *encodeReports) finishingReport() map[string]any {
 // graphics encoder used ("" for the processor); note is for the job log when the processor is used because of
 // one ("" for the processor by choice, and for a server that sends no main encoder).
 func encoderArgs(plan rules.Plan, main *string, caps []map[string]any, source *media.Info, src, out string) (args []string, enc, note string) {
+	if plan.Video.Hardware == "cpu" && !plan.Video.Copy { // the Convert step says never the graphics card
+		return plan.FFmpegArgs(src, out), "", "CPU only, as the Convert step says"
+	}
 	if main == nil || plan.Video.Copy {
 		return plan.FFmpegArgs(src, out), "", ""
 	}
@@ -757,3 +775,13 @@ func (c *Client) report(ctx context.Context, l *Lease, body map[string]any) erro
 
 // gb is a size in GB, to one decimal.
 func gb(n uint64) string { return strconv.FormatFloat(float64(n)/(1<<30), 'f', 1, 64) + " GB" }
+
+// hardwareStop is a conversion the Convert step's hardware choice stopped (only, or fail): its words are plain and
+// the job is not retried. err is what ffmpeg said, for the job log.
+type hardwareStop struct {
+	words string
+	err   error
+}
+
+func (e *hardwareStop) Error() string { return e.words }
+func (e *hardwareStop) Unwrap() error { return e.err }

@@ -12,7 +12,7 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 )
 
-// W7 with real ffmpeg: a graphics encoder that cannot open its device (a path that is not there) fails for real.
+// W7 with real ffmpeg: a graphics encoder that refuses an option it does not take (no device set here) fails for real.
 // The Convert step's choices decide what happens next, and the job log names the rung that made the file.
 func TestRealHardwareChoicesOnConvert(t *testing.T) {
 	needTools(t)
