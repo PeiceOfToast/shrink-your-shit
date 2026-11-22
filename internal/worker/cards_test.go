@@ -169,6 +169,34 @@ func TestCardFailureStopsTheRun(t *testing.T) {
 	s.assertOriginalSafe()
 }
 
+// W9: a tell card anywhere the after-save path can reach counts as that connection told. One on a Didn't work
+// link suppresses the legacy global tell too, so the failing path tells the server once, not twice.
+func TestATellOnAnErrorLinkCountsAsTold(t *testing.T) {
+	s := newScenarioNamed(t, "Harrow.Lane.2019.Remux.mkv")
+	tm := cardsTemplate()
+	(*tm.Branches)[0].After = []rules.Card{{
+		NodeID: "say", Type: workflow.TypeNotify, Name: "Send a notification",
+		Config:  map[string]any{"target": "t1", "text": "saved"},
+		OnError: []rules.Card{{NodeID: "ms", Type: workflow.TypeMediaServer, Name: "Tell the media server", Config: map[string]any{}}},
+	}}
+	w := s.worker(Beside)
+	w.Template = func(jobs.Job) (rules.Template, int64, error) { return tm, 0, nil }
+	var told []string
+	w.OnDone = func(jobs.Job, string) { told = append(told, "global") }
+	w.Cards = func(jobs.Job, string) flow.Env {
+		return flow.Env{ // no Notify: the card doesn't work, so its Didn't work link runs
+			TellMediaServer: func(which string) (string, error) { told = append(told, "media:"+which); return "Told Plex", nil },
+		}
+	}
+	w.RunOne(context.Background())
+	if j := s.job(); j.Status != jobs.Done {
+		t.Fatalf("%s %q", j.Status, j.Error)
+	}
+	if got := strings.Join(told, " "); got != "media:all" {
+		t.Errorf("told %q; the one tell on the error link should be the only one", got)
+	}
+}
+
 // FB2a: the after-save cards run once the result is in place: the checksum of the new file is published,
 // the sidecar beside it carries it, the notification goes through what main wires in, a card that doesn't
 // work is a warning on the timeline while the job stays done, and a tell card replaces the global tell.

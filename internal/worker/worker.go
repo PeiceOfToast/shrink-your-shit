@@ -443,6 +443,17 @@ func (w *Worker) RunOne(ctx context.Context) (bool, error) {
 	return w.runClaimed(ctx, job, jobCtx, cancel, lease, true)
 }
 
+// hasTell says whether cards, or any card's Yes, No or Didn't work path, has a card of this type: a tell on any
+// path the run can take still means that connection was told, so the legacy global tell would repeat it.
+func hasTell(cards []rules.Card, kind string) bool {
+	for _, c := range cards {
+		if c.Type == kind || hasTell(c.Yes, kind) || hasTell(c.No, kind) || hasTell(c.OnError, kind) {
+			return true
+		}
+	}
+	return false
+}
+
 // runClaimed runs job, claimed for this worker (current, cancelJob and lease set), and records its
 // outcome. renew: this worker renews its lease (a local job; a remote worker renews its own, V7b2).
 func (w *Worker) runClaimed(ctx context.Context, job jobs.Job, jobCtx context.Context, cancel context.CancelFunc, lease string, renew bool) (bool, error) {
@@ -665,14 +676,11 @@ func (w *Worker) runClaimed(ctx context.Context, job jobs.Job, jobCtx context.Co
 	w.mu.Lock()
 	after, cardVars := w.after, w.cardVars
 	w.mu.Unlock()
-	// A tell card makes that kind of connection per workflow; the other kind is still told as it always has been
+	// A tell card makes that kind of connection per workflow, on whichever path it sits (the top level, a
+	// check's Yes or No, or a Didn't work link); the other kind is still told as it always has been
 	// (flow-builder.md section 10; review2-538 P3b: per kind, not per path). Without any tell card the global
 	// tell runs unchanged.
-	hasMedia, hasDownloader := false, false
-	for _, c := range after {
-		hasMedia = hasMedia || c.Type == workflow.TypeMediaServer
-		hasDownloader = hasDownloader || c.Type == workflow.TypeDownloader
-	}
+	hasMedia, hasDownloader := hasTell(after, workflow.TypeMediaServer), hasTell(after, workflow.TypeDownloader)
 	switch {
 	case !hasMedia && !hasDownloader:
 		if w.OnDone != nil {
