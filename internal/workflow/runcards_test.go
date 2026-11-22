@@ -1072,3 +1072,11 @@ func TestAnAfterStepsErrorLinkCannotLoopOntoItself(t *testing.T) {
 		t.Errorf("a self error link: %+v", r.Issues)
 	}
 }
+
+// review-605: a running-time question saved without its seconds (a draft from before the field, or a
+// hand-built one) reads with the schema's default, the way an unset percent does.
+func TestRuntimeSummaryDefaultsToTwoSeconds(t *testing.T) {
+	if s := summary(node(TypeCheckResult, "", map[string]any{"test": "runtime_within"})); s != "Only if the running time is within 2 seconds of the original's" {
+		t.Errorf("summary %q", s)
+	}
+}
