@@ -394,7 +394,15 @@ func main() {
 			TellDownloader: func(which string) (string, error) {
 				return integ.TellKinds(job.ID, job.Path, final, kinds(which, integrations.Sonarr, integrations.Radarr))
 			},
-			Notify: notifier.SendTo,
+			// the run's global tell: the connections no tell card of this run told (per connection, 11-22)
+			TellMediaRest: func() (string, error) {
+				return integ.TellRest(job.ID, job.Path, final, []integrations.Kind{integrations.Plex, integrations.Jellyfin})
+			},
+			TellDownloaderRest: func() (string, error) {
+				return integ.TellRest(job.ID, job.Path, final, []integrations.Kind{integrations.Sonarr, integrations.Radarr})
+			},
+			TellForget: func() { integ.ForgetTold(job.ID) },
+			Notify:     notifier.SendTo,
 		}
 		env.Exec = web.CommandRunner(store) // FB2b: the Safety switch, read per job; nil makes the card refuse
 		return env
