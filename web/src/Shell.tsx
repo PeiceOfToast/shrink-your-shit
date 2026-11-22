@@ -135,7 +135,7 @@ export function Shell({ title, proto, children }: { title: string; proto: boolea
           <button className="search" type="button" aria-label="Search or jump to" onClick={() => setPalette(true)}>
             <Icon id="i-search" /><span className="txt">Search or jump to…</span><span className="k">{mac ? "⌘ K" : "Ctrl K"}</span>
           </button>
-          {converting && <Link className="converting" to="/jobs?tab=running"><Icon id="i-play" />{converting}</Link>}
+          {converting && <Link className="activity" to="/jobs?tab=running" aria-label={converting}><Icon id="i-play" /><span className="txt">{converting}</span></Link>}
           <ThemeMenu />
         </header>
         <ConnBar />
