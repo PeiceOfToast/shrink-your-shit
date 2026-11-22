@@ -636,9 +636,9 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
   const tv = takesVars(defs), needVars = tv || (doc.variables ?? []).length > 0, vl = useData(() => varListFor(id, needVars), [id, needVars]).data, varBad = vl ? varProblems(doc.nodes, defs, withOwn(vl.variables, doc.variables ?? [])) : [];
   // The server's words and problems for the document as it is now (nothing saved): asked 300 ms after a change.
   // Export: the draft as workflow-<id>.json, saved the way a job log is (Blob + download). A failure is an alert.
-  const [exportErr, setExportErr] = useState("");
+  const [exportErr, setExportErr] = useState(""), [exportNote, setExportNote] = useState("");
   const exportFile = async () => {
-    setExportErr("");
+    setExportErr(""); setExportNote("");
     const r = await act(exportWorkflow(id), setExportErr);
     if (!r) return;
     const a = document.createElement("a");
@@ -646,7 +646,10 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
     a.download = "workflow-" + id + ".json";
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    // the file holds the saved draft only: no autosave here, so say so when the page has edits it can't see
+    if (dirty) setExportNote("Exported the last saved draft. Your unsaved changes aren't in the file.");
   };
+  useEffect(() => setExportNote(""), [doc]); // the note is about the file just downloaded: an edit makes it stale
   const ask = async (d: WorkflowDoc) => { const r = await act(validateDoc(id, d), setSaid); if (r) setLive(r); return r; };
   const seen = useRef<WorkflowDoc | null>(null); // null: the first check runs on load, so the list has the server's places and add rules
   useEffect(() => {
@@ -811,11 +814,10 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
           </div>
           {canStack && <><span className="vr" aria-hidden="true" />{undoRedo}</>}
         </div>
-        {canStack && <>
-          {tools}
-          <button className="btn sm ghost" type="button" onClick={exportFile}>Export</button>
-          <button className="btn sm primary" type="button" disabled={varBad.length > 0} title={varBad.length ? "Fix the variable names first" : undefined} onClick={openPublish}>Publish</button>
-        </>}
+        {canStack && tools}
+        <button className="btn sm ghost" type="button" onClick={exportFile}>Export</button>
+        {exportNote && <span className="muted" role="status">{exportNote}</span>}
+        {canStack && <button className="btn sm primary" type="button" disabled={varBad.length > 0} title={varBad.length ? "Fix the variable names first" : undefined} onClick={openPublish}>Publish</button>}
       </div>
       <div className="edframe stackframe"><div className="stackbody">
       {canStack && (checked || !dirty) && (issues.length === 0 ? <p className="st ok checkline"><Icon id="i-check-c" /><span>Check: no problems</span></p>
