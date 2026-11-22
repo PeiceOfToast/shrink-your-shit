@@ -753,6 +753,21 @@ func unreadableSecretWords(names []string) string {
 		"Your original was not touched. Enter " + it + " again in the workflow, then press Retry."
 }
 
+// unsetSecretWords is what the job says when a setting uses a workflow secret that has no value: the secret is
+// named, and nothing was converted.
+func unsetSecretWords(names []string) string {
+	quoted := make([]string, len(names))
+	for i, n := range names {
+		quoted[i] = "“" + n + "”"
+	}
+	what, it := "The workflow secret "+strings.Join(quoted, ", "), "it"
+	if len(names) > 1 {
+		what, it = "The workflow secrets "+strings.Join(quoted, ", "), "them"
+	}
+	return what + " has no value, so converting did not start. Your original was not touched. " +
+		"Give " + it + " a value in the workflow, then press Retry."
+}
+
 // jobf logs a line about job id, to the program's log and to the job's own run log (S5).
 func (w *Worker) jobf(id int64, format string, a ...any) {
 	msg := fmt.Sprintf(format, a...)
@@ -1461,6 +1476,10 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		var unreadable *jobs.SecretUnreadableError
 		if errors.As(err, &unreadable) {
 			return "", retryable(failed(unreadableSecretWords(unreadable.Names), err), retryGeneral)
+		}
+		var unset *jobs.SecretUnsetError
+		if errors.As(err, &unset) {
+			return "", retryable(failed(unsetSecretWords(unset.Names), err), retryGeneral)
 		}
 		return "", retryable(failed("This library's setting could not be read, so converting did not start. Your original was not touched. Open the library and save its setting again, then press Retry.", err), retryGeneral)
 	}
