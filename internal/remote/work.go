@@ -576,14 +576,24 @@ func (c *Client) convert(ctx context.Context, cv Converter, l *Lease, snap rules
 	// clock around this call also counts the transfers, so it cannot measure the encode.
 	speed := encodeSpeed{}
 	if err == nil && !snap.Plan.Video.Copy && l.Job.DurationSec > 0 {
-		if secs := time.Since(ranAt).Seconds(); secs > 0 {
-			speed = encodeSpeed{encoder: rules.VideoEncoderIn(args, snap.Plan.Video.Index), speed: l.Job.DurationSec / secs}
-			if ranFrames > 0 {
-				speed.fps = float64(ranFrames) / secs
-			}
-		}
+		speed = measureSpeed(l.Job.DurationSec, time.Since(ranAt).Seconds(), ranFrames, rules.VideoEncoderIn(args, snap.Plan.Video.Index))
 	}
 	return stderr, args, speed, err
+}
+
+// minEncodeSecs floors a measured encode's time. The Windows clock can read 0 for a run that finished at once
+// (a test's fake exec does), and a real encode never takes this little, so the floor changes no real speed.
+const minEncodeSecs = 0.001
+
+// measureSpeed is one finished encode's figures (F7): the job's length over the time it took, and the frames
+// per second when ffmpeg reported a count (frames < 0 means none).
+func measureSpeed(durationSec, secs float64, frames int64, encoder string) encodeSpeed {
+	secs = max(secs, minEncodeSecs)
+	sp := encodeSpeed{encoder: encoder, speed: durationSec / secs}
+	if frames > 0 {
+		sp.fps = float64(frames) / secs
+	}
+	return sp
 }
 
 // addSpeed puts the encode's figures in a success report (F7), for the server's remembered speeds. Nothing
