@@ -135,6 +135,61 @@ func TestEncoderSpeedsGroupTheLocalPoolAsLocal(t *testing.T) {
 	}
 }
 
+// #643: RemoveWorker deletes the workers row but leaves its jobs. Their speeds keep the removed worker's own id,
+// and this computer's entry is not changed by them.
+func TestEncoderSpeedsKeepARemovedRemoteWorkerApart(t *testing.T) {
+	s := open(t)
+	l, err := s.AddLibrary("m", t.TempDir(), rules.SliderTemplate(3), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, _, err := s.NewPairing(time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rw, _, err := s.Pair(code, "Laptop", "1", "", "", 1, "", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	keep := func(worker string, speed float64) {
+		n++
+		id, err := s.Enqueue(Job{Library: "m", LibraryID: l.ID, Path: filepath.Join(l.Path, fmt.Sprintf("%d.mkv", n))})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Claim(worker); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.RecordRunStep(id, RunStep{Index: 0, Name: "encode", Encoder: "hevc_qsv", Speed: speed}); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Complete(id, filepath.Join(l.Path, "out.mkv"), 1); err != nil {
+			t.Fatal(err)
+		}
+	}
+	keep("builtin", 2)
+	keep(rw.ID, 10)
+	keep(rw.ID, 12)
+	if err := s.RemoveWorker(rw.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.EncoderSpeeds(50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []EncoderSpeed{
+		{Worker: LocalWorker, Encoder: "hevc_qsv", Speed: 2, Samples: 1},
+		{Worker: rw.ID, Encoder: "hevc_qsv", Speed: 11, Samples: 2},
+	}
+	slices.SortFunc(got, func(a, b EncoderSpeed) int { return strings.Compare(a.Worker, b.Worker) })
+	slices.SortFunc(want, func(a, b EncoderSpeed) int { return strings.Compare(a.Worker, b.Worker) })
+	if !slices.Equal(got, want) {
+		t.Fatalf("speeds %+v, want %+v", got, want)
+	}
+}
+
 // F7: a pair with more conversions than asked for keeps its newest: the median moves with the new ones
 // and the old ones fall away.
 func TestEncoderSpeedsKeepTheNewestConversions(t *testing.T) {
