@@ -101,3 +101,96 @@ func TestV1SettingSaveKeepsAReorderedStepOrder(t *testing.T) {
 		t.Errorf("the step order was reset to %q", got.Template.StepOrder)
 	}
 }
+
+// The old page echoes back the three fields GET shows (rateControl, hardware, keepIfBigger) but never
+// sends a new value for them. A save with one setting changed must succeed and keep their stored values.
+func TestV1SettingSaveKeepsTheFieldsItEchoes(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	first, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	standard := `{"quality":3,"speed":"normal","format":"hevc","resolution":"keep","maxBitrate":"none","audio":"keep_all","subtitles":"keep_all","fileType":"keep","afterConverting":"replace","ignore":[],"skipHdr":true,"skipSmall":true,"minSavingPct":10,"order":"newest"}`
+	if code, body := post(t, srv, "PUT", fmt.Sprintf("/api/libraries/%d/setting", first.ID), standard); code != 200 {
+		t.Fatalf("standard: %d %s", code, body)
+	}
+	f, _ := st.GetFlow(first.FlowID)
+	tm := f.Template
+	// a real level flow: a bitrate level with its max (the page sends the max back and the level is kept)
+	tm.Selectors.RateControl, tm.Selectors.MaxBitrate, tm.Selectors.Hardware, tm.Selectors.KeepIfBigger = "level", "medium", "only", true
+	l, _ := st.AddLibrary("Echoed", t.TempDir(), tm, true)
+	echo := `,"rateControl":"level","hardware":"only","keepIfBigger":true`
+	body := strings.Replace(strings.Replace(standard, `"speed":"normal"`, `"speed":"slower"`, 1), `"maxBitrate":"none"`, `"maxBitrate":"medium"`, 1)
+	body = strings.TrimSuffix(body, "}") + echo + "}"
+	if code, out := post(t, srv, "PUT", fmt.Sprintf("/api/libraries/%d/setting", l.ID), body); code != 200 {
+		t.Fatalf("echo save: %d %s", code, out)
+	}
+	got, _ := st.GetFlow(l.FlowID)
+	s := got.Template.Selectors
+	if s == nil || s.Speed != "slower" {
+		t.Fatalf("the one setting was not saved: %+v", s)
+	}
+	if s.RateControl != "level" || s.MaxBitrate != "medium" || s.Hardware != "only" || !s.KeepIfBigger {
+		t.Errorf("echoed fields were not kept: rateControl=%q maxBitrate=%q hardware=%q keepIfBigger=%v", s.RateControl, s.MaxBitrate, s.Hardware, s.KeepIfBigger)
+	}
+}
+
+// A level flow's save that sends no bitrate max (none) is refused by Validate, with the kept level, and nothing is written.
+func TestV1SettingRefusesALevelWithNoMax(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	first, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	standard := `{"quality":3,"speed":"normal","format":"hevc","resolution":"keep","maxBitrate":"none","audio":"keep_all","subtitles":"keep_all","fileType":"keep","afterConverting":"replace","ignore":[],"skipHdr":true,"skipSmall":true,"minSavingPct":10,"order":"newest"}`
+	if code, body := post(t, srv, "PUT", fmt.Sprintf("/api/libraries/%d/setting", first.ID), standard); code != 200 {
+		t.Fatalf("standard: %d %s", code, body)
+	}
+	f, _ := st.GetFlow(first.FlowID)
+	tm := f.Template
+	tm.Selectors.RateControl, tm.Selectors.MaxBitrate = "level", "medium"
+	l, _ := st.AddLibrary("Level", t.TempDir(), tm, true)
+	body := strings.Replace(standard, `"speed":"normal"`, `"speed":"slower"`, 1)
+	code, out := post(t, srv, "PUT", fmt.Sprintf("/api/libraries/%d/setting", l.ID), body)
+	if code != 400 || !strings.Contains(out, "Bitrate level needs Low, Medium or High") {
+		t.Fatalf("level with no max: want 400 from Validate, got %d %s", code, out)
+	}
+	got, _ := st.GetFlow(l.FlowID)
+	if s := got.Template.Selectors; s == nil || s.Speed != "normal" || s.RateControl != "level" || s.MaxBitrate != "medium" {
+		t.Errorf("a refused save changed the template: %+v", s)
+	}
+}
+
+// A slider flow's setting body that names a rate control it cannot have is refused with 409 and nothing is written.
+func TestBasicRefusesAChangedEchoedField(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	l, _ := st.AddLibrary("Slider", t.TempDir(), rules.SliderTemplate(3), true)
+	before, _ := st.GetFlow(l.FlowID)
+	want, _ := json.Marshal(before.Template)
+	code, out := post(t, srv, "PUT", fmt.Sprintf("/api/libraries/%d/setting", l.ID), `{"quality":4,"rateControl":"level"}`)
+	if code != 409 || !strings.Contains(out, "edit_in_new_ui") {
+		t.Fatalf("basic with changed rateControl: want 409 edit_in_new_ui, got %d %s", code, out)
+	}
+	got, _ := st.GetFlow(l.FlowID)
+	if g, _ := json.Marshal(got.Template); string(g) != string(want) {
+		t.Errorf("a refused save changed the template:\n got %s\nwant %s", g, want)
+	}
+}
+
+// This page cannot set rateControl, hardware or keepIfBigger: a changed value is refused with 409 and nothing is written.
+func TestV1SettingRefusesAChangedEchoedField(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	first, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	standard := `{"quality":3,"speed":"normal","format":"hevc","resolution":"keep","maxBitrate":"none","audio":"keep_all","subtitles":"keep_all","fileType":"keep","afterConverting":"replace","ignore":[],"skipHdr":true,"skipSmall":true,"minSavingPct":10,"order":"newest"}`
+	if code, body := post(t, srv, "PUT", fmt.Sprintf("/api/libraries/%d/setting", first.ID), standard); code != 200 {
+		t.Fatalf("standard: %d %s", code, body)
+	}
+	f, _ := st.GetFlow(first.FlowID)
+	tm := f.Template
+	tm.Selectors.RateControl, tm.Selectors.MaxBitrate = "level", "medium"
+	l, _ := st.AddLibrary("Changed", t.TempDir(), tm, true)
+	body := strings.Replace(strings.Replace(standard, `"speed":"normal"`, `"speed":"slower"`, 1), `"maxBitrate":"none"`, `"maxBitrate":"medium"`, 1)
+	body = strings.TrimSuffix(body, "}") + `,"rateControl":"quality"}`
+	code, out := post(t, srv, "PUT", fmt.Sprintf("/api/libraries/%d/setting", l.ID), body)
+	if code != 409 || !strings.Contains(out, "edit_in_new_ui") {
+		t.Fatalf("changed rateControl: want 409 edit_in_new_ui, got %d %s", code, out)
+	}
+	got, _ := st.GetFlow(l.FlowID)
+	if s := got.Template.Selectors; s == nil || s.RateControl != "level" || s.Speed != "normal" {
+		t.Errorf("a refused save changed the template: %+v", s)
+	}
+}
