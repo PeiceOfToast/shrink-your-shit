@@ -115,12 +115,13 @@ export function Libraries() {
   </>;
   return (
     <div className="stack">
-      <PageHead icon="i-library" title="Libraries" help="The folders that are watched for videos." />
-      <Problem m={libs.data ? libs.error?.message : undefined} />
-      {/* one toolbar: Add, then Select; while selecting, All and the bulk actions (on phones they sit under "...") ; filter on the right */}
-      <div className="ltools" role="toolbar" aria-label="Libraries">
-        <Link className="btn sm primary" to="/libraries/new"><Icon id="i-plus" />Add library</Link>
+      <PageHead icon="i-library" title="Libraries" sub="The folders that are watched for videos.">
         <button className="btn sm ghost" type="button" aria-pressed={selecting} onClick={() => (setSelecting(!selecting), setSel([]))}>{selecting ? "Done" : "Select"}</button>
+        <Link className="btn sm primary" to="/libraries/new"><Icon id="i-plus" />Add library</Link>
+      </PageHead>
+      <Problem m={libs.data ? libs.error?.message : undefined} />
+      {/* one toolbar: while selecting, All and the bulk actions (on phones they sit under "...") ; filter on the right */}
+      <div className="ltools" role="toolbar" aria-label="Libraries">
         {selecting && <label className="hit selall"><input type="checkbox" aria-label="Select all libraries" checked={sel.length === all.length} onChange={(e) => setSel(e.target.checked ? all.map((l) => l.id) : [])} /><span className="sm">All</span></label>}
         {selecting && <span className="desk">{actions}</span>}
         {selecting && <details className="menu phone"><summary className="btn sm icon ghost" aria-label="More actions"><Icon id="i-more" /></summary><div className="pop" role="menu">{actions}</div></details>}

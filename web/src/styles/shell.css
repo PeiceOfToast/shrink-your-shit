@@ -50,6 +50,8 @@ code,.mono{font-family:var(--mono);font-size:max(.92em,var(--fs-sm))}
 .crumb .cur{overflow:hidden;text-overflow:ellipsis}
 .search{flex:1;max-width:420px;min-width:0;display:flex;align-items:center;gap:8px;height:36px;padding:0 10px;border:1px solid var(--border-strong);border-radius:var(--radius-sm);background:var(--surface);color:var(--text-2);cursor:text;font:inherit;text-align:left}
 .search .k{margin-left:auto;font-size:var(--fs-sm);border:1px solid var(--border-strong);border-radius:4px;padding:0 5px;white-space:nowrap}
+.converting{display:inline-flex;align-items:center;gap:6px;min-height:36px;white-space:nowrap;color:var(--accent-text);font-weight:var(--fw-strong);font-size:var(--fs-sm);text-decoration:none}
+.converting:hover{text-decoration:underline}.converting .ic{width:14px;height:14px}
 .activity{display:inline-flex;align-items:center;gap:6px;color:var(--accent-text);text-decoration:none;font-weight:600;white-space:nowrap}
 .menu{position:relative}
 .menu>summary{list-style:none;cursor:pointer}

@@ -130,7 +130,14 @@ export function Workflows() {
   useEffect(() => { if (imp) impFocus.current?.focus(); }, [imp]);
   return (
     <div className="stack">
-      <PageHead icon="i-workflow" title="Workflows" help="What happens to each file. A library uses one workflow." />
+      <PageHead icon="i-workflow" title="Workflows" sub="What happens to each file. A library uses one workflow.">
+        {tab === "workflows" && <>
+          <button className="btn sm ghost" type="button" onClick={() => fileIn.current?.click()}>Import…</button>
+          <input ref={fileIn} type="file" accept=".json,application/json" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void pickFile(f); }} />
+          <button className="btn sm ghost" type="button" aria-pressed={fav} onClick={() => setFav(!fav)}><Icon id="i-star" />Favourites</button>
+          {!wizard && <button className="btn sm primary" type="button" onClick={() => (setWizard(true), setSaid(""))}><Icon id="i-plus" />New workflow</button>}
+        </>}
+      </PageHead>
       {wizard && <Wizard onClose={() => setWizard(false)} onMade={(w) => navigate("/workflows/" + w.id)} />}
       <div className="tabs" role="tablist">
         <button role="tab" type="button" aria-selected={tab === "workflows"} onClick={() => tab !== "workflows" && setTab("workflows")}>Workflows</button>
@@ -153,15 +160,11 @@ export function Workflows() {
             <td data-p="3">{t.description}</td><td className="sm" data-p="4">{t.steps.join(", ")}</td><td className="stc"><span className="pill">{t.changesOriginals ? "Changes originals" : "Originals stay"}</span></td></tr>)}</tbody>
         </table></div>
       ) : (<>
-        {/* one toolbar (clean pass T4): New workflow first, filters, search on the right */}
+        {/* one toolbar (clean pass T4): the tag pick and search; New workflow, Import and Favourites sit in the page header */}
         <div className="ltools" role="toolbar" aria-label="Workflows">
-          {!wizard && <button className="btn sm primary" type="button" onClick={() => (setWizard(true), setSaid(""))}><Icon id="i-plus" />New workflow</button>}
-          <button className="btn sm ghost" type="button" onClick={() => fileIn.current?.click()}>Import…</button>
-          <input ref={fileIn} type="file" accept=".json,application/json" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void pickFile(f); }} />
           {hasTags && <select className="input sm" aria-label="Tag" value={activeTag} onChange={(e) => setTag(e.target.value)}>
             <option value="">Tag: any</option>{tags.map((t) => <option key={t} value={t}>{t}</option>)}
           </select>}
-          <button className="btn sm ghost" type="button" aria-pressed={fav} onClick={() => setFav(!fav)}><Icon id="i-star" />Favourites</button>
           <input className="input find" type="search" placeholder="Search workflows" aria-label="Search workflows" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
         {wfs.error && wfs.data && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{wfs.error.message}</span></p>}

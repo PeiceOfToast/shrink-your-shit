@@ -334,7 +334,7 @@ export function Workers() {
   };
   return (
     <div className="stack">
-      <PageHead icon="i-worker" title="Workers" help="The computers that convert your files. Nothing converts until a worker is started.">
+      <PageHead icon="i-worker" title="Workers" sub="Nothing converts until a worker is on.">
         {!ws.loaded && <span className="skel-ph skel-sw" aria-hidden="true" />}
         {list.length > 0 && <WorkersSwitch n={n} m={list.length} busy={busyAny} finishing={fin} onSet={set} />}
         {/* user item 2: Add a worker pairs another computer (V7b) */}
