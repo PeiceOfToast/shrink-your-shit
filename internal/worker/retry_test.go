@@ -199,7 +199,7 @@ func TestConverterKilledBySignalIsTriedAgain(t *testing.T) {
 		t.Skip("POSIX signals")
 	}
 	killed := exec.Command("sh", "-c", "kill -9 $$").Run()
-	if !killedBySignal(killed) {
+	if !KilledBySignal(killed) {
 		t.Fatalf("not seen as killed: %v", killed)
 	}
 	s := newScenario(t)
@@ -207,7 +207,7 @@ func TestConverterKilledBySignalIsTriedAgain(t *testing.T) {
 	s.retrying().RunOne(context.Background())
 	s.wantRetry(1, 5*time.Minute, "Converting stopped with an error")
 	exited := exec.Command("sh", "-c", "exit 1").Run()
-	if killedBySignal(exited) {
+	if KilledBySignal(exited) {
 		t.Error("an ordinary exit seen as killed")
 	}
 }

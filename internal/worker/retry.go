@@ -78,9 +78,10 @@ func waitWords(d time.Duration) string {
 	return fmt.Sprintf("%d %s", n, plural(n, "minute", "minutes"))
 }
 
-// killedBySignal reports whether a program ended because the system stopped it (out of memory, killed),
-// not because it gave up on the file.
-func killedBySignal(err error) bool {
+// KilledBySignal reports whether a program ended because the system stopped it (out of memory, killed),
+// not because it gave up on the file. The remote worker uses it to say so in its report, since the server's
+// copy of the failure is words, not the signal.
+func KilledBySignal(err error) bool {
 	var ee *exec.ExitError
 	return errors.As(err, &ee) && ee.ProcessState != nil && !ee.Exited()
 }
