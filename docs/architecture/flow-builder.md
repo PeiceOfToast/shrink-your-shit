@@ -132,10 +132,10 @@ Every question has one form rule: every condition set must hold for Yes; a quest
 | Audio | `audio.tracks` | which sound tracks, in which form | yes | — |
 | Subtitles | `subtitles.tracks` | which subtitles, as tracks or files | yes | — |
 | File type | `container.output` | the new file's type | yes | — |
-| Crop black bars | `video.crop` | detects and removes letterbox bars (engine F4) | no | FB5, after W10 |
-| Even out loudness | `audio.loudness` | two-pass loudness normalisation (engine F5) | no | FB5, after W10 |
-| Frame rate | `video.framerate` | keep, or at most N fps | no | FB5, after W10 |
-| Bit depth | `video.bitdepth` | keep, 8-bit, 10-bit | no | FB5, after W10 |
+| Crop black bars | — | detects and removes letterbox bars | as the "Remove black bars" switch on Convert video (engine F4) | done by F4, see 7.1 |
+| Even out loudness | — | two-pass loudness normalisation | as the "Even out loudness" switch on Convert video (engine F5) | done by F5, see 7.1 |
+| Frame rate | `video.framerate` | keep, or at most N fps | no | waits for the user; no engine half yet |
+| Bit depth | `video.bitdepth` | keep, 8-bit, 10-bit | no | waits for the user; no engine half yet (10-bit already keeps its depth) |
 | Earlier install's settings | `video.legacy_settings` | read-only migration card | yes | — |
 
 Plan cards never run alone: validation requires the stretch to start with Leave some files alone and Convert video and to be followed by Check the result and Save the result, as today (`internal/workflow/preset.go:156-158`). Until W10 the stretch keeps the preset's order; the steps view says so on the row ("Set place").
@@ -279,7 +279,7 @@ Small PRs, one each, to dev. Each: tests, the clean-room grep in the PR descript
 | FB2c | editor: after-rows under Save; tags in Jobs rows and the "Has a tag" filter | web, jobs (a `tags` column) | M | screenshots; migration test for the column |
 | FB3 | the dropdown view as the filtered steps view; first run and the library page open it | web | M | one component; the old dropdown page removed; screenshots |
 | FB4 | Convert again later, Hand to another workflow, Random split, Wait, Compare the result | workflow, flow, jobs (requeue with delay) | M | tests; the goto loop check |
-| FB5 | plan cards beyond today's: Crop black bars, Even out loudness, Frame rate, Bit depth | rules, workflow | L | after the engine team's W10 (steps add to the plan); not before |
+| FB5 | plan cards beyond today's: Crop black bars, Even out loudness, Frame rate, Bit depth | rules, workflow | L | closed 2026-11-22 without a build, see 7.1 |
 | FB6 | editor shell: toolbar, full-height canvas, palette and settings inside the frame (ui-review C10 / U11) | web | M | screenshots at 1440 and 390; one primary button |
 
 Order: FB0 → FB1a → FB1b → FB1c → FB1d → FB2a → FB2b → FB2c → FB3 → FB6 → FB4 → FB5.
@@ -314,6 +314,13 @@ Where the build differs from the sections above, the build is right and the text
 - **The editor shell** (FB6) covers the graph: a 48 px toolbar, a frame as tall as the window, the palette
   and the inspector inside it, 200 px node cards. The steps view keeps its page head for now.
 - A step's required settings come first in its form (the server's object keys are alphabetical).
+- **FB5 (2026-11-22).** Closed without a build, on the manager's decision, once W10 (#648) and W11 (#651)
+  landed. Crop black bars and Even out loudness arrived from the engine team as switches on the Convert
+  video step (F4 #642/#647 `removeBlackBars`, F5 #644 `evenLoudness`, both off by default), so a person
+  already sets them in the editor; separate cards would be a second place for the same setting plus a
+  migration, for no gain. Frame rate and Bit depth have no engine half (the plan has no target fps and
+  10-bit keeps its depth since #507) and nobody has asked for them; they stay an optional idea for the
+  user. The last FB4b piece, Compare the result before the save (#602, #605), is on `dev`.
 
 ## 8. Overlap with queued work
 
