@@ -155,7 +155,7 @@ func TestGPUFailureOnlyRetriesAnEncoderError(t *testing.T) {
 	}
 	for _, c := range cases {
 		w.stopped = c.stop
-		if got := w.gpuFailed(c.ctx, c.err, c.stderr, c.full); got != c.want {
+		if got := w.gpuFailed(c.ctx, c.err, c.stderr, c.full, hardwarePolicy{}); got != c.want {
 			t.Errorf("%s: %v, want %v", c.name, got, c.want)
 		}
 	}

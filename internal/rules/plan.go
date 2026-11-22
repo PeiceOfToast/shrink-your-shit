@@ -148,6 +148,21 @@ type VideoEncode struct {
 	Format string `json:"format,omitempty"`
 	// Extra are the encoder's own arguments (S6: SVT-AV1's tune, VP9's constant quality and speed).
 	Extra []string `json:"extra,omitempty"`
+	// Hardware, HardwareFail and CPUCRF are the Convert step's graphics choices (W7). Hardware "" (auto) uses the
+	// graphics card when it can; "only" never converts on the processor; "cpu" never uses the card. HardwareFail
+	// "fail" ends the job when the card fails, instead of converting on the processor; "" is next. CPUCRF is the
+	// processor's own CRF; 0 is CRF.
+	Hardware     string `json:"hardware,omitempty"`
+	HardwareFail string `json:"hardwareFail,omitempty"`
+	CPUCRF       int    `json:"cpuCRF,omitempty"`
+}
+
+// cpuCRF is the CRF the processor encodes with: its own when the Convert step set one, else CRF.
+func (v VideoEncode) cpuCRF() int {
+	if v.CPUCRF > 0 {
+		return v.CPUCRF
+	}
+	return v.CRF
 }
 
 // HDR is what an HDR10 or HLG video keeps through the encoder (RESEARCH/hdr-dv.md): the colour
@@ -280,6 +295,17 @@ func (t Template) CompileWith(info media.Info, f Facts) (p Plan) {
 	// queued before its flow changed still runs: its encode keeps the HDR too.
 	p.applyHDR(info, false)
 	return p
+}
+
+// resolutionCRF moves a quality position's CRF for the picture's size: one lower up to 720p, one higher at 2160p.
+func resolutionCRF(crf, h, w int) int {
+	switch {
+	case h > 0 && h <= 720:
+		return crf - 1
+	case h >= 2160 || w >= 3840:
+		return crf + 1
+	}
+	return crf
 }
 
 // FFmpegArgs are the ffmpeg arguments that convert in to out: the first video stream is encoded as
@@ -421,11 +447,11 @@ func (p Plan) ffmpegArgs(in, out, gpu string, full bool) []string {
 	kbps := strconv.Itoa(p.Video.TargetKbps) + "k"
 	switch {
 	case gpu == "" && vp9Target(p.Video): // VP9: constrained quality, the target as its cap (see vp9Target)
-		args = append(args, "-c:"+v, p.Video.Codec, "-crf:"+v, strconv.Itoa(p.Video.CRF), "-b:"+v, kbps)
+		args = append(args, "-c:"+v, p.Video.Codec, "-crf:"+v, strconv.Itoa(p.Video.cpuCRF()), "-b:"+v, kbps)
 	case gpu == "" && p.Video.TargetKbps > 0: // VBR: an average to aim at, in place of the quality
 		args = append(args, "-c:"+v, p.Video.Codec, "-b:"+v, kbps)
 	case gpu == "":
-		args = append(args, "-c:"+v, p.Video.Codec, "-crf:"+v, strconv.Itoa(p.Video.CRF))
+		args = append(args, "-c:"+v, p.Video.Codec, "-crf:"+v, strconv.Itoa(p.Video.cpuCRF()))
 	case p.Video.TargetKbps > 0:
 		args = append(args, "-c:"+v, gpu, "-b:"+v, kbps)
 	default:
@@ -926,13 +952,7 @@ func compileSelectors(p Plan, s Selectors, info media.Info, langs []string, basi
 	if height > 0 {
 		w, h = ScaledWidth(uw, uh, height), height
 	}
-	crf := pos.CRF
-	switch {
-	case h > 0 && h <= 720:
-		crf--
-	case h >= 2160 || w >= 3840:
-		crf++
-	}
+	crf := resolutionCRF(pos.CRF, h, w)
 	target := s.Format
 	if target == "" {
 		target = "hevc"
@@ -957,6 +977,18 @@ func compileSelectors(p Plan, s Selectors, info media.Info, langs []string, basi
 	case "vbr_legacy":
 		p.Video.TargetKbps, p.Video.MaxRateKbps = legacyVBRKbps(s.MaxBitrate, target, w, h, src, s.VBRMaxKbps)
 		p.Video.PeakLimitKbps = s.VBRMaxKbps
+	}
+	// W7: the Convert step's graphics choices. The defaults are saved as absent, so a flow that never set them
+	// compiles as it did. A processor quality of its own applies where quality is the CRF (not a bitrate).
+	p.Video.Hardware, p.Video.HardwareFail = s.Hardware, s.HardwareFail
+	if p.Video.Hardware == "auto" {
+		p.Video.Hardware = ""
+	}
+	if p.Video.HardwareFail == "next" {
+		p.Video.HardwareFail = ""
+	}
+	if cpu, ok := SliderAt(s.CPUQuality); ok && s.CPUQuality != s.Quality && (s.RateControl == "" || s.RateControl == "quality" || s.RateControl == "quality_legacy") {
+		p.Video.CPUCRF = resolutionCRF(cpu.CRF, h, w) + vf.CRFOffset
 	}
 	if target != "hevc" {
 		p.Video.Format = target

@@ -65,7 +65,7 @@ func Attempt(ctx context.Context, in AttemptInput, run RunFunc, hooks AttemptHoo
 	for {
 		raw, err := run(ctx, r.Args)
 		res := AttemptResult{Rung: r, Stderr: raw, Errors: media.ErrorLines([]byte(raw)), Err: err, Fell: fell, FellReason: fellReason}
-		if r.Encoder == "" || !attemptSteps(ctx, err, res.Errors, r.Full, hooks.Stopped) {
+		if r.Encoder == "" || !attemptSteps(ctx, err, res.Errors, r.Full, hooks.Stopped, policyOf(in.Plan.Video)) {
 			return res
 		}
 		reason := firstLines(res.Errors, 1)
@@ -98,16 +98,27 @@ func Attempt(ctx context.Context, in AttemptInput, run RunFunc, hooks AttemptHoo
 	}
 }
 
+// hardwarePolicy is the Convert step's graphics choice. only: the file is never converted on the processor (Hardware
+// "only"). fail: a graphics failure is final, it never steps down (HardwareFail "fail").
+type hardwarePolicy struct{ only, fail bool }
+
+func policyOf(v rules.VideoEncode) hardwarePolicy {
+	return hardwarePolicy{only: v.Hardware == "only", fail: v.HardwareFail == "fail"}
+}
+
 // attemptSteps says whether a graphics rung that ended with err should convert again on the next rung. Off the full
 // GPU pipeline, only an encoder or ffmpeg failure (jobs.FallsBackToProcessor). On the full rung the graphics card
 // also decodes, and a decode error there can be the card's, not the file's (a profile or chroma layout it cannot
 // read), so any failure steps down except a stop (cancel, shutdown, the stall stop), a lost lease, a full disk, a
-// missing source or an unwritable output, which the processor would hit too.
-func attemptSteps(ctx context.Context, err error, errText string, full bool, stopped func() bool) bool {
+// missing source or an unwritable output, which the processor would hit too. The policy can only stop a step.
+func attemptSteps(ctx context.Context, err error, errText string, full bool, stopped func() bool, hw hardwarePolicy) bool {
 	if err == nil || ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, errLeaseLost) {
 		return false
 	}
 	if stopped != nil && stopped() {
+		return false
+	}
+	if hw.fail || (hw.only && !full) { // a hybrid rung under "only" never hands the file to the processor
 		return false
 	}
 	lines := strings.Split(errText, "\n")
