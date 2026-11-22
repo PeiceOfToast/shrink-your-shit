@@ -19,11 +19,15 @@ import (
 // that runs past it says "can't", and the test run ends in time.
 const deviceBudget = 90 * time.Second
 
-// Bits is whether a thing works at 8 bits and at 10 bits.
+// Bits is whether a thing works at 8 bits and at 10 bits. Bit10 is nil when the 10-bit case was never measured
+// (H.264 here), so the record leaves the key out instead of saying "can't".
 type Bits struct {
-	Bit8  bool `json:"8bit"`
-	Bit10 bool `json:"10bit"`
+	Bit8  bool  `json:"8bit"`
+	Bit10 *bool `json:"10bit,omitempty"`
 }
+
+// TenBit is whether the 10-bit case works: false when it was not measured.
+func (b Bits) TenBit() bool { return b.Bit10 != nil && *b.Bit10 }
 
 // DeviceRecord is what one graphics device measured can do, by small test runs: Decode per codec (h264, hevc:
 // the family's hardware decoder reads a one-frame sample) and Scale (the family's scale filter runs on the
@@ -60,10 +64,9 @@ func (c *Checker) deviceTest(ctx context.Context, encoders, tenBit []string) []D
 			continue
 		}
 		r := DeviceRecord{Family: fam, Decode: map[string]Bits{}}
-		r.Decode["h264"] = Bits{Bit8: c.Decodes(dctx, fam, "h264", false)}
-		hevc := Bits{Bit8: c.Decodes(dctx, fam, "hevc", false)}
-		hevc.Bit10 = c.Decodes(dctx, fam, "hevc", true)
-		r.Decode["hevc"] = hevc
+		r.Decode["h264"] = Bits{Bit8: c.Decodes(dctx, fam, "h264", false)} // 10-bit H.264 is not probed: no key
+		ten := c.Decodes(dctx, fam, "hevc", true)
+		r.Decode["hevc"] = Bits{Bit8: c.Decodes(dctx, fam, "hevc", false), Bit10: &ten}
 		r.Scale = c.scales(dctx, fam, p)
 		if slices.Contains(tenBit, "hevc_"+fam) {
 			r.HDRMeta = c.hdrMeta(dctx, fam)
@@ -107,7 +110,10 @@ func (c *Checker) hdrMeta(ctx context.Context, fam string) bool {
 	if _, err := c.Exec.Output(tctx, c.FFmpeg, hdrEncodeArgs(fam, media.VAAPIDevice(), sample, out)...); err != nil {
 		return false
 	}
-	js, err := c.Exec.Output(tctx, c.FFprobe, "-v", "error", "-show_streams", "-of", "json", out)
+	// The side data is read from the stream and from the first frame: ffprobe 6.1 reports it per frame only, 7.x
+	// per stream as well. One frame is read, so the call stays cheap.
+	js, err := c.Exec.Output(tctx, c.FFprobe, "-v", "error", "-select_streams", "v:0", "-show_streams",
+		"-show_frames", "-read_intervals", "%+#1", "-of", "json", out)
 	return err == nil && hasHDRSideData(js)
 }
 
@@ -121,29 +127,34 @@ func hdrEncodeArgs(fam, device, in, out string) []string {
 	return args
 }
 
-// hasHDRSideData reads ffprobe's stream JSON: true when the first video stream carries both the mastering display
-// and the content light level side data.
+// hasHDRSideData reads ffprobe's JSON: true when the first video stream, or its first frame, carries both the
+// mastering display and the content light level side data.
 func hasHDRSideData(js []byte) bool {
-	var v struct {
-		Streams []struct {
-			SideData []struct {
-				Type string `json:"side_data_type"`
-			} `json:"side_data_list"`
-		} `json:"streams"`
+	type side struct {
+		SideData []struct {
+			Type string `json:"side_data_type"`
+		} `json:"side_data_list"`
 	}
-	if json.Unmarshal(js, &v) != nil || len(v.Streams) == 0 {
+	var v struct {
+		Streams []side `json:"streams"`
+		Frames  []side `json:"frames"`
+	}
+	if json.Unmarshal(js, &v) != nil {
 		return false
 	}
-	var mastering, light bool
-	for _, d := range v.Streams[0].SideData {
-		switch d.Type {
-		case "Mastering display metadata":
-			mastering = true
-		case "Content light level metadata":
-			light = true
+	both := func(s side) bool {
+		var mastering, light bool
+		for _, d := range s.SideData {
+			switch d.Type {
+			case "Mastering display metadata":
+				mastering = true
+			case "Content light level metadata":
+				light = true
+			}
 		}
+		return mastering && light
 	}
-	return mastering && light
+	return (len(v.Streams) > 0 && both(v.Streams[0])) || (len(v.Frames) > 0 && both(v.Frames[0]))
 }
 
 // familyOf is the graphics family of a hardware encoder name ("hevc_qsv" -> "qsv"), "" for none.

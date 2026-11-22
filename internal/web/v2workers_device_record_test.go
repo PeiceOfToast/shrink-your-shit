@@ -15,9 +15,10 @@ import (
 // L2: a graphics device's measured record travels in the capability list as kind "device": its decode per codec
 // and bit depth, and whether its scale runs on the card.
 func TestDeviceRecordIsInTheCapabilityList(t *testing.T) {
+	no := false
 	tools := doctor.Tools{Hardware: []string{"hevc_qsv"}, Devices: []doctor.DeviceRecord{{
 		Family: "qsv",
-		Decode: map[string]doctor.Bits{"h264": {Bit8: true}, "hevc": {Bit8: true, Bit10: false}},
+		Decode: map[string]doctor.Bits{"h264": {Bit8: true}, "hevc": {Bit8: true, Bit10: &no}},
 		Scale:  true,
 	}}}
 	caps := capabilities(tools, true)
@@ -29,7 +30,7 @@ func TestDeviceRecordIsInTheCapabilityList(t *testing.T) {
 		t.Errorf("device entry %v", dev)
 	}
 	dec, _ := dev["decode"].(map[string]doctor.Bits)
-	if got := dec["hevc"]; !got.Bit8 || got.Bit10 {
+	if got := dec["hevc"]; !got.Bit8 || got.TenBit() {
 		t.Errorf("hevc decode %+v, want 8-bit yes and 10-bit no", got)
 	}
 }
@@ -70,7 +71,8 @@ func TestWorstCaseCapabilitiesFitTheReportLimit(t *testing.T) {
 		names = append(names, e)
 	}
 	sort.Strings(names)
-	all := map[string]doctor.Bits{"h264": {Bit8: true, Bit10: true}, "hevc": {Bit8: true, Bit10: true}}
+	yes := true
+	all := map[string]doctor.Bits{"h264": {Bit8: true}, "hevc": {Bit8: true, Bit10: &yes}}
 	for _, shape := range []string{"passed", "not present"} {
 		tools := doctor.Tools{TestedAt: time.Now(), FFprobe: "/usr/bin/ffprobe", FFprobeVersion: "7.1.5", SSIM: true}
 		for _, e := range names {

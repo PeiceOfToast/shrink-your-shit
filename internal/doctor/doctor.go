@@ -175,22 +175,33 @@ func (c *Checker) tested(ctx context.Context, maxAge time.Duration) (Tools, map[
 		c.run = map[string]Probe{}
 		c.mu.Unlock()
 		hw := c.hardwareTest(ctx, t)
-		dev := c.deviceTest(ctx, hw[0], hw[2])
 		c.mu.Lock()
 		at := time.Now()
 		probes := c.run
 		c.run = nil
 		stored := ctx.Err() == nil // a test cut short by its caller is not a result: the next caller runs it again
 		if stored {
-			c.hw, c.hwAt, c.probes, c.dev = &hw, at, probes, dev
+			// The encoder answer is stored before the device probes run (they can take up to 90 s), so the
+			// encoder list is never "not finished" while they run. The device record follows in its own lock.
+			c.hw, c.hwAt, c.probes, c.dev = &hw, at, probes, nil
 			c.publishLocked()
 		}
-		c.hwRun = nil
-		close(run)
 		c.mu.Unlock()
 		if stored && c.OnTested != nil {
 			c.OnTested(at, resultsOf(hw))
 		}
+		// hwRun stays set through the device probes: a second hardware test must not start while the card is in use.
+		dev := c.deviceTest(ctx, hw[0], hw[2])
+		c.mu.Lock()
+		if stored && ctx.Err() == nil {
+			c.dev = dev
+			c.publishLocked()
+		} else if stored {
+			c.hw = nil // the device pass was cut short: the next caller runs the whole test again
+		}
+		c.hwRun = nil
+		close(run)
+		c.mu.Unlock()
 		return t.withEncoders(hw, at).withDevices(dev), probes
 	}
 }

@@ -6,7 +6,9 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 )
@@ -16,14 +18,16 @@ import (
 // failDecode10 fails the HEVC 10-bit decode; failScale fails any run with a scale filter on the device;
 // failHDREncode fails the device's HDR encode; hdrLost leaves the light levels out of what ffprobe reads back.
 type deviceFake struct {
-	failDecode10, failScale, failHDREncode, hdrLost bool
-	last10                                          bool
-	decodes, scales, hdrEncodes                     int
+	failDecode10, failScale, failHDREncode, hdrLost, frameOnly bool
+	last10                                                     bool
+	decodes, scales, hdrEncodes                                int
 }
 
 const (
 	hdrBoth          = `{"streams":[{"side_data_list":[{"side_data_type":"Mastering display metadata"},{"side_data_type":"Content light level metadata"}]}]}`
 	hdrOnlyMastering = `{"streams":[{"side_data_list":[{"side_data_type":"Mastering display metadata"}]}]}`
+	// hdrFrameOnly is the ffprobe 6.1 shape: the stream lists no side data, the first frame lists both.
+	hdrFrameOnly = `{"streams":[{"codec_type":"video"}],"frames":[{"side_data_list":[{"side_data_type":"Mastering display metadata"},{"side_data_type":"Content light level metadata"}]}]}`
 )
 
 func (f *deviceFake) run(name string, args []string) (string, string, error) {
@@ -32,6 +36,9 @@ func (f *deviceFake) run(name string, args []string) (string, string, error) {
 	case strings.HasSuffix(name, "ffprobe"):
 		if f.hdrLost {
 			return hdrOnlyMastering, "", nil
+		}
+		if f.frameOnly {
+			return hdrFrameOnly, "", nil
 		}
 		return hdrBoth, "", nil
 	case strings.Contains(all, "-f matroska"):
@@ -73,11 +80,11 @@ func TestDeviceRecordSeparatesTenBitDecodeFromEncode(t *testing.T) {
 		t.Fatalf("records %+v, want one qsv record", recs)
 	}
 	r := recs[0]
-	if got := r.Decode["hevc"]; !got.Bit8 || got.Bit10 {
+	if got := r.Decode["hevc"]; !got.Bit8 || got.TenBit() {
 		t.Errorf("hevc decode %+v, want 8-bit yes and 10-bit no", got)
 	}
-	if got := r.Decode["h264"]; !got.Bit8 {
-		t.Errorf("h264 decode %+v, want 8-bit yes", got)
+	if got := r.Decode["h264"]; !got.Bit8 || got.Bit10 != nil {
+		t.Errorf("h264 decode %+v, want 8-bit yes and no 10-bit key (never probed)", got)
 	}
 	if !r.Scale {
 		t.Error("scale is no, but only the 10-bit decode failed")
@@ -94,7 +101,7 @@ func TestDeviceRecordScaleFailureIsCantNotCrash(t *testing.T) {
 	if recs[0].Scale {
 		t.Fatal("scale is yes, but its test failed")
 	}
-	if got := recs[0].Decode["hevc"]; !got.Bit8 || !got.Bit10 {
+	if got := recs[0].Decode["hevc"]; !got.Bit8 || !got.TenBit() {
 		t.Errorf("hevc decode %+v, want both depths: the decodes passed", got)
 	}
 	if f.scales == 0 {
@@ -142,7 +149,7 @@ func TestDeviceRecordHDRMetaEncodeFailureIsCant(t *testing.T) {
 	if len(recs) != 1 || recs[0].HDRMeta {
 		t.Fatalf("records %+v, want HDR metadata no", recs)
 	}
-	if !recs[0].Scale || !recs[0].Decode["hevc"].Bit10 {
+	if !recs[0].Scale || !recs[0].Decode["hevc"].TenBit() {
 		t.Errorf("the other fields changed: %+v", recs[0])
 	}
 }
@@ -156,5 +163,53 @@ func TestDeviceRecordHDRMetaOnlyAfterATenBitEncode(t *testing.T) {
 	}
 	if f.hdrEncodes != 0 {
 		t.Errorf("%d HDR encodes with no 10-bit encode", f.hdrEncodes)
+	}
+}
+
+// The ffprobe 6.1 shape: the side data is on the first frame only, and the card still counts as HDR.
+func TestDeviceRecordHDRMetaReadsTheFirstFrame(t *testing.T) {
+	f := &deviceFake{frameOnly: true}
+	recs := deviceChecker(f).deviceTest(context.Background(), []string{"hevc_qsv"}, []string{"hevc_qsv"})
+	if len(recs) != 1 || !recs[0].HDRMeta {
+		t.Fatalf("records %+v, want HDR metadata yes from the frame-level side data", recs)
+	}
+}
+
+// The encoder answer is stored before the device probes run, so ToolsNow has the card while a device probe is
+// still stuck (up to 90 s on a fresh boot). The device record follows when the probe is done.
+func TestEncoderAnswerIsReadyWhileTheDeviceProbeRuns(t *testing.T) {
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	x := &media.FakeExec{Handler: func(name string, args []string) (string, string, error) {
+		a := strings.Join(args, " ")
+		switch {
+		case strings.Contains(a, "-version"):
+			return name + " version 7.1.5", "", nil
+		case strings.Contains(a, "-encoders"):
+			return " V....D libx265              H.265 / HEVC\n V....D hevc_qsv           hardware HEVC\n", "", nil
+		case strings.Contains(a, "-hwaccel"): // the first device probe: hold it
+			once.Do(func() { close(entered) })
+			<-release
+			return "", "", nil
+		case strings.Contains(a, "-c:v"):
+			return "", "", nil
+		}
+		return "", "", errors.New("unexpected " + a)
+	}}
+	c := &Checker{Exec: x, FFmpeg: "/usr/bin/ffmpeg", FFprobe: "/usr/bin/ffprobe"}
+	done := make(chan Tools, 1)
+	go func() { done <- c.Tools(context.Background()) }()
+	select {
+	case <-entered:
+	case <-time.After(10 * time.Second):
+		close(release)
+		t.Fatal("the device probe never started")
+	}
+	tl, ok := c.ToolsNow()
+	close(release)
+	<-done
+	if !ok || len(tl.Hardware) != 1 || tl.Hardware[0] != "hevc_qsv" {
+		t.Errorf("while the device probe runs: ok=%v hardware=%v, want the encoder answer hevc_qsv", ok, tl.Hardware)
 	}
 }
