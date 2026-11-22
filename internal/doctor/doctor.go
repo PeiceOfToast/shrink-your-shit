@@ -300,6 +300,7 @@ func (c *Checker) Retest(ctx context.Context) Tools {
 	if c.hwRun == nil {
 		c.hw = nil
 	}
+	c.decodeOK = nil // "test again" re-probes decode too, not just the encoders
 	c.mu.Unlock()
 	return c.Tools(ctx)
 }

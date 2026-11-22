@@ -107,3 +107,52 @@ func TestWorstCaseCapabilitiesFitTheReportLimit(t *testing.T) {
 		}
 	}
 }
+
+// A record whose every probe failed says "failed" on its entry; a record with any passing probe says "passed".
+func TestDeviceEntryTestReflectsTheRecord(t *testing.T) {
+	no := false
+	failed := doctor.Tools{Devices: []doctor.DeviceRecord{{Family: "qsv",
+		Decode: map[string]doctor.Bits{"h264": {Bit8: false}, "hevc": {Bit8: false, Bit10: &no}}}}}
+	dev := capabilityByKey(capabilities(failed, true), "device:qsv")
+	if dev == nil || dev["test"] != "failed" {
+		t.Errorf("every probe failed: device entry %v, want test failed", dev)
+	}
+	yes := true
+	passed := doctor.Tools{Devices: []doctor.DeviceRecord{{Family: "qsv",
+		Decode: map[string]doctor.Bits{"h264": {Bit8: true}, "hevc": {Bit8: false, Bit10: &yes}}}}}
+	dev = capabilityByKey(capabilities(passed, true), "device:qsv")
+	if dev == nil || dev["test"] != "passed" {
+		t.Errorf("a probe passed: device entry %v, want test passed", dev)
+	}
+}
+
+// Each graphics family is its own entry with its own key: qsv and vaapi never share one.
+func TestDeviceEntriesHaveOneKeyPerFamily(t *testing.T) {
+	yes := true
+	tools := doctor.Tools{Devices: []doctor.DeviceRecord{
+		{Family: "qsv", Decode: map[string]doctor.Bits{"hevc": {Bit8: true, Bit10: &yes}}, Scale: true},
+		{Family: "vaapi", Decode: map[string]doctor.Bits{"hevc": {Bit8: true}}, Scale: false},
+	}}
+	caps := capabilities(tools, true)
+	for _, fam := range []string{"qsv", "vaapi"} {
+		dev := capabilityByKey(caps, "device:"+fam)
+		if dev == nil {
+			t.Fatalf("no device:%s in %v", fam, caps)
+		}
+		if dev["family"] != fam || dev["kind"] != "device" {
+			t.Errorf("device:%s entry %v", fam, dev)
+		}
+	}
+	if got := capabilityByKey(caps, "device:vaapi"); got != nil && got["scale"] != false {
+		t.Errorf("vaapi scale %v, want false (its own record)", got["scale"])
+	}
+	n := 0
+	for _, c := range caps {
+		if c["kind"] == "device" {
+			n++
+		}
+	}
+	if n != 2 {
+		t.Errorf("%d device entries, want 2 (one per family)", n)
+	}
+}

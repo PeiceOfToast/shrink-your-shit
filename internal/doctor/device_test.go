@@ -24,8 +24,8 @@ type deviceFake struct {
 }
 
 const (
-	hdrBoth          = `{"streams":[{"side_data_list":[{"side_data_type":"Mastering display metadata"},{"side_data_type":"Content light level metadata"}]}]}`
-	hdrOnlyMastering = `{"streams":[{"side_data_list":[{"side_data_type":"Mastering display metadata"}]}]}`
+	hdrBoth          = `{"streams":[{"codec_type":"video","side_data_list":[{"side_data_type":"Mastering display metadata"},{"side_data_type":"Content light level metadata"}]}]}`
+	hdrOnlyMastering = `{"streams":[{"codec_type":"video","side_data_list":[{"side_data_type":"Mastering display metadata"}]}]}`
 	// hdrFrameOnly is the ffprobe 6.1 shape: the stream lists no side data, the first frame lists both.
 	hdrFrameOnly = `{"streams":[{"codec_type":"video"}],"frames":[{"side_data_list":[{"side_data_type":"Mastering display metadata"},{"side_data_type":"Content light level metadata"}]}]}`
 )
@@ -211,5 +211,56 @@ func TestEncoderAnswerIsReadyWhileTheDeviceProbeRuns(t *testing.T) {
 	<-done
 	if !ok || len(tl.Hardware) != 1 || tl.Hardware[0] != "hevc_qsv" {
 		t.Errorf("while the device probe runs: ok=%v hardware=%v, want the encoder answer hevc_qsv", ok, tl.Hardware)
+	}
+}
+
+// "Test again" re-probes decode: a decode answer cached as failed must not survive a Retest, or the card that
+// now decodes reads "can't" until the process restarts.
+func TestRetestReprobesDecode(t *testing.T) {
+	var mu sync.Mutex
+	decodeFails := true
+	x := &media.FakeExec{Handler: func(name string, args []string) (string, string, error) {
+		a := strings.Join(args, " ")
+		switch {
+		case strings.Contains(a, "-version"):
+			return name + " version 7.1.5", "", nil
+		case strings.Contains(a, "-encoders"):
+			return " V....D libx265              H.265 / HEVC\n V....D hevc_qsv           hardware HEVC\n", "", nil
+		case strings.Contains(a, "-hwaccel"):
+			mu.Lock()
+			fail := decodeFails
+			mu.Unlock()
+			if fail {
+				return "", "decode failed", errors.New("exit status 1")
+			}
+			return "", "", nil
+		case strings.Contains(a, "-c:v"):
+			return "", "", nil
+		}
+		return "", "", errors.New("unexpected " + a)
+	}}
+	c := &Checker{Exec: x, FFmpeg: "/usr/bin/ffmpeg", FFprobe: "/usr/bin/ffprobe"}
+	first := c.Tools(context.Background())
+	if len(first.Devices) != 1 || first.Devices[0].Decode["hevc"].Bit8 {
+		t.Fatalf("first test: devices %+v, want hevc 8-bit decode failed", first.Devices)
+	}
+	mu.Lock()
+	decodeFails = false
+	mu.Unlock()
+	again := c.Retest(context.Background())
+	if len(again.Devices) != 1 || !again.Devices[0].Decode["hevc"].Bit8 {
+		t.Errorf("after Retest: devices %+v, want hevc 8-bit decode passed (the cached failure was kept)", again.Devices)
+	}
+}
+
+// hasHDRSideData reads the video stream by codec_type: an audio stream that comes first does not decide it.
+func TestHDRSideDataPicksTheVideoStream(t *testing.T) {
+	audioFirst := `{"streams":[{"codec_type":"audio"},{"codec_type":"video","side_data_list":[{"side_data_type":"Mastering display metadata"},{"side_data_type":"Content light level metadata"}]}]}`
+	if !hasHDRSideData([]byte(audioFirst)) {
+		t.Error("video stream with both side data after an audio stream: want true")
+	}
+	videoNoSide := `{"streams":[{"codec_type":"video"},{"codec_type":"audio","side_data_list":[{"side_data_type":"Mastering display metadata"},{"side_data_type":"Content light level metadata"}]}]}`
+	if hasHDRSideData([]byte(videoNoSide)) {
+		t.Error("side data on an audio stream counted for the video stream: want false")
 	}
 }

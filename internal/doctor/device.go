@@ -40,6 +40,19 @@ type DeviceRecord struct {
 	HDRMeta bool
 }
 
+// Passed is whether any probe of the record passed: false when every one failed, so the record says so.
+func (r DeviceRecord) Passed() bool {
+	if r.Scale || r.HDRMeta {
+		return true
+	}
+	for _, b := range r.Decode {
+		if b.Bit8 || b.TenBit() {
+			return true
+		}
+	}
+	return false
+}
+
 // hdrParams are the HDR10 static metadata the sample carries: a mastering display (BT.2020 primaries, D65, 1000
 // nits) and content light levels (1000 MaxCLL, 400 MaxFALL).
 const hdrParams = "master-display=G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,1):max-cll=1000,400"
@@ -131,7 +144,8 @@ func hdrEncodeArgs(fam, device, in, out string) []string {
 // mastering display and the content light level side data.
 func hasHDRSideData(js []byte) bool {
 	type side struct {
-		SideData []struct {
+		CodecType string `json:"codec_type"`
+		SideData  []struct {
 			Type string `json:"side_data_type"`
 		} `json:"side_data_list"`
 	}
@@ -154,7 +168,15 @@ func hasHDRSideData(js []byte) bool {
 		}
 		return mastering && light
 	}
-	return (len(v.Streams) > 0 && both(v.Streams[0])) || (len(v.Frames) > 0 && both(v.Frames[0]))
+	// The video stream is the one with codec_type "video", not whatever comes first (an audio stream may lead).
+	videoStream := false
+	for _, s := range v.Streams {
+		if s.CodecType == "video" {
+			videoStream = both(s)
+			break
+		}
+	}
+	return videoStream || (len(v.Frames) > 0 && both(v.Frames[0]))
 }
 
 // familyOf is the graphics family of a hardware encoder name ("hevc_qsv" -> "qsv"), "" for none.

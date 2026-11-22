@@ -651,8 +651,12 @@ func capabilities(t doctor.Tools, ok bool) []map[string]any {
 	// the card. Only a measured device is listed; the processor is not, since it decodes and scales everything
 	// ffmpeg has and the brief says not to test it.
 	for _, d := range t.Devices {
+		test := "failed" // every probe failed: the entry says so, the key and its other values stay as they were
+		if d.Passed() {
+			test = "passed"
+		}
 		out = append(out, map[string]any{"key": "device:" + d.Family, "kind": "device", "label": "Graphics device (" + d.Family + ")",
-			"slot": "gpu", "test": "passed", "testedAt": at, "family": d.Family, "decode": d.Decode, "scale": d.Scale, "hdrMeta": d.HDRMeta})
+			"slot": "gpu", "test": test, "testedAt": at, "family": d.Family, "decode": d.Decode, "scale": d.Scale, "hdrMeta": d.HDRMeta})
 	}
 	if t.FFprobe != "" {
 		add("tool", "ffprobe", "ffprobe "+t.FFprobeVersion, "cpu", "passed", "")
