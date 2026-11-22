@@ -297,7 +297,7 @@ func TestWholeFieldRefFields(t *testing.T) {
 	}
 	sort.Strings(got)
 	want := []string{
-		"audio.tracks/audio", "audio.tracks/onlyMyLanguages",
+		"audio.tracks/audio", "audio.tracks/evenLoudness", "audio.tracks/onlyMyLanguages",
 		"container.output/fileType",
 		"filter.video/dolbyVision", "filter.video/fps", "filter.video/hdr",
 		"filter.video/minBitrateKbps", "filter.video/resolution", "filter.video/size",

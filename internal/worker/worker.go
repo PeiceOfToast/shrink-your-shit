@@ -1720,6 +1720,19 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		}
 		place.Release()
 	}()
+	// F5: when the person asked to even out the loudness, measure each converted audio track now, over the file the
+	// encode reads. A remote worker cannot read the file, so the log says the audio was left as it is.
+	if plan.EvenLoudness && hasConvertedAudio(plan) {
+		if w.remote != nil {
+			w.jobNote(job.ID, secEncode, jobs.LevelInfo, "(%s): the loudness was not evened out: a remote worker cannot measure it yet", job.Path)
+		} else {
+			lp, lerr := w.measureLoudness(ctx, job, src, srcPath, plan)
+			if lerr != nil { // stopped while measuring: the job ends here
+				return "", lerr
+			}
+			plan = lp
+		}
+	}
 	args := plan.FFmpegArgs(srcPath, tmp)
 	w.setPhase(secEncode) // the encoder choice and its notes belong to encode (log-spec section 4)
 	chosenWhy := ""
