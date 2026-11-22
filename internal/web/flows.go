@@ -5,12 +5,16 @@ package web
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/workflow"
 )
 
 // flowItem is a flow as GET /api/flows shows it (UI-API-CONTRACT.md "Flows").
@@ -192,11 +196,69 @@ func flowRoutes(api *http.ServeMux, store *jobs.Store, ss *settingsStore, eng En
 		}
 		writeJSON(w, map[string]bool{"ok": true})
 	})
-	notYet := func(w http.ResponseWriter, r *http.Request) {
-		apiError(w, http.StatusNotImplemented, "not_available", "Importing and exporting flows comes in a later version.")
-	}
-	api.HandleFunc("POST /api/flows/import", notYet)
-	api.HandleFunc("GET /api/flows/{id}/export", notYet)
+	// Export writes the workflow's draft (the version being edited) as a portable file; import saves the file as a
+	// new draft, never over a workflow and never published (workflow architecture 3.2 and 3.3).
+	api.HandleFunc("GET /api/flows/{id}/export", func(w http.ResponseWriter, r *http.Request) {
+		id, ok := flowID(w, r)
+		if !ok {
+			return
+		}
+		f, err := store.GetFlow(id)
+		if err != nil {
+			storeErr(w, err)
+			return
+		}
+		d, _, err := store.Draft(id)
+		if err != nil {
+			storeErr(w, err)
+			return
+		}
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="workflow-%d.json"`, id))
+		writeJSON(w, workflow.Export(f.Name, d.Doc, d.Layout, eng.Version, time.Now()))
+	})
+	api.HandleFunc("POST /api/flows/import", func(w http.ResponseWriter, r *http.Request) {
+		raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 8<<20))
+		if err != nil {
+			apiError(w, http.StatusRequestEntityTooLarge, "too_large", "The file is too large (at most 8 MiB). Nothing was changed.")
+			return
+		}
+		sc, err := workflowScopes(store)
+		if err != nil {
+			serverError(w, err)
+			return
+		}
+		imp, err := workflow.ReadPortable(raw, sc.Global)
+		if err != nil {
+			apiError(w, http.StatusBadRequest, "invalid", err.Error())
+			return
+		}
+		name := imp.Name
+		if name == "" {
+			name = "Imported workflow"
+		}
+		f, err := addImported(store, name, imp.Doc)
+		if err != nil {
+			storeErr(w, err)
+			return
+		}
+		if len(imp.Layout.Nodes) > 0 || len(imp.Layout.Groups) > 0 {
+			d, _, err := store.Draft(f.ID)
+			if err == nil {
+				_, err = store.SaveDraft(f.ID, imp.Doc, imp.Layout, d.Etag)
+			}
+			if err != nil {
+				serverError(w, err)
+				return
+			}
+		}
+		v, err := workflowView(store, f.ID)
+		if err != nil {
+			serverError(w, err)
+			return
+		}
+		v["import"] = map[string]any{"missingGlobals": nonNil(imp.MissingGlobals), "unknownSteps": nonNil(imp.UnknownSteps)}
+		writeJSONStatus(w, http.StatusCreated, v)
+	})
 
 	// Choosing another flow for a library (each library picks a flow; the control-level slice dropped the
 	// "a flow per library" setting).
@@ -240,4 +302,28 @@ func flowRoutes(api *http.ServeMux, store *jobs.Store, ss *settingsStore, eng En
 		}
 		writeJSON(w, map[string]bool{"ok": true})
 	})
+}
+
+// addImported saves an imported workflow under name, or under the next free "(imported)" name when the name is
+// taken: an import never overwrites a workflow.
+func addImported(store *jobs.Store, name string, doc workflow.Doc) (jobs.Flow, error) {
+	candidate := name
+	for n := 1; ; n++ {
+		f, err := store.AddWorkflow(candidate, doc)
+		if err == nil || !errors.Is(err, jobs.ErrNameTaken) || n > 50 {
+			return f, err
+		}
+		candidate = fmt.Sprintf("%s (imported %d)", name, n)
+		if n == 1 {
+			candidate = name + " (imported)"
+		}
+	}
+}
+
+// nonNil is s, or an empty list when s is nil, so the JSON shows [] rather than null.
+func nonNil(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
 }

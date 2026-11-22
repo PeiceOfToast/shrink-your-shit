@@ -75,10 +75,13 @@ func TestFlows(t *testing.T) {
 	if code, body, _ = do(t, nil, srv, call{method: "GET", path: fmt.Sprintf("/api/flows/%d", movies.FlowID)}); code != 200 || !json.Valid([]byte(body)) {
 		t.Errorf("get: %d %s", code, body)
 	}
-	for _, k := range []call{{method: "POST", path: "/api/flows/import", body: "{}", ctype: "application/json"}, {method: "GET", path: "/api/flows/1/export"}} {
-		if code, body, _ := do(t, nil, srv, k); code != 501 || errCode(body) != "not_available" {
-			t.Errorf("%s: %d %s", k.path, code, body)
-		}
+	// import and export are real now (flows_export_test.go): a file that is not an export is refused, and a flow
+	// that does not exist has no export
+	if code, body, _ := do(t, nil, srv, call{method: "POST", path: "/api/flows/import", body: "{}", ctype: "application/json"}); code != 400 || errCode(body) != "invalid" {
+		t.Errorf("import of a non-export: %d %s", code, body)
+	}
+	if code, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/flows/999999/export"}); code != 404 || errCode(body) != "not_found" {
+		t.Errorf("export of no flow: %d %s", code, body)
 	}
 }
 
