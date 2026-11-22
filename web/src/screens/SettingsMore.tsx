@@ -51,7 +51,7 @@ function General({ start, auth, saved }: { start: string[]; auth: boolean; saved
       <p className={bad ? "st bad" : "muted"} role="status" style={{ margin: 0 }}>{said}</p>
       <div className="row" style={{ justifyContent: "flex-start", flexWrap: "wrap", gap: 12 }}>
         <button className="btn primary" type="button" disabled={!dirty} onClick={save}>Save</button>
-        <span className="muted">Nothing is saved until you press Save.</span>
+        <span className="muted">Languages are saved when you press Save.</span>
       </div>
     </div>
   </>);
@@ -114,39 +114,46 @@ function Confirm({ title, body, yes, no, busy, danger, onYes, onNo }: { title: s
 // [code, name, name in the language]); added by typing a name and picking it.
 // The codes and the one Save live in General; this row reports what it did through say().
 function Languages({ codes, setCodes, say }: { codes: string[]; setCodes: Dispatch<SetStateAction<string[]>>; say: (m: string, bad?: boolean) => void }) {
-  const [list, setList] = useState<[string, string, string?][]>([]), [typed, setTyped] = useState(""), [open, setOpen] = useState(false), [at, setAt] = useState(-1);
+  const [list, setList] = useState<[string, string, string?][]>([]), [typed, setTyped] = useState(""), [open, setOpen] = useState(false), [at, setAt] = useState(-1), [adding, setAdding] = useState(false);
+  const addBtn = useRef<HTMLButtonElement>(null), box = useRef<HTMLInputElement>(null), backToAdd = useRef(false);
   useEffect(() => { fetch("/languages.json").then((r) => r.json()).then(setList, () => {}); }, []);
+  // the box takes focus when it opens; closing it (Enter, a pick, Add, Escape) puts focus back on "+ Add"
+  useEffect(() => {
+    if (adding) return box.current?.focus();
+    if (backToAdd.current) { backToAdd.current = false; addBtn.current?.focus(); }
+  }, [adding]);
   const name = (c: string) => list.find((l) => l[0] === c)?.[1] ?? c;
   const q = typed.trim().toLowerCase();
   const hits = q ? list.filter((l) => [l[1], l[2] ?? "", l[0]].some((s) => s.toLowerCase().includes(q))) : list;
+  const close = () => (setAdding(false), setOpen(false), setAt(-1), setTyped(""), (backToAdd.current = true));
   const add = (raw = typed) => {
     const t = raw.trim().toLowerCase(); if (!t) return;
     const hit = list.find((l) => l[1].toLowerCase() === t || (l[2] ?? "").toLowerCase() === t || l[0] === t);
     if (!hit) return say("No language called " + raw.trim() + ". Pick one from the list.", true);
     setCodes((cs) => (cs.includes(hit[0]) ? cs : [...cs, hit[0]]));
-    setTyped(""); say(hit[1] + " added. Press Save to keep it.");
+    close(); say(hit[1] + " added. Press Save to keep it.");
   };
-  const pick = (l: [string, string, string?]) => (setOpen(false), setAt(-1), add(l[1]));
+  const pick = (l: [string, string, string?]) => add(l[1]);
   return (
-    <SettingRow title="Your languages" desc={'Audio and subtitles in these languages are kept when a workflow says "Keep only my languages". Tracks with no language set are always kept.'}>
+    <SettingRow title="Your languages" desc={<>Audio and subtitles in these languages are kept when a workflow says "Keep only my languages". Tracks with no language set are always kept. "Save as separate .srt files" saves subtitles in these languages as files.</>}>
       <div className="langs">
         {codes.length ? <ul className="chips" aria-label="Your languages" style={{ listStyle: "none", padding: 0, margin: 0, flexWrap: "wrap" }}>{codes.map((c) => (
           <li key={c} className="mchip">{name(c)} <button className="btn sm icon ghost" type="button" aria-label={"Remove " + name(c)} onClick={() => (setCodes(codes.filter((x) => x !== c)), say(name(c) + " removed. Press Save to keep it."))}><Icon id="i-x" /></button></li>))}</ul>
-          : <p className="muted" style={{ margin: 0 }}>None chosen yet.</p>}
-        <div className="field"><label htmlFor="lang-add">Add a language</label>
-          {/* an own list, not a datalist: the browser's datalist popup is its own chrome and opened off the screen
-              (review item B); .lang-opts (shell.css) is left-anchored under the field and never wider than the screen */}
+          : <p className="muted" style={{ margin: 0 }}>None yet.</p>}
+        {adding ? (
           <div className="row" style={{ gap: 8, position: "relative" }} onBlur={(e) => !e.currentTarget.contains(e.relatedTarget as Node) && (setOpen(false), setAt(-1))}>
-            <input id="lang-add" className="input" autoComplete="off" role="combobox" aria-expanded={open} aria-controls="lang-opts" aria-autocomplete="list" aria-activedescendant={at >= 0 ? "lang-o" + at : undefined} aria-describedby="lang-h2" value={typed}
+            {/* an own list, not a datalist: the browser's datalist popup is its own chrome and opened off the screen
+                (review item B); .lang-opts (shell.css) is left-anchored under the field and never wider than the screen */}
+            <input ref={box} id="lang-add" className="input" aria-label="Add a language" autoComplete="off" role="combobox" aria-expanded={open} aria-controls="lang-opts" aria-autocomplete="list" aria-activedescendant={at >= 0 ? "lang-o" + at : undefined} value={typed}
               onChange={(e) => (setTyped(e.target.value), setAt(-1), setOpen(true))}
               onFocus={() => setOpen(true)} onClick={() => setOpen(true)}
               onKeyDown={(e) => {
                 // a pick from the list adds at once, as the old page did; typed text waits for Add or Enter
                 if (e.key === "ArrowDown" && hits.length) return (e.preventDefault(), setOpen(true), setAt((a) => Math.min(a + 1, hits.length - 1)));
                 if (e.key === "ArrowUp" && hits.length) return (e.preventDefault(), setAt((a) => Math.max(a - 1, -1)));
-                if (e.key === "Enter") return (e.preventDefault(), at >= 0 ? pick(hits[at]) : (setOpen(false), add()));
-                if (e.key === "Escape") return (e.preventDefault(), setOpen(false), setAt(-1));
-              }} style={{ flex: 1, minWidth: 0 }} />
+                if (e.key === "Enter") return (e.preventDefault(), at >= 0 ? pick(hits[at]) : add());
+                if (e.key === "Escape") return (e.preventDefault(), close());
+              }} style={{ flex: 1, minWidth: 0, width: 200, maxWidth: "100%" }} />
             <button className="btn" type="button" onClick={() => add()}><Icon id="i-plus" />Add</button>
             {open && !!hits.length && <div className="pop lang-opts" id="lang-opts" role="listbox" aria-label="Languages">{hits.map((l, i) =>
               <button key={l[0]} id={"lang-o" + i} type="button" role="option" aria-selected={at === i} className={"it" + (at === i ? " on" : "")}
@@ -154,7 +161,9 @@ function Languages({ codes, setCodes, say }: { codes: string[]; setCodes: Dispat
                 <span>{l[1]}</span>{l[2] && l[2] !== l[1] && <span className="muted">{l[2]}</span>}
               </button>)}</div>}
           </div>
-          <span className="hint" id="lang-h2">"Save as separate .srt files" saves subtitles in these languages as files.</span></div>
+        ) : (
+          <div><button ref={addBtn} className="btn" type="button" onClick={() => setAdding(true)}><Icon id="i-plus" />Add</button></div>
+        )}
       </div>
     </SettingRow>);
 }
