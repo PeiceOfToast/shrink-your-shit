@@ -214,6 +214,84 @@ func TestEncoderAnswerIsReadyWhileTheDeviceProbeRuns(t *testing.T) {
 	}
 }
 
+// A refresh whose device probe is held serves the previous device record until its pass ends, so the card does not
+// vanish from the Workers page for the length of the pass (up to 90 s). A pass cut short by its caller keeps the
+// previous record too. The new pass here fails its scale probe, so the old and new records differ.
+func TestRefreshKeepsTheOldDeviceRecordUntilThePassEnds(t *testing.T) {
+	for _, cut := range []bool{false, true} {
+		label := "pass finishes"
+		if cut {
+			label = "pass cut short"
+		}
+		t.Run(label, func(t *testing.T) {
+			f := &deviceFake{}
+			hold := false
+			entered := make(chan struct{})
+			release := make(chan struct{})
+			var once sync.Once
+			x := &media.FakeExec{Handler: func(name string, args []string) (string, string, error) {
+				a := strings.Join(args, " ")
+				switch {
+				case strings.Contains(a, "-version"):
+					return name + " version 7.1.5", "", nil
+				case strings.Contains(a, "-encoders"):
+					return " V....D libx265              H.265 / HEVC\n V....D hevc_qsv           hardware HEVC\n", "", nil
+				case hold && strings.Contains(a, "-hwaccel"): // the refresh's device probe: hold it
+					once.Do(func() { close(entered) })
+					<-release
+				}
+				return f.run(name, args)
+			}}
+			c := &Checker{Exec: x, FFmpeg: "/usr/bin/ffmpeg", FFprobe: "/usr/bin/ffprobe"}
+
+			first := c.Tools(context.Background())
+			if len(first.Devices) != 1 || !first.Devices[0].Scale {
+				t.Fatalf("first run: devices %+v, want one record with scale yes", first.Devices)
+			}
+
+			// Make the stored hardware result stale, so the next call runs the whole test again.
+			c.mu.Lock()
+			c.hwAt = c.hwAt.Add(-toolsTTL - time.Second)
+			c.mu.Unlock()
+			hold, f.failScale = true, true
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			done := make(chan Tools, 1)
+			go func() { done <- c.Tools(ctx) }()
+			select {
+			case <-entered:
+			case <-time.After(10 * time.Second):
+				close(release)
+				t.Fatal("the refresh's device probe never started")
+			}
+
+			tl, ok := c.ToolsNow()
+			if !ok || len(tl.Devices) != 1 || !tl.Devices[0].Scale {
+				t.Errorf("while the device probe is held: ok=%v devices=%+v, want the previous record (scale yes)", ok, tl.Devices)
+			}
+			if cut {
+				cancel()
+			}
+			close(release)
+			<-done
+
+			if cut {
+				c.mu.Lock()
+				dev := c.dev
+				c.mu.Unlock()
+				if len(dev) != 1 || !dev[0].Scale {
+					t.Errorf("after a cut-short pass: devices %+v, want the previous record (scale yes)", dev)
+				}
+				return
+			}
+			tl, ok = c.ToolsNow()
+			if !ok || len(tl.Devices) != 1 || tl.Devices[0].Scale {
+				t.Errorf("after the pass: ok=%v devices=%+v, want the new record (scale no)", ok, tl.Devices)
+			}
+		})
+	}
+}
+
 // "Test again" re-probes decode: a decode answer cached as failed must not survive a Retest, or the card that
 // now decodes reads "can't" until the process restarts.
 func TestRetestReprobesDecode(t *testing.T) {

@@ -182,8 +182,9 @@ func (c *Checker) tested(ctx context.Context, maxAge time.Duration) (Tools, map[
 		stored := ctx.Err() == nil // a test cut short by its caller is not a result: the next caller runs it again
 		if stored {
 			// The encoder answer is stored before the device probes run (they can take up to 90 s), so the
-			// encoder list is never "not finished" while they run. The device record follows in its own lock.
-			c.hw, c.hwAt, c.probes, c.dev = &hw, at, probes, nil
+			// encoder list is never "not finished" while they run. The device record follows in its own lock, and the
+			// previous one stays served until the new pass finishes (no blank card on a refresh).
+			c.hw, c.hwAt, c.probes = &hw, at, probes
 			c.publishLocked()
 		}
 		c.mu.Unlock()
