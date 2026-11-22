@@ -148,6 +148,14 @@ textarea.input{min-height:72px;font-family:var(--mono);font-size:var(--fs-sm)}
 .card>.hd h2,.card>.hd h3{font-size:calc(15px*var(--font-scale))}
 .card>.hd h2 a,.card>.hd h3 a{color:var(--text);text-decoration:none}
 .card>.hd h2 a:hover,.card>.hd h3 a:hover{text-decoration:underline}
+/* SettingRow (web/src/SettingRow.tsx): title and muted description left, controls right, a divider between rows; the controls move under the text on a phone */
+.setrow{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,45%);gap:var(--s3) var(--s4);align-items:center;padding:12px var(--pad)}
+.bd>.setrow+.setrow,.bd>.setrow+p,.bd>p+.setrow,.bd>.setrow+div{border-top:1px solid var(--border)}
+.setrow .ttl{font-weight:600}
+.setrow .sub{margin:2px 0 0}
+.setrow .ctl{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;align-items:center;min-width:0}
+.setrow .langs{flex:1 1 280px;min-width:0;display:flex;flex-direction:column;gap:8px}
+@media (max-width:640px){.setrow{grid-template-columns:minmax(0,1fr)}.setrow .ctl{justify-content:flex-start}}
 .card>.bd{padding:var(--pad)}
 .grid{display:grid;gap:var(--gap)}
 .cols2{grid-template-columns:repeat(2,minmax(0,1fr))}

@@ -3,9 +3,10 @@
 // when asked for, never kept by the page; a new one; Sign out, only when the server needs a token). Safety: how long
 // replaced originals are kept, where, and what the trash holds now (its whole size lives here, not beside Space saved:
 // design 05:34Z). Not here: log retention (no setting on the server).
-import { useEffect, useId, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type Dispatch, type MouseEvent, type ReactNode, type SetStateAction } from "react";
 import { Icon } from "../Icon";
 import { PageHead } from "../PageHead";
+import { SettingRow, ValueChip } from "../SettingRow";
 import { SignedOut, failed, type Answer } from "../api";
 import { bytes, plural } from "../format";
 import { cancelUpdate, checkUpdate, getConverting, getHealth, getUpdate, installUpdate, purgeTrash, rollbackUpdate, type UpdateNotice, getSettings, getToken, getTrash, patchSettings, rotateToken, signOut } from "../libraryApi";
@@ -29,12 +30,31 @@ export function GeneralSettings() {
     <div className="stack">
       <PageHead icon="i-settings" title="Settings" />
       <SettingsTabs at="general" />
-      {!st.data ? <div className="empty">{st.error?.message ?? "Loading…"}</div> : <>
-        <ThisComputer />
-        <Languages start={st.data.languages ?? []} saved={st.reload} />
-        <Access auth={!!st.data.authRequired} />
-      </>}
+      {!st.data ? <div className="empty">{st.error?.message ?? "Loading…"}</div> : <General start={st.data.languages ?? []} auth={!!st.data.authRequired} saved={st.reload} />}
     </div>);
+}
+
+// The page's one Save (the design): it saves the languages; the rows above only change what is on the page until then.
+function General({ start, auth, saved }: { start: string[]; auth: boolean; saved: () => void }) {
+  const [codes, setCodes] = useState(start), [said, setSaid] = useState(""), [bad, setBad] = useState(false);
+  const save = async () => { setBad(false); if (await act(patchSettings({ languages: codes }), (m) => (setBad(true), setSaid(m)))) (setSaid("Saved."), saved()); };
+  const dirty = JSON.stringify(codes) !== JSON.stringify(start);
+  return (<>
+    <section className="card" aria-labelledby="pc-h"><div className="hd"><h2 id="pc-h">This computer</h2></div>
+      <div className="bd stack" style={{ padding: 0, gap: 0 }}>
+        <ThisComputer />
+        <Languages codes={codes} setCodes={setCodes} say={(m, isBad) => (setSaid(m), setBad(!!isBad))} />
+      </div></section>
+    <section className="card" aria-labelledby="acc-h"><div className="hd"><h2 id="acc-h">Access</h2></div>
+      <div className="bd stack" style={{ padding: 0, gap: 0 }}><Access auth={auth} /></div></section>
+    <div className="stack" style={{ gap: 8 }}>
+      <p className={bad ? "st bad" : "muted"} role="status" style={{ margin: 0 }}>{said}</p>
+      <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+        <span className="muted">Nothing is saved until you press Save.</span>
+        <button className="btn primary" type="button" disabled={!dirty} onClick={save}>Save</button>
+      </div>
+    </div>
+  </>);
 }
 
 // This computer (ONE-COMMAND-SETUP.md section 11): main server or a worker, and Change... with a confirm. Server to
@@ -56,20 +76,18 @@ function ThisComputer() {
       : <>{n ? plural(n, "job is", "jobs are") : "Jobs are"} converting now. Stop {n === 1 ? "it" : "them"} on <Link to="/jobs">Jobs</Link> first, or wait.</>);
     btn.current?.focus();
   };
-  return (
-    <section className="card" aria-labelledby="pc-h"><div className="hd"><h2 id="pc-h">This computer</h2></div>
-      <div className="bd stack">
-        <div className="row"><strong>{s.role === "server" ? "Main server" : worker ? "Worker for " + name : "Not chosen yet"}</strong>
-          <button ref={btn} className="btn" type="button" onClick={() => (s.role === "unset" ? navigate("/start") : (setErr(null), setAsk(true)))}>Change…</button></div>
-        {s.role === "server" && <p className="muted" style={{ margin: 0 }}>Keeps your libraries and this web page.</p>}
-        {err && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{err}</span></p>}
-      </div>
-      {ask && (worker
-        ? <Confirm title={"Stop being a worker for " + name + "?"} body={name + " stops sending jobs here. This computer becomes its own server and starts setup."}
-            yes="Make it a server" no="Keep as worker" busy={busy} onYes={go} onNo={() => (setAsk(false), btn.current?.focus())} />
-        : <Confirm title="Make this computer a worker?" body="Its libraries and workflows stop running here. Nothing is deleted. Switch back in Settings to use them again."
-            yes="Make it a worker" no="Keep as server" busy={busy} onYes={go} onNo={() => (setAsk(false), btn.current?.focus())} />)}
-    </section>);
+  return (<>
+    <SettingRow title="Role" desc={s.role === "server" ? "Keeps your libraries and this web page." : undefined}>
+      <ValueChip>{s.role === "server" ? "Main server" : worker ? "Worker for " + name : "Not chosen yet"}</ValueChip>
+      <button ref={btn} className="btn" type="button" onClick={() => (s.role === "unset" ? navigate("/start") : (setErr(null), setAsk(true)))}>Change…</button>
+    </SettingRow>
+    {err && <p className="st bad" role="alert" style={{ margin: "0 16px 12px" }}><Icon id="i-alert" /><span>{err}</span></p>}
+    {ask && (worker
+      ? <Confirm title={"Stop being a worker for " + name + "?"} body={name + " stops sending jobs here. This computer becomes its own server and starts setup."}
+          yes="Make it a server" no="Keep as worker" busy={busy} onYes={go} onNo={() => (setAsk(false), btn.current?.focus())} />
+      : <Confirm title="Make this computer a worker?" body="Its libraries and workflows stop running here. Nothing is deleted. Switch back in Settings to use them again."
+          yes="Make it a worker" no="Keep as server" busy={busy} onYes={go} onNo={() => (setAsk(false), btn.current?.focus())} />)}
+  </>);
 }
 
 // A small modal confirm (the folder picker's dialog look): focus starts on the title, Tab stays inside, Escape keeps.
@@ -94,8 +112,9 @@ function Confirm({ title, body, yes, no, busy, danger, onYes, onNo }: { title: s
 
 // "Your languages": one list for the whole install, shown by name, saved as ISO 639-2 codes (/languages.json:
 // [code, name, name in the language]); added by typing a name and picking it.
-function Languages({ start, saved }: { start: string[]; saved: () => void }) {
-  const [codes, setCodes] = useState(start), [list, setList] = useState<[string, string, string?][]>([]), [typed, setTyped] = useState(""), [said, setSaid] = useState(""), [bad, setBad] = useState(false), [open, setOpen] = useState(false), [at, setAt] = useState(-1);
+// The codes and the one Save live in General; this row reports what it did through say().
+function Languages({ codes, setCodes, say }: { codes: string[]; setCodes: Dispatch<SetStateAction<string[]>>; say: (m: string, bad?: boolean) => void }) {
+  const [list, setList] = useState<[string, string, string?][]>([]), [typed, setTyped] = useState(""), [open, setOpen] = useState(false), [at, setAt] = useState(-1);
   useEffect(() => { fetch("/languages.json").then((r) => r.json()).then(setList, () => {}); }, []);
   const name = (c: string) => list.find((l) => l[0] === c)?.[1] ?? c;
   const q = typed.trim().toLowerCase();
@@ -103,19 +122,17 @@ function Languages({ start, saved }: { start: string[]; saved: () => void }) {
   const add = (raw = typed) => {
     const t = raw.trim().toLowerCase(); if (!t) return;
     const hit = list.find((l) => l[1].toLowerCase() === t || (l[2] ?? "").toLowerCase() === t || l[0] === t);
-    if (!hit) return (setBad(true), setSaid("No language called " + raw.trim() + ". Pick one from the list."));
+    if (!hit) return say("No language called " + raw.trim() + ". Pick one from the list.", true);
     setCodes((cs) => (cs.includes(hit[0]) ? cs : [...cs, hit[0]]));
-    setTyped(""); setBad(false); setSaid(hit[1] + " added. Press Save to keep it.");
+    setTyped(""); say(hit[1] + " added. Press Save to keep it.");
   };
   const pick = (l: [string, string, string?]) => (setOpen(false), setAt(-1), add(l[1]));
-  const save = async () => { setBad(false); if (await act(patchSettings({ languages: codes }), (m) => (setBad(true), setSaid(m)))) (setSaid("Saved."), saved()); };
-  const dirty = JSON.stringify(codes) !== JSON.stringify(start);
   return (
-    <section className="card" aria-labelledby="lang-h"><div className="hd"><h2 id="lang-h">Your languages</h2></div>
-      <div className="bd stack">
+    <SettingRow title="Your languages" desc={'Audio and subtitles in these languages are kept when a workflow says "Keep only my languages". Tracks with no language set are always kept.'}>
+      <div className="langs">
         {codes.length ? <ul className="chips" aria-label="Your languages" style={{ listStyle: "none", padding: 0, margin: 0, flexWrap: "wrap" }}>{codes.map((c) => (
-          <li key={c} className="mchip">{name(c)} <button className="btn sm icon ghost" type="button" aria-label={"Remove " + name(c)} onClick={() => (setCodes(codes.filter((x) => x !== c)), setSaid(name(c) + " removed. Press Save to keep it."))}><Icon id="i-x" /></button></li>))}</ul>
-          : <p className="muted">None chosen yet.</p>}
+          <li key={c} className="mchip">{name(c)} <button className="btn sm icon ghost" type="button" aria-label={"Remove " + name(c)} onClick={() => (setCodes(codes.filter((x) => x !== c)), say(name(c) + " removed. Press Save to keep it."))}><Icon id="i-x" /></button></li>))}</ul>
+          : <p className="muted" style={{ margin: 0 }}>None chosen yet.</p>}
         <div className="field"><label htmlFor="lang-add">Add a language</label>
           {/* an own list, not a datalist: the browser's datalist popup is its own chrome and opened off the screen
               (review item B); .lang-opts (shell.css) is left-anchored under the field and never wider than the screen */}
@@ -130,18 +147,16 @@ function Languages({ start, saved }: { start: string[]; saved: () => void }) {
                 if (e.key === "Enter") return (e.preventDefault(), at >= 0 ? pick(hits[at]) : (setOpen(false), add()));
                 if (e.key === "Escape") return (e.preventDefault(), setOpen(false), setAt(-1));
               }} style={{ flex: 1, minWidth: 0 }} />
-            <button className="btn" type="button" onClick={() => add()}>Add</button>
+            <button className="btn" type="button" onClick={() => add()}><Icon id="i-plus" />Add</button>
             {open && !!hits.length && <div className="pop lang-opts" id="lang-opts" role="listbox" aria-label="Languages">{hits.map((l, i) =>
               <button key={l[0]} id={"lang-o" + i} type="button" role="option" aria-selected={at === i} className={"it" + (at === i ? " on" : "")}
                 onMouseDown={(e) => e.preventDefault()} onMouseEnter={() => setAt(i)} onClick={() => pick(l)}>
                 <span>{l[1]}</span>{l[2] && l[2] !== l[1] && <span className="muted">{l[2]}</span>}
               </button>)}</div>}
           </div>
-          <span className="hint" id="lang-h2">Audio and subtitles in these languages are kept by "Keep only my languages". "Save as separate .srt files" saves subtitles in these languages as files. Tracks with no language set are always kept.</span></div>
-        <p className={bad ? "st bad" : "muted"} role="status">{said}</p>
-        <div className="row"><button className="btn primary" type="button" disabled={!dirty} onClick={save}>Save</button></div>
+          <span className="hint" id="lang-h2">"Save as separate .srt files" saves subtitles in these languages as files.</span></div>
       </div>
-    </section>);
+    </SettingRow>);
 }
 
 // Access: the token only when asked for; a new one asks first; Sign out only when the server needs a token (IA).
@@ -150,22 +165,20 @@ function Access({ auth }: { auth: boolean }) {
   const show = async () => { if (tok) return setTok(null); const r = await act(getToken(), setSaid); if (r) setTok(r.token); };
   const make = async () => { setAsk(false); const r = await act(rotateToken(), setSaid); if (r) (setTok(r.token), setSaid("New token made. Use it to sign in on other devices.")); };
   const out = async () => { if (await act(signOut(), setSaid)) navigate("/signin"); };
-  return (
-    <section className="card" aria-labelledby="acc-h"><div className="hd"><h2 id="acc-h">Access</h2></div>
-      <div className="bd stack">
-        <div className="field"><label htmlFor="tok">Access token</label>
-          <div className="row" style={{ gap: 8 }}>
-            <input id="tok" className="input mono" readOnly value={tok ?? "••••••••••••"} aria-describedby="tok-h" style={{ flex: 1, minWidth: 0 }} />
-            <button className="btn" type="button" aria-controls="tok" onClick={show}>{tok ? "Hide" : "Show"}</button>
-            {tok && navigator.clipboard && <button className="btn" type="button" onClick={() => navigator.clipboard.writeText(tok).then(() => setSaid("Copied."), () => {})}>Copy</button>}
-            <button className="btn" type="button" onClick={() => setAsk(true)}>Make a new one</button></div>
-          <span className="hint" id="tok-h">{auth ? "" : "Not needed on this computer. "}Needed to open shrink-your-shit from another device.</span></div>
-        {ask && <div className="note" role="alertdialog" aria-labelledby="tok-ask"><Icon id="i-alert" /><div className="sp"><strong id="tok-ask">Make a new token?</strong> {auth ? "The old one stops working, so other devices must use the new one." : "This server doesn't ask for one now. Making one turns sign-in on for every browser and script, and they will need the token from then on."}</div>
-          <button className="btn sm primary" type="button" onClick={make}>Make it</button><button className="btn sm ghost" type="button" onClick={() => setAsk(false)}>Cancel</button></div>}
-        <p className="muted" role="status">{said}</p>
-        {auth && <div className="row"><button className="btn" type="button" onClick={out}>Sign out of this browser</button></div>}
-      </div>
-    </section>);
+  return (<>
+    <SettingRow title={<label htmlFor="tok">Access token</label>} desc={<span id="tok-h">{auth ? "" : "Not needed on this computer. "}Needed to open shrink-your-shit from another device.</span>}>
+      <input id="tok" className="input mono" readOnly value={tok ?? "••••••••••••"} aria-describedby="tok-h" style={{ width: 200, maxWidth: "100%", minWidth: 0 }} />
+      <button className="btn" type="button" aria-controls="tok" onClick={show}>{tok ? "Hide" : "Show"}</button>
+      {tok && navigator.clipboard && <button className="btn" type="button" onClick={() => navigator.clipboard.writeText(tok).then(() => setSaid("Copied."), () => {})}>Copy</button>}
+      <button className="btn" type="button" onClick={() => setAsk(true)}>Make a new one</button>
+    </SettingRow>
+    {ask && <div className="note" role="alertdialog" aria-labelledby="tok-ask" style={{ margin: "0 16px 12px" }}><Icon id="i-alert" /><div className="sp"><strong id="tok-ask">Make a new token?</strong> {auth ? "The old one stops working, so other devices must use the new one." : "This server doesn't ask for one now. Making one turns sign-in on for every browser and script, and they will need the token from then on."}</div>
+      <button className="btn sm primary" type="button" onClick={make}>Make it</button><button className="btn sm ghost" type="button" onClick={() => setAsk(false)}>Cancel</button></div>}
+    <p className="muted" role="status" style={{ margin: said ? "0 16px 12px" : 0 }}>{said}</p>
+    {auth && <SettingRow title="Sign out of this browser" desc="Only shown when the server needs the token.">
+      <button className="btn" type="button" aria-label="Sign out of this browser" onClick={out}>Sign out</button>
+    </SettingRow>}
+  </>);
 }
 
 export function SafetySettings() {
