@@ -259,6 +259,23 @@ func TestRemoveBlackBarsSetting(t *testing.T) {
 	if crop(nil) { // a workflow saved before the choice existed: the picture is left as it is
 		t.Error("a workflow that does not ask compiles to a plan that cuts the bars")
 	}
+	// Off, the key is in no Convert step's config, so a flow saved without it reads back exactly as it was
+	// (review 647: a convertConfig that always wrote the key survived every test).
+	for name, d := range map[string]Doc{"the preset": Preset(), "the slider's": FromTemplate(rules.SliderTemplate(3), nil)} {
+		for _, n := range d.Nodes {
+			if n.Type != TypeConvert {
+				continue
+			}
+			if _, ok := n.Config["removeBlackBars"]; ok {
+				t.Errorf("%s Convert step config has removeBlackBars: %v", name, n.Config)
+			}
+		}
+	}
+	tm := rules.Template{Kind: rules.KindSelectors, Selectors: ptr(rules.DefaultSelectors(3)), CompilerVersion: rules.CompilerVersion}
+	doc := roundTrip(t, FromTemplate(tm, nil))
+	if got, issues := ToTemplate(doc, tm); len(issues) > 0 || !reflect.DeepEqual(got, tm) {
+		t.Errorf("a flow saved without the choice does not read back as it was:\n got %+v\nwant %+v\n%+v", got, tm, issues)
+	}
 }
 
 // The registry: every node type has a definition with a config schema and ports.
