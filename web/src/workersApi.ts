@@ -1,7 +1,7 @@
 // V7 Workers on the real /api/v2/workers (#132), or the mock's workers with ?mock=1 (the same Worker shape).
 import { call, failed, MOCK, type Answer } from "./api";
 import * as mock from "./mock";
-import type { JoinRequest, Worker } from "./types/v2";
+import type { EncoderSpeed, JoinRequest, Worker } from "./types/v2";
 
 const base = (id: string) => "/api/v2/workers/" + encodeURIComponent(id);
 export async function listWorkers(): Promise<Answer<Worker[]>> {
@@ -9,11 +9,12 @@ export async function listWorkers(): Promise<Answer<Worker[]>> {
   return failed(r) ? r : r.items;
 }
 // The Workers page: the workers plus join requests (E4, ONE-COMMAND-SETUP.md section 9) from the same call, newest first.
-export interface WorkersPage { items: Worker[]; joinRequests: JoinRequest[] }
+// F7: encoderSpeeds, how fast each worker's encoders have run (empty when the server has none).
+export interface WorkersPage { items: Worker[]; joinRequests: JoinRequest[]; encoderSpeeds: EncoderSpeed[] }
 export async function workersPage(): Promise<Answer<WorkersPage>> {
-  if (MOCK) return { items: mock.mockState().workers, joinRequests: mock.joins.map((j) => ({ ...j })) };
+  if (MOCK) return { items: mock.mockState().workers, joinRequests: mock.joins.map((j) => ({ ...j })), encoderSpeeds: mock.encoderSpeeds.map((s) => ({ ...s })) };
   const r = await call<WorkersPage>("GET", "/api/v2/workers");
-  return failed(r) ? r : { items: r.items, joinRequests: r.joinRequests ?? [] };
+  return failed(r) ? r : { items: r.items, joinRequests: r.joinRequests ?? [], encoderSpeeds: r.encoderSpeeds ?? [] };
 }
 export async function getWorker(id: string): Promise<Answer<Worker>> {
   if (MOCK) return mock.mockState().workers.find((w) => w.id === id) ?? { error: { code: "not_found", message: "There is no such worker." } };
