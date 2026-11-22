@@ -115,6 +115,20 @@ func TestACheckThatStopsTheJobIsTheOnlyStep(t *testing.T) {
 	})
 }
 
+// L1 fix: the encoder check takes the card's place before the checks that can still stop the job, so a refusal
+// after it must give the place back. The count is all there is (user bug 11-20): a leak takes one place away
+// until the program restarts, and the next graphics job waits for good.
+func TestAJobStoppedByALaterCheckGivesTheCardBack(t *testing.T) {
+	oneTry(t)
+	s := newScenario(t)
+	s.freeBytes = 1 << 20 // the disk beside the original looks full: the free-space check refuses after the slot is taken
+	graphicsSlotWorker(s, "t1").RunOne(context.Background())
+	s.assertKept("not enough free disk space", jobs.ReasonLowDiskSpace)
+	if n := GPURunning(); n != 0 {
+		t.Errorf("graphics used after a job the free-space check stopped: %d, want 0", n)
+	}
+}
+
 // wantOnlyTheFailedCheck: the job's only step is the failed check step, its result naming want, and ffmpeg never
 // ran (the check comes before the encode, so there is no encode step).
 func (s *scenario) wantOnlyTheFailedCheck(t *testing.T, want string) {

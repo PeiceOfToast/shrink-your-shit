@@ -39,12 +39,17 @@ type encoderRun struct {
 // before its encode. The errors, codes and words are the ones each check already had.
 func (w *Worker) checkPlan(ctx context.Context, job jobs.Job, plan rules.Plan, src media.Info, srcPath string, size int64, newName string) (encoderRun, error) {
 	started := w.now()
+	var held *GPUSlot // the card's place the encoder check took: a later check that refuses gives it back
 	refuse := func(err error) (encoderRun, error) {
+		if held != nil {
+			held.Release()
+		}
 		w.recordCheckStep(job.ID, started, "failed", plainReason(err)+" No new file was written.")
 		return encoderRun{}, err
 	}
 	// 1. The encoder that can make this file, at the bit depth it needs.
 	enc, err := w.encoderFor(ctx, job, plan, src)
+	held = enc.slot
 	if err != nil {
 		return refuse(err)
 	}

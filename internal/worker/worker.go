@@ -1680,6 +1680,10 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	if err != nil {
 		return "", err
 	}
+	gpuSlot := enc.slot // the card's place this job holds while its graphics encode runs
+	if gpuSlot != nil { // given back here, before staging: a failure below must not keep the card (L1 fix)
+		defer gpuSlot.Release()
+	}
 	stageNear := job.Path
 	if OutputMode(plan.Output) == Folder {
 		stageNear = newName // staged in the folder for new files: the last step is a rename on its disk
@@ -1690,14 +1694,8 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	}
 	tmp := stage.path
 	gpu, full, chosenWhy := enc.gpu, enc.full, enc.why
-	gpuSlot := enc.slot  // the card's place this job holds while its graphics encode runs
 	var place *filePlace // the Files at once place this job holds while it converts on the processor
-	defer func() {
-		if gpuSlot != nil {
-			gpuSlot.Release()
-		}
-		place.Release()
-	}()
+	defer func() { place.Release() }()
 	args := plan.FFmpegArgs(srcPath, tmp)
 	if gpu != "" { // the arguments for the graphics encoder the check chose, once the staged file has its path
 		args, _ = graphicsArgs(plan, srcPath, tmp, gpu, full)
