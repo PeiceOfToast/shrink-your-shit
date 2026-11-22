@@ -559,10 +559,15 @@ ALTER TABLE jobs ADD COLUMN output_info TEXT;`},
 	// fastest on each computer. On the encode step: the encoder the command names, the realtime multiple
 	// (media length / encode seconds, 3.2 for 3.2x) and the average frames per second. A row from before
 	// this, a copy (no encoder), and a conversion nothing measured keep 0 and stay out of the medians.
+	// The index serves that page's read of the newest finished encodes (every workers GET reads them):
+	// its name, then the order it takes them in (started_at, then job_id), so the bounded read stops as
+	// soon as it has enough instead of sorting the whole history. IF NOT EXISTS because a rewind fixture
+	// below this re-runs this step with the index still there.
 	{61, "encoder speeds", `
 ALTER TABLE job_run_steps ADD COLUMN encoder TEXT NOT NULL DEFAULT '';
 ALTER TABLE job_run_steps ADD COLUMN speed REAL NOT NULL DEFAULT 0;
-ALTER TABLE job_run_steps ADD COLUMN fps REAL NOT NULL DEFAULT 0;`},
+ALTER TABLE job_run_steps ADD COLUMN fps REAL NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS job_run_steps_name_started ON job_run_steps(name, started_at, job_id);`},
 }
 
 // legacyReasonCode is the SQL for the code of a reason stored before migration 23 as its sentence alone

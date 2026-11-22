@@ -88,6 +88,7 @@ func TestReportSpeedIsChecked(t *testing.T) {
 	}{
 		{"a name this program never runs", `{"encoder":"totally-made-up","speed":3.5,"fps":118}`, "", 0, 0},
 		{"a huge encoder string", `{"encoder":"` + strings.Repeat("hevc_qsv ", 40) + `","speed":3.5,"fps":118}`, "", 0, 0},
+		{"a speed with no encoder", `{"encoder":"","speed":3.5,"fps":118}`, "", 0, 0},
 		{"a speed beyond any encode", `{"encoder":"hevc_qsv","speed":1e9,"fps":118}`, "", 0, 0},
 		{"a negative speed", `{"encoder":"hevc_qsv","speed":-3.5,"fps":118}`, "", 0, 0},
 		{"a frame rate beyond any encode", `{"encoder":"hevc_qsv","speed":3.5,"fps":1e9}`, "hevc_qsv", 3.5, 0},

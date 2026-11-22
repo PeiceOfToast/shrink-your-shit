@@ -4,6 +4,7 @@ package jobs
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -148,6 +149,58 @@ func TestEncoderSpeedsReadOnlyTheNewestEncodes(t *testing.T) {
 	}
 }
 
+// F7 review2 #638 §4: samples are ordered by when the conversion ran, not by the job's id, because Convert
+// again reuses the id: an old job converted again today is the newest sample.
+func TestEncoderSpeedsOrderByWhenItRan(t *testing.T) {
+	s := open(t)
+	dir := t.TempDir()
+	finished := func(name, at string, speed float64) int64 {
+		src := filepath.Join(dir, "in", name)
+		if err := os.MkdirAll(filepath.Dir(src), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(src, []byte("original"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		id, err := s.Enqueue(Job{Path: src, SizeBefore: 100})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Claim(LocalWorker); err != nil {
+			t.Fatal(err)
+		}
+		s.RecordRunStep(id, RunStep{Index: 0, Name: "encode", StartedAt: at, Encoder: "libx265", Speed: speed})
+		if err := s.Complete(id, filepath.Join(dir, "out", name), 1); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	first := finished("a.mkv", "2026-01-01T00:00:00Z", 1)
+	finished("b.mkv", "2026-01-02T00:00:00Z", 2)
+	finished("c.mkv", "2026-01-03T00:00:00Z", 3)
+	// the first job is converted again today: its new run replaces its step and is the newest sample
+	if err := s.ConvertAgain(first); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Claim(LocalWorker); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordRunStep(first, RunStep{Index: 0, Name: "encode", StartedAt: "2026-01-04T00:00:00Z", Encoder: "libx265", Speed: 40}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Complete(first, filepath.Join(dir, "out", "a.mkv"), 1); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.EncoderSpeeds(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// the newest two conversions are the re-converted old job (40x) and the last one (3x): 21.5x
+	if len(got) != 1 || got[0].Samples != 2 || got[0].Speed != 21.5 {
+		t.Fatalf("speeds %+v, want the newest two by start time (21.5x over 2 samples)", got)
+	}
+}
+
 // Migration 61 (F7): an install from before it keeps its run steps, which read no speed, and a new step
 // keeps the encoder, the realtime multiple and the frames per second.
 func TestMigration61AddsEncoderSpeedsKeepingOldSteps(t *testing.T) {
@@ -170,6 +223,16 @@ func TestMigration61AddsEncoderSpeedsKeepingOldSteps(t *testing.T) {
 	if err != nil || len(steps) != 1 || steps[0].Encoder != "hevc_qsv" || steps[0].Speed != 3.5 || steps[0].FPS != 120 {
 		t.Fatalf("a new step reads back %+v, %v", steps, err)
 	}
+	indexExists := func() bool {
+		var n int
+		if err := s.db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'job_run_steps_name_started'`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n == 1
+	}
+	if !indexExists() { // review2 #638 §3: the workers read of the newest encodes is served by it
+		t.Error("migration 61 made no index on job_run_steps(name, started_at, job_id)")
+	}
 	s.Close()
 	db := rawDB(t, path)
 	for _, q := range append(rewindEncoderSpeeds, `PRAGMA user_version=60`) {
@@ -189,6 +252,10 @@ func TestMigration61AddsEncoderSpeedsKeepingOldSteps(t *testing.T) {
 	}
 	if steps[0].Encoder != "" || steps[0].Speed != 0 || steps[0].FPS != 0 {
 		t.Errorf("an old step kept a speed: %+v", steps[0])
+	}
+	// migration 61 ran again with the index still there (a rewind fixture's path): IF NOT EXISTS kept it
+	if !indexExists() {
+		t.Error("re-running migration 61 lost the index")
 	}
 	if got, err := s.EncoderSpeeds(50); err != nil || len(got) != 0 {
 		t.Errorf("an old install has speeds %+v, %v; want none", got, err)

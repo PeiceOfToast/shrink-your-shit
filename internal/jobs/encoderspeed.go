@@ -25,10 +25,13 @@ var encoderSpeedScan = 5000
 // conversions: 'done' jobs whose encode step recorded a speed. The newest conversions are the ones kept
 // when a pair has more. A copy and a conversion nothing measured recorded no speed, so they are not here.
 func (s *Store) EncoderSpeeds(each int) ([]EncoderSpeed, error) {
+	// newest first, by when it ran: Convert again reuses the job's id, so an old job converted again now is
+	// the newest sample even though its id is not. A step with no start time (an older remote worker's report)
+	// sorts last, which is right: nothing says when it ran.
 	rows, err := s.db.Query(`SELECT j.worker, st.encoder, st.speed, st.fps
 FROM job_run_steps st JOIN jobs j ON j.id = st.job_id
 WHERE st.name = 'encode' AND st.speed > 0 AND j.status = ?
-ORDER BY j.id DESC LIMIT ?`, Done, encoderSpeedScan) // newest first, so a pair past `each` keeps its newest conversions
+ORDER BY st.started_at DESC, j.id DESC LIMIT ?`, Done, encoderSpeedScan)
 	if err != nil {
 		return nil, err
 	}
