@@ -84,8 +84,8 @@ func unchangedFrom(body map[string]json.RawMessage, view map[string]any) map[str
 
 // readSelectors reads a selectors body (see below); langs are the person's languages, needed for
 // "Keep only my languages".
-func readSelectors(body map[string]json.RawMessage, langs []string) (rules.Selectors, error) {
-	s, err := readSelectorsBody(body)
+func readSelectors(body map[string]json.RawMessage, langs []string, kept *rules.Selectors) (rules.Selectors, error) {
+	s, err := readSelectorsBody(body, kept)
 	if err != nil {
 		return s, err
 	}
@@ -95,7 +95,9 @@ func readSelectors(body map[string]json.RawMessage, langs []string) (rules.Selec
 	return s, nil
 }
 
-func readSelectorsBody(body map[string]json.RawMessage) (rules.Selectors, error) {
+// kept are the stored rate control, hardware and keep-if-bigger (nil: none). This page never sets them, and
+// changedEcho has refused a body that sends other values, so they are validated as they will be saved.
+func readSelectorsBody(body map[string]json.RawMessage, kept *rules.Selectors) (rules.Selectors, error) {
 	var q struct{ Quality int }
 	if b, err := json.Marshal(body); err != nil || json.Unmarshal(b, &q) != nil {
 		return rules.Selectors{}, &rules.SelectorError{Code: "invalid_json", Message: "The request body is not valid JSON."}
@@ -124,6 +126,9 @@ func readSelectorsBody(body map[string]json.RawMessage) (rules.Selectors, error)
 	s.MaxBitrate = rules.OldBitrateLevel(s.MaxBitrate)   // a page from before S6 sends Mbps: its nearest level, for one release
 	if !slices.Contains(rules.AvailableAudio, s.Audio) { // and 25b's audio values: design E's map, for one release
 		s.Audio, s.OnlyMyLanguages, _ = rules.StandardAudio(s.Audio, s.OnlyMyLanguages)
+	}
+	if kept != nil {
+		s.RateControl, s.Hardware, s.KeepIfBigger = kept.RateControl, kept.Hardware, kept.KeepIfBigger
 	}
 	return s, s.Validate()
 }
@@ -452,6 +457,10 @@ func settingTemplate(w http.ResponseWriter, store *jobs.Store, body map[string]j
 			return rules.Template{}, false
 		}
 	}
+	if changedEcho(body, cur.Selectors) { // this page cannot set these, Basic or Standard: a changed value is refused, not dropped
+		apiError(w, http.StatusConflict, "edit_in_new_ui", "Keep rate control, hardware and keep-if-bigger in the new workflow editor. Nothing was changed.")
+		return rules.Template{}, false
+	}
 	if q, audio, basic := readBasic(body); basic {
 		if _, ok := rules.SliderAt(q); !ok {
 			apiError(w, http.StatusBadRequest, "invalid_quality", "quality must be a slider position from 1 to 5. Nothing was changed.")
@@ -468,22 +477,15 @@ func settingTemplate(w http.ResponseWriter, store *jobs.Store, body map[string]j
 	}
 	for k := range body {
 		if selectorFields[strings.ToLower(k)] {
-			s, err := readSelectors(body, store.Languages())
+			s, err := readSelectors(body, store.Languages(), cur.Selectors)
 			var se *rules.SelectorError
 			if errors.As(err, &se) {
 				apiError(w, http.StatusBadRequest, se.Code, se.Message)
 				return rules.Template{}, false
 			}
-			if changedEcho(body, cur.Selectors) { // this page cannot set these: a changed value is refused, not dropped
-				apiError(w, http.StatusConflict, "edit_in_new_ui", "Keep rate control, hardware and keep-if-bigger in the new workflow editor. Nothing was changed.")
-				return rules.Template{}, false
-			}
 			t := s.Template()
 			if cur.Kind == rules.KindSelectors && t.Kind == rules.KindSelectors {
 				t.StepOrder = cur.StepOrder // this page never adds, removes or reorders steps: a set order stays
-				if cur.Selectors != nil {   // and it never sends these: the stored values stay
-					t.Selectors.KeepIfBigger, t.Selectors.RateControl, t.Selectors.Hardware = cur.Selectors.KeepIfBigger, cur.Selectors.RateControl, cur.Selectors.Hardware
-				}
 			}
 			return t, true
 		}

@@ -184,7 +184,7 @@ func previewTemplate(w http.ResponseWriter, store *jobs.Store, l jobs.Library, s
 		t.Languages = strings.Join(store.Languages(), ",")
 		return t, true
 	}
-	sel, err := readSelectors(s, store.Languages())
+	sel, err := readSelectors(s, store.Languages(), nil)
 	var se *rules.SelectorError
 	if errors.As(err, &se) {
 		code := se.Code
