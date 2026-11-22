@@ -1712,6 +1712,20 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	gpu, full, chosenWhy := enc.gpu, enc.full, enc.why
 	var place *filePlace // the Files at once place this job holds while it converts on the processor
 	defer func() { place.Release() }()
+	// F5: when the person asked to even out the loudness, measure each converted audio track now, over the file the
+	// encode reads. A remote worker cannot read the file, so the log says the audio was left as it is. (The card's
+	// place is given back by its own defer above, which covers this block's failure too.)
+	if plan.EvenLoudness && hasConvertedAudio(plan) {
+		if w.remote != nil {
+			w.jobNote(job.ID, secEncode, jobs.LevelInfo, "(%s): the loudness was not evened out: a remote worker cannot measure it yet", job.Path)
+		} else {
+			lp, lerr := w.measureLoudness(ctx, job, src, srcPath, plan)
+			if lerr != nil { // stopped while measuring: the job ends here
+				return "", lerr
+			}
+			plan = lp
+		}
+	}
 	args := plan.FFmpegArgs(srcPath, tmp)
 	if gpu != "" { // the arguments for the graphics encoder the check chose, once the staged file has its path
 		args, _ = graphicsArgs(plan, srcPath, tmp, gpu, full)

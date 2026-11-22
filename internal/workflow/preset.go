@@ -37,7 +37,7 @@ func FromTemplate(t rules.Template, prev *Doc) Doc {
 			node(TypeInput, map[string]any{"ignore": orEmpty(s.Ignore)}),
 			node(TypeSkips, map[string]any{"includeDolbyVision": s.IncludeDolbyVision}),
 			node(TypeConvert, convertConfig(s)),
-			node(TypeAudio, map[string]any{"audio": s.Audio, "onlyMyLanguages": s.OnlyMyLanguages}),
+			node(TypeAudio, audioConfig(s)),
 			node(TypeSubtitles, map[string]any{"subtitles": s.Subtitles}),
 			node(TypeContainer, map[string]any{"fileType": s.FileType}),
 			node(TypeVerify, map[string]any{}),
@@ -221,7 +221,8 @@ func selectorsOf(order []Node, leaveFile bool) (rules.Selectors, []Issue) {
 	if s.HardwareFail == "next" {
 		s.HardwareFail = ""
 	}
-	s.RateControl = strOf(cv, "rateControl", "") // item A; the *_legacy values keep a saved flow's files
+	s.RemoveBlackBars = boolOf(cv, "removeBlackBars", false) // F4: off unless the step asks for it
+	s.RateControl = strOf(cv, "rateControl", "")             // item A; the *_legacy values keep a saved flow's files
 	if s.RateControl == "quality" {
 		s.RateControl = "" // the default is saved as absent, so an unchanged flow keeps its template
 	}
@@ -236,6 +237,7 @@ func selectorsOf(order []Node, leaveFile bool) (rules.Selectors, []Issue) {
 	}
 	if a := by[TypeAudio]; a.Enabled {
 		s.Audio, s.OnlyMyLanguages = strOf(a.Config, "audio", s.Audio), boolOf(a.Config, "onlyMyLanguages", s.OnlyMyLanguages)
+		s.EvenLoudness = boolOf(a.Config, "evenLoudness", false) // F5: off unless the step asks for it
 	} else {
 		s.Audio, s.OnlyMyLanguages = "as_is", false
 	}
@@ -429,6 +431,16 @@ func hasOnError(d Doc) bool {
 	return false
 }
 
+// audioConfig is the Audio step's config for s; F5's choice only when it is on, so a flow saved without it
+// reads back exactly as it was.
+func audioConfig(s rules.Selectors) map[string]any {
+	c := map[string]any{"audio": s.Audio, "onlyMyLanguages": s.OnlyMyLanguages}
+	if s.EvenLoudness {
+		c["evenLoudness"] = true
+	}
+	return c
+}
+
 // convertConfig is the Convert video step's config for s; the rate control keys only when it is not the default.
 func convertConfig(s rules.Selectors) map[string]any {
 	c := map[string]any{"quality": s.Quality, "format": s.Format, "resolution": s.Resolution, "maxBitrate": s.MaxBitrate, "speed": s.Speed}
@@ -440,6 +452,9 @@ func convertConfig(s rules.Selectors) map[string]any {
 	}
 	if s.CPUQuality != 0 {
 		c["cpuQuality"] = s.CPUQuality
+	}
+	if s.RemoveBlackBars { // F4: only when asked for, so a flow saved without it reads back exactly as it was
+		c["removeBlackBars"] = true
 	}
 	if s.RateControl != "" && s.RateControl != "quality" {
 		c["rateControl"] = s.RateControl

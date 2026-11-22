@@ -297,7 +297,7 @@ func TestWholeFieldRefFields(t *testing.T) {
 	}
 	sort.Strings(got)
 	want := []string{
-		"audio.tracks/audio", "audio.tracks/onlyMyLanguages",
+		"audio.tracks/audio", "audio.tracks/evenLoudness", "audio.tracks/onlyMyLanguages",
 		"container.output/fileType",
 		"filter.video/dolbyVision", "filter.video/fps", "filter.video/hdr",
 		"filter.video/minBitrateKbps", "filter.video/resolution", "filter.video/size",
@@ -305,7 +305,7 @@ func TestWholeFieldRefFields(t *testing.T) {
 		"output.commit/folderMode", "output.commit/ifBigger", "output.commit/policy",
 		"subtitles.tracks/subtitles",
 		"video.convert/format", "video.convert/maxBitrate", "video.convert/quality", "video.convert/rateControl",
-		"video.convert/resolution", "video.convert/speed", "video.convert/vbrMaxKbps",
+		"video.convert/removeBlackBars", "video.convert/resolution", "video.convert/speed", "video.convert/vbrMaxKbps",
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("settings that take a whole reference:\n got %v\nwant %v", got, want)
