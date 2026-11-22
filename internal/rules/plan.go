@@ -150,6 +150,10 @@ type VideoEncode struct {
 	TenBit bool `json:"tenBit,omitempty"`
 	// Format is the video format made (S6: h264, av1, vp9); "" is HEVC, as every Plan before S6.
 	Format string `json:"format,omitempty"`
+	// Crop (F4): the person asked for the black bars to be cut. CropRect is what the worker measured for this
+	// file; nil means no crop (no bars, or the samples did not agree), and the arguments are as they were.
+	Crop     bool      `json:"crop,omitempty"`
+	CropRect *CropRect `json:"cropRect,omitempty"`
 	// Extra are the encoder's own arguments (S6: SVT-AV1's tune, VP9's constant quality and speed).
 	Extra []string `json:"extra,omitempty"`
 	// Hardware, HardwareFail and CPUCRF are the Convert step's graphics choices (W7). Hardware "" (auto) uses the
@@ -397,7 +401,8 @@ func (p Plan) FFmpegArgsWith(in, out, enc string) ([]string, bool) {
 // encoder, or when FFmpegArgsWith wouldn't use enc, ok is false and the arguments are FFmpegArgsWith's.
 func (p Plan) FFmpegArgsFullGPU(in, out, enc string) ([]string, bool) {
 	args, ok := p.FFmpegArgsWith(in, out, enc)
-	if prof, has := ProfileFor(enc); !ok || !has || !prof.FullPipeline() {
+	// F4: a crop is a processor filter, so the card cannot decode and scale the picture alone (no full pipeline).
+	if prof, has := ProfileFor(enc); !ok || !has || !prof.FullPipeline() || p.Video.CropRect != nil {
 		return args, false
 	}
 	return p.ffmpegArgs(in, out, enc, true), true
@@ -522,6 +527,9 @@ func (p Plan) ffmpegArgs(in, out, gpu string, full bool) []string {
 		}
 	}
 	var vf []Filter
+	if r := p.Video.CropRect; r != nil { // F4: the crop comes first, so the scale and the upload see the cut picture
+		vf = append(vf, Filter{Text: r.Filter()})
+	}
 	if p.Video.Height > 0 {
 		if full {
 			vf = append(vf, Filter{Text: profiles[fam].scale(p.Video.Height, ten10), Card: true})
@@ -764,6 +772,7 @@ func (p Plan) Expect(src media.Info, packets int64) Expect {
 			n++
 		}
 	}
+	e.Crop = p.Video.CropRect                          // F4: the picture comparison crops the original the same way
 	if f := p.Video.Format; f != "" && !p.Video.Copy { // S6: the encoded stream is in the chosen format
 		n := 0
 		for k := range e.Streams {
@@ -936,6 +945,7 @@ func (s Snapshot) Fingerprint() string {
 		p.Tracks[i].Title = ""
 		p.Tracks[i].Loudness = nil // what the measuring pass read (F5): a measurement, not a setting
 	}
+	p.Video.CropRect = nil // what the worker measured for this file, not a setting (F4)
 	// (SrtNames is resolved after RecordPlan, so it is not in the stored snapshot this fingerprints.)
 	b, _ := json.Marshal(struct {
 		Plan                          Plan
@@ -1016,6 +1026,7 @@ func compileSelectors(p Plan, s Selectors, info media.Info, langs []string, basi
 	// W7: the Convert step's graphics choices. The defaults are saved as absent, so a flow that never set them
 	// compiles as it did. A processor quality of its own applies where quality is the CRF (not a bitrate).
 	p.Video.Hardware, p.Video.HardwareFail = s.Hardware, s.HardwareFail
+	p.Video.Crop = s.RemoveBlackBars // F4: the worker measures the bars for a file that asks for it
 	if p.Video.Hardware == "auto" {
 		p.Video.Hardware = ""
 	}

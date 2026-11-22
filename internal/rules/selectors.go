@@ -28,6 +28,9 @@ type Selectors struct {
 	Hardware     string `json:"hardware,omitempty"`
 	HardwareFail string `json:"hardwareFail,omitempty"`
 	CPUQuality   int    `json:"cpuQuality,omitempty"`
+	// RemoveBlackBars (F4): cut the black bars the picture has, when a sample of the file agrees on them. Off
+	// by default, so a flow that never set it compiles as it did.
+	RemoveBlackBars bool `json:"removeBlackBars,omitempty"`
 	// Notices are coded notes shown on the flow until its next publish (migration 38: bitrate_meaning_changed).
 	Notices []Notice `json:"notices,omitempty"`
 	Audio   string   `json:"audio"` // AvailableAudio (S6: design E's six choices)
