@@ -169,31 +169,51 @@ func TestCardFailureStopsTheRun(t *testing.T) {
 	s.assertOriginalSafe()
 }
 
-// W9: a tell card anywhere the after-save path can reach counts as that connection told. One on a Didn't work
-// link suppresses the legacy global tell too, so the failing path tells the server once, not twice.
-func TestATellOnAnErrorLinkCountsAsTold(t *testing.T) {
-	s := newScenarioNamed(t, "Harrow.Lane.2019.Remux.mkv")
-	tm := cardsTemplate()
-	(*tm.Branches)[0].After = []rules.Card{{
-		NodeID: "say", Type: workflow.TypeNotify, Name: "Send a notification",
-		Config:  map[string]any{"target": "t1", "text": "saved"},
-		OnError: []rules.Card{{NodeID: "ms", Type: workflow.TypeMediaServer, Name: "Tell the media server", Config: map[string]any{}}},
-	}}
-	w := s.worker(Beside)
-	w.Template = func(jobs.Job) (rules.Template, int64, error) { return tm, 0, nil }
-	var told []string
-	w.OnDone = func(jobs.Job, string) { told = append(told, "global") }
-	w.Cards = func(jobs.Job, string) flow.Env {
-		return flow.Env{ // no Notify: the card doesn't work, so its Didn't work link runs
-			TellMediaServer: func(which string) (string, error) { told = append(told, "media:"+which); return "Told Plex", nil },
-		}
-	}
-	w.RunOne(context.Background())
-	if j := s.job(); j.Status != jobs.Done {
-		t.Fatalf("%s %q", j.Status, j.Error)
-	}
-	if got := strings.Join(told, " "); got != "media:all" {
-		t.Errorf("told %q; the one tell on the error link should be the only one", got)
+// W9: exactly one tell of each kind runs, on the path the run took. A tell card that ran — worked or failed —
+// is that connection's tell and the legacy global tell stays quiet for its kind; a tell card on a path the run
+// did not take told nothing, so the global tell still covers that kind. The card's tell asks for "movies" so
+// the recorded words say which tell it was: the card's, or the global "all".
+func TestOnlyTheTellThatRanReplacesTheGlobalTell(t *testing.T) {
+	ms := rules.Card{NodeID: "ms", Type: workflow.TypeMediaServer, Name: "Tell the media server", Config: map[string]any{"which": "movies"}}
+	tellOnError := rules.Card{NodeID: "say", Type: workflow.TypeNotify, Name: "Send a notification",
+		Config: map[string]any{"target": "t1", "text": "saved"}, OnError: []rules.Card{ms}}
+	for _, c := range []struct {
+		name  string
+		after []rules.Card
+		mute  bool // no notification target: the notify card doesn't work, so its Didn't work link runs
+		want  string
+	}{
+		{"a tell on the error link, and the step fails", []rules.Card{tellOnError}, true, "media:movies"},
+		{"the same workflow, and the step works", []rules.Card{tellOnError}, false, "media:all"},
+		{"a tell on a check's Yes, and No was taken", []rules.Card{{
+			NodeID: "ask", Type: workflow.TypeCheckResult,
+			Check: &rules.Question{Kind: "result", Test: "saved_at_least", Percent: 101}, // no file saves 101%
+			Yes:   []rules.Card{ms}}}, false, "media:all"},
+		{"a tell at the top level", []rules.Card{ms}, false, "media:movies"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			s := newScenarioNamed(t, "Harrow.Lane.2019.Remux.mkv")
+			tm := cardsTemplate()
+			(*tm.Branches)[0].After = c.after
+			w := s.worker(Beside)
+			w.Template = func(jobs.Job) (rules.Template, int64, error) { return tm, 0, nil }
+			var told []string
+			w.OnDone = func(jobs.Job, string) { told = append(told, "global") }
+			w.Cards = func(jobs.Job, string) flow.Env {
+				e := flow.Env{TellMediaServer: func(which string) (string, error) { told = append(told, "media:"+which); return "Told Plex", nil }}
+				if !c.mute {
+					e.Notify = func(target, kind, text string) (string, error) { return "Sent to phone", nil }
+				}
+				return e
+			}
+			w.RunOne(context.Background())
+			if j := s.job(); j.Status != jobs.Done {
+				t.Fatalf("%s %q", j.Status, j.Error)
+			}
+			if got := strings.Join(told, " "); got != c.want {
+				t.Errorf("told %q, want %q", got, c.want)
+			}
+		})
 	}
 }
 
@@ -252,7 +272,8 @@ func TestAfterCardsRunOnTheSavedFile(t *testing.T) {
 		t.Errorf("the media server card should be a warning step: %+v", steps)
 	}
 
-	// a media-server card alone: the downloaders are still told the global way, the media servers are not (per kind)
+	// a media-server card alone: the downloaders are still told the global way, the media servers are not (per
+	// kind). The card's tell comes first now, in the after run; the global tell of the other kind follows it.
 	s3 := newScenarioNamed(t, "Harrow.Lane.2019.Remux.mkv")
 	tm3 := cardsTemplate()
 	(*tm3.Branches)[0].After = []rules.Card{{NodeID: "ms", Type: workflow.TypeMediaServer, Name: "Tell the media server", Config: map[string]any{}}}
@@ -270,7 +291,7 @@ func TestAfterCardsRunOnTheSavedFile(t *testing.T) {
 		}
 	}
 	w3.RunOne(context.Background())
-	if j := s3.job(); j.Status != jobs.Done || strings.Join(told3, " ") != "downloader:all media:all" {
+	if j := s3.job(); j.Status != jobs.Done || strings.Join(told3, " ") != "media:all downloader:all" {
 		t.Errorf("per-kind tell: %s %v", j.Status, told3)
 	}
 	// without a tell card the global tell runs as it always has
