@@ -238,7 +238,7 @@ export function Jobs() {
 const text = (o: string | string[]) => Array.isArray(o) ? o.join("\n") : o;
 // map server step labels to person-facing names (workshop #217: encode, check)
 // The check step is named by what it checked (its found Check line); an older log without one is "Checking the new file".
-const stepLabel = (s: string, found?: string[], scored = false) => s === "check" ? checkLabel(found, scored) : ({ encode: "Converting video", imported: "Older log, not split into steps", replace: "Save the result", audio: "Audio", filter: "Filter" } as Record<string, string>)[s] ?? s;
+const stepLabel = (s: string, found?: string[], scored = false) => s === "check" ? checkLabel(found, scored) : ({ preflight: "Checking before converting", encode: "Converting video", imported: "Older log, not split into steps", replace: "Save the result", audio: "Audio", filter: "Filter" } as Record<string, string>)[s] ?? s;
 const checkLabel = (found?: string[], scored = false) => {
   const c = (found ?? []).find((l) => l.startsWith("Check: ")) ?? "";
   return /^Check: picture/.test(c) ? "Checking the picture" : /^Check: playback/.test(c) ? "Checking playback" : /^Check: damage/.test(c) ? "Checking the original for damage" : scored ? "Checking the picture" : "Checking the new file"; // a remote worker records the picture score with no Check: line
@@ -398,7 +398,7 @@ function StepLog({ d, id, worker, failedIdx, kept, hasResult }: { d: { loaded: b
   const vars = [...(l.variables ?? [])].sort((a, b) => a.name.localeCompare(b.name)), changed = vars.filter((v) => v.changedBy != null);
   // a line's step row: its section names the step (encode; output is the check; replace), and a check-stream line is the check's.
   // steps[] has no index, and the worker writes its own lines as step 0, so the section is the key. Lines with no row go in "Other lines".
-  const ROW: Record<string, string> = { encode: "encode", output: "check", replace: "replace" };
+  const ROW: Record<string, string> = { check: "preflight", encode: "encode", output: "check", replace: "replace" };
   const own = new Map<string, LogLine[]>(), other: LogLine[] = [];
   const secs2 = (l.sections ?? []).filter((x) => x.id !== "start" && x.id !== "summary"), sectioned = secs2.some((x) => x.lines.length > 0);
   // the start and summary sections' lines: shown in their own rows, and counted like any other line

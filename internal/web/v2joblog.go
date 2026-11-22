@@ -33,9 +33,11 @@ func v2JobLog(api *http.ServeMux, store *jobs.Store) {
 			serverError(w, err)
 			return
 		}
-		failed := -1
+		// the step the failure summary names; the pre-write check step is index -1, so "no summary" is its own
+		// answer rather than -1 (which would match it)
+		failed, hasFailed := 0, false
 		if f, err := store.FailureOf(id); err == nil && f != nil {
-			failed = f.Step
+			failed, hasFailed = f.Step, true
 		}
 		moves, _ := store.JobMoves(id) // the replace step's file actions, in order (design's moves[])
 		j, _ := store.Get(id)
@@ -57,7 +59,7 @@ func v2JobLog(api *http.ServeMux, store *jobs.Store) {
 			if set := stepSet(st.Name, table); len(set) > 0 {
 				m["set"] = set
 			}
-			if st.Index == failed { // the last 200 lines of the failed step: the output that says where it stopped
+			if hasFailed && st.Index == failed { // the last 200 lines of the failed step: the output that says where it stopped
 				var mine []string
 				for _, l := range lines {
 					if l.Step == st.Index && l.Stream != "app" && l.Stream != "info" { // ffmpeg's own output, not the worker's words

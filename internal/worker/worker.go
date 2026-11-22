@@ -1323,9 +1323,6 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		return "", keptSourceMissing("the original can't be read any more, so it was left as it is")
 	}
 	w.inputLines(job.ID, srcPath, before, src)
-	if err := w.preflight(srcPath, before.Size()); err != nil {
-		return "", err
-	}
 	// The original's picture count: the container's own count when it states one exactly (an mp4's nb_frames, an
 	// mkv's DURATION tag), which the probe has read already; only when it does not is every packet counted, which
 	// reads the whole file (P2: the encode reads it all again anyway, so that second read is only for files that
@@ -1634,15 +1631,8 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			name = outName
 		}
 		newName = FolderPathAs(dir, job.Library, job.Path, name)
-		if err := os.MkdirAll(filepath.Dir(newName), 0o755); err != nil {
-			return "", failed("The folder for new files can't be written to, so nothing was converted. Your original was not touched. Check the flow's folder, then press Retry.", err)
-		}
-		if err := removeLeftoverTemps(newName); err != nil { // an earlier run's, staged there (review-697332b P2)
-			return "", err
-		}
-		if err := w.preflight(newName, before.Size()); err != nil { // its own disk: the new file is made there (review 6cafc6f)
-			return "", err
-		}
+		// its folder is made, cleaned and checked, and its free space, by checkPlan below (L1): before anything is
+		// converted, and recorded as the job's check step
 	}
 	// W4b: the .srt files' names, resolved beside the new file (an empty template keeps today's names),
 	// and the job log's variables section, now that every field the run uses is filled in.
@@ -1676,6 +1666,14 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			return "", failed(srtTaken(name), fs.ErrExist)
 		}
 	}
+	// L1: every check that must pass before anything is converted, in one fixed order and as one run step: the
+	// encoder for this file and its bit depth, the free space beside the original, and (in Folder mode) the folder
+	// for new files, made and shown to be writable, with the room on its disk. Its step is recorded before the
+	// encode's, so the run log and the job page show it first: passed, or as the check that stopped the job.
+	enc, err := w.checkPlan(ctx, job, plan, src, srcPath, before.Size(), newName)
+	if err != nil {
+		return "", err
+	}
 	stageNear := job.Path
 	if OutputMode(plan.Output) == Folder {
 		stageNear = newName // staged in the folder for new files: the last step is a rename on its disk
@@ -1685,12 +1683,8 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		return "", err
 	}
 	tmp := stage.path
-	// The local worker encodes with its graphics encoder for this plan's format when it can do this plan; else,
-	// and for a remote worker, the processor (its own arguments are FFmpegArgs, unchanged).
-	gpu := ""
-	noSlots := false     // the card's slots are set to 0: no graphics encode may run here
-	full := false        // gpu runs the full GPU pipeline (decode and encode on the graphics card)
-	var gpuSlot *GPUSlot // the card's place this job holds while its graphics encode runs
+	gpu, full, chosenWhy := enc.gpu, enc.full, enc.why
+	gpuSlot := enc.slot  // the card's place this job holds while its graphics encode runs
 	var place *filePlace // the Files at once place this job holds while it converts on the processor
 	defer func() {
 		if gpuSlot != nil {
@@ -1699,69 +1693,8 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		place.Release()
 	}()
 	args := plan.FFmpegArgs(srcPath, tmp)
-	w.setPhase(secEncode) // the encoder choice and its notes belong to encode (log-spec section 4)
-	chosenWhy := ""
-	cpuOnly := plan.Video.Hardware == "cpu" && w.remote == nil // the Convert step says never the graphics card
-	if cpuOnly {
-		chosenWhy = "CPU only, as the Convert step says"
-	}
-	if w.remote == nil && w.Encoder != nil && !cpuOnly {
-		need10 := rules.NeedsTenBit(plan, &src)
-		if w.EncoderCandidates != nil && !plan.Video.Copy { // R5: what hardware is here, and each encoder considered
-			for _, line := range w.EncoderCandidates(plan.Video.Codec, need10, plan.Video.HDR) {
-				w.logLine(job.ID, secEncode, jobs.LevelInfo, line)
-			}
-		}
-		want, why := w.Encoder(plan.Video.Codec, need10, plan.Video.HDR)
-		note := rules.FallbackNote(plan.Video, why)
-		if want != "" && !plan.Video.Copy {
-			until, paused, err := w.Queue.EncoderPaused(w.ID)
-			switch {
-			case err == nil && paused && (plan.Video.Hardware == "only" || plan.Video.HardwareFail == "fail"):
-				// The Convert step does not let the processor take this file: the card is only temporarily out, so wait for it
-				w.jobf(job.ID, ": %s is paused until %s after three failures in a row; this step waits for it and never converts on the processor", want, until.Local().Format("15:04"))
-				return "", retryable(failed(HardwarePausedWords, errors.New(want+" is paused after three failures in a row")), retryPaused)
-			case err == nil && paused:
-				w.jobf(job.ID, ": %s is paused until %s after three failures in a row; using the processor", want, until.Local().Format("15:04"))
-				chosenWhy = want + " is paused after three failures in a row"
-			default:
-				if gargs, gfull, ok := w.graphicsArgs(ctx, job, plan, src, srcPath, tmp, want); ok {
-					// The card's slots come first (user bug 11-20): a job waits while they are all in
-					// use, so no two graphics jobs run on it at once beyond the limit. With none (the
-					// limit at 0), the processor does the encoding, as it does for any plan the card
-					// can't do.
-					slot, serr := w.takeGPUSlot(ctx, job)
-					if serr != nil { // stopped while it waited
-						return "", serr
-					}
-					if slot != nil {
-						gpuSlot = slot
-						args, full = gargs, gfull
-						gpu = want
-						chosenWhy = want + " passed its test on this computer and can do this file"
-					} else {
-						chosenWhy = want + " passed its test on this computer, but the graphics slots are set to 0"
-						noSlots = true
-					}
-				} else {
-					if plan.Video.Hardware == "only" { // never the processor here: the refusal below says what happens
-						w.jobf(job.ID, ": encoder %s can't do this file", want)
-					} else {
-						w.jobf(job.ID, ": encoder %s can't do this file; using the processor", want)
-					}
-					chosenWhy = want + " can't do this file"
-				}
-			}
-		} else if note != "" && !plan.Video.Copy {
-			w.jobf(job.ID, ": %s", note) // why the processor: the Chosen line below follows it, without repeating it
-		}
-	}
-	if gpu == "" && plan.Video.Hardware == "only" && !plan.Video.Copy && w.remote == nil { // refused before the Chosen line: it would name the processor
-		words := HardwareOnlyNoEncoderWords
-		if noSlots {
-			words = HardwareOnlySlotsWords
-		}
-		return "", failed(words, errors.New("no graphics encoder for this file"))
+	if gpu != "" { // the arguments for the graphics encoder the check chose, once the staged file has its path
+		args, _ = graphicsArgs(plan, srcPath, tmp, gpu, full)
 	}
 	if !plan.Video.Copy && w.remote == nil { // R5's last line: the encoder the real encode uses, why, and its settings
 		w.logLine(job.ID, secEncode, jobs.LevelInfo, ChosenLine(plan, gpu, args, chosenWhy))
@@ -3045,26 +2978,6 @@ func shortReason(reason string) string {
 		return string(r[:encoderReasonMax])
 	}
 	return reason
-}
-
-// graphicsArgs picks the pipeline for the graphics encoder want: the full GPU pipeline when its family decodes
-// the source here (full is true), else the processor decodes and the encoder encodes. ok is false when neither
-// can do this plan. The job log says which, and why the full pipeline is not used.
-func (w *Worker) graphicsArgs(ctx context.Context, job jobs.Job, plan rules.Plan, src media.Info, srcPath, tmp, want string) (args []string, full, ok bool) {
-	fam := rules.GraphicsFamily(want)
-	prof, _ := rules.ProfileFor(want) // a family without a full graphics pipeline is decoded by the processor
-	if v := src.Video(); v != nil && w.GraphicsDecodes != nil && prof.FullPipeline() {
-		if w.GraphicsDecodes(ctx, fam, v.Codec, rules.NeedsTenBit(plan, &src)) { // one rule for 10-bit, here and at the encoder
-			if args, full = plan.FFmpegArgsFullGPU(srcPath, tmp, want); full {
-				w.jobf(job.ID, ": decoding and encoding on the graphics card (full GPU pipeline)")
-				return args, true, true
-			}
-		} else {
-			w.jobf(job.ID, ": %s can't decode %s here; the processor decodes", fam, codecName(v.Codec))
-		}
-	}
-	args, ok = plan.FFmpegArgsWith(srcPath, tmp, want)
-	return args, false, ok
 }
 
 // gpuFailed says whether a graphics encode that ended with err steps down (attemptSteps), under the Convert step's
