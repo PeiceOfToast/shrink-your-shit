@@ -55,9 +55,9 @@ func (x slowEncode) Stream(ctx context.Context, onLine func(string), name string
 
 // V7d (orch-lead 15:02Z): a worker stays online through a long encode (here an encode 3x the offline wait),
 // since its calls go on beside its work: sampled every 100 ms across the encode it never reads offline for 5
-// reads in a row (one host pause about the offline window does not fail it), and from the encode's half point
-// a call moves last_seen on before the encode ends. Once it stops it shows offline, once (worker.updated
-// fires on the change, not on every check), and the summary counts it.
+// reads in a row (one host pause about the offline window does not fail it), and at the encode's half point it
+// reads busy with its load, while a call moves last_seen on before the encode ends. Once it stops it shows
+// offline, once (worker.updated fires on the change, not on every check), and the summary counts it.
 func TestWorkerStaysOnlineThroughALongEncode(t *testing.T) {
 	needFFmpeg(t)
 	srv, st, lib := server(t)
@@ -162,7 +162,13 @@ encode:
 			// heartbeats are among those calls). The snapshot is taken with the encode half done, and a call
 			// must move it on before the encode ends: that is what "it goes on beside the work" means here.
 			if !snapped {
+				// With the encode provably running (half done, the other half ahead) it reads busy, with its
+				// load from the beats beside the work. After the encode ends it is a race with the job's
+				// failure, so the check is here, not there.
 				seen, snapped = lastSeen(), true
+				if s, _, mem := worker(); s != "busy" || mem == nil {
+					t.Errorf("converting: %s, memory %v", s, mem)
+				}
 			} else if !moved && lastSeen() != seen {
 				moved = true
 			}
@@ -183,9 +189,6 @@ encode:
 	}
 	if !moved {
 		t.Fatalf("the worker's last_seen did not move on from its half point until the encode ended: %q", seen)
-	}
-	if s, _, mem := worker(); s != "busy" || mem == nil {
-		t.Errorf("converting: %s, memory %v", s, mem)
 	}
 	// A busy host's pause during the encode is not this test's claim: count the offline events from the stop on.
 	for len(events) > 0 {
