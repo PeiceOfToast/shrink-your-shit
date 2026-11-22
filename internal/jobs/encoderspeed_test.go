@@ -114,6 +114,40 @@ func TestEncoderSpeedsKeepTheNewestConversions(t *testing.T) {
 	}
 }
 
+// F7 review #638 §3: the scan behind a workers GET is bounded, so an old conversion falls out of the
+// figures once enough newer ones are there (it is still served, only not read).
+func TestEncoderSpeedsReadOnlyTheNewestEncodes(t *testing.T) {
+	old := encoderSpeedScan
+	encoderSpeedScan = 2
+	t.Cleanup(func() { encoderSpeedScan = old })
+	s := open(t)
+	l, err := s.AddLibrary("m", t.TempDir(), rules.SliderTemplate(3), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i <= 3; i++ {
+		id, err := s.Enqueue(Job{Library: "m", LibraryID: l.ID, Path: filepath.Join(l.Path, fmt.Sprintf("%d.mkv", i))})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Claim(LocalWorker); err != nil {
+			t.Fatal(err)
+		}
+		s.RecordRunStep(id, RunStep{Index: 0, Name: "encode", Encoder: "libx264", Speed: float64(i)})
+		if err := s.Complete(id, filepath.Join(l.Path, "out.mkv"), 1); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := s.EncoderSpeeds(50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// the newest two ran at 2x and 3x: the first conversion is past the scan
+	if len(got) != 1 || got[0].Samples != 2 || got[0].Speed != 2.5 {
+		t.Fatalf("speeds %+v, want the newest two (2.5x over 2 samples)", got)
+	}
+}
+
 // Migration 61 (F7): an install from before it keeps its run steps, which read no speed, and a new step
 // keeps the encoder, the realtime multiple and the frames per second.
 func TestMigration61AddsEncoderSpeedsKeepingOldSteps(t *testing.T) {

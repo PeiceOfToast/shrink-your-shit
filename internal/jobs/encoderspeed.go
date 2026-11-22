@@ -15,6 +15,12 @@ type EncoderSpeed struct {
 	Samples int
 }
 
+// encoderSpeedScan is how many of the newest finished encodes EncoderSpeeds reads. It runs on every
+// workers GET (the Overview and Jobs pages poll it every 15 s), so it must not walk the whole history;
+// a pair's own newest `each` conversions are far newer than this, so the medians do not change. A var,
+// so a test can set it low and see the bound.
+var encoderSpeedScan = 5000
+
 // EncoderSpeeds returns, per worker and encoder, the medians over that pair's last `each` finished
 // conversions: 'done' jobs whose encode step recorded a speed. The newest conversions are the ones kept
 // when a pair has more. A copy and a conversion nothing measured recorded no speed, so they are not here.
@@ -22,7 +28,7 @@ func (s *Store) EncoderSpeeds(each int) ([]EncoderSpeed, error) {
 	rows, err := s.db.Query(`SELECT j.worker, st.encoder, st.speed, st.fps
 FROM job_run_steps st JOIN jobs j ON j.id = st.job_id
 WHERE st.name = 'encode' AND st.speed > 0 AND j.status = ?
-ORDER BY j.id DESC`, Done) // newest first, so a pair past `each` keeps its newest conversions
+ORDER BY j.id DESC LIMIT ?`, Done, encoderSpeedScan) // newest first, so a pair past `each` keeps its newest conversions
 	if err != nil {
 		return nil, err
 	}

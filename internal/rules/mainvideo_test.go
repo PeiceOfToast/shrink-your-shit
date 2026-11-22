@@ -165,6 +165,21 @@ func TestGraphicsEncoderIn(t *testing.T) {
 	}
 }
 
+// KnownVideoEncoder: the names this program's own commands put after -c:v, and nothing else (F7 review #638:
+// a remote worker's report names an encoder, and the server keeps only names it would write itself).
+func TestKnownVideoEncoder(t *testing.T) {
+	for _, enc := range []string{"hevc_nvenc", "h264_qsv", "av1_vaapi", "hevc_amf", "libx265", "libx264", "libsvtav1", "libvpx-vp9"} {
+		if !KnownVideoEncoder(enc) {
+			t.Errorf("%q is a name this program writes, and was refused", enc)
+		}
+	}
+	for _, enc := range []string{"", "copy", "hevc", "x265", "libx265-injected", "HEVC_QSV", "hevc_qsv ", "totally-made-up", strings.Repeat("a", 300)} {
+		if KnownVideoEncoder(enc) {
+			t.Errorf("%q is not a name this program writes, and was taken", enc)
+		}
+	}
+}
+
 // OutputDepth: a card makes 10 bits only when its arguments ask for them; the processor makes the job's
 // depth on every target (NeedsTenBit: the plan's 10 bits, or a 10-bit source the plan left unset).
 func TestOutputDepth(t *testing.T) {

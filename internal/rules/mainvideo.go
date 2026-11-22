@@ -76,6 +76,21 @@ func GraphicsEncoderIn(args []string, index int) string {
 	return enc
 }
 
+// KnownVideoEncoder reports whether enc is a video encoder this program's own commands name: one of the
+// graphics encoders it builds arguments for, or a software one a format uses. A remote worker's report names
+// the encoder its command ran; the server keeps that name, so it takes only the names it would write itself.
+func KnownVideoEncoder(enc string) bool {
+	if graphicsEncoders[enc] {
+		return true
+	}
+	for _, f := range VideoFormats {
+		if f.Encoder == enc {
+			return true
+		}
+	}
+	return false
+}
+
 // VideoEncoderIn is the encoder an ffmpeg command names for the plan's main video: a graphics encoder, a
 // software one (libx265), or "copy"; "" when the command names none.
 func VideoEncoderIn(args []string, index int) string {

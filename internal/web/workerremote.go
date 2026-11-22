@@ -300,8 +300,8 @@ func remoteRoutes(mux *http.ServeMux, store *jobs.Store, gate func(http.Response
 			return
 		}
 		pl, _ := rj.Plan()
-		res := worker.RemoteResult{Stderr: in.Stderr, Command: in.Args, Code: in.Code,
-			Encoder: in.Encoder, Speed: in.Speed, FPS: in.FPS}
+		res := worker.RemoteResult{Stderr: in.Stderr, Command: in.Args, Code: in.Code}
+		res.Encoder, res.Speed, res.FPS = checkedSpeed(in.Encoder, in.Speed, in.FPS)
 		if in.Info != nil {
 			res.Info = *in.Info // read as a probe: unknown fields are dropped, not passed on to the API
 		}
@@ -346,6 +346,7 @@ func remoteRoutes(mux *http.ServeMux, store *jobs.Store, gate func(http.Response
 		// store the remote worker's steps and failure summary directly, so the log looks complete even
 		// before the server-side recordEncode runs (E part 3: the remote brings back its data). Only the
 		// attempt that holds the lease writes: a late report must not change the current attempt's record.
+		in.Steps = checkedSteps(in.Steps) // a step row's own figures go through the same check as the report's
 		for _, st := range in.Steps {
 			if err := store.RecordRunStep(j.ID, st); err != nil {
 				log.Printf("remote step store: %v", err)
@@ -367,6 +368,38 @@ func remoteRoutes(mux *http.ServeMux, store *jobs.Store, gate func(http.Response
 		}
 		writeJSONStatus(w, http.StatusAccepted, map[string]any{"accepted": true, "jobId": strconv.FormatInt(j.ID, 10)})
 	})
+}
+
+// maxReportedSpeed and maxReportedFPS bound what a paired worker's speed report may say (F7 review #638 §2):
+// the realtime multiple a conversion can reach (the job's length over the encode's seconds), and the average
+// frame rate an encode reports. The figures are the worker's own claim, and its encoder name goes on to the
+// workers list, so a report outside these is not stored.
+const (
+	maxReportedSpeed = 1000
+	maxReportedFPS   = 10000
+)
+
+// checkedSpeed is a remote report's speed figures as the server keeps them: its encoder only when that is a
+// name this program runs, its speed only in (0, maxReportedSpeed], and its frame rate only in (0,
+// maxReportedFPS] (0 when it is not). Bad values store no figure; they never fail the job.
+func checkedSpeed(enc string, speed, fps float64) (string, float64, float64) {
+	if !rules.KnownVideoEncoder(enc) || !(speed > 0 && speed <= maxReportedSpeed) { // also drops NaN and Inf
+		return "", 0, 0
+	}
+	if !(fps > 0 && fps <= maxReportedFPS) {
+		fps = 0
+	}
+	return enc, speed, fps
+}
+
+// checkedSteps is a report's run steps as the server keeps them: a step row's speed figures go through the
+// same check as the report's own, so a row cannot smuggle in a name or a number the server would not keep
+// (a worker can report any steps; the store takes their encoder and speed for the workers list).
+func checkedSteps(steps []jobs.RunStep) []jobs.RunStep {
+	for i := range steps {
+		steps[i].Encoder, steps[i].Speed, steps[i].FPS = checkedSpeed(steps[i].Encoder, steps[i].Speed, steps[i].FPS)
+	}
+	return steps
 }
 
 // sameUpload checks the file at name has size bytes (unless -1) and this SHA-256 (hex).
