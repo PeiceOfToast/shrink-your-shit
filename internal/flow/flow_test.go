@@ -563,6 +563,12 @@ func TestAfterErrorPathRunsInsteadOfTheRest(t *testing.T) {
 	if fmt.Sprint(sent) != "[t1 t3]" || len(notes) != 2 || len(warnings) != 1 {
 		t.Errorf("unwired: sent %v, notes %+v, warnings %v", sent, notes, warnings)
 	}
+	// A card that works does not take its error path, even when one is wired: the rest of the path runs.
+	sent = nil
+	notes, warnings = After([]rules.Card{note("a", "t2", note("e", "t4")), note("b", "t3")}, st, env)
+	if fmt.Sprint(sent) != "[t2 t3]" || len(notes) != 2 || len(warnings) != 0 {
+		t.Errorf("wired but working: sent %v, notes %+v, warnings %v", sent, notes, warnings)
+	}
 }
 
 // W9 pin: a failing card inside a Check's Yes branch runs its error path, skips the rest of that Yes branch,

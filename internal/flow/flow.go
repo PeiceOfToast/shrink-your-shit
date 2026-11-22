@@ -107,7 +107,8 @@ func Before(cards []rules.Card, st *State, env Env) ([]Note, error) {
 }
 
 // After runs the path's actions on the saved result, in order. One that doesn't work is a warning on the
-// job, never a failure: the save is done and stays done, and every card still runs (section 1.5).
+// job, never a failure: the save is done and stays done, and the later cards still run — unless its Didn't
+// work path is wired, which runs instead of the rest of this one (section 1.5).
 func After(cards []rules.Card, st *State, env Env) (notes []Note, warnings []string) {
 	if st.Vars == nil {
 		st.Vars = map[string]string{}
