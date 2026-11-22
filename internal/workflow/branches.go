@@ -140,13 +140,18 @@ func branchTemplate(d Doc) (rules.Template, []Issue) {
 						Message: "'" + nodeName(an) + "' can't follow 'Save the result'. After the save come only steps that act on the saved file."})
 					return nil, false
 				}
-				if an.Enabled {
-					cards = append(cards, rules.Card{NodeID: an.ID, Type: an.Type, Name: nodeName(an), Config: clone(an.Config)})
+				card := rules.Card{NodeID: an.ID, Type: an.Type, Name: nodeName(an), Config: clone(an.Config)}
+				if errNext := out[[2]string{an.ID, "error"}]; errNext != "" { // W9: what runs when this step doesn't work
+					errSeen := clone(onPath)
+					errSeen[id] = true
+					onErr, ok := afterChain(errNext, errSeen)
+					if !ok {
+						return nil, false
+					}
+					card.OnError = onErr
 				}
-				if out[[2]string{an.ID, "error"}] != "" {
-					issues = append(issues, Issue{Code: "not_runnable_yet", Severity: "error", NodeID: an.ID, Port: "error",
-						Message: "Steps after '" + portLabel(an, "error") + "' come in a later update. For now, remove that link: a step after the save that doesn't work leaves the job done, with a warning."})
-					return nil, false
+				if an.Enabled {
+					cards = append(cards, card)
 				}
 				id = out[[2]string{an.ID, "success"}]
 			}
