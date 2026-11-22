@@ -263,7 +263,7 @@ func (t Template) CompileWith(info media.Info, f Facts) (p Plan) {
 		// Basic (S4): the position's selectors, its audio choice, always MKV, replace only
 		s := DefaultSelectors(pos.Position)
 		s.Audio, s.FileType = BasicAudio(t.Params.Audio), "mkv"
-		return compileSelectors(p, s, info, SplitLanguages(t.Languages), true)
+		return runSteps(p, info, []Step{SelectorsStep{S: s, Langs: SplitLanguages(t.Languages), Basic: true}})
 	case KindSelectors:
 		if t.Selectors == nil {
 			p.Skip, p.SkipCode = "its library's setting has a choice this version cannot run", SkipSettingCannotRun
@@ -277,7 +277,7 @@ func (t Template) CompileWith(info media.Info, f Facts) (p Plan) {
 			}
 			return p
 		}
-		return compileSelectors(p, s, info, SplitLanguages(t.Languages), false)
+		return runSteps(p, info, []Step{SelectorsStep{S: s, Langs: SplitLanguages(t.Languages)}})
 	default:
 		p.Skip, p.SkipCode = fmt.Sprintf("flows of kind %q cannot run yet", t.Kind), SkipSettingCannotRun
 		return p
