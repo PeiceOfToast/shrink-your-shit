@@ -3,7 +3,9 @@
 package rules
 
 import (
+	"cmp"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -58,6 +60,23 @@ func withStepDecisions(p Plan, info media.Info) Plan {
 	if p.Kind != KindLegacy { // a legacy flow has one step: its video settings
 		p.Steps = append(p.Steps, audioDecision(p, info), subtitleDecision(p, info), fileTypeDecision(p, info))
 	}
+	return p
+}
+
+// orderSteps puts the step sections in the order the workflow runs its steps (W11). order is the labels
+// joined by commas (Template.StepOrder); "" keeps the sections as they are. A section it doesn't name goes last.
+func orderSteps(p Plan, order string) Plan {
+	if order == "" || len(p.Steps) < 2 {
+		return p
+	}
+	names := strings.Split(order, ",")
+	rank := func(s StepDecision) int {
+		if i := slices.Index(names, s.Label); i >= 0 {
+			return i
+		}
+		return len(names)
+	}
+	slices.SortStableFunc(p.Steps, func(a, b StepDecision) int { return cmp.Compare(rank(a), rank(b)) })
 	return p
 }
 

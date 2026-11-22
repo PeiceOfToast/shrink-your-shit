@@ -33,6 +33,9 @@ type Template struct {
 	// Branches are a workflow with checks' paths (V6a, branch.go); none for a straight workflow.
 	// A pointer, so Templates stay comparable with == (a straight one has none).
 	Branches *[]Branch `json:"branches,omitempty"`
+	// StepOrder (W11) is the job log's step sections in run order, when the workflow's steps are not in the
+	// Shrink videos order: the labels joined by commas. "" for that order, so a stored flow keeps its bytes.
+	StepOrder string `json:"stepOrder,omitempty"`
 	// Languages are the person's languages (Settings > General, ISO 639-2 codes, comma-separated) for
 	// "Keep only my languages": a program-wide setting, filled in when the flow is read, never stored in it.
 	Languages string `json:"-"`
