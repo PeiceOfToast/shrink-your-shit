@@ -130,6 +130,10 @@ func After(cards []rules.Card, st *State, env Env) (notes []Note, warnings []str
 			warnings = append(warnings, n.Words)
 		}
 		notes = append(notes, n)
+		if err != nil && len(c.OnError) > 0 { // W9: its Didn't work path runs instead of the rest of this one
+			ns, ws := After(c.OnError, st, env)
+			return append(notes, ns...), append(warnings, ws...)
+		}
 	}
 	return notes, warnings
 }
