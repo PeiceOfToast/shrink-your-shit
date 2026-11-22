@@ -20,6 +20,7 @@ import { listWorkers, noWorker } from "../workersApi";
 import { useData } from "../useData";
 import { afterHeader, queuedLine } from "../jobResult";
 import type { Failure, JobAction, JobDetail, JobItem, JobProgressEvent, JobState, Probe, Tab, Pin } from "../types/jobs";
+import { stepLabel } from "../stepLabel";
 
 const TABS: [Tab, string][] = [["waiting", "Waiting"], ["running", "Running"], ["completed", "Done"], ["skipped", "Skipped"], ["failed", "Failed"]];
 // G5: the Done filter for originals waiting in the trash. The words come from design (SCREENS V6); keep them here.
@@ -236,13 +237,6 @@ export function Jobs() {
 // E (SCREENS V6b 'Why it failed'): the sentence, where it stopped, the server's hint when it has one, and the last
 // ffmpeg error lines (at most five) behind a disclosure. Each part is left out when the server sends none.
 const text = (o: string | string[]) => Array.isArray(o) ? o.join("\n") : o;
-// map server step labels to person-facing names (workshop #217: encode, check)
-// The check step is named by what it checked (its found Check line); an older log without one is "Checking the new file".
-const stepLabel = (s: string, found?: string[], scored = false) => s === "check" ? checkLabel(found, scored) : ({ encode: "Converting video", imported: "Older log, not split into steps", replace: "Save the result", audio: "Audio", filter: "Filter" } as Record<string, string>)[s] ?? s;
-const checkLabel = (found?: string[], scored = false) => {
-  const c = (found ?? []).find((l) => l.startsWith("Check: ")) ?? "";
-  return /^Check: picture/.test(c) ? "Checking the picture" : /^Check: playback/.test(c) ? "Checking playback" : /^Check: damage/.test(c) ? "Checking the original for damage" : scored ? "Checking the picture" : "Checking the new file"; // a remote worker records the picture score with no Check: line
-};
 // SCREENS V6b: the sentence, the reason code small under it, where it stops (the step opens in the log), the hint as
 // 'What you can do' (left out when null), the last ffmpeg lines with Copy, and the buttons. --error left border.
 // SCREENS V6c What the check found: a check that kept the original or failed the job writes "Label: value" lines in its
