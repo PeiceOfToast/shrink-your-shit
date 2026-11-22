@@ -24,7 +24,7 @@ const (
 // does not stop it: the default steps down as before, and a failure the system (killed) or the disk (no space)
 // made keeps its own retry.
 func HardwareStopWords(v rules.VideoEncode, err error) string {
-	if killedBySignal(err) || errors.Is(err, syscall.ENOSPC) {
+	if KilledBySignal(err) || errors.Is(err, syscall.ENOSPC) {
 		return ""
 	}
 	switch {

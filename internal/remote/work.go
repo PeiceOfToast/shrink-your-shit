@@ -282,11 +282,15 @@ func (c *Client) workOne(ctx context.Context, cv Converter) (did bool, err error
 
 // failureReport is what a failed conversion sends: its words, ffmpeg's lines and the arguments that ran, and
 // the file-type refusal's code when ffmpeg says what the new file's type supports (slice 15), so the server
-// stores settings_rejected. A worker built before this sends the same report without a code.
+// stores settings_rejected. A converter the system stopped (out of memory, killed) carries the killed code, so
+// the server retries it as it does a local one: the report is words, so it cannot see the signal. A worker
+// built before this sends the same report without a code.
 func failureReport(err error, stderr string, ran []string) map[string]any {
 	body := map[string]any{"ok": false, "message": err.Error(), "stderr": stderr, "args": ran}
 	if _, ok := jobs.HeaderSupport(stderr); ok {
 		body["code"] = jobs.ReasonSettingsRejected
+	} else if worker.KilledBySignal(err) {
+		body["code"] = jobs.ReasonKilled
 	}
 	var hs *hardwareStop
 	if errors.As(err, &hs) { // the Convert step's choice stopped it: plain words, not retried (W7 round 2)

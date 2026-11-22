@@ -16,8 +16,9 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/worker"
 )
 
-// Slice 15, review #580: a remote worker's report may carry the file-type refusal's code, and only that
-// one. An older worker sends none ("" stays valid); anything else is refused before it reaches the job.
+// Slice 15, review #580: a remote worker's report may carry the file-type refusal's code or the killed one
+// (its converter was stopped by the system), and only those. An older worker sends none ("" stays valid);
+// anything else is refused before it reaches the job.
 func TestReportAcceptsOnlyKnownFailureCodes(t *testing.T) {
 	_, st, a, _ := libServer(t, true)
 	release := make(chan struct{})
@@ -83,5 +84,8 @@ func TestReportAcceptsOnlyKnownFailureCodes(t *testing.T) {
 	// It becomes a final failure in the worker's remote-result branch; the runner is held here, so that is not reached.
 	if c, b := report(lease("c.mkv"), jobs.ReasonHardwareChoice); c != http.StatusAccepted {
 		t.Errorf("hardware_choice: %d %s, want 202", c, b)
+	}
+	if c, b := report(lease("d.mkv"), jobs.ReasonKilled); c != http.StatusAccepted {
+		t.Errorf("killed: %d %s, want 202", c, b)
 	}
 }

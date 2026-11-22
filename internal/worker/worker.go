@@ -1979,7 +1979,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			}
 		}
 		ferr := failed("Converting stopped with an error. Your original was not touched. Press Retry; if it keeps failing, the file may be damaged.", fmt.Errorf("%w: %s", terr, firstLines(encErr, 3)))
-		if killedBySignal(terr) { // stopped by the system (out of memory...), not a problem of the file
+		if KilledBySignal(terr) || killedRemote(terr) { // stopped by the system (out of memory...), not a problem of the file
 			return "", retryable(ferr, retryGeneral)
 		}
 		return "", ferr

@@ -595,6 +595,7 @@ const (
 	ReasonRemoved          = "removed"           // the job was removed (its library went, or a clean-up)
 	ReasonWorkerLost       = "worker_lost"       // its worker stopped answering (its lease ran out, V7a)
 	ReasonSettingsRejected = "settings_rejected" // the new file's type can't hold a track as the workflow maps it (slice 15)
+	ReasonKilled           = "killed"            // a remote worker's converter was stopped by the system; the server retries it as it does a local one
 	ReasonShareDropped     = "share_dropped"     // its share stopped answering mid-convert: back in the queue, never failed (D4c)
 	ReasonShareOffline     = "share_offline"     // shown on a waiting file whose library is paused by its share (not stored)
 	ReasonCheckDiffers     = "check_differs"     // a refusal: the new file is not what the workflow asked for (the original stays)
@@ -609,5 +610,5 @@ const (
 // JobReasonCodes are the codes a job's own reason can have (besides the skip codes and user_stopped).
 var JobReasonCodes = []string{ReasonConvertFailed, ReasonDiskFull, ReasonCannotRead, ReasonCannotWrite, ReasonStalled,
 	ReasonLowDiskSpace, ReasonKeptOriginal, ReasonNewFileBigger, ReasonRetryLater, ReasonRemoved, UserStoppedReason, ReasonWorkerLost,
-	ReasonSettingsRejected, ReasonShareDropped,
+	ReasonSettingsRejected, ReasonKilled, ReasonShareDropped,
 	ReasonCheckDiffers, ReasonOutputDamaged, ReasonCheckNotRun, ReasonSourceDamaged, ReasonSourceMissing, ReasonWorkflowStopped, ReasonHardwareChoice}

@@ -67,6 +67,14 @@ func remoteFailureCode(err error) (string, bool) {
 	return "", false
 }
 
+// killedRemote says whether a remote worker's conversion failure carried the code for a system kill (its
+// ffmpeg was out of memory or killed): the server has the report's words, not the signal, so what it does
+// for its own killed converter is done for this code instead.
+func killedRemote(err error) bool {
+	code, ok := remoteFailureCode(err)
+	return ok && code == jobs.ReasonKilled
+}
+
 // RemoteJob joins the server's run of a leased job with the remote worker converting it.
 type RemoteJob struct {
 	Lease   string
