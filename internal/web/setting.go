@@ -473,7 +473,11 @@ func settingTemplate(w http.ResponseWriter, store *jobs.Store, body map[string]j
 				apiError(w, http.StatusBadRequest, se.Code, se.Message)
 				return rules.Template{}, false
 			}
-			return s.Template(), true
+			t := s.Template()
+			if cur.Kind == rules.KindSelectors && t.Kind == rules.KindSelectors {
+				t.StepOrder = cur.StepOrder // this page never adds, removes or reorders steps: a set order stays
+			}
+			return t, true
 		}
 	}
 	// neither Basic nor Standard: quality is not a number

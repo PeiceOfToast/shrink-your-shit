@@ -5,6 +5,7 @@ package web
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
@@ -71,5 +72,32 @@ func TestBranchesLibraryEchoIsRefusedNotSaved(t *testing.T) {
 	}
 	if f, _ := st.GetFlow(l.FlowID); f.Template.Kind != rules.KindBranches || (*f.Template.Branches)[0].End != "Left alone." {
 		t.Errorf("the branches flow changed: %+v", f.Template)
+	}
+}
+
+// The old page's one-setting save keeps a reordered flow's step order (#651 review P3-1).
+func TestV1SettingSaveKeepsAReorderedStepOrder(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	first, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	standard := `{"quality":3,"speed":"normal","format":"hevc","resolution":"keep","maxBitrate":"none","audio":"keep_all","subtitles":"keep_all","fileType":"keep","afterConverting":"replace","ignore":[],"skipHdr":true,"skipSmall":true,"minSavingPct":10,"order":"newest"}`
+	if code, body := post(t, srv, "PUT", fmt.Sprintf("/api/libraries/%d/setting", first.ID), standard); code != 200 {
+		t.Fatalf("standard: %d %s", code, body)
+	}
+	f, _ := st.GetFlow(first.FlowID)
+	tm := f.Template
+	if tm.Kind != rules.KindSelectors {
+		t.Fatalf("want a Standard flow, got %s", tm.Kind)
+	}
+	tm.StepOrder = "Audio,Subtitles,File type,Convert video"
+	l, _ := st.AddLibrary("Reordered", t.TempDir(), tm, true)
+	if code, body := post(t, srv, "PUT", fmt.Sprintf("/api/libraries/%d/setting", l.ID), strings.Replace(standard, `"speed":"normal"`, `"speed":"slower"`, 1)); code != 200 {
+		t.Fatalf("one setting: %d %s", code, body)
+	}
+	got, _ := st.GetFlow(l.FlowID)
+	if got.Template.Selectors == nil || got.Template.Selectors.Speed != "slower" {
+		t.Errorf("the one setting was not saved: %+v", got.Template.Selectors)
+	}
+	if got.Template.StepOrder != "Audio,Subtitles,File type,Convert video" {
+		t.Errorf("the step order was reset to %q", got.Template.StepOrder)
 	}
 }
