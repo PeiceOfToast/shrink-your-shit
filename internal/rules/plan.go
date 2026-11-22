@@ -84,6 +84,10 @@ type Plan struct {
 	// its source had ("default+forced", or "0" for none). ffmpeg does not carry the flags into WebM, so the
 	// default flag would land on whichever subtitle ffmpeg picks. Empty for every other container.
 	SubDispositions []string `json:"subDispositions,omitempty"`
+
+	// EvenLoudness: the converted audio tracks are measured and normalised (F5). Omitted when off, so existing
+	// Plans and fingerprints are unchanged.
+	EvenLoudness bool `json:"evenLoudness,omitempty"`
 }
 
 // Skip codes: why a file is not converted, as the Preview counts them (UI-API-CONTRACT.md, the open
@@ -677,6 +681,7 @@ func (p Plan) trackArgs() []string {
 		if o.added {
 			op := o.op
 			args = append(args, "-c:"+a, op.Encoder, "-b:"+a, strconv.Itoa(op.Kbps)+"k", "-ac:"+a, strconv.Itoa(op.Channels))
+			args = append(args, p.loudnessArgs(op, a)...)
 			if op.Title != "" && perTrack {
 				args = append(args, "-metadata:s:"+a, "title="+op.Title)
 			}
@@ -689,6 +694,8 @@ func (p Plan) trackArgs() []string {
 				if op.Channels > 0 { // a downmix (S4's stereo AAC): never more channels than the track has
 					args = append(args, "-ac:"+a, strconv.Itoa(op.Channels))
 				}
+				// F5: only a track the worker measured gets a loudness filter
+				args = append(args, p.loudnessArgs(op, a)...)
 				if op.Title != "" && perTrack { // over the source's title, which ffmpeg copies with the track
 					args = append(args, "-metadata:s:"+a, "title="+op.Title)
 				}
@@ -927,6 +934,7 @@ func (s Snapshot) Fingerprint() string {
 	p.Tracks = append([]TrackOp(nil), p.Tracks...) // a copy, so the track titles leave the fingerprint and the plan keeps them
 	for i := range p.Tracks {
 		p.Tracks[i].Title = ""
+		p.Tracks[i].Loudness = nil // what the measuring pass read (F5): a measurement, not a setting
 	}
 	// (SrtNames is resolved after RecordPlan, so it is not in the stored snapshot this fingerprints.)
 	b, _ := json.Marshal(struct {
@@ -953,6 +961,7 @@ func compileSelectors(p Plan, s Selectors, info media.Info, langs []string, basi
 	pos, _ := SliderAt(s.Quality)
 	v := info.Video()
 	p.Output, p.MinSSIM, p.KeepIfBigger = s.AfterConverting, pos.MinSSIM, s.KeepIfBigger
+	p.EvenLoudness = s.EvenLoudness
 	p.OutputName, p.SrtName, p.TrackTitle = s.OutputName, s.SrtName, s.TrackTitle
 	if s.AfterConverting == "folder" {
 		p.OutputDir, p.FolderMode = s.OutputDir, s.FolderMode

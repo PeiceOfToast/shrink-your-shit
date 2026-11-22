@@ -56,6 +56,10 @@ type Selectors struct {
 	// Notes are sentences about this flow shown once (S6: "Audio choices changed in this update…", from
 	// migration 19); a save makes a new template without them (contract 23:33Z).
 	Notes []string `json:"notes,omitempty"`
+
+	// EvenLoudness (F5, "Even out loudness"): the converted audio tracks are normalised to one target, LoudnessI
+	// LUFS. Off by default; a copied track is never touched, so it never forces a conversion by itself.
+	EvenLoudness bool `json:"evenLoudness,omitempty"`
 }
 
 // What this version can save and run (UI-API-CONTRACT.md addendum 13): the UI shows the rest disabled.
