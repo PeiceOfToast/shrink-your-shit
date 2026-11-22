@@ -474,6 +474,10 @@ func settingTemplate(w http.ResponseWriter, store *jobs.Store, body map[string]j
 				apiError(w, http.StatusBadRequest, se.Code, se.Message)
 				return rules.Template{}, false
 			}
+			if changedEcho(body, cur.Selectors) { // this page cannot set these: a changed value is refused, not dropped
+				apiError(w, http.StatusConflict, "edit_in_new_ui", "Keep rate control, hardware and keep-if-bigger in the new workflow editor. Nothing was changed.")
+				return rules.Template{}, false
+			}
 			t := s.Template()
 			if cur.Kind == rules.KindSelectors && t.Kind == rules.KindSelectors {
 				t.StepOrder = cur.StepOrder // this page never adds, removes or reorders steps: a set order stays
@@ -618,4 +622,32 @@ func notEditableHere(t rules.Template) (code, message string) {
 		return "flow_read_only", readOnlyHere
 	}
 	return "", ""
+}
+
+// changedEcho reports whether a body changes one of the echoed fields this page cannot set. An echo of the stored value is fine.
+func changedEcho(body map[string]json.RawMessage, s *rules.Selectors) bool {
+	var cur rules.Selectors
+	if s != nil {
+		cur = *s
+	}
+	for k, v := range body {
+		var same bool
+		switch strings.ToLower(k) {
+		case "ratecontrol":
+			var x string
+			same = json.Unmarshal(v, &x) == nil && x == cur.RateControl
+		case "hardware":
+			var x string
+			same = json.Unmarshal(v, &x) == nil && x == cur.Hardware
+		case "keepifbigger":
+			var x bool
+			same = json.Unmarshal(v, &x) == nil && x == cur.KeepIfBigger
+		default:
+			continue
+		}
+		if !same {
+			return true
+		}
+	}
+	return false
 }

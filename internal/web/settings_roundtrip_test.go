@@ -130,3 +130,27 @@ func TestV1SettingSaveKeepsTheFieldsItEchoes(t *testing.T) {
 		t.Errorf("echoed fields were not kept: rateControl=%q hardware=%q keepIfBigger=%v", s.RateControl, s.Hardware, s.KeepIfBigger)
 	}
 }
+
+// This page cannot set rateControl, hardware or keepIfBigger: a changed value is refused with 409 and nothing is written.
+func TestV1SettingRefusesAChangedEchoedField(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	first, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	standard := `{"quality":3,"speed":"normal","format":"hevc","resolution":"keep","maxBitrate":"none","audio":"keep_all","subtitles":"keep_all","fileType":"keep","afterConverting":"replace","ignore":[],"skipHdr":true,"skipSmall":true,"minSavingPct":10,"order":"newest"}`
+	if code, body := post(t, srv, "PUT", fmt.Sprintf("/api/libraries/%d/setting", first.ID), standard); code != 200 {
+		t.Fatalf("standard: %d %s", code, body)
+	}
+	f, _ := st.GetFlow(first.FlowID)
+	tm := f.Template
+	tm.Selectors.RateControl = "level"
+	l, _ := st.AddLibrary("Changed", t.TempDir(), tm, true)
+	body := strings.Replace(standard, `"speed":"normal"`, `"speed":"slower"`, 1)
+	body = strings.TrimSuffix(body, "}") + `,"rateControl":"quality"}`
+	code, out := post(t, srv, "PUT", fmt.Sprintf("/api/libraries/%d/setting", l.ID), body)
+	if code != 409 || !strings.Contains(out, "edit_in_new_ui") {
+		t.Fatalf("changed rateControl: want 409 edit_in_new_ui, got %d %s", code, out)
+	}
+	got, _ := st.GetFlow(l.FlowID)
+	if s := got.Template.Selectors; s == nil || s.RateControl != "level" || s.Speed != "normal" {
+		t.Errorf("a refused save changed the template: %+v", s)
+	}
+}
