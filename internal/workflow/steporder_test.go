@@ -125,3 +125,81 @@ func labels(p rules.Plan) []string {
 	}
 	return out
 }
+
+// The shortcut that keeps a saved template as it is compares the step order too: a saved audio-first
+// template, passed as current with the default chain, comes back in the default order.
+func TestSavedReorderDoesNotSurviveTheDefaultChain(t *testing.T) {
+	saved, issues := ToTemplate(reordered(t, chainAudioFirst...), rules.Template{})
+	if len(issues) > 0 || saved.StepOrder == "" {
+		t.Fatalf("setup: issues %+v, stepOrder %q", issues, saved.StepOrder)
+	}
+	tm, issues := ToTemplate(reordered(t, chainDefault...), saved)
+	if len(issues) > 0 || tm.StepOrder != "" {
+		t.Errorf("default chain over a saved reorder: issues %+v, stepOrder %q, want none and \"\"", issues, tm.StepOrder)
+	}
+}
+
+// A reordered flow with a step's own failure choice is a check-shaped flow: its paths carry the order too,
+// so the job log follows the workflow.
+func TestReorderedBranchPathKeepsItsOrder(t *testing.T) {
+	d := reordered(t, chainAudioFirst...)
+	for i := range d.Nodes {
+		if d.Nodes[i].Type == TypeConvert {
+			d.Nodes[i].OnError = &ErrorPolicy{Action: "retry", Max: 2, BackoffSeconds: 30, Then: "skip"}
+		}
+	}
+	tm, issues := ToTemplate(d, rules.Template{})
+	if len(issues) > 0 || tm.Kind != rules.KindBranches || tm.Branches == nil || len(*tm.Branches) == 0 {
+		t.Fatalf("issues %+v, template %+v", issues, tm)
+	}
+	const want = "Audio,Subtitles,File type,Convert video"
+	found := false
+	for _, b := range *tm.Branches {
+		if b.Then == nil {
+			continue
+		}
+		found = true
+		if b.Then.StepOrder != want {
+			t.Errorf("branch %v: stepOrder %q, want %q", b.Path, b.Then.StepOrder, want)
+		}
+	}
+	if !found {
+		t.Fatal("no branch converts: the probe is not testing the path")
+	}
+	p := tm.Compile(video(1920, 1080))
+	if got := strings.Join(labels(p), ","); got != want {
+		t.Errorf("the job log's sections %q, want the workflow's order %q (skip %q)", got, want, p.Skip)
+	}
+}
+
+// A check's yes path reordered: the job log of the 4K file follows the path's order.
+func TestReorderedCheckPathCompilesInItsOrder(t *testing.T) {
+	d, check := branchDoc(nil)
+	byType := map[string]Node{}
+	for _, n := range d.Nodes[2:] {
+		byType[n.Type] = n
+	}
+	var order []Node
+	for _, ty := range chainAudioFirst[1:] {
+		order = append(order, byType[ty])
+	}
+	d.Nodes = append([]Node{d.Nodes[0], check}, order...)
+	d.Edges = []Edge{{ID: NewID(), From: d.Nodes[0].ID, FromPort: "success", To: check.ID, ToPort: "in"},
+		{ID: NewID(), From: check.ID, FromPort: "match", To: order[0].ID, ToPort: "in"}}
+	end := Node{ID: NewID(), Type: TypeEnd, TypeVersion: 1, Enabled: true, Config: map[string]any{"reason": "Not 4K: left for later."}}
+	d.Nodes = append(d.Nodes, end)
+	d.Edges = append(d.Edges, chainEdges(order)...)
+	d.Edges = append(d.Edges, Edge{ID: NewID(), From: check.ID, FromPort: "else", To: end.ID, ToPort: "in"})
+	if r := Validate(d); r.Errors() {
+		t.Fatalf("%+v", r.Issues)
+	}
+	tm, issues := ToTemplate(d, rules.Template{})
+	if len(issues) > 0 || tm.Kind != rules.KindBranches {
+		t.Fatalf("issues %+v, kind %s", issues, tm.Kind)
+	}
+	p := tm.Compile(video(3840, 2160))
+	const want = "Check the file,Audio,Subtitles,File type,Convert video"
+	if p.Skip != "" || strings.Join(labels(p), ",") != want {
+		t.Errorf("the 4K file's sections %v (skip %q), want %q", labels(p), p.Skip, want)
+	}
+}
