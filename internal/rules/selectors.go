@@ -23,6 +23,11 @@ type Selectors struct {
 	// "" or "quality" is CRF alone. The *_legacy values are flows saved before item A, compiled as they were.
 	RateControl string `json:"rateControl,omitempty"`
 	VBRMaxKbps  int    `json:"vbrMaxKbps,omitempty"` // vbr: the person's own limit (kbps)
+	// Hardware, HardwareFail and CPUQuality are the Convert step's graphics choices (W7): auto | only | cpu, next |
+	// fail, and the processor's own slider position (0 = the same as Quality). "" is today's behaviour.
+	Hardware     string `json:"hardware,omitempty"`
+	HardwareFail string `json:"hardwareFail,omitempty"`
+	CPUQuality   int    `json:"cpuQuality,omitempty"`
 	// Notices are coded notes shown on the flow until its next publish (migration 38: bitrate_meaning_changed).
 	Notices []Notice `json:"notices,omitempty"`
 	Audio   string   `json:"audio"` // AvailableAudio (S6: design E's six choices)
@@ -140,6 +145,15 @@ func (s Selectors) Validate() error {
 	case "quality_legacy", "vbr_legacy": // a flow saved before item A (migration 38) runs as it was
 	default:
 		return invalid("rateControl", s.RateControl)
+	}
+	if !contains([]string{"", "auto", "only", "cpu"}, s.Hardware) {
+		return invalid("hardware", s.Hardware)
+	}
+	if !contains([]string{"", "next", "fail"}, s.HardwareFail) {
+		return invalid("hardwareFail", s.HardwareFail)
+	}
+	if _, ok := SliderAt(s.CPUQuality); s.CPUQuality != 0 && !ok {
+		return &SelectorError{"invalid", "CPU quality must be 0 (the same as Quality) or a slider position from 1 to 5. Nothing was changed."}
 	}
 	switch {
 	case !contains(allAudio, s.Audio):

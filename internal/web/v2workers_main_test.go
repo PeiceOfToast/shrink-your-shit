@@ -142,7 +142,7 @@ func TestLocalEncoderForSaysWhyTheProcessorBeforeTheTest(t *testing.T) {
 	}
 	t.Cleanup(func() { st.Close() })
 	enc, note := LocalEncoderFor(st, chk)("libx265", false, nil)
-	if enc != "" || note != "the encoder test here has not finished yet; using the processor" {
+	if enc != "" || note != "the encoder test here has not finished yet" {
 		t.Errorf("enc %q, note %q", enc, note)
 	}
 }
@@ -154,7 +154,7 @@ func TestLocalEncoderForLogsAFormatThatDidNotPass(t *testing.T) {
 	st, srv := localWorkerServer(t, chk)
 	enc := func(codec string) (string, string) { return LocalEncoderFor(st, chk)(codec, false, nil) }
 
-	if e, note := enc("libx264"); e != "" || note != "encoder h264_qsv didn't pass its test here; using the processor" {
+	if e, note := enc("libx264"); e != "" || note != "encoder h264_qsv didn't pass its test here" {
 		t.Errorf("H.264 plan, h264_qsv failed: enc %q, note %q", e, note)
 	}
 	if e, note := enc("libx265"); e != "hevc_qsv" || note != "" {

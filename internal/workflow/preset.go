@@ -213,6 +213,14 @@ func selectorsOf(order []Node, leaveFile bool) (rules.Selectors, []Issue) {
 	s.Quality = intOf(cv, "quality", s.Quality)
 	s.Format, s.Resolution = strOf(cv, "format", s.Format), strOf(cv, "resolution", s.Resolution)
 	s.MaxBitrate, s.Speed = strOf(cv, "maxBitrate", s.MaxBitrate), strOf(cv, "speed", s.Speed)
+	s.Hardware, s.HardwareFail = strOf(cv, "hardware", ""), strOf(cv, "hardwareFail", "") // W7: "" is the default
+	s.CPUQuality = intOf(cv, "cpuQuality", 0)
+	if s.Hardware == "auto" { // the defaults read back as absent, as the plan has them
+		s.Hardware = ""
+	}
+	if s.HardwareFail == "next" {
+		s.HardwareFail = ""
+	}
 	s.RateControl = strOf(cv, "rateControl", "") // item A; the *_legacy values keep a saved flow's files
 	if s.RateControl == "quality" {
 		s.RateControl = "" // the default is saved as absent, so an unchanged flow keeps its template
@@ -424,6 +432,15 @@ func hasOnError(d Doc) bool {
 // convertConfig is the Convert video step's config for s; the rate control keys only when it is not the default.
 func convertConfig(s rules.Selectors) map[string]any {
 	c := map[string]any{"quality": s.Quality, "format": s.Format, "resolution": s.Resolution, "maxBitrate": s.MaxBitrate, "speed": s.Speed}
+	if s.Hardware != "" && s.Hardware != "auto" { // W7: the graphics choices, only when not the default
+		c["hardware"] = s.Hardware
+	}
+	if s.HardwareFail != "" && s.HardwareFail != "next" {
+		c["hardwareFail"] = s.HardwareFail
+	}
+	if s.CPUQuality != 0 {
+		c["cpuQuality"] = s.CPUQuality
+	}
 	if s.RateControl != "" && s.RateControl != "quality" {
 		c["rateControl"] = s.RateControl
 		if s.RateControl == "vbr" || s.RateControl == "vbr_legacy" {

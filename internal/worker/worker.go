@@ -150,9 +150,9 @@ type Worker struct {
 	// Encoder is the graphics encoder the local worker uses for a video codec (ffmpeg's name, e.g. libx264), or ""
 	// for the processor (or nil: the processor). need10 is set when the new file is 10-bit (an HDR plan, or a
 	// 10-bit source, SDR or not), so that encoder's 10-bit test must have passed too. A plan it can't do, and a
-	// graphics encode that fails, use the processor. note, when set, is the job-log line for a processor the
-	// worker fell back to (not set for a processor by choice).
-	Encoder func(codec string, need10 bool, hdr *rules.HDR) (enc, note string)
+	// graphics encode that fails, use the processor. why, when set, is the reason the graphics encoder was not
+	// used (not set for a processor by choice); the worker words the job-log line from it (rules.FallbackNote).
+	Encoder func(codec string, need10 bool, hdr *rules.HDR) (enc, why string)
 	// GraphicsDecodes says whether a graphics family (qsv, vaapi) decodes codec at that bit depth here: the
 	// full GPU pipeline needs it (nil: the processor decodes). Set from the doctor's probe.
 	GraphicsDecodes func(ctx context.Context, fam, codec string, tenBit bool) bool
@@ -1688,6 +1688,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	// The local worker encodes with its graphics encoder for this plan's format when it can do this plan; else,
 	// and for a remote worker, the processor (its own arguments are FFmpegArgs, unchanged).
 	gpu := ""
+	noSlots := false     // the card's slots are set to 0: no graphics encode may run here
 	full := false        // gpu runs the full GPU pipeline (decode and encode on the graphics card)
 	var gpuSlot *GPUSlot // the card's place this job holds while its graphics encode runs
 	var place *filePlace // the Files at once place this job holds while it converts on the processor
@@ -1700,17 +1701,26 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	args := plan.FFmpegArgs(srcPath, tmp)
 	w.setPhase(secEncode) // the encoder choice and its notes belong to encode (log-spec section 4)
 	chosenWhy := ""
-	if w.remote == nil && w.Encoder != nil {
+	cpuOnly := plan.Video.Hardware == "cpu" && w.remote == nil // the Convert step says never the graphics card
+	if cpuOnly {
+		chosenWhy = "CPU only, as the Convert step says"
+	}
+	if w.remote == nil && w.Encoder != nil && !cpuOnly {
 		need10 := rules.NeedsTenBit(plan, &src)
 		if w.EncoderCandidates != nil && !plan.Video.Copy { // R5: what hardware is here, and each encoder considered
 			for _, line := range w.EncoderCandidates(plan.Video.Codec, need10, plan.Video.HDR) {
 				w.logLine(job.ID, secEncode, jobs.LevelInfo, line)
 			}
 		}
-		want, note := w.Encoder(plan.Video.Codec, need10, plan.Video.HDR)
+		want, why := w.Encoder(plan.Video.Codec, need10, plan.Video.HDR)
+		note := rules.FallbackNote(plan.Video, why)
 		if want != "" && !plan.Video.Copy {
 			until, paused, err := w.Queue.EncoderPaused(w.ID)
 			switch {
+			case err == nil && paused && (plan.Video.Hardware == "only" || plan.Video.HardwareFail == "fail"):
+				// The Convert step does not let the processor take this file: the card is only temporarily out, so wait for it
+				w.jobf(job.ID, ": %s is paused until %s after three failures in a row; this step waits for it and never converts on the processor", want, until.Local().Format("15:04"))
+				return "", retryable(failed(HardwarePausedWords, errors.New(want+" is paused after three failures in a row")), retryPaused)
 			case err == nil && paused:
 				w.jobf(job.ID, ": %s is paused until %s after three failures in a row; using the processor", want, until.Local().Format("15:04"))
 				chosenWhy = want + " is paused after three failures in a row"
@@ -1731,15 +1741,27 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 						chosenWhy = want + " passed its test on this computer and can do this file"
 					} else {
 						chosenWhy = want + " passed its test on this computer, but the graphics slots are set to 0"
+						noSlots = true
 					}
 				} else {
-					w.jobf(job.ID, ": encoder %s can't do this file; using the processor", want)
+					if plan.Video.Hardware == "only" { // never the processor here: the refusal below says what happens
+						w.jobf(job.ID, ": encoder %s can't do this file", want)
+					} else {
+						w.jobf(job.ID, ": encoder %s can't do this file; using the processor", want)
+					}
 					chosenWhy = want + " can't do this file"
 				}
 			}
 		} else if note != "" && !plan.Video.Copy {
 			w.jobf(job.ID, ": %s", note) // why the processor: the Chosen line below follows it, without repeating it
 		}
+	}
+	if gpu == "" && plan.Video.Hardware == "only" && !plan.Video.Copy && w.remote == nil { // refused before the Chosen line: it would name the processor
+		words := HardwareOnlyNoEncoderWords
+		if noSlots {
+			words = HardwareOnlySlotsWords
+		}
+		return "", failed(words, errors.New("no graphics encoder for this file"))
 	}
 	if !plan.Video.Copy && w.remote == nil { // R5's last line: the encoder the real encode uses, why, and its settings
 		w.logLine(job.ID, secEncode, jobs.LevelInfo, ChosenLine(plan, gpu, args, chosenWhy))
@@ -1935,6 +1957,9 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		if errors.Is(terr, syscall.ENOSPC) || strings.Contains(encErr+terr.Error(), "No space left on device") {
 			return "", retryable(failed(diskFull, terr), retrySpace)
 		}
+		if rc, ok := remoteFailureCode(terr); ok && rc == jobs.ReasonHardwareChoice { // a remote worker's choice stopped it: its words, not retried
+			return "", failedWithCode(rc, terr.Error(), terr)
+		}
 		if words := headerWords(encErr); words != "" { // the new file's type can't hold a track: not damage
 			// Slice 15: when ffmpeg also says what the type supports, the workflow's settings are the
 			// problem — settings_rejected, which never falls back or counts against the encoder. A
@@ -1947,6 +1972,11 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 				code = jobs.ReasonSettingsRejected
 			}
 			return "", failedWithCode(code, words, fmt.Errorf("%w: %s", terr, firstLines(encErr, 3)))
+		}
+		if gpu != "" && !fell { // the Convert step does not allow the processor here: the failure stands, plain words, not retried
+			if words := HardwareStopWords(plan.Video, terr); words != "" {
+				return "", failed(words, fmt.Errorf("%w: %s", terr, firstLines(encErr, 3)))
+			}
 		}
 		ferr := failed("Converting stopped with an error. Your original was not touched. Press Retry; if it keeps failing, the file may be damaged.", fmt.Errorf("%w: %s", terr, firstLines(encErr, 3)))
 		if KilledBySignal(terr) || killedRemote(terr) { // stopped by the system (out of memory...), not a problem of the file
@@ -3037,9 +3067,10 @@ func (w *Worker) graphicsArgs(ctx context.Context, job jobs.Job, plan rules.Plan
 	return args, false, ok
 }
 
-// gpuFailed says whether a graphics encode that ended with err steps down (attemptSteps).
-func (w *Worker) gpuFailed(ctx context.Context, err error, stderr string, full bool) bool {
-	return attemptSteps(ctx, err, stderr, full, w.stalled)
+// gpuFailed says whether a graphics encode that ended with err steps down (attemptSteps), under the Convert step's
+// hardware choices.
+func (w *Worker) gpuFailed(ctx context.Context, err error, stderr string, full bool, hw hardwarePolicy) bool {
+	return attemptSteps(ctx, err, stderr, full, w.stalled, hw)
 }
 
 // stalled says the worker's stall stop ended the encode: a stop never steps down.

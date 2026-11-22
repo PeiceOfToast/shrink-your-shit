@@ -75,6 +75,10 @@ func TestMigrationKeepsBehaviour(t *testing.T) {
 		func(s *rules.Selectors) {
 			s.AfterConverting, s.Ignore, s.Subtitles = "beside", []string{"Extras"}, "keep_all"
 		},
+		// W7: the Convert step's graphics choices, saved and loaded both ways.
+		func(s *rules.Selectors) { s.Hardware, s.HardwareFail, s.CPUQuality = "only", "fail", 4 },
+		func(s *rules.Selectors) { s.Hardware, s.HardwareFail = "cpu", "" },
+		func(s *rules.Selectors) { s.Hardware, s.HardwareFail, s.CPUQuality = "", "fail", 0 }, // the default "auto"/"next" load as "" too
 	} {
 		s := rules.DefaultSelectors(3)
 		f(&s)

@@ -106,7 +106,7 @@ func TestFormatEncoderThatDidNotPassIsLogged(t *testing.T) {
 	s := newScenario(t)
 	w := s.worker(Replace)
 	w.Encoder = func(string, bool, *rules.HDR) (string, string) {
-		return "", "encoder h264_qsv didn't pass its test here; using the processor"
+		return "", "encoder h264_qsv didn't pass its test here"
 	}
 	if _, err := w.RunOne(context.Background()); err != nil {
 		t.Fatalf("RunOne: %v", err)
@@ -155,7 +155,7 @@ func TestGPUFailureOnlyRetriesAnEncoderError(t *testing.T) {
 	}
 	for _, c := range cases {
 		w.stopped = c.stop
-		if got := w.gpuFailed(c.ctx, c.err, c.stderr, c.full); got != c.want {
+		if got := w.gpuFailed(c.ctx, c.err, c.stderr, c.full, hardwarePolicy{}); got != c.want {
 			t.Errorf("%s: %v, want %v", c.name, got, c.want)
 		}
 	}

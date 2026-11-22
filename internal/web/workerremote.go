@@ -290,7 +290,7 @@ func remoteRoutes(mux *http.ServeMux, store *jobs.Store, gate func(http.Response
 			return
 		}
 		switch in.Code {
-		case "", jobs.ReasonSettingsRejected, jobs.ReasonKilled:
+		case "", jobs.ReasonSettingsRejected, jobs.ReasonKilled, jobs.ReasonHardwareChoice:
 		default:
 			apiError(w, http.StatusBadRequest, "invalid", "Unknown failure code.")
 			return

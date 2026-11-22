@@ -142,7 +142,7 @@ func TestGraphicsSlotsAtZeroUseTheProcessor(t *testing.T) {
 	if len(enc) != 1 || strings.Contains(enc[0], "hevc_nvenc") || !strings.Contains(enc[0], "libx265") {
 		t.Fatalf("encodes, want the processor alone:\n%s", strings.Join(enc, "\n"))
 	}
-	if n := logCount(t, s, "the graphics slots are set to 0, so the processor does the encoding"); n != 1 {
+	if n := logCount(t, s, "the graphics slots are set to 0, so no graphics encoder runs"); n != 1 {
 		t.Errorf("graphics-slots-0 line: %d, want 1", n)
 	}
 	if n := GPURunning(); n != 0 {

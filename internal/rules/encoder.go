@@ -48,6 +48,14 @@ func passedTenBit(caps []map[string]any) []string {
 // job log when the processor is used because of a test or a family; "" without one for the processor by
 // choice (main cpu, or no graphics encoder for the format).
 func EncoderFor(codec, main string, need10 bool, hdr *HDR, caps []map[string]any) (enc, note string) {
+	enc, why := EncoderWhy(codec, main, need10, hdr, caps)
+	return enc, UsingTheProcessor(why)
+}
+
+// EncoderWhy is EncoderFor without the processor clause: the reason the graphics encoder is not used, or ""
+// when it is used or the processor is chosen by main. Callers add the clause with FallbackNote, so a Convert
+// step that never uses the processor can leave it out.
+func EncoderWhy(codec, main string, need10 bool, hdr *HDR, caps []map[string]any) (enc, why string) {
 	if main == "" || main == "cpu" {
 		return "", ""
 	}
@@ -56,24 +64,41 @@ func EncoderFor(codec, main string, need10 bool, hdr *HDR, caps []map[string]any
 		return "", ""
 	}
 	if !slices.Contains(PassedGraphics(caps), want) {
-		return "", fmt.Sprintf("encoder %s didn't pass its test here; using the processor", want)
+		return "", fmt.Sprintf("encoder %s didn't pass its test here", want)
 	}
 	if hdr == nil && !need10 {
 		return want, ""
 	}
 	if !slices.Contains(passedTenBit(caps), want) {
 		if hdr != nil {
-			return "", fmt.Sprintf("HDR needs a 10-bit encoder: %s didn't pass its 10-bit test here; using the processor", want)
+			return "", fmt.Sprintf("HDR needs a 10-bit encoder: %s didn't pass its 10-bit test here", want)
 		}
 		// An SDR file can be 10-bit too (a 10-bit source kept at its depth): the same test decides it, so
 		// an 8-bit-only encoder is not used and then refused by the output check after a wasted encode.
-		return "", fmt.Sprintf("this file is 10-bit: %s didn't pass its 10-bit test here; using the processor", want)
+		return "", fmt.Sprintf("this file is 10-bit: %s didn't pass its 10-bit test here", want)
 	}
 	if hdr == nil {
 		return want, ""
 	}
 	if (hdr.MasterDisplay != "" || hdr.CLL != "") && !HDRCarrier(want) {
-		return "", fmt.Sprintf("HDR10 with mastering data: using the processor, %s isn't on the list of encoders proven to keep that data", want)
+		return "", fmt.Sprintf("HDR10 with mastering data: %s isn't on the list of encoders proven to keep that data", want)
 	}
 	return want, ""
+}
+
+// UsingTheProcessor is the job-log note for a fallback reason when the processor takes the file; "" stays "".
+func UsingTheProcessor(why string) string {
+	if why == "" {
+		return ""
+	}
+	return why + "; using the processor"
+}
+
+// FallbackNote is the job-log note for a fallback reason under the Convert step's hardware choice. Under only
+// the processor is never used, so the reason stands alone and never names it.
+func FallbackNote(v VideoEncode, why string) string {
+	if v.Hardware == "only" {
+		return why
+	}
+	return UsingTheProcessor(why)
 }
