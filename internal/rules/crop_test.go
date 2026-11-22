@@ -43,6 +43,22 @@ func TestAgreedCropFourPixelsApartStillAgrees(t *testing.T) {
 	}
 }
 
+// Every pair must be within the tolerance, not only each sample against the first: 804 and 796 are 8 px apart
+// even though each is 4 px from 800.
+func TestAgreedCropRejectsSamplesEightPxApart(t *testing.T) {
+	samples := []CropRect{{W: 1920, H: 800, X: 0, Y: 140}, {W: 1920, H: 804, X: 0, Y: 140}, {W: 1920, H: 796, X: 0, Y: 140}}
+	if got, ok := AgreedCrop(samples, 1920, 1080); ok {
+		t.Errorf("800, 804 and 796 spread 8 px and must reject the crop, got %+v", got)
+	}
+}
+
+func TestAgreedCropAcceptsSamplesWithinTolerancePairwise(t *testing.T) {
+	samples := []CropRect{{W: 1920, H: 800, X: 0, Y: 140}, {W: 1920, H: 804, X: 0, Y: 140}, {W: 1920, H: 802, X: 0, Y: 140}}
+	if _, ok := AgreedCrop(samples, 1920, 1080); !ok {
+		t.Error("800, 804 and 802 spread 4 px and must agree")
+	}
+}
+
 func TestAgreedCropOneSpotSixPxOffRejects(t *testing.T) {
 	samples := []CropRect{
 		{W: 1920, H: 800, X: 0, Y: 140},
@@ -81,7 +97,7 @@ func TestAgreedCropOffThePictureRejects(t *testing.T) {
 }
 
 func TestCropSpotsSpreadAcrossTheFile(t *testing.T) {
-	want := []float64{10, 30, 50, 70, 90}
+	want := []float64{5, 15, 25, 35, 45, 55, 65, 75, 85, 95}
 	got := CropSpots(100)
 	if len(got) != len(want) {
 		t.Fatalf("spots: got %v", got)

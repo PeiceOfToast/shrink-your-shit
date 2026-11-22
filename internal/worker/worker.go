@@ -1399,7 +1399,10 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		if w.remote != nil {
 			w.jobNote(job.ID, secEncode, jobs.LevelInfo, "(%s): the black bars were not removed: a remote worker cannot measure the picture yet", job.Path)
 		} else {
-			r, ok, words := w.detectCrop(ctx, src, srcPath)
+			r, ok, words, cerr := w.detectCrop(ctx, src, srcPath)
+			if cerr != nil {
+				return "", cerr // stopped while sampling: the job ends as a stop, no encode
+			}
 			if ok {
 				plan.Video.CropRect = &r
 			}

@@ -25,7 +25,10 @@ func TestRealCropRemovesLetterboxBars(t *testing.T) {
 
 	info := probe(t, src)
 	w := &Worker{Exec: media.OSExec{}, FFmpeg: "ffmpeg"}
-	r, ok, words := w.detectCrop(context.Background(), info, src)
+	r, ok, words, err := w.detectCrop(context.Background(), info, src)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !ok || r != (rules.CropRect{W: 1920, H: 800, X: 0, Y: 140}) {
 		t.Fatalf("detectCrop: got %+v ok %v (%s), want 1920x800 at 0,140", r, ok, words)
 	}
@@ -48,7 +51,7 @@ func TestRealCropSkipsAMidFileChangeOfShape(t *testing.T) {
 		"-map", "[v]", "-c:v", "libx264", "-preset", "ultrafast", src)
 
 	w := &Worker{Exec: media.OSExec{}, FFmpeg: "ffmpeg"}
-	if _, ok, words := w.detectCrop(context.Background(), probe(t, src), src); ok {
+	if _, ok, words, err := w.detectCrop(context.Background(), probe(t, src), src); err != nil || ok {
 		t.Fatalf("detectCrop cropped a file whose shape changes: %s", words)
 	}
 
