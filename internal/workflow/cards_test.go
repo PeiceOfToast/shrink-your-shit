@@ -123,3 +123,24 @@ func TestTodaysCardsKindsAndPhases(t *testing.T) {
 		t.Errorf("file states: convert %v save %v check %v", conv.FileOn, save.FileOn, check.FileOn)
 	}
 }
+
+// W9: a step's Didn't work and skipped ports never stage the file. They leave the original, except on a step
+// after the save, where the save is already done. A step type lifted later is checked here as well.
+func TestFailurePortsNeverStageTheFile(t *testing.T) {
+	for _, d := range Definitions() {
+		afterSave := d.RunsAs == RunsAction && len(d.Phase) == 1 && d.Phase[0] == PhaseAfter
+		for _, p := range []string{"error", "skipped"} {
+			st, ok := d.FileOn[p]
+			if !ok {
+				continue
+			}
+			want := FileOriginal
+			if afterSave {
+				want = FileSaved
+			}
+			if st != want {
+				t.Errorf("%s %s: file state %q, want %q", d.Type, p, st, want)
+			}
+		}
+	}
+}
