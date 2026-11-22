@@ -538,3 +538,29 @@ func TestBeforeSaveDecides(t *testing.T) {
 		t.Errorf("sizes from the values: %+v", v)
 	}
 }
+
+// W9: a failing after-save action with an error path runs that path instead of the rest of its own path; with
+// no error path (unwired) the failure is a warning and the rest runs, as before.
+func TestAfterErrorPathRunsInsteadOfTheRest(t *testing.T) {
+	var sent []string
+	env := Env{Notify: func(target, kind, text string) (string, error) {
+		sent = append(sent, target)
+		if target == "t1" {
+			return "", errors.New("the phone is off")
+		}
+		return "Sent", nil
+	}}
+	note := func(id, target string, onErr ...rules.Card) rules.Card {
+		return rules.Card{NodeID: id, Type: workflow.TypeNotify, Name: "Send a notification", Config: map[string]any{"target": target, "kind": "good", "text": "x"}, OnError: onErr}
+	}
+	st := &State{Vars: map[string]string{}}
+	notes, warnings := After([]rules.Card{note("a", "t1", note("e", "t2")), note("b", "t3")}, st, env)
+	if fmt.Sprint(sent) != "[t1 t2]" || len(notes) != 2 || !notes[0].Failed || len(warnings) != 1 {
+		t.Errorf("wired: sent %v, notes %+v, warnings %v", sent, notes, warnings)
+	}
+	sent = nil
+	notes, warnings = After([]rules.Card{note("a", "t1"), note("b", "t3")}, st, env)
+	if fmt.Sprint(sent) != "[t1 t3]" || len(notes) != 2 || len(warnings) != 1 {
+		t.Errorf("unwired: sent %v, notes %+v, warnings %v", sent, notes, warnings)
+	}
+}
