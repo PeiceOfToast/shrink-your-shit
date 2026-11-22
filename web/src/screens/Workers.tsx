@@ -177,7 +177,7 @@ function AddWorker({ workers, reload }: { workers: Worker[]; reload: () => void 
     setSaid(ok ? "Command copied." : "Select the command and copy it.");
   };
   return <>
-    <span className="addw"><button className="btn sm" type="button" aria-expanded={open} aria-controls={group} onClick={() => { if (open) return setOpen(false); setOpen(true); if (came || !p || gone) make(); }}><Icon id="i-plus" />Add a worker</button>
+    <span className="addw"><button className="btn sm primary" type="button" aria-expanded={open} aria-controls={group} onClick={() => { if (open) return setOpen(false); setOpen(true); if (came || !p || gone) make(); }}><Icon id="i-plus" />Add a worker</button>
       {said && <span className="muted sm" role="status">{said}</span>}</span>
     {open && <div className="swask addpanel" id={group} role="region" aria-label="Add a worker">
       <p className="sm">Easiest: run the install command on the other computer. It finds this server and asks to join here.</p>
