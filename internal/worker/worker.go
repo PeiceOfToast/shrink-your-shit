@@ -797,9 +797,32 @@ func (w *Worker) recordEncodeStart(id int64, args []string, started time.Time) {
 		Command: "ffmpeg " + strings.Join(args, " ")})
 }
 
+// encodeFigures is how fast the encode ran, for the remembered encoder speeds (F7): the encoder the command
+// names, the realtime multiple (the media's length over the encode's seconds) and the average frames per
+// second. Empty when nothing measured it: a copy, a failed encode, or an older remote worker's report.
+type encodeFigures struct {
+	encoder    string
+	speed, fps float64
+}
+
+// figuresOf is the local worker's own measurement: its encode's wall time and the frames ffmpeg reported.
+// A remote worker sends its own numbers instead: the server's clock includes the transfer.
+func (w *Worker) figuresOf(job jobs.Job, args []string, plan rules.Plan, started time.Time, frames int64, terr error) encodeFigures {
+	secs := w.now().Sub(started).Seconds()
+	if terr != nil || secs <= 0 || plan.Video.Copy || job.DurationSec <= 0 {
+		return encodeFigures{}
+	}
+	f := encodeFigures{encoder: rules.VideoEncoderIn(args, plan.Video.Index), speed: job.DurationSec / secs}
+	if frames > 0 {
+		f.fps = float64(frames) / secs
+	}
+	return f
+}
+
 // recordEncode keeps the encode step in the database: its command, how long it took, the ffmpeg lines it wrote
 // and, when it failed, the failure summary (the last error lines of ffmpeg, or the last lines if none report one).
-func (w *Worker) recordEncode(id int64, args []string, started time.Time, encErr string, terr error, probe string) {
+// figures is the encode's speed (F7), kept on the step for the per-worker and per-encoder medians.
+func (w *Worker) recordEncode(id int64, args []string, started time.Time, encErr string, terr error, probe string, figures encodeFigures) {
 	if w.Queue == nil {
 		return
 	}
@@ -819,7 +842,8 @@ func (w *Worker) recordEncode(id int64, args []string, started time.Time, encErr
 		outcome = "failed"
 	}
 	w.Queue.RecordRunStep(id, jobs.RunStep{Index: 0, Name: "encode", StartedAt: started.UTC().Format(time.RFC3339),
-		TookMs: w.now().Sub(started).Milliseconds(), Outcome: outcome, Command: "ffmpeg " + strings.Join(args, " "), Probe: probe, OutputLines: len(lines)})
+		TookMs: w.now().Sub(started).Milliseconds(), Outcome: outcome, Command: "ffmpeg " + strings.Join(args, " "), Probe: probe, OutputLines: len(lines),
+		Encoder: figures.encoder, Speed: figures.speed, FPS: figures.fps})
 	if terr == nil {
 		return
 	}
@@ -1844,7 +1868,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 					Decoder: decoderWords(src, false), Progress: media.Progress{ETASeconds: -1}})
 			},
 			Failed: func(r Rung, errText string, err error) {
-				w.recordEncode(job.ID, r.Args, encStart, errText, err, probeSummary(src))
+				w.recordEncode(job.ID, r.Args, encStart, errText, err, probeSummary(src), encodeFigures{})
 			},
 			Note:    func(text string) { w.jobf(job.ID, ": %s", text) },
 			Stopped: w.stalled,
@@ -1910,7 +1934,15 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			}
 		}
 	}
-	w.recordEncode(job.ID, args, encStart, encErr, terr, probeSummary(src))
+	figures := encodeFigures{}
+	if terr == nil {
+		if w.remote != nil {
+			figures = w.remote.figures()
+		} else {
+			figures = w.figuresOf(job, args, plan, encStart, decoded, terr)
+		}
+	}
+	w.recordEncode(job.ID, args, encStart, encErr, terr, probeSummary(src), figures)
 	// Moved or deleted while converting: ffmpeg's read errors then say nothing about the file, so it is
 	// neither damaged nor the encoder's fault. Checked before the errors are read as damage.
 	if ctx.Err() == nil && sourceGone(srcPath) {

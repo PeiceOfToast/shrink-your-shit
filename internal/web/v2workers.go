@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -655,6 +656,26 @@ func capabilities(t doctor.Tools, ok bool) []map[string]any {
 	return out
 }
 
+// encoderSpeedSamples is how many of a worker's and encoder's latest conversions a remembered speed is
+// the median of (F7): recent enough to follow a change, enough to smooth one slow file.
+const encoderSpeedSamples = 50
+
+// speedViews is the remembered encoder speeds for the workers API (F7): per worker and encoder, the median
+// realtime multiple and frames per second over its last conversions, and how many conversions that is.
+// fps is absent when no conversion said it (an older remote worker reports none).
+func speedViews(speeds []jobs.EncoderSpeed) []map[string]any {
+	out := make([]map[string]any, 0, len(speeds))
+	for _, s := range speeds {
+		v := map[string]any{"worker": s.Worker, "encoder": s.Encoder,
+			"speed": math.Round(s.Speed*100) / 100, "samples": s.Samples}
+		if s.FPS > 0 {
+			v["fps"] = math.Round(s.FPS*10) / 10
+		}
+		out = append(out, v)
+	}
+	return out
+}
+
 func v2Workers(api *http.ServeMux, v *workerView) {
 	found := func(w http.ResponseWriter, r *http.Request) bool {
 		if _, remote := v.remoteByID(r.PathValue("id")); !remote && r.PathValue("id") != jobs.LocalWorker {
@@ -677,7 +698,13 @@ func v2Workers(api *http.ServeMux, v *workerView) {
 			serverError(w, err)
 			return
 		}
-		writeJSON(w, map[string]any{"items": items, "total": len(items), "joinRequests": v.joinViews(time.Now())})
+		speeds, err := v.store.EncoderSpeeds(encoderSpeedSamples)
+		if err != nil {
+			serverError(w, err)
+			return
+		}
+		writeJSON(w, map[string]any{"items": items, "total": len(items), "joinRequests": v.joinViews(time.Now()),
+			"encoderSpeeds": speedViews(speeds)})
 	}
 	api.HandleFunc("GET /api/v2/workers", list)
 	api.HandleFunc("GET /api/v2/workers/{id}", func(w http.ResponseWriter, r *http.Request) {
