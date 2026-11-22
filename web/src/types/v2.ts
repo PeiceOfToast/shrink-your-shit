@@ -83,6 +83,9 @@ export interface Worker {
   primaryEncoder?: string; // 'cpu' or an encoder name (hevc_qsv…): the effective choice, CPU is the fallback
 }
 
+// F7: how fast one encoder has run on one worker. speed is the median realtime multiple (2 decimals); fps is absent when unknown.
+export interface EncoderSpeed { worker: ID; encoder: string; speed: number; samples: number; fps?: number }
+
 export interface Library {
   id: ID;
   name: string;

@@ -2,7 +2,7 @@
 // screens offer, really applied to that state. Every screen using it shows the Prototype banner. ?mock=fresh shows a
 // new install (no libraries yet) for review. When a contract endpoint lands, its function here becomes the fetch.
 import { useSyncExternalStore } from "react";
-import type { ActivityEvent, Capability, FoundServer, ID, JoinRequest, JoinState, RoleBody, Setup, Job, JobState, Library, PublishPreview, Settings, Summary, Template, Trash, ValidationIssue, Worker, Workflow, WorkflowDoc, WorkflowRevision } from "../types/v2";
+import type { ActivityEvent, Capability, EncoderSpeed, FoundServer, ID, JoinRequest, JoinState, RoleBody, Setup, Job, JobState, Library, PublishPreview, Settings, Summary, Template, Trash, ValidationIssue, Worker, Workflow, WorkflowDoc, WorkflowRevision } from "../types/v2";
 import type { FirstFiles, FolderReport, Issue, LibraryItem } from "../types/v1";
 import { branchedDoc, checkVariables, emptyDoc, legacyDoc, presetDoc, preview, revision, summary as stepSummary } from "./steps";
 
@@ -523,6 +523,12 @@ export function primaryProblem(id: ID, enc: string): string | null {
 const at = (min: number) => new Date(Date.now() + min * 60000).toISOString();
 const jr = (id: ID, name: string, address: string, os: string, hardware: string | null, ago: number, state: JoinRequest["state"] = "waiting", replacesWorker = false): JoinRequest =>
   ({ id, name, address, os, hardware, url: "http://" + address + ":8484", askedAt: at(-ago), expiresAt: at(10 - ago), state, replacesWorker });
+// F7 encoder speeds (GET /workers encoderSpeeds): "this" has two encoders (one without fps), "nas" has one, "laptop" has none.
+export const encoderSpeeds: EncoderSpeed[] = mockMode === "fresh" ? [] : [
+  { worker: "this", encoder: "hevc_qsv", speed: 3.25, samples: 42, fps: 118.4 },
+  { worker: "this", encoder: "libx265", speed: 0.61, samples: 1 },
+  { worker: "nas", encoder: "hevc_qsv", speed: 1.4, samples: 7 },
+];
 export const joins: JoinRequest[] = mockMode === "fresh" ? [] : [
   jr("jr3", "attic-pc", "192.168.1.60", "linux", "NVIDIA GeForce RTX 3060", 0.5),
   jr("jr2", "laptop", "192.168.1.44", "windows", null, 1, "waiting", true),
