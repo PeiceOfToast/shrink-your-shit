@@ -436,16 +436,49 @@ func TestAfterCardsCompile(t *testing.T) {
 	if tm5, is := ToTemplate(d5, rules.Template{}); len(is) > 0 || len((*tm5.Branches)[0].After) != 1 {
 		t.Errorf("compile of a late note: %+v %+v", is, tm5.Branches)
 	}
-	// an after card's error port leads nowhere yet
+	// W9: an after card's error port is its own path: the card carries it as OnError
 	d4, _ := runDoc()
 	save4 := d4.Nodes[len(d4.Nodes)-1]
 	s4, n4 := node(TypeChecksum, "", map[string]any{}), node(TypeNotify, "", map[string]any{"text": "x"})
 	d4.Nodes = append(d4.Nodes, s4, n4)
 	d4.Edges = append(d4.Edges, link(save4.ID, "success", s4.ID), link(s4.ID, "error", n4.ID))
-	if _, is := ToTemplate(d4, rules.Template{}); !hasIssue(is, "not_runnable_yet", s4.ID) {
-		t.Errorf("an after card's error port: %+v", is)
+	tm4, is4 := ToTemplate(d4, rules.Template{})
+	if len(is4) > 0 {
+		t.Errorf("an after card's error port: %+v", is4)
+	}
+	if aft := (*tm4.Branches)[0].After; len(aft) != 1 || len(aft[0].OnError) != 1 || aft[0].OnError[0].Type != TypeNotify {
+		t.Errorf("an after card's error path: %+v", aft)
 	}
 	_ = by
+}
+
+// W9: every after-save action with a Didn't work port takes an error link, and carries file state saved on it.
+// Unwired, the card has no OnError: a failure stays a warning and the path goes on.
+func TestAfterSaveActionsTakeAnErrorLink(t *testing.T) {
+	for _, typ := range []string{TypeMediaServer, TypeDownloader, TypeNotify, TypeSidecar, TypeChecksum, TypeCopy, TypeCommand} {
+		def, ok := Definition(typ)
+		if !ok || def.FileOn["error"] != FileSaved || def.FileOn["success"] != FileSaved {
+			t.Errorf("%s: fileOn %+v, want saved on success and error", typ, def.FileOn)
+		}
+		d, _ := runDoc()
+		save := d.Nodes[len(d.Nodes)-1]
+		act, n := node(typ, "", map[string]any{}), node(TypeNotify, "", map[string]any{"text": "x"})
+		d.Nodes = append(d.Nodes, act, n)
+		d.Edges = append(d.Edges, link(save.ID, "success", act.ID), link(act.ID, "error", n.ID))
+		tm, is := ToTemplate(d, rules.Template{})
+		if hasIssue(is, "not_runnable_yet", act.ID) || len((*tm.Branches)[0].After) != 1 || len((*tm.Branches)[0].After[0].OnError) != 1 {
+			t.Errorf("%s with an error link: issues %+v", typ, is)
+		}
+		u, _ := runDoc()
+		save = u.Nodes[len(u.Nodes)-1]
+		act = node(typ, "", map[string]any{})
+		u.Nodes = append(u.Nodes, act)
+		u.Edges = append(u.Edges, link(save.ID, "success", act.ID))
+		tu, iu := ToTemplate(u, rules.Template{})
+		if len(iu) > 0 || len((*tu.Branches)[0].After) != 1 || (*tu.Branches)[0].After[0].OnError != nil {
+			t.Errorf("%s unwired: issues %+v, card %+v", typ, iu, (*tu.Branches)[0].After)
+		}
+	}
 }
 
 func hasIssue(issues []Issue, code, nodeID string) bool {
@@ -1017,5 +1050,25 @@ func TestCompareTheResultFieldsShowPerChoice(t *testing.T) {
 	}
 	if _, has := props["test"].(map[string]any)["x-onlyWhen"]; has {
 		t.Error("the test itself is always shown")
+	}
+}
+
+// W9 pin: an after-save step whose error link leads back onto itself is refused at publish. ToTemplate drops
+// the link silently, so Validate is what keeps the loop out of a published workflow.
+func TestAnAfterStepsErrorLinkCannotLoopOntoItself(t *testing.T) {
+	d, _ := runDoc()
+	save := d.Nodes[len(d.Nodes)-1]
+	act := node(TypeNotify, "", map[string]any{"text": "x"})
+	d.Nodes = append(d.Nodes, act)
+	d.Edges = append(d.Edges, link(save.ID, "success", act.ID), link(act.ID, "error", act.ID))
+	r := Validate(d)
+	found := false
+	for _, i := range r.Issues {
+		if i.Code == "cycle_without_loop" {
+			found = true
+		}
+	}
+	if !found || !r.Errors() {
+		t.Errorf("a self error link: %+v", r.Issues)
 	}
 }

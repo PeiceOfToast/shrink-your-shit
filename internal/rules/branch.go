@@ -378,6 +378,9 @@ type Card struct {
 	Check *Question `json:"check,omitempty"`
 	Yes   []Card    `json:"yes,omitempty"`
 	No    []Card    `json:"no,omitempty"`
+	// W9: an action's Didn't work link. When the action fails, these cards run instead of the rest of the
+	// path; with none, the failure is a warning and the path goes on.
+	OnError []Card `json:"onError,omitempty"`
 }
 
 // Decision is how a file went through a "Check the file" step: the port it left by and design's words,

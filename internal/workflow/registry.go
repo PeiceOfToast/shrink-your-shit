@@ -540,16 +540,20 @@ func phaseOf(runsAs string) []string {
 
 // fileOnOf is the file's state on each output port unless the entry says otherwise: a plan step's
 // Next carries the new file (staged), a save's carries it saved, a question's or a before-action's
-// the original; "skipped" and "error" always leave the original as it is.
+// the original; "skipped" and "error" leave the original as it is, except on a step after the save, where
+// the save is already done and its Didn't work path starts from the saved file.
 func fileOnOf(d StepDefinition) map[string]string {
 	out := map[string]string{}
+	afterSave := d.RunsAs == RunsAction && len(d.Phase) == 1 && d.Phase[0] == PhaseAfter
 	for _, p := range d.Outputs {
 		switch {
+		case afterSave:
+			out[p.Name] = FileSaved
 		case p.Name == "skipped" || p.Name == "error":
 			out[p.Name] = FileOriginal
 		case d.RunsAs == RunsPlan || d.RunsAs == RunsVerify:
 			out[p.Name] = FileStaged
-		case d.RunsAs == RunsCommit, d.RunsAs == RunsAction && len(d.Phase) == 1 && d.Phase[0] == PhaseAfter:
+		case d.RunsAs == RunsCommit:
 			out[p.Name] = FileSaved
 		default:
 			out[p.Name] = FileOriginal
