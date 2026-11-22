@@ -401,7 +401,8 @@ func main() {
 			TellDownloaderRest: func() (string, error) {
 				return integ.TellRest(job.ID, job.Path, final, []integrations.Kind{integrations.Sonarr, integrations.Radarr})
 			},
-			Notify: notifier.SendTo,
+			TellForget: func() { integ.ForgetTold(job.ID) },
+			Notify:     notifier.SendTo,
 		}
 		env.Exec = web.CommandRunner(store) // FB2b: the Safety switch, read per job; nil makes the card refuse
 		return env

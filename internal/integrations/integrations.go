@@ -196,8 +196,8 @@ type Service struct {
 	mu     sync.Mutex // guards the saved document and told
 	wg     sync.WaitGroup
 	// told is, per job, the connections a tell card told in that job's run (their ids). The run's global tell
-	// skips them: a Plex card does not silence Jellyfin (per server, 11-22). An entry is taken when the global
-	// tell passes its connection.
+	// skips them: a Plex card does not silence Jellyfin (per server, 11-22). ForgetTold clears a job's entry
+	// when its run ends, so a retry of the job tells again.
 	told map[int64]map[string]bool
 }
 
@@ -621,8 +621,8 @@ func (s *Service) tellConnections(jobID int64, from, finalPath string, want []Ki
 }
 
 // connectionTold is the per-connection bookkeeping of a tell: a card's tell records connection id for the job
-// and returns true; the rest of the run returns false for a connection a card recorded (and forgets it) and true
-// for the others.
+// and returns true; the rest of the run returns false for a connection a card recorded and true for the others.
+// The record is kept until ForgetTold, so both kinds' rest calls skip it.
 func (s *Service) connectionTold(jobID int64, id string, card bool) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -636,14 +636,16 @@ func (s *Service) connectionTold(jobID int64, id string, card bool) bool {
 		s.told[jobID][id] = true
 		return true
 	}
-	if s.told[jobID][id] {
-		delete(s.told[jobID], id)
-		if len(s.told[jobID]) == 0 {
-			delete(s.told, jobID)
-		}
-		return false
-	}
-	return true
+	return !s.told[jobID][id]
+}
+
+// ForgetTold ends a job's run for the tell record: the connections its cards told are no longer held back.
+// The worker calls it once per run, when the run ends (a defer, so a failed or panicking run clears it too),
+// which keeps a disabled connection's entry from outliving the run.
+func (s *Service) ForgetTold(jobID int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.told, jobID)
 }
 
 // lookupBudget is how long one "Ask the downloader for details" may spend across every instance it asks.

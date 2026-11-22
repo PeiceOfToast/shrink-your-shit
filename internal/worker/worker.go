@@ -679,6 +679,9 @@ func (w *Worker) runClaimed(ctx context.Context, job jobs.Job, jobCtx context.Co
 	var e flow.Env
 	if w.Cards != nil {
 		e = w.Cards(job, final)
+		if e.TellForget != nil {
+			defer e.TellForget() // the run's tell record ends with the run, even when a card panics
+		}
 	}
 	var notes []flow.Note
 	if len(after) > 0 { // FB2a: the path's cards on the saved result; one that doesn't work is a warning, never a failure
