@@ -24,11 +24,13 @@ var encoderSpeedScan = 5000
 // EncoderSpeeds returns, per worker and encoder, the medians over that pair's last `each` finished
 // conversions: 'done' jobs whose encode step recorded a speed. The newest conversions are the ones kept
 // when a pair has more. A copy and a conversion nothing measured recorded no speed, so they are not here.
+// A conversion is grouped by the worker a person sees: a paired remote worker keeps its id, and every local pool
+// name ("builtin", "builtin-2", ...) is LocalWorker, so one encoder on this computer is one entry.
 func (s *Store) EncoderSpeeds(each int) ([]EncoderSpeed, error) {
 	// newest first, by when it ran: Convert again reuses the job's id, so an old job converted again now is
 	// the newest sample even though its id is not. A step with no start time (an older remote worker's report)
 	// sorts last, which is right: nothing says when it ran.
-	rows, err := s.db.Query(`SELECT j.worker, st.encoder, st.speed, st.fps
+	rows, err := s.db.Query(`SELECT COALESCE((SELECT id FROM workers w WHERE w.id = j.worker AND w.kind='remote'), 'local'), st.encoder, st.speed, st.fps
 FROM job_run_steps st JOIN jobs j ON j.id = st.job_id
 WHERE st.name = 'encode' AND st.speed > 0 AND j.status = ?
 ORDER BY st.started_at DESC, j.id DESC LIMIT ?`, Done, encoderSpeedScan)
