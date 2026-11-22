@@ -3,6 +3,7 @@
 package worker
 
 import (
+	"context"
 	"errors"
 	"syscall"
 	"testing"
@@ -45,5 +46,29 @@ func TestPausedWaitOutlastsThePause(t *testing.T) {
 	}
 	if wait2, ok2 := retryIn(retryable(errors.New("paused"), retryPaused), 1); !ok2 || wait2 < time.Hour {
 		t.Errorf("second wait %v (ok %v): want it to stay past the pause", wait2, ok2)
+	}
+}
+
+// Under only, a paused card makes the job wait for it: no encode runs, the log never says the processor takes the
+// file, and the retry is after the whole pause (the wait is 1 h 5 min).
+func TestPausedCardUnderOnlyWaitsForTheCard(t *testing.T) {
+	s := newScenario(t)
+	w := hardwareWorker(s, "only", "")
+	w.Encoder = func(string, bool, *rules.HDR) (string, string) { return "hevc_nvenc", "" }
+	for i := 0; i < 3; i++ {
+		fall(t, s, w)
+	}
+	w.RunOne(context.Background())
+	if j := s.job(); j.Status == jobs.Done || j.Status == jobs.Failed {
+		t.Fatalf("status %s: want the job to wait for the card", j.Status)
+	}
+	if enc := encodeCalls(s); len(enc) != 0 {
+		t.Errorf("encodes %v: want none while the card is paused", enc)
+	}
+	if n := s.count("using the processor"); n != 0 {
+		t.Errorf("log says the processor takes the file %d times under only", n)
+	}
+	if n := logCount(t, s, "trying again in 1h5m0s"); n != 1 {
+		t.Errorf("retry line: %d, want the wait to outlast the pause (1h5m0s)", n)
 	}
 }

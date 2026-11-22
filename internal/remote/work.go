@@ -480,9 +480,6 @@ func (c *Client) convert(ctx context.Context, cv Converter, l *Lease, snap rules
 		return c.call(cctx, "leases/"+l.ID+"/progress", body, nil)
 	}
 	args, enc, note := encoderArgs(snap.Plan, l.Primary, c.Caps, snap.Source, src, out)
-	if snap.Plan.Video.Hardware == "only" { // the processor is never used here: the note says why, without that
-		note = strings.TrimSuffix(note, "; using the processor")
-	}
 	if note != "" {
 		c.note(ctx, l, note)
 	}
@@ -687,15 +684,14 @@ func encoderArgs(plan rules.Plan, main *string, caps []map[string]any, source *m
 	// The snapshot's source is the server's probe of the original: a 10-bit SDR file needs a 10-bit encoder
 	// too, not only an HDR one (rules.NeedsTenBit). Nil (an older server, or a plan sent without it): the plan decides.
 	need10 := rules.NeedsTenBit(plan, source)
-	var want string
-	want, note = rules.EncoderFor(plan.Video.Codec, *main, need10, plan.Video.HDR, caps)
+	want, why := rules.EncoderWhy(plan.Video.Codec, *main, need10, plan.Video.HDR, caps)
 	if want == "" {
-		return plan.FFmpegArgs(src, out), "", note
+		return plan.FFmpegArgs(src, out), "", rules.FallbackNote(plan.Video, why)
 	}
 	if args, ok := plan.FFmpegArgsWith(src, out, want); ok {
 		return args, want, ""
 	}
-	return plan.FFmpegArgs(src, out), "", fmt.Sprintf("encoder %s can't do this file; using the processor", want)
+	return plan.FFmpegArgs(src, out), "", rules.FallbackNote(plan.Video, fmt.Sprintf("encoder %s can't do this file", want))
 }
 
 // ProgressEvery is how often a converting worker reports where its encode is.

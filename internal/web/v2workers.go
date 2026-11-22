@@ -1129,16 +1129,16 @@ func (v *workerView) offlineCount() int {
 // here; need10 also needs its 10-bit test (an HDR plan, or a 10-bit source). note is the job-log line when a
 // test says no (the processor is used then); it is empty for the processor by choice. The worker asks at each
 // job's start.
-func LocalEncoderFor(store *jobs.Store, chk *doctor.Checker) func(codec string, need10 bool, hdr *rules.HDR) (enc, note string) {
+func LocalEncoderFor(store *jobs.Store, chk *doctor.Checker) func(codec string, need10 bool, hdr *rules.HDR) (enc, why string) {
 	return func(codec string, need10 bool, hdr *rules.HDR) (string, string) {
 		cfg, _ := store.WorkerConfigOf(jobs.LocalWorker)
 		v := &workerView{store: store, eng: Engine{Doctor: chk}}
 		t, ok := v.tools()
 		caps := capabilities(t, ok)
 		if !ok { // nothing has been tested here yet: the processor takes this file, and the job log says so
-			return "", "the encoder test here has not finished yet; using the processor"
+			return "", "the encoder test here has not finished yet"
 		}
-		return rules.EncoderFor(codec, primaryEncoder(cfg.PrimaryEncoder, caps), need10, hdr, caps)
+		return rules.EncoderWhy(codec, primaryEncoder(cfg.PrimaryEncoder, caps), need10, hdr, caps)
 	}
 }
 

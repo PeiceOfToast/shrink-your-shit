@@ -46,7 +46,7 @@ func TestRemoteHDR10ToAnUnprovenFamilyGetsProcessorArgs(t *testing.T) {
 	if len(x.calls) != 1 || !slices.Contains(x.calls[0], "libx265") || slices.Contains(x.calls[0], "hevc_nvenc") {
 		t.Errorf("ffmpeg args %v: want the processor (libx265)", x.calls)
 	}
-	want := "HDR10 with mastering data: using the processor, hevc_nvenc isn't on the list of encoders proven to keep that data"
+	want := "HDR10 with mastering data: hevc_nvenc isn't on the list of encoders proven to keep that data; using the processor"
 	chosen := "Chosen: x265 (processor). Settings: Encoder: libx265" // the note above said why; not repeated
 	if len(notes) != 2 || notes[0] != want || !strings.HasPrefix(notes[1], chosen) || !slices.Equal(encs, []string{""}) {
 		t.Errorf("notes %q, encoders %q: want %q, then the Chosen line, and the processor reported", notes, encs, want)

@@ -39,7 +39,8 @@ func TestReportAcceptsOnlyKnownFailureCodes(t *testing.T) {
 	lib, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
 	lease := func(name string) string {
 		t.Helper()
-		if _, err := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: filepath.Join(lib.Path, name), SizeBefore: 1000}); err != nil {
+		_, err := st.Enqueue(jobs.Job{Library: lib.Path, LibraryID: lib.ID, Path: filepath.Join(lib.Path, name), SizeBefore: 1000})
+		if err != nil {
 			t.Fatal(err)
 		}
 		c, b := workerCall(t, srv, "lease", w.Token, `{"slots":1}`, WorkerAPILevel)
@@ -77,5 +78,10 @@ func TestReportAcceptsOnlyKnownFailureCodes(t *testing.T) {
 	l2 := lease("b.mkv")
 	if c, b := report(l2, jobs.ReasonSettingsRejected); c != http.StatusAccepted {
 		t.Errorf("settings_rejected: %d %s, want 202", c, b)
+	}
+	// The Convert step's hardware choice stopped the remote job: the code is a known one, so the report is accepted.
+	// It becomes a final failure in the worker's remote-result branch; the runner is held here, so that is not reached.
+	if c, b := report(lease("c.mkv"), jobs.ReasonHardwareChoice); c != http.StatusAccepted {
+		t.Errorf("hardware_choice: %d %s, want 202", c, b)
 	}
 }

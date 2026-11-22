@@ -102,6 +102,21 @@ func TestRemoteAutoStepsDownWhenTheCardFails(t *testing.T) {
 	}
 }
 
+// Under only, the note for an HDR10 file with mastering data on a family that cannot keep it says why, and never
+// that the processor is used (the job is refused before ffmpeg, so the processor would never run here).
+func TestRemoteOnlyFallbackNoteNeverNamesTheProcessor(t *testing.T) {
+	main := "hevc_nvenc"
+	plan := rules.Plan{Video: rules.VideoEncode{Codec: "libx265", CRF: 20, Preset: "medium", Hardware: "only", HDR: &rules.HDR{
+		Transfer: "smpte2084", Primaries: "bt2020", Matrix: "bt2020nc",
+		MasterDisplay: "G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,1)", CLL: "1000,400",
+	}}}
+	caps := []map[string]any{encoderCap("hevc_nvenc", "passed"), tenBitCap("hevc_nvenc")}
+	_, enc, note := encoderArgs(plan, &main, caps, nil, "/in.mkv", "/out.mkv")
+	if enc != "" || !strings.Contains(note, "mastering data") || strings.Contains(note, "processor") {
+		t.Errorf("enc %q, note %q: want no encoder and the mastering reason without the processor", enc, note)
+	}
+}
+
 // A policy stop is reported with its plain words and not retried: code hardware_choice, not the generic failure.
 func TestHardwareChoiceFailureReportIsPlainAndNotRetried(t *testing.T) {
 	body := failureReport(&hardwareStop{words: onlyFailedWords}, "", nil)
