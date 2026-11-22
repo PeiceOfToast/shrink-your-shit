@@ -11,18 +11,35 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 )
 
-// deviceFake answers the device probes: a sample made in software (the codec's encoder, with its pixel format)
-// and the on-device decode or scale of that sample. failDecode10 fails the HEVC 10-bit decode; failScale fails
-// any run with a scale filter on the device.
+// deviceFake answers the device probes: a sample made in software (the codec's encoder, with its pixel format),
+// the on-device decode or scale of that sample, and the HDR round trip (a Matroska file ffprobe reads back).
+// failDecode10 fails the HEVC 10-bit decode; failScale fails any run with a scale filter on the device;
+// failHDREncode fails the device's HDR encode; hdrLost leaves the light levels out of what ffprobe reads back.
 type deviceFake struct {
-	failDecode10, failScale bool
-	last10                  bool
-	decodes, scales         int
+	failDecode10, failScale, failHDREncode, hdrLost bool
+	last10                                          bool
+	decodes, scales, hdrEncodes                     int
 }
+
+const (
+	hdrBoth          = `{"streams":[{"side_data_list":[{"side_data_type":"Mastering display metadata"},{"side_data_type":"Content light level metadata"}]}]}`
+	hdrOnlyMastering = `{"streams":[{"side_data_list":[{"side_data_type":"Mastering display metadata"}]}]}`
+)
 
 func (f *deviceFake) run(name string, args []string) (string, string, error) {
 	all := strings.Join(args, " ")
 	switch {
+	case strings.HasSuffix(name, "ffprobe"):
+		if f.hdrLost {
+			return hdrOnlyMastering, "", nil
+		}
+		return hdrBoth, "", nil
+	case strings.Contains(all, "-f matroska"):
+		f.hdrEncodes++
+		if f.failHDREncode {
+			return "", "encode failed", errors.New("exit status 1")
+		}
+		return "", "", nil
 	case strings.Contains(all, "-c:v libx265") || strings.Contains(all, "-c:v libx264"):
 		f.last10 = strings.Contains(all, "yuv420p10le")
 		return "", "", nil
@@ -51,7 +68,7 @@ func deviceChecker(f *deviceFake) *Checker {
 // 8-bit one and the scale stand.
 func TestDeviceRecordSeparatesTenBitDecodeFromEncode(t *testing.T) {
 	f := &deviceFake{failDecode10: true}
-	recs := deviceChecker(f).deviceTest(context.Background(), []string{"hevc_qsv"})
+	recs := deviceChecker(f).deviceTest(context.Background(), []string{"hevc_qsv"}, []string{"hevc_qsv"})
 	if len(recs) != 1 || recs[0].Family != "qsv" {
 		t.Fatalf("records %+v, want one qsv record", recs)
 	}
@@ -70,12 +87,12 @@ func TestDeviceRecordSeparatesTenBitDecodeFromEncode(t *testing.T) {
 // A scale test that fails is "can't" for scale only: the decodes still stand.
 func TestDeviceRecordScaleFailureIsCantNotCrash(t *testing.T) {
 	f := &deviceFake{failScale: true}
-	recs := deviceChecker(f).deviceTest(context.Background(), []string{"hevc_vaapi"})
+	recs := deviceChecker(f).deviceTest(context.Background(), []string{"hevc_vaapi"}, []string{"hevc_vaapi"})
 	if len(recs) != 1 {
 		t.Fatalf("records %+v, want one vaapi record", recs)
 	}
 	if recs[0].Scale {
-		t.Error("scale is yes, but its test failed")
+		t.Fatal("scale is yes, but its test failed")
 	}
 	if got := recs[0].Decode["hevc"]; !got.Bit8 || !got.Bit10 {
 		t.Errorf("hevc decode %+v, want both depths: the decodes passed", got)
@@ -89,10 +106,55 @@ func TestDeviceRecordScaleFailureIsCantNotCrash(t *testing.T) {
 func TestDeviceRecordOnlyForFullPipelineFamilies(t *testing.T) {
 	f := &deviceFake{}
 	c := deviceChecker(f)
-	if recs := c.deviceTest(context.Background(), []string{"hevc_nvenc", "libx265"}); len(recs) != 0 {
+	if recs := c.deviceTest(context.Background(), []string{"hevc_nvenc", "libx265"}, nil); len(recs) != 0 {
 		t.Errorf("records %+v for families with no full pipeline", recs)
 	}
 	if f.decodes != 0 || f.scales != 0 {
 		t.Errorf("ran %d decodes and %d scales for no device", f.decodes, f.scales)
+	}
+}
+
+// The HDR probe: a device whose 10-bit HEVC encode keeps both the mastering display and the light levels is yes.
+func TestDeviceRecordHDRMetaSurvivesTheDeviceEncode(t *testing.T) {
+	f := &deviceFake{}
+	recs := deviceChecker(f).deviceTest(context.Background(), []string{"hevc_qsv"}, []string{"hevc_qsv"})
+	if len(recs) != 1 || !recs[0].HDRMeta {
+		t.Fatalf("records %+v, want HDR metadata yes", recs)
+	}
+	if f.hdrEncodes != 1 {
+		t.Errorf("%d HDR encodes, want 1", f.hdrEncodes)
+	}
+}
+
+// Light levels lost on the way through the device is "can't", even though the mastering display survived.
+func TestDeviceRecordHDRMetaLostIsCant(t *testing.T) {
+	f := &deviceFake{hdrLost: true}
+	recs := deviceChecker(f).deviceTest(context.Background(), []string{"hevc_qsv"}, []string{"hevc_qsv"})
+	if len(recs) != 1 || recs[0].HDRMeta {
+		t.Fatalf("records %+v, want HDR metadata no", recs)
+	}
+}
+
+// A failed HDR encode is "can't" and leaves the rest of the record standing.
+func TestDeviceRecordHDRMetaEncodeFailureIsCant(t *testing.T) {
+	f := &deviceFake{failHDREncode: true}
+	recs := deviceChecker(f).deviceTest(context.Background(), []string{"hevc_qsv"}, []string{"hevc_qsv"})
+	if len(recs) != 1 || recs[0].HDRMeta {
+		t.Fatalf("records %+v, want HDR metadata no", recs)
+	}
+	if !recs[0].Scale || !recs[0].Decode["hevc"].Bit10 {
+		t.Errorf("the other fields changed: %+v", recs[0])
+	}
+}
+
+// No 10-bit encode for the family: no HDR probe runs at all.
+func TestDeviceRecordHDRMetaOnlyAfterATenBitEncode(t *testing.T) {
+	f := &deviceFake{}
+	recs := deviceChecker(f).deviceTest(context.Background(), []string{"hevc_qsv"}, nil)
+	if len(recs) != 1 || recs[0].HDRMeta {
+		t.Fatalf("records %+v, want HDR metadata no", recs)
+	}
+	if f.hdrEncodes != 0 {
+		t.Errorf("%d HDR encodes with no 10-bit encode", f.hdrEncodes)
 	}
 }

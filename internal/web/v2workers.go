@@ -652,7 +652,7 @@ func capabilities(t doctor.Tools, ok bool) []map[string]any {
 	// ffmpeg has and the brief says not to test it.
 	for _, d := range t.Devices {
 		out = append(out, map[string]any{"key": "device:" + d.Family, "kind": "device", "label": "Graphics device (" + d.Family + ")",
-			"slot": "gpu", "test": "passed", "testedAt": at, "family": d.Family, "decode": d.Decode, "scale": d.Scale})
+			"slot": "gpu", "test": "passed", "testedAt": at, "family": d.Family, "decode": d.Decode, "scale": d.Scale, "hdrMeta": d.HDRMeta})
 	}
 	if t.FFprobe != "" {
 		add("tool", "ffprobe", "ffprobe "+t.FFprobeVersion, "cpu", "passed", "")

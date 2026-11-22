@@ -4,7 +4,10 @@ package web
 
 import (
 	"encoding/json"
+	"sort"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/doctor"
 )
@@ -54,5 +57,51 @@ func TestOldWorkerWithNoRecordStillReads(t *testing.T) {
 	list := json.RawMessage(`[{"key":"encoder:libx265","kind":"encoder","test":"passed"}]`)
 	if got, ok := reportedCaps(list); !ok || got == "{}" {
 		t.Errorf("an encoder-only list (no record) was refused: %q ok=%v", got, ok)
+	}
+}
+
+// The report limit (8 KiB) is checked on the capability list a remote worker sends. The worst cases the list can
+// reach: every encoder this product names listed as passed (graphics ones at 10 bits too), or every graphics encoder
+// listed as not present (the longest detail text), and a measured record for each full-pipeline family with every
+// field set. Each stored report must still be accepted, with room to spare.
+func TestWorstCaseCapabilitiesFitTheReportLimit(t *testing.T) {
+	names := make([]string, 0, len(encoderLabels))
+	for e := range encoderLabels {
+		names = append(names, e)
+	}
+	sort.Strings(names)
+	all := map[string]doctor.Bits{"h264": {Bit8: true, Bit10: true}, "hevc": {Bit8: true, Bit10: true}}
+	for _, shape := range []string{"passed", "not present"} {
+		tools := doctor.Tools{TestedAt: time.Now(), FFprobe: "/usr/bin/ffprobe", FFprobeVersion: "7.1.5", SSIM: true}
+		for _, e := range names {
+			graphics := strings.HasSuffix(e, "_qsv") || strings.HasSuffix(e, "_vaapi") || strings.HasSuffix(e, "_nvenc") ||
+				strings.HasSuffix(e, "_amf") || strings.HasSuffix(e, "_videotoolbox")
+			switch {
+			case graphics && shape == "passed":
+				tools.Hardware = append(tools.Hardware, e)
+				tools.Hardware10 = append(tools.Hardware10, e)
+			case graphics:
+				tools.HardwareListed = append(tools.HardwareListed, e)
+			default:
+				tools.Software = append(tools.Software, e)
+			}
+		}
+		tools.Devices = []doctor.DeviceRecord{
+			{Family: "qsv", Decode: all, Scale: true, HDRMeta: true},
+			{Family: "vaapi", Decode: all, Scale: true, HDRMeta: true},
+		}
+		list := WorkerCapabilities(tools, true)
+		raw, err := json.Marshal(list)
+		if err != nil {
+			t.Fatal(err)
+		}
+		stored, ok := reportedCaps(raw)
+		if !ok {
+			t.Fatalf("%s: the worst-case report is refused: %d bytes", shape, len(raw))
+		}
+		t.Logf("%s: %d capability entries, %d bytes as sent, %d bytes stored", shape, len(list), len(raw), len(stored))
+		if len(raw) > 8<<10-512 {
+			t.Errorf("%s: worst case is %d bytes: less than 512 bytes under the 8 KiB limit", shape, len(raw))
+		}
 	}
 }

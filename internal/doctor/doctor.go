@@ -175,7 +175,7 @@ func (c *Checker) tested(ctx context.Context, maxAge time.Duration) (Tools, map[
 		c.run = map[string]Probe{}
 		c.mu.Unlock()
 		hw := c.hardwareTest(ctx, t)
-		dev := c.deviceTest(ctx, hw[0])
+		dev := c.deviceTest(ctx, hw[0], hw[2])
 		c.mu.Lock()
 		at := time.Now()
 		probes := c.run
@@ -498,6 +498,11 @@ func lastErrorLine(err error) string {
 // the frames (format=nv12,hwupload; the plain command fails on a working VAAPI box), QSV opens its own;
 // the others take software frames as they are. 10-bit asks for Main10 from p010 frames.
 func encodeArgs(enc string, tenBit bool, device string) []string {
+	return append(encodeInput(enc, tenBit, device), "-f", "null", "-")
+}
+
+// encodeInput is encodeArgs without its output: the input and the encoder, for a caller that writes a file.
+func encodeInput(enc string, tenBit bool, device string) []string {
 	args := []string{"-hide_banner", "-v", "error"}
 	p, _ := rules.ProfileFor(enc) // the family's set-up: VAAPI opens its device, QSV its own
 	args = append(args, p.Setup(device)...)
@@ -512,7 +517,7 @@ func encodeArgs(enc string, tenBit bool, device string) []string {
 	if tenBit && strings.HasPrefix(enc, "hevc_") { // av1_* reject main10: their p010 frames are enough
 		args = append(args, "-profile:v", "main10")
 	}
-	return append(args, "-f", "null", "-")
+	return args
 }
 
 func (c *Checker) freeSpace(dir string) (uint64, error) {
