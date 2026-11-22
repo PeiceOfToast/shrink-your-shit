@@ -59,6 +59,9 @@ func (p Plan) plannedPicture(src media.Info) (w, h int, scaled bool) {
 	if !p.Video.Copy && v.Quarter() {
 		w, h = h, w
 	}
+	if r := p.Video.CropRect; r != nil { // F4: the cropped picture is what the scale then works from
+		w, h = r.W, r.H
+	}
 	if p.Video.Height > 0 {
 		w, h, scaled = ScaledWidth(w, h, p.Video.Height), p.Video.Height, true
 	}

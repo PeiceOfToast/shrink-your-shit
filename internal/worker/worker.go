@@ -1390,6 +1390,22 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		}
 		return "", againLeftAlone()
 	}
+	// F4: when the person asked to remove the black bars, measure them for this file now. Only a plan that will
+	// encode asks. A remote worker cannot sample the picture yet, so the log says the bars were left as they are.
+	if plan.Skip == "" && plan.Video.Crop && !plan.Video.Copy {
+		if w.remote != nil {
+			w.jobNote(job.ID, secEncode, jobs.LevelInfo, "(%s): the black bars were not removed: a remote worker cannot measure the picture yet", job.Path)
+		} else {
+			r, ok, words, cerr := w.detectCrop(ctx, src, srcPath)
+			if cerr != nil {
+				return "", cerr // stopped while sampling: the job ends as a stop, no encode
+			}
+			if ok {
+				plan.Video.CropRect = &r
+			}
+			w.jobNote(job.ID, secEncode, jobs.LevelInfo, "(%s): %s", job.Path, words)
+		}
+	}
 	// FB1c: the path's cards before its end (Set a variable, Add a note), in order, whether the path converts,
 	// leaves the file alone or stops as failed, so a note can say why. Each one is a step of the timeline; the
 	// first that doesn't work fails the job, the original untouched; what they set joins the run's values.
