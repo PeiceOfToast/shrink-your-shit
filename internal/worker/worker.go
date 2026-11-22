@@ -260,12 +260,14 @@ type Worker struct {
 	// claims past them while they still are, so a graphics job behind them is found (under mu).
 	refused    []int64
 	progressAt atomic.Int64 // UnixNano of the running encode's last progress (stall watchdog)
-	finishing  atomic.Bool  // the position is at the file's length: the stall watchdog gives the finishing allowance
+	finishing  atomic.Bool  // the position is at the file's length: the finishing step, judged by the file's growth
+	ended      atomic.Bool  // progress=end was read: the encode is over; no stall is judged, only the FinishAfter ceiling
 	stalledFor atomic.Int64 // the limit (ns) the watchdog last stopped an encode at: the message says it
 	positionAt atomic.Int64 // UnixNano of the running encode's last forward move of out_time (the frozen-position ceiling)
 	// the running local encode's output against its source at the last report: past twice the source (overSize), with the
 	// two sizes, so a stall stop can say why it stopped (stopOver: the stop that fired was for that size).
 	overSize, stopOver atomic.Bool
+	finishStop         atomic.Bool // the stop that fired was the finishing step's ceiling (FinishAfter): its own words
 	outBytes, srcBytes atomic.Int64
 	diskBytes          atomic.Int64 // the running encode's temp file on disk at the watchdog's last check: its growth is progress
 	// the running job's run counters (log-spec L2 summary): the ffmpeg runs it needed and the bytes it wrote.
@@ -541,6 +543,9 @@ func (w *Worker) runClaimed(ctx context.Context, job jobs.Job, jobCtx context.Co
 		case stopUser:
 			return true, w.Queue.UserStopped(job.ID)
 		case stopStall:
+			if w.finishStop.Load() {
+				return true, w.Queue.Fail(job.ID, jobs.ReasonStalled, fmt.Sprintf("Stopped: the finishing step ran for more than %s though the new file was still growing. The original is untouched; press Retry to try again.", w.stalledLimit()))
+			}
 			if w.stopOver.Load() {
 				return true, w.Queue.Fail(job.ID, jobs.ReasonStalled, "Stopped: the new file is more than twice the original's size and its position has stopped moving. The original is untouched; press Retry to try again.")
 			}
@@ -962,13 +967,20 @@ func (w *Worker) stalledLimit() time.Duration {
 	return w.stallAfter()
 }
 
-// stallLimit is how long an encode may go without progress: the stall allowance, or the finishing one once its
-// position is at the file's length. The finishing allowance is never shorter than the stall one.
-func (w *Worker) stallLimit(after time.Duration, finishing bool) time.Duration {
-	if finishing {
-		return max(after, w.finishAfter())
+// stallLimits is how long an encode may go without progress (stall) and how long its position may stay frozen while
+// its frames or bytes grow (ceiling). Finishing (the position is at the file's length): a worker whose output is judged
+// (growthJudged) keeps the stall allowance, the file's growth counts as progress, and FinishAfter bounds the frozen
+// position. A worker that does not report its output keeps the rule it had before: FinishAfter for the whole finish.
+func (w *Worker) stallLimits(finishing, growthJudged bool) (stall, ceiling time.Duration) {
+	after := w.stallAfter()
+	switch {
+	case !finishing:
+		return after, w.frozenFactor() * after
+	case growthJudged:
+		return after, w.finishAfter()
+	default:
+		return max(after, w.finishAfter()), max(w.frozenFactor()*after, w.finishAfter())
 	}
-	return after
 }
 
 // reachedEnd says a position (out_time, µs) is the file's length: every frame is written and the encode is
@@ -979,6 +991,9 @@ func reachedEnd(outUS, durationSec float64) bool {
 	return durationSec > 0 && d >= -finishTolerance*1e6 && d <= finishTolerance*1e6
 }
 
+// ReachedEnd is reachedEnd for the remote worker, which tells the server when its encode is finishing (slice 12b).
+func ReachedEnd(outUS, durationSec float64) bool { return reachedEnd(outUS, durationSec) }
+
 // watchStall stops job id (stopStall) if its encode reports no progress for stallAfter (stallLimit once it is
 // finishing). The returned func ends the watch. Checks after the encode have their own time limits (slice 10).
 func (w *Worker) watchStall(job jobs.Job, out string) func() {
@@ -988,12 +1003,22 @@ func (w *Worker) watchStall(job jobs.Job, out string) func() {
 	w.positionAt.Store(now.UnixNano())
 	w.finishing.Store(false)
 	w.overSize.Store(false)
+	w.finishStop.Store(false)
 	w.diskBytes.Store(0)
+	w.ended.Store(false)
 	w.srcBytes.Store(job.SizeBefore)
 	after := w.stallAfter()
 	done := make(chan struct{})
+	stopFinish := func(limit time.Duration) { // the finish itself ran past FinishAfter, though its file may still be growing
+		w.stopOver.Store(false)
+		w.finishStop.Store(true)
+		w.stalledFor.Store(int64(limit))
+		w.jobf(id, ": the finishing step has run for more than %s; stopping it", limit)
+		w.stop(id, stopStall)
+	}
 	stopFor := func(limit time.Duration) {
 		w.stalledFor.Store(int64(limit))
+		w.finishStop.Store(false)
 		if w.overSize.Load() { // past twice the source: the new file cannot save space, so say that, not "no progress"
 			w.stopOver.Store(true)
 			// the size is ffmpeg's count or the temp file's on disk, whichever is larger: a silent encode reports 0
@@ -1007,6 +1032,7 @@ func (w *Worker) watchStall(job jobs.Job, out string) func() {
 	}
 	stopCeiling := func(limit time.Duration) { // frames still grow, so the log says the position is what stopped it
 		w.stopOver.Store(false)
+		w.finishStop.Store(false)
 		w.stalledFor.Store(int64(limit))
 		w.jobf(id, ": its position has not moved for %s, though it is still writing; stopping it", limit)
 		w.stop(id, stopStall)
@@ -1034,15 +1060,26 @@ func (w *Worker) watchStall(job jobs.Job, out string) func() {
 						w.overSize.Store(true)
 					}
 				}
+				if w.ended.Load() { // progress=end: the file is written and ffmpeg is exiting, so no stall is judged; FinishAfter still bounds the exit
+					if now.Sub(time.Unix(0, w.positionAt.Load())) >= w.finishAfter() {
+						stopFinish(w.finishAfter())
+						return
+					}
+					w.quietCheck(id, now)
+					continue
+				}
 				finishing := w.finishing.Load()
-				limit := w.stallLimit(after, finishing)
-				if now.Sub(time.Unix(0, w.progressAt.Load())) >= limit {
-					stopFor(limit)
+				stall, ceiling := w.stallLimits(finishing, true)
+				if now.Sub(time.Unix(0, w.progressAt.Load())) >= stall {
+					stopFor(stall)
 					return
 				}
-				ceiling := w.stallLimit(w.frozenFactor()*after, finishing)
 				if now.Sub(time.Unix(0, w.positionAt.Load())) >= ceiling {
-					stopCeiling(ceiling) // frames or bytes still grow, but out_time has not moved for the ceiling
+					if finishing {
+						stopFinish(ceiling)
+					} else {
+						stopCeiling(ceiling) // frames or bytes still grow, but out_time has not moved for the ceiling
+					}
 					return
 				}
 				w.quietCheck(id, now) // R9: ffmpeg printing nothing for a minute
@@ -1070,6 +1107,7 @@ func (w *Worker) tempSize(path string) (int64, bool) {
 // while the worker says it is converting.
 func (w *Worker) watchRemoteStall(id int64, rj *RemoteJob) func() {
 	w.stopOver.Store(false) // a stop from an earlier local encode on this worker is not this stop's reason
+	w.finishStop.Store(false)
 	after := w.stallAfter()
 	done := make(chan struct{})
 	go func() {
@@ -1080,18 +1118,24 @@ func (w *Worker) watchRemoteStall(id int64, rj *RemoteJob) func() {
 			case <-done:
 				return
 			case now := <-t.C:
-				limit := w.stallLimit(after, rj.finishing())
-				if still, judging := rj.stillFor(now); judging && still >= limit {
+				limit, kind := w.remoteJudge(rj, now)
+				switch kind {
+				case stallNoProgress:
 					w.stalledFor.Store(int64(limit))
+					w.finishStop.Store(false)
 					w.jobf(id, ": the remote encode made no progress for %s, stopping it", limit)
 					w.stop(id, stopStall)
 					return
-				}
-				// the frozen-position ceiling: frames or bytes may still grow, but out_time must move within it
-				ceiling := w.stallLimit(w.frozenFactor()*after, rj.finishing())
-				if still, judging := rj.posStillFor(now); judging && still >= ceiling {
-					w.stalledFor.Store(int64(ceiling))
-					w.jobf(id, ": the remote encode's position has not moved for %s, though it is still writing; stopping it", ceiling)
+				case stallPosition:
+					w.stalledFor.Store(int64(limit))
+					w.finishStop.Store(false)
+					w.jobf(id, ": the remote encode's position has not moved for %s, though it is still writing; stopping it", limit)
+					w.stop(id, stopStall)
+					return
+				case stallFinish:
+					w.stalledFor.Store(int64(limit))
+					w.finishStop.Store(true)
+					w.jobf(id, ": the remote finishing step has run for more than %s; stopping it", limit)
 					w.stop(id, stopStall)
 					return
 				}
@@ -1099,6 +1143,31 @@ func (w *Worker) watchRemoteStall(id int64, rj *RemoteJob) func() {
 		}
 	}()
 	return func() { close(done) }
+}
+
+// stallKind says which limit a remote encode was judged past (stallNone: none).
+type stallKind int
+
+const (
+	stallNone       stallKind = iota
+	stallNoProgress           // no progress for the stall allowance
+	stallPosition             // the position frozen for the ceiling, while frames or bytes still grow
+	stallFinish               // the finishing step ran past FinishAfter
+)
+
+// remoteJudge says whether the remote encode rj must be stopped at now, and for which limit.
+func (w *Worker) remoteJudge(rj *RemoteJob, now time.Time) (time.Duration, stallKind) {
+	stall, ceiling := w.stallLimits(rj.finishing(), rj.outputJudged())
+	if still, judging := rj.stillFor(now); judging && still >= stall {
+		return stall, stallNoProgress
+	}
+	if still, judging := rj.posStillFor(now); judging && still >= ceiling {
+		if rj.finishing() {
+			return ceiling, stallFinish
+		}
+		return ceiling, stallPosition
+	}
+	return 0, stallNone
 }
 
 // BesidePath is the output name in Beside mode.
@@ -2965,6 +3034,10 @@ func (w *Worker) encodeLocal(ctx context.Context, job jobs.Job, args []string, o
 		// most-behind stream, so it freezes in a subtitle gap while frames still go on (bug 2). The output's size is the
 		// larger of ffmpeg's total_size and the temp file's size on disk (the watchdog's check): a faststart rewrite or
 		// a frozen progress block still shows the file growing.
+		if p.Ended { // progress=end: the file is written; the encode is over and nothing more is judged
+			w.ended.Store(true)
+			return
+		}
 		posMoved := p.OutTimeUS > at // a position further on: one that repeats is not progress
 		total := max(p.TotalSize, w.diskBytes.Load())
 		outputOK := outputWithin(job.SizeBefore, total)

@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
@@ -488,18 +489,34 @@ func (c *Client) convert(ctx context.Context, cv Converter, l *Lease, snap rules
 	if e := report(map[string]any{"stage": "converting", "outTimeUs": 0, "encoder": enc}); leaseGone(e) {
 		return "", args, e
 	}
-	var last time.Time
-	var gone error
-	label := enc // the encoder of the rung running now: the live label in each progress report
+	rep := &encodeReports{label: enc, out: out, duration: l.Job.DurationSec}
+	send := func(body map[string]any) { // a lost lease stops the encode
+		if e := report(body); leaseGone(e) {
+			rep.lose(e)
+			cancel()
+		}
+	}
+	var last time.Time // the throttle of the progress reports (the progress callback's own)
 	run := func(_ context.Context, rargs []string) (string, error) {
+		rep.startRung()
+		// close alone is not enough: select can take a ready tick after the close, so the tick's last report could land
+		// after the encode's end. Wait for the goroutine to exit before the run returns.
+		stopTick, tickDone := make(chan struct{}), make(chan struct{})
+		defer func() { close(stopTick); <-tickDone }()
+		go func() { defer close(tickDone); rep.tick(stopTick, ProgressEvery, send) }()
 		// The raw log: worker.Attempt reads its error lines once (media.ErrorLines), as the local worker does.
 		return media.Transcode(cctx, cv.Exec, cv.FFmpeg, rargs, l.Job.DurationSec, func(p media.Progress) {
+			if p.Ended { // progress=end: the file is written and the encode is over; "checking", as at exit (slice 12b)
+				rep.end()
+				send(map[string]any{"stage": "checking"})
+				return
+			}
 			if time.Since(last) < ProgressEvery {
 				return
 			}
 			last = time.Now()
-			body := map[string]any{"stage": "converting", "outTimeUs": p.OutTimeUS, "encoder": label}
-			if p.Frame >= 0 { // frames and bytes keep an encode alive when its position is frozen (the server judges them)
+			body := rep.moved(p.OutTimeUS) // the position, the encoder on the live label, and the new file's size
+			if p.Frame >= 0 {              // frames and bytes keep an encode alive when its position is frozen (the server judges them)
 				body["frame"] = p.Frame
 			}
 			if p.TotalSize > 0 {
@@ -508,36 +525,137 @@ func (c *Client) convert(ctx context.Context, cv Converter, l *Lease, snap rules
 			if l.Job.DurationSec > 0 {
 				body["percent"] = p.Percent // a length we don't know has no percent
 			}
-			if e := report(body); leaseGone(e) {
-				gone = e
-				cancel() // the job went back to the queue: stop converting it
-			}
+			send(body)
 		})
 	}
 	failed := "" // the graphics encoder that failed, for the server's note when the processor converts the file
 	res := worker.Attempt(cctx, worker.AttemptInput{Plan: snap.Plan, SrcPath: src, Tmp: out,
 		First: worker.Rung{Args: args, Encoder: enc}}, run, worker.AttemptHooks{
 		OnRung: func(r worker.Rung) {
-			label = r.Encoder // the live label names the processor now
-			report(map[string]any{"stage": "converting", "outTimeUs": 0, "encoder": label})
+			rep.setLabel(r.Encoder) // the live label names the processor now
+			report(map[string]any{"stage": "converting", "outTimeUs": 0, "encoder": r.Encoder})
 		},
 		Failed:  func(r worker.Rung, _ string, _ error) { failed = r.Encoder },
-		Stopped: func() bool { return gone != nil },
+		Stopped: func() bool { return rep.lost() != nil },
 	})
 	args = res.Args
 	stderr, err := res.Errors, res.Err
-	if err == nil && gone == nil {
+	if err == nil && rep.lost() == nil {
 		if res.Fell {
 			c.noteFell(ctx, l, failed, res.FellReason) // the processor converted it, so the graphics encoder was the fault
 		} else if res.Encoder != "" {
 			c.noteWorked(ctx, l) // the graphics encoder converted the file: its run of failures ends
 		}
 	}
-	if gone != nil {
-		return stderr, args, gone
+	if g := rep.lost(); g != nil {
+		return stderr, args, g
 	}
 	report(map[string]any{"stage": "checking"}) // the encode ended (also when it failed): no longer judged
 	return stderr, args, err
+}
+
+// encodeReports is what an encode's converting reports share: the encoder on the live label, the position and
+// whether it is the file's length (the finishing step), whether the encode has ended (progress=end), and the
+// lease's loss. The finishing step prints no progress line (a faststart rewrite), so tick reports the new file's
+// size on its own while the position is at the length: the server judges that growth (slice 12b).
+type encodeReports struct {
+	mu       sync.Mutex
+	label    string
+	out      string
+	duration float64
+	outUS    float64
+	atEnd    bool
+	ended    bool
+	gone     error
+	// sendMu serializes the finishing reports against progress=end. Lock order: sendMu before mu, never the reverse
+	// (a send that answers lease_gone takes mu, so it must run with sendMu held and mu free).
+	sendMu sync.Mutex
+}
+
+// startRung clears the state of one ffmpeg run (a rung of the attempt ladder).
+func (r *encodeReports) startRung() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.outUS, r.atEnd, r.ended = 0, false, false
+}
+
+func (r *encodeReports) setLabel(enc string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.label = enc
+}
+
+// moved records the position and returns the converting report for it.
+func (r *encodeReports) moved(outUS float64) map[string]any {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.outUS, r.atEnd = outUS, worker.ReachedEnd(outUS, r.duration)
+	return r.reportLocked()
+}
+
+// reportLocked is the converting report at the current position; the new file's size is in it when it can be read.
+func (r *encodeReports) reportLocked() map[string]any {
+	body := map[string]any{"stage": "converting", "outTimeUs": r.outUS, "encoder": r.label}
+	if fi, err := os.Stat(r.out); err == nil {
+		body["outputBytes"] = fi.Size()
+	}
+	return body
+}
+
+// end records progress=end: nothing after it is a converting report. It takes sendMu too, so a finishing report
+// that is being sent finishes first and none starts after this returns.
+func (r *encodeReports) end() {
+	r.sendMu.Lock()
+	defer r.sendMu.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.ended = true
+}
+
+// lose records that the lease is gone (the job went back to the queue).
+func (r *encodeReports) lose(err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.gone == nil {
+		r.gone = err
+	}
+}
+
+func (r *encodeReports) lost() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.gone
+}
+
+// tick reports the finishing step every every, while the position is at the file's length and the encode has not
+// ended. The report is built under mu and sent after it is released: a send that answers lease_gone calls lose,
+// which takes mu. sendMu keeps a send from running past end's "checking" (sendMu is taken before mu, always).
+func (r *encodeReports) tick(stop <-chan struct{}, every time.Duration, send func(map[string]any)) {
+	t := time.NewTicker(max(every, 10*time.Millisecond))
+	defer t.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-t.C:
+			r.sendMu.Lock()
+			if body := r.finishingReport(); body != nil {
+				send(body)
+			}
+			r.sendMu.Unlock()
+		}
+	}
+}
+
+// finishingReport is the report tick sends: the finishing step's position and size, or nil when the position is
+// not at the file's length or the encode has ended.
+func (r *encodeReports) finishingReport() map[string]any {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.atEnd || r.ended {
+		return nil
+	}
+	return r.reportLocked()
 }
 
 // encoderArgs is the ffmpeg arguments for a plan on this worker: its main encoder's for the plan's format when
