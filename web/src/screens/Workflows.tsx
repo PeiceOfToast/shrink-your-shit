@@ -1,6 +1,6 @@
 // V3 Workflows list, Templates tab and the New workflow wizard (spec 5.1, 5.2; DESIGN/v2 SCREENS V3,
-// mockups/workflows.html), on the real /api/v2 (#109) or the mock with ?mock=1. Opening one goes to its step list (WorkflowStack.tsx). Not here yet: Export, Test run, History,
-// Import, the Cards view. Archive isn't in the contract.
+// mockups/workflows.html), on the real /api/v2 (#109) or the mock with ?mock=1. Opening one goes to its step list (WorkflowStack.tsx). Import is here (a file becomes a draft); Export is on the
+// workflow page. Not here yet: Test run, History, the Cards view. Archive isn't in the contract.
 import { Empty, LoadFailed, PageHead } from "../PageHead";
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "../Icon";
@@ -8,7 +8,8 @@ import { Skeleton } from "../Skeleton";
 import { count, plural } from "../format";
 import { SignedOut, failed, type Answer } from "../api";
 import { useData } from "../useData";
-import { createWorkflow, deleteWorkflow, duplicateWorkflow, listTemplates, listWorkflows, patchWorkflow } from "../workflowApi";
+import { createWorkflow, deleteWorkflow, duplicateWorkflow, getDraft, importWorkflow, listTemplates, listWorkflows, patchWorkflow } from "../workflowApi";
+import { importLines, type ReportLine } from "../importReport";
 import { Link, navigate, useSearch } from "../router";
 import type { Workflow } from "../types/v2";
 
@@ -109,6 +110,24 @@ export function Workflows() {
   // Pass 5 #3: with no tag on any workflow, the Tags column and the Tag filter are hidden. Based on the list the API returned, so filtering never hides them.
   const hasTags = tags.length > 0, activeTag = hasTags ? tag : "";
   const rows = all.filter((w) => (!q || (w.name + " " + w.description).toLowerCase().includes(q.toLowerCase())) && (!activeTag || w.tags.includes(activeTag)) && (!fav || w.favourite));
+  // Import: a file becomes a new draft. The panel says what to fix before it runs; a refused file sends nothing new.
+  const fileIn = useRef<HTMLInputElement>(null);
+  const [imp, setImp] = useState<{ id: string; name: string; lines: ReportLine[] } | null>(null), [impErr, setImpErr] = useState("");
+  const pickFile = async (f: File) => {
+    setImp(null); setImpErr(""); setSaid("");
+    if (f.size > 8 * 1024 * 1024) return setImpErr("This file is larger than 8 MiB, so nothing was sent.");
+    let json: unknown;
+    try { json = JSON.parse(await f.text()); } catch { return setImpErr("This file isn't a workflow export."); }
+    const r = await act(importWorkflow(json), setImpErr);
+    if (!r) return;
+    const d = await getDraft(r.id);
+    const secrets = failed(d) ? null : d.workflow.variables.filter((v) => v.type === "secret" && !v.hasValue).map((v) => v.name);
+    setImp({ id: r.id, name: r.name, lines: importLines(r.import, secrets, "Settings > Variables") });
+    wfs.reload();
+  };
+  // A finished import moves focus to its result, so keyboard users land on what it says (a failure keeps focus on Import…; its alert speaks)
+  const impFocus = useRef<HTMLParagraphElement>(null);
+  useEffect(() => { if (imp) impFocus.current?.focus(); }, [imp]);
   return (
     <div className="stack">
       <PageHead icon="i-workflow" title="Workflows" help="What happens to each file. A library uses one workflow." />
@@ -118,6 +137,15 @@ export function Workflows() {
         <button role="tab" type="button" aria-selected={tab === "templates"} onClick={() => tab !== "templates" && setTab("templates")}>Templates {tpl.data && <span className="n">{templates.length}</span>}</button>
       </div>
       <p className="muted" role="status">{said}</p>
+      {impErr && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{impErr}</span></p>}
+      {/* always mounted, so the screen reader announces the result when it arrives; hidden (not removed) when there is none */}
+      <div role="status" className={imp ? "card" : "sr"} aria-label={imp ? "Import result" : undefined}>{imp && <div className="bd stack">
+        <div className="stack" style={{ gap: 6 }}>
+          <p ref={impFocus} tabIndex={-1}>Imported as a draft: {imp.name}. <Link to={"/workflows/" + encodeURIComponent(imp.id)}>Open it</Link></p>
+          {imp.lines.map((l, i) => <p key={i} className={"st " + (l.kind === "error" ? "bad" : l.kind === "warn" ? "warn" : "ok")}><Icon id={l.kind === "ok" ? "i-check-c" : "i-alert"} /><span>{l.kind === "error" ? <span className="sr">Error: </span> : l.kind === "warn" ? <span className="sr">Warning: </span> : null}{l.text}</span></p>)}
+        </div>
+        <div className="row"><button className="btn sm ghost" type="button" onClick={() => setImp(null)}>Dismiss</button></div>
+      </div>}</div>
       {tab === "templates" ? (tpl.error && !tpl.data ? <LoadFailed error={tpl.error} reload={tpl.reload} /> :
         <div className="list"><table className="tbl">
           <thead><tr><th>Template</th><th data-p="3">What it does</th><th data-p="4">Steps it uses</th><th className="stc">Changes originals</th></tr></thead>
@@ -128,6 +156,8 @@ export function Workflows() {
         {/* one toolbar (clean pass T4): New workflow first, filters, search on the right */}
         <div className="ltools" role="toolbar" aria-label="Workflows">
           {!wizard && <button className="btn sm primary" type="button" onClick={() => (setWizard(true), setSaid(""))}><Icon id="i-plus" />New workflow</button>}
+          <button className="btn sm ghost" type="button" onClick={() => fileIn.current?.click()}>Import…</button>
+          <input ref={fileIn} type="file" accept=".json,application/json" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void pickFile(f); }} />
           {hasTags && <select className="input sm" aria-label="Tag" value={activeTag} onChange={(e) => setTag(e.target.value)}>
             <option value="">Tag: any</option>{tags.map((t) => <option key={t} value={t}>{t}</option>)}
           </select>}

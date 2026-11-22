@@ -57,6 +57,17 @@ export async function getDraft(id: string): Promise<Answer<WorkflowRevision>> {
   if (MOCK) return mock.getDraft(id) ?? no("not_found", "There is no such workflow.");
   return call("GET", base(id) + "/draft");
 }
+// Export the draft as a file (the server's GET /api/flows/{id}/export; the file's JSON, saved by the page).
+export async function exportWorkflow(id: string): Promise<Answer<object>> {
+  if (MOCK) return no("mock", "Export and import need the real server.");
+  return call("GET", "/api/flows/" + enc(id) + "/export");
+}
+// Import a file as a new draft (POST /api/flows/import). A refused file saves nothing: 400 invalid, 413 too_large.
+export type ImportReport = { missingGlobals: string[]; unknownSteps: string[]; issues: ValidationIssue[] };
+export async function importWorkflow(file: unknown): Promise<Answer<Workflow & { import: ImportReport }>> {
+  if (MOCK) return no("mock", "Export and import need the real server.");
+  return call("POST", "/api/flows/import", file);
+}
 // PUT /workflows/{id}/draft with If-Match: a draft changed elsewhere answers 409 stale_draft.
 export async function saveDraft(id: string, workflow: WorkflowDoc, layout: Layout, etag: string): Promise<Answer<WorkflowRevision>> {
   if (MOCK) {
