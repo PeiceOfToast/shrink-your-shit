@@ -7,7 +7,7 @@ import { Icon } from "../Icon";
 import { SignedOut, failed, type Answer } from "../api";
 import { afterOnly, beforeSave, deleteNode, groupOf, insertAfter, insertAfterSave, insertQuestion, isQuestion, moveNode, newNode, order, otherwiseOf, setOtherwise, type Otherwise } from "../stepEdits"; // the steps in running order: a property of the document, not data
 import { useData } from "../useData";
-import { getDraft, getLadder, getWorkflow, listTemplates, listWorkflows, patchWorkflow, publish, publishPreview, saveDraft, stepDefinitions, validateDoc, type Checked, type Ladder } from "../workflowApi";
+import { exportWorkflow, getDraft, getLadder, getWorkflow, listTemplates, listWorkflows, patchWorkflow, publish, publishPreview, saveDraft, stepDefinitions, validateDoc, type Checked, type Ladder } from "../workflowApi";
 import { Link, navigate, onLeave } from "../router";
 import { Browse } from "../FolderPicker";
 import { OwnVars, VarInput, builtinsOf, takesVars, varListFor, varProblems, withOwn } from "../VarInput";
@@ -635,6 +635,18 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
   // the list is needed for the picker (a step takes variables) and for the Variables card's add form (it shows with own variables too)
   const tv = takesVars(defs), needVars = tv || (doc.variables ?? []).length > 0, vl = useData(() => varListFor(id, needVars), [id, needVars]).data, varBad = vl ? varProblems(doc.nodes, defs, withOwn(vl.variables, doc.variables ?? [])) : [];
   // The server's words and problems for the document as it is now (nothing saved): asked 300 ms after a change.
+  // Export: the draft as workflow-<id>.json, saved the way a job log is (Blob + download). A failure is an alert.
+  const [exportErr, setExportErr] = useState("");
+  const exportFile = async () => {
+    setExportErr("");
+    const r = await act(exportWorkflow(id), setExportErr);
+    if (!r) return;
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(r, null, 2)], { type: "application/json" }));
+    a.download = "workflow-" + id + ".json";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
   const ask = async (d: WorkflowDoc) => { const r = await act(validateDoc(id, d), setSaid); if (r) setLive(r); return r; };
   const seen = useRef<WorkflowDoc | null>(null); // null: the first check runs on load, so the list has the server's places and add rules
   useEffect(() => {
@@ -801,6 +813,7 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
         </div>
         {canStack && <>
           {tools}
+          <button className="btn sm ghost" type="button" onClick={exportFile}>Export</button>
           <button className="btn sm primary" type="button" disabled={varBad.length > 0} title={varBad.length ? "Fix the variable names first" : undefined} onClick={openPublish}>Publish</button>
         </>}
       </div>
@@ -809,6 +822,7 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
         : <p className="st bad checkline"><Icon id="i-alert" /><span>Check: {issues.length === 1 ? "1 problem" : issues.length + " problems"}. Publish waits until {issues.length === 1 ? "it's" : "they're"} fixed. <button className="linkbtn" type="button" onClick={() => setOpen(issues[0].nodeId ?? null)}>Show</button></span></p>)}
       {canStack && varBad.length > 0 && <p className="st bad" role="alert"><Icon id="i-alert" /><span>Fix {varBad.length === 1 ? "1 field" : varBad.length + " fields"} before publishing. <button className="linkbtn" type="button" onClick={() => setOpen(varBad[0].nodeId)}>{varBad[0].title}</button></span></p>}
       <p className="muted" role="status">{said}</p>
+      {exportErr && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{exportErr}</span></p>}
 
       {panel && (
         <section className="card" aria-labelledby="pub-h"><div className="hd"><h2 id="pub-h">Publish v{panel.nextNumber}</h2></div><div className="bd stack">
