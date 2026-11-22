@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -60,7 +61,25 @@ var selectorFields = map[string]bool{"speed": true, "format": true, "resolution"
 // the current page keeps working.
 // settingEcho are the fields a setting answer carries that a client may send back unchanged: ignored.
 var settingEcho = map[string]bool{"kind": true, "positions": true, "order": true, "availableformats": true, "availableaudio": true,
-	"availablesubtitles": true, "availablefiletypes": true, "warnings": true, "sharedflowchoice": true, "fitsbasic": true, "becomes": true, "bitrateladder": true, "notes": true, "minsavingpct": true, "skipsmall": true, "skiphdr": true}
+	"availablesubtitles": true, "availablefiletypes": true, "warnings": true, "sharedflowchoice": true, "fitsbasic": true, "becomes": true, "bitrateladder": true, "notes": true, "minsavingpct": true, "skipsmall": true, "skiphdr": true, "editablehere": true, "reason": true}
+
+// unchangedFrom is the body without the fields whose values are the ones the setting shows now: a page that
+// saves back what GET showed has chosen none of those.
+func unchangedFrom(body map[string]json.RawMessage, view map[string]any) map[string]json.RawMessage {
+	b, _ := json.Marshal(view)
+	var shown map[string]any
+	json.Unmarshal(b, &shown)
+	out := map[string]json.RawMessage{}
+	for k, raw := range body {
+		var v any
+		json.Unmarshal(raw, &v)
+		if same, ok := shown[k]; ok && reflect.DeepEqual(same, v) {
+			continue
+		}
+		out[k] = raw
+	}
+	return out
+}
 
 // readSelectors reads a selectors body (see below); langs are the person's languages, needed for
 // "Keep only my languages".
@@ -191,6 +210,22 @@ func settingRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 		if l, err := store.GetLibrary(id); err == nil {
 			if f, err := store.GetFlow(l.FlowID); err == nil {
 				cur = f.Template
+			}
+		}
+		if l, err := store.GetLibrary(id); err == nil && len(body) > 0 {
+			if f, err := store.GetFlow(l.FlowID); err == nil {
+				rest := unchangedFrom(body, withWarnings(store, f))
+				_, whole := body["kind"]     // a whole GET answer, sent back
+				if len(rest) == 0 && whole { // it chose nothing: nothing is saved
+					writeJSON(w, withWarnings(store, f))
+					return
+				}
+				if _, _, basic := readBasic(rest); len(rest) > 0 && basic && cur.Kind == rules.KindSlider {
+					if q, ok := body["quality"]; ok {
+						rest["quality"] = q // a slider save needs its position
+					}
+					body = rest // a Basic flow with one Basic choice changed: only that choice is saved
+				}
 			}
 		}
 		if refusedHere(w, cur) {
