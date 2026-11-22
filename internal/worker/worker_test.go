@@ -272,6 +272,8 @@ func (s *scenario) handle(name string, args []string) (string, string, error) {
 				return s.progressOut, s.encodeStderr, nil
 			}
 			return "out_time_us=50000000\n", s.encodeStderr, nil
+		case s.has(args, "print_format=json"): // F5's measuring pass: ffmpeg's print is the answer
+			return "", loudPrint, nil
 		case s.has(args, "-filters"):
 			if s.hasSSIM {
 				return " T.C ssim              VV->V      Calculate the SSIM between two video streams.\n", "", nil

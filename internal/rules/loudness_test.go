@@ -3,6 +3,7 @@
 package rules
 
 import (
+	"encoding/json"
 	"strconv"
 	"strings"
 	"testing"
@@ -109,6 +110,33 @@ func TestLoudnessFilterGoesOnConvertedTracksOnly(t *testing.T) {
 	plan.EvenLoudness = false
 	if args := strings.Join(plan.trackArgs(), " "); strings.Contains(args, "-filter") {
 		t.Errorf("setting off still filters: %s", args)
+	}
+}
+
+// The setting on is not enough: a converted track nobody measured gets no -filter:a in the encoder's arguments. The
+// worker measures before the encode, and a track it could not measure is encoded as it is.
+func TestLoudnessFilterIsAbsentForAnUnmeasuredTrackEvenWhenAsked(t *testing.T) {
+	plan := Plan{EvenLoudness: true, AudioOrder: []int{1}, Tracks: []TrackOp{
+		{Index: 1, Type: "audio", Encoder: "aac", Kbps: 128, Channels: 2},
+	}}
+	args := strings.Join(plan.FFmpegArgs("in.mkv", "out.mkv"), " ")
+	if strings.Contains(args, "-filter:a") {
+		t.Errorf("an unmeasured track was filtered: %s", args)
+	}
+}
+
+// Off, the setting is not in the API's JSON at all: an old Plan or setting reads back exactly as it was. On, it is.
+func TestEvenLoudnessOffStaysOutOfTheJSON(t *testing.T) {
+	for name, v := range map[string]any{"a setting": Selectors{}, "a plan": Plan{}} {
+		if b, _ := json.Marshal(v); strings.Contains(string(b), "evenLoudness") {
+			t.Errorf("%s with the setting off carries it: %s", name, b)
+		}
+	}
+	if b, _ := json.Marshal(Plan{EvenLoudness: true}); !strings.Contains(string(b), `"evenLoudness":true`) {
+		t.Errorf("a plan with the setting on does not carry it: %s", b)
+	}
+	if b, _ := json.Marshal(Selectors{EvenLoudness: true}); !strings.Contains(string(b), `"evenLoudness":true`) {
+		t.Errorf("a setting with the setting on does not carry it: %s", b)
 	}
 }
 

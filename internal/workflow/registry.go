@@ -276,6 +276,9 @@ func Definitions() []StepDefinition {
 				"onlyMyLanguages": typedRef(map[string]any{"type": "boolean", "default": true, "title": "Only my languages",
 					// design's words (02:38Z), true to planAudio: with none matching, a stereo choice keeps the main track only
 					"description": "Keeps only tracks in your languages (Settings > General). Tracks with no language set are always kept. If none match, a stereo choice keeps the main track; the other choices keep all tracks."}),
+				// F5: only the tracks this step converts or adds are measured, and a copied track is never touched.
+				"evenLoudness": typedRef(map[string]any{"type": "boolean", "default": false, "title": "Even out loudness",
+					"description": "Measures the sound of each converted track and evens it out to the same level. A track that is kept as it is is never changed."}),
 			}, []string{"audio", "onlyMyLanguages"})}),
 		def(StepDefinition{Type: TypeSubtitles, RunsAs: RunsPlan, Category: "subtitles", Name: "Subtitles", Icon: "subtitles", TypeLabel: "Subtitles",
 			Description: "Which subtitles the new file keeps.", Inputs: []Port{in}, Outputs: []Port{success}, RunsWith: encodeSegment,

@@ -185,14 +185,17 @@ func TestMeasureLoudnessStopEndsTheJobWithNoLine(t *testing.T) {
 	}
 }
 
-// Past the cap the step stops: the track it was on and the rest keep their audio, a line says so, and the job goes
-// on (no error).
-func TestMeasureLoudnessPastTheCapLeavesTheRest(t *testing.T) {
+// Past the cap the step stops and drops every measurement it took: no track in the file is evened out (a file is
+// evened out all at once or not at all), a line says so, and the job goes on (no error).
+func TestMeasureLoudnessPastTheCapLeavesNoTrackEven(t *testing.T) {
 	old := loudnessTotalLimit
 	loudnessTotalLimit = 20 * time.Millisecond
 	defer func() { loudnessTotalLimit = old }()
-	x := &loudExec{reply: func(_ int, c context.Context) (string, error) {
-		<-c.Done() // a measure that runs past the cap
+	x := &loudExec{reply: func(n int, c context.Context) (string, error) {
+		if n == 0 {
+			return loudPrint, nil // the first track is measured before the cap
+		}
+		<-c.Done() // the second runs past the cap
 		return "", c.Err()
 	}}
 	q := &logQueue{}
@@ -202,13 +205,37 @@ func TestMeasureLoudnessPastTheCapLeavesTheRest(t *testing.T) {
 		t.Fatalf("the cap ended the job: %v", err)
 	}
 	if got.Tracks[0].Loudness != nil || got.Tracks[1].Loudness != nil {
-		t.Error("a track was normalised past the cap")
+		t.Error("a track was normalised past the cap: the file is evened out all at once or not at all")
 	}
-	if len(x.calls) != 1 {
-		t.Errorf("%d runs after the cap, want none further", len(x.calls)-1)
+	if len(x.calls) != 2 {
+		t.Errorf("%d runs, want two: one measured, the last one past the cap", len(x.calls))
 	}
-	if lines(q, "measuring took more than") != 1 {
-		t.Errorf("log %q: want one cap line", q.lines)
+	if lines(q, "no track in this file is evened out") != 1 {
+		t.Errorf("log %q: want one cap line saying no track was evened out", q.lines)
+	}
+	if lines(q, "it is evened out to") != 0 {
+		t.Errorf("log %q: a line claims a track was evened out before the cap dropped it", q.lines)
+	}
+}
+
+// The worker's gate (F5): a job measures only when the person asked to even out the loudness, even though its plan
+// converts the audio either way. The on case is the guard: the same fixture must measure, or the off case proves
+// nothing.
+func TestEvenLoudnessIsMeasuredOnlyWhenAsked(t *testing.T) {
+	for _, on := range []bool{false, true} {
+		s := newScenario(t)
+		s.srcSpec.streams[1] = aud("truehd", "eng", 6) // lossless: eac3_surround really converts it
+		s.outSpec.streams[1] = aud("eac3", "eng", 6)
+		w := s.worker(Replace)
+		sel := rules.DefaultSelectors(3)
+		sel.Audio = "eac3_surround" // the plan converts the track, so only the setting decides
+		sel.EvenLoudness = on
+		tmpl := sel.Template()
+		w.Template = func(jobs.Job) (rules.Template, int64, error) { return tmpl, 0, nil }
+		w.RunOne(context.Background())
+		if n := s.count("print_format=json"); (n == 1) != on {
+			t.Errorf("even loudness %v: %d measuring runs, want %v:\n%s", on, n, on, strings.Join(s.calls, "\n"))
+		}
 	}
 }
 
@@ -227,20 +254,25 @@ func TestHasConvertedAudioIsOnlyConvertedOrAdded(t *testing.T) {
 	}
 }
 
-// Subtitles and dropped tracks are never measured, even when they carry an encoder: only audio is. The subtitle is
-// given a rate, so only the type check (not the missing-rate check) can keep it out.
-func TestMeasureLoudnessSkipsSubtitlesAndDroppedTracks(t *testing.T) {
+// Subtitles, dropped tracks and copied tracks are never measured: only audio this step converts or adds. Each
+// stream is given a rate, so only the plan's own checks (not the missing-rate one) can keep them out.
+func TestMeasureLoudnessSkipsSubtitlesDroppedAndCopiedTracks(t *testing.T) {
 	x := &loudExec{reply: func(int, context.Context) (string, error) { return loudPrint, nil }}
 	w := &Worker{Exec: x, FFmpeg: "ffmpeg", Queue: &logQueue{}}
-	src := media.Info{Streams: []media.Stream{{Index: 1, Type: "audio", SampleRate: 48000}, {Index: 2, Type: "subtitle", SampleRate: 48000}}}
+	src := media.Info{Streams: []media.Stream{
+		{Index: 1, Type: "audio", SampleRate: 48000},
+		{Index: 2, Type: "subtitle", SampleRate: 48000},
+		{Index: 3, Type: "audio", SampleRate: 48000},
+	}}
 	plan := rules.Plan{EvenLoudness: true, Tracks: []rules.TrackOp{
 		{Index: 1, Type: "audio", Drop: true, Encoder: "aac"},
 		{Index: 2, Type: "subtitle", Encoder: "mov_text"},
+		{Index: 3, Type: "audio"}, // kept as it is: no encoder, so nothing to even out
 	}}
 	if _, err := w.measureLoudness(context.Background(), jobs.Job{ID: 7, Path: "m.mkv"}, src, "/src/m.mkv", plan); err != nil {
 		t.Fatal(err)
 	}
 	if len(x.calls) != 0 {
-		t.Errorf("%d measuring runs on a subtitle or a dropped track", len(x.calls))
+		t.Errorf("%d measuring runs on a subtitle, a dropped track or a copied one", len(x.calls))
 	}
 }

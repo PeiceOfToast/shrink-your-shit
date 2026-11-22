@@ -37,6 +37,12 @@ func (w *Worker) measureLoudness(ctx context.Context, job jobs.Job, src media.In
 	tctx, cancel := context.WithTimeout(ctx, loudnessTotalLimit)
 	defer cancel()
 	ops := append([]rules.TrackOp(nil), p.Tracks...)
+	type measured struct {
+		index int
+		level rules.Loudness
+	}
+	var done []measured
+	capped := false
 	for k := range ops {
 		op := &ops[k]
 		if op.Type != "audio" || op.Drop || op.Encoder == "" {
@@ -46,8 +52,9 @@ func (w *Worker) measureLoudness(ctx context.Context, job jobs.Job, src media.In
 		if err := ctx.Err(); err != nil { // stopped: the job ends with no line about the measure
 			return p, err
 		}
-		if tctx.Err() != nil { // the step ran past its cap: this track and the rest are left as they are
-			w.jobNote(job.ID, secEncode, jobs.LevelWarning, "(%s): the loudness was not evened out: measuring took more than %s, so audio track %d and any after it are left as they are", job.Path, loudnessTotalLimit, op.Index)
+		if tctx.Err() != nil { // the step ran past its cap: no track in this file is evened out
+			w.jobNote(job.ID, secEncode, jobs.LevelWarning, "(%s): the loudness was not evened out: measuring took more than %s, so no track in this file is evened out", job.Path, loudnessTotalLimit)
+			capped = true
 			break
 		}
 		if err != nil {
@@ -55,7 +62,17 @@ func (w *Worker) measureLoudness(ctx context.Context, job jobs.Job, src media.In
 			continue
 		}
 		op.Loudness = &m
-		w.jobNote(job.ID, secEncode, jobs.LevelInfo, "(%s): audio track %d measures %.1f LUFS; it is evened out to %g LUFS", job.Path, op.Index, m.I, rules.LoudnessI)
+		done = append(done, measured{op.Index, m})
+	}
+	if capped { // a file is evened out all at once or not at all, so a track measured before the cap goes back too
+		for k := range ops {
+			ops[k].Loudness = nil
+		}
+	}
+	if !capped { // the line only once the track really is evened out
+		for _, d := range done {
+			w.jobNote(job.ID, secEncode, jobs.LevelInfo, "(%s): audio track %d measures %.1f LUFS; it is evened out to %g LUFS", job.Path, d.index, d.level.I, rules.LoudnessI)
+		}
 	}
 	p.Tracks = ops
 	return p, nil

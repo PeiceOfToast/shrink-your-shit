@@ -79,6 +79,8 @@ func TestMigrationKeepsBehaviour(t *testing.T) {
 		func(s *rules.Selectors) { s.Hardware, s.HardwareFail, s.CPUQuality = "only", "fail", 4 },
 		func(s *rules.Selectors) { s.Hardware, s.HardwareFail = "cpu", "" },
 		func(s *rules.Selectors) { s.Hardware, s.HardwareFail, s.CPUQuality = "", "fail", 0 }, // the default "auto"/"next" load as "" too
+		// F5: even loudness, saved and loaded both ways.
+		func(s *rules.Selectors) { s.EvenLoudness = true },
 	} {
 		s := rules.DefaultSelectors(3)
 		f(&s)
@@ -209,15 +211,56 @@ func TestValidateGraph(t *testing.T) {
 	}
 }
 
-// Turning off audio, subtitles or file type passes the original's through.
+// Turning off audio, subtitles or file type passes the original's through, and a turned-off audio step evens
+// nothing out whatever its config still says.
 func TestTurnedOffSteps(t *testing.T) {
 	d := roundTrip(t, FromTemplate(rules.SliderTemplate(3), nil))
+	d.Nodes[3].Config["evenLoudness"] = true
 	for _, i := range []int{3, 4, 5} {
 		d.Nodes[i].Enabled = false
 	}
 	tm, issues := ToTemplate(d, rules.Template{})
-	if len(issues) > 0 || tm.Selectors.Audio != "as_is" || tm.Selectors.OnlyMyLanguages || tm.Selectors.Subtitles != "keep_all" || tm.Selectors.FileType != "keep" {
+	if len(issues) > 0 || tm.Selectors.Audio != "as_is" || tm.Selectors.OnlyMyLanguages || tm.Selectors.EvenLoudness ||
+		tm.Selectors.Subtitles != "keep_all" || tm.Selectors.FileType != "keep" {
 		t.Errorf("%+v %+v", tm.Selectors, issues)
+	}
+}
+
+// F5: the Audio step's even-loudness choice is a boolean that is off unless the step asks for it, saved and read
+// back both ways, and it reaches the plan the worker compiles.
+func TestEvenLoudnessSetting(t *testing.T) {
+	au, _ := Definition(TypeAudio)
+	props := au.ConfigSchema["properties"].(map[string]any)
+	if p, _ := props["evenLoudness"].(map[string]any); p["type"] != "boolean" || p["default"] != false {
+		t.Errorf("the Audio step's even-loudness choice: %v", props["evenLoudness"])
+	}
+	even := func(config map[string]any) bool {
+		d := FromTemplate(rules.SliderTemplate(3), nil)
+		for i := range d.Nodes {
+			if d.Nodes[i].Type == TypeAudio {
+				for k, v := range config {
+					d.Nodes[i].Config[k] = v
+				}
+			}
+		}
+		d = roundTrip(t, d)
+		if r := Validate(d); !r.Stackable || len(r.Issues) != 0 { // also: the schema knows the key
+			t.Fatalf("%+v", r.Issues)
+		}
+		tm, issues := ToTemplate(d, rules.Template{})
+		if len(issues) > 0 || tm.Selectors == nil {
+			t.Fatalf("%+v %+v", tm.Selectors, issues)
+		}
+		if tm.Selectors.EvenLoudness != (config["evenLoudness"] == true) {
+			t.Errorf("the template's choice for %v: %v", config, tm.Selectors.EvenLoudness)
+		}
+		return tm.Compile(files()[0]).EvenLoudness
+	}
+	if !even(map[string]any{"evenLoudness": true}) {
+		t.Error("a workflow that asks for even loudness compiles to a plan that does not even it out")
+	}
+	if even(nil) { // a workflow saved before the choice existed: the sound is left as it is
+		t.Error("a workflow that does not ask compiles to a plan that evens the loudness out")
 	}
 }
 

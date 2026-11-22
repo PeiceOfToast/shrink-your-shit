@@ -51,7 +51,7 @@ func settingView(f jobs.Flow) map[string]any {
 // selectorFields are the Standard selectors (UI-API-CONTRACT.md addendum 2): any of them in a PUT body
 // makes it a selectors save.
 var selectorFields = map[string]bool{"speed": true, "format": true, "resolution": true, "maxbitrate": true, "audio": true,
-	"subtitles": true, "filetype": true, "afterconverting": true, "ignore": true, "includedolbyvision": true, "outputdir": true, "onlymylanguages": true}
+	"subtitles": true, "filetype": true, "afterconverting": true, "ignore": true, "includedolbyvision": true, "outputdir": true, "onlymylanguages": true, "evenloudness": true}
 
 // readSelectors is a selectors body: what it leaves out is the quality's own value. A client's kind,
 // positions, available*, the removed order, the removed minSavingPct and skipSmall (always
