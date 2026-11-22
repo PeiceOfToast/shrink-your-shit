@@ -14,6 +14,7 @@ import { onLive } from "../live";
 import { Empty, LoadFailed, PageHead } from "../PageHead";
 import { Link, navigate, useSearch } from "../router";
 import { useData } from "../useData";
+import { speedLine, speedsOf } from "../encoderSpeeds";
 import { allWorkers, allowJoin, denyJoin, dismissJoin, newPairing, type Pairing, dismissUpdateNotice, getWorker, patchWorker, workersPage, stoppedByUpdate, testCapabilities, workerAction } from "../workersApi";
 import type { Capability, JoinRequest, Worker } from "../types/v2";
 import { FileName } from "../FileName";
@@ -321,7 +322,7 @@ export function Workers() {
   const live = useLiveWorkers(() => (ws.reload(), jobs.reload()));
   const [said, setSaid] = useState("");
   const names = Object.fromEntries((jobs.data && !failed(jobs.data) ? jobs.data.items : []).map((j) => [j.id, j.name]));
-  const all = ws.data?.items ?? [], list = all.map(live);
+  const all = ws.data?.items ?? [], list = all.map(live), speeds = ws.data?.encoderSpeeds ?? [];
   const done = (m: string) => (setSaid(m), ws.reload());
   // the "Workers on" switch: one call for every worker (#171)
   // lead 16:57Z (design 7.2): a finishing worker shows OFF; the label says it's finishing; ON again starts every worker that isn't on
@@ -346,7 +347,7 @@ export function Workers() {
       <JoinCards joins={ws.data?.joinRequests ?? []} workers={all} on={n > 0} reload={ws.reload} />
       {!ws.loaded ? <Skeleton cards={3} /> : ws.error && !ws.data ? <LoadFailed error={ws.error} reload={ws.reload} /> : !list.length ? <Empty icon="i-worker" text="No workers yet." /> : (
         <div className="wgrid">{list.map((w) => {
-          const [t, cls, icon] = words(w), gone = w.status === "offline" || w.status === "stalled";
+          const [t, cls, icon] = words(w), gone = w.status === "offline" || w.status === "stalled", mine = speedsOf(speeds, w.id);
           return <article key={w.id} className={"card wcard" + (gone ? " dim" : "")}>
             <div className="hd"><h3><Link to={"/workers/" + encodeURIComponent(w.id)}>{w.name}</Link></h3><span className="sp" /><WorkerSwitch w={w} onDone={done} />
               <Link className="btn icon ghost gear" to={"/workers/" + encodeURIComponent(w.id) + "?tab=limits"} aria-label={"Settings for " + w.name} title="Settings"><Icon id="i-gear" /></Link></div>
@@ -357,6 +358,8 @@ export function Workers() {
               <Live w={w} />{/* user item 3: GPU % on the Workers list too (QA #444) */}
               {w.currentJobIds.map((id) => <p key={id} className="sm">Converting <Link className="mono" to={"/jobs?tab=running&job=" + encodeURIComponent(id)}>{names[id] ?? "Job " + id}</Link></p>)}
               <div><h4 className="sm muted ec-h">Encoders</h4><EncoderCards w={w} reload={ws.reload} /></div>
+              {mine.length > 0 && <div><h4 className="sm muted ec-h">Encoder speed</h4>
+                <ul className="sm speeds">{mine.map((s) => <li key={s.encoder} className="mono">{speedLine(s)}</li>)}</ul></div>}
             </div>
           </article>;
         })}</div>)}

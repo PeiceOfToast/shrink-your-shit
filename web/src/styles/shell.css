@@ -620,6 +620,7 @@ label.chk{cursor:pointer}
 .wcard dd a{display:block}
 /* Encoder cards (SCREENS V7, 11-13): lit = its test passed; dim (grey, with "(no)") = not there or failed. Words, not colour alone */
 .ec-h{margin:0 0 6px;font-weight:var(--fw-strong)}
+.speeds{list-style:none;margin:0;padding:0;display:grid;gap:2px;overflow-wrap:anywhere}
 .ec-grid{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:8px}
 .ec-grid.big{grid-template-columns:repeat(auto-fill,minmax(200px,1fr))}
 .ec{min-width:0;display:flex;flex-direction:column;gap:2px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-2);font-size:var(--fs-sm);overflow-wrap:anywhere}
