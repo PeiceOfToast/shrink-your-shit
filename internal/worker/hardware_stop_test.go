@@ -5,6 +5,7 @@ package worker
 import (
 	"context"
 	"errors"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -65,10 +66,37 @@ func TestPausedCardUnderOnlyWaitsForTheCard(t *testing.T) {
 	if enc := encodeCalls(s); len(enc) != 0 {
 		t.Errorf("encodes %v: want none while the card is paused", enc)
 	}
-	if n := s.count("using the processor"); n != 0 {
+	if n := logCount(t, s, "using the processor"); n != 0 {
 		t.Errorf("log says the processor takes the file %d times under only", n)
 	}
 	if n := logCount(t, s, "trying again in 1h5m0s"); n != 1 {
 		t.Errorf("retry line: %d, want the wait to outlast the pause (1h5m0s)", n)
+	}
+}
+
+// Under only, a local encoder that did not pass its test: the job log gives the reason and never names the processor,
+// and the refusal follows the reason.
+func TestOnlyLocalRefusalLogNeverNamesTheProcessor(t *testing.T) {
+	s := newScenario(t)
+	w := hardwareWorker(s, "only", "")
+	w.Encoder = func(string, bool, *rules.HDR) (string, string) {
+		return "", "encoder h264_qsv didn't pass its test here"
+	}
+	w.RunOne(context.Background()) // a failed job returns its error; the status below is the check
+	// The refusal's own words say the processor is never used; no other line may name it.
+	lines, err := s.store.LogLines(s.id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range lines {
+		if strings.Contains(l.Text, "processor") && !strings.Contains(l.Text, "never uses the processor") {
+			t.Errorf("log line names the processor under only, before the refusal: %q", l.Text)
+		}
+	}
+	if n := logCount(t, s, "encoder h264_qsv didn't pass its test here"); n != 1 {
+		t.Errorf("reason line: %d, want 1", n)
+	}
+	if j := s.job(); j.Status != jobs.Failed || !strings.Contains(j.Error, "Hardware only: no graphics encoder") {
+		t.Fatalf("status %s, error %q", j.Status, j.Error)
 	}
 }

@@ -671,7 +671,7 @@ func (r *encodeReports) finishingReport() map[string]any {
 }
 
 // encoderArgs is the ffmpeg arguments for a plan on this worker: its main encoder's for the plan's format when
-// this worker's own test passed it (rules.EncoderFor, as the local worker picks), else the processor. enc is the
+// this worker's own test passed it (rules.EncoderWhy gives the reason it did not, as the local worker picks), else the processor. enc is the
 // graphics encoder used ("" for the processor); note is for the job log when the processor is used because of
 // one ("" for the processor by choice, and for a server that sends no main encoder).
 func encoderArgs(plan rules.Plan, main *string, caps []map[string]any, source *media.Info, src, out string) (args []string, enc, note string) {

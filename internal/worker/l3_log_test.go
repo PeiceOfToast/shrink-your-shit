@@ -60,14 +60,14 @@ func TestEncoderCandidatesInTheEncodeSection(t *testing.T) {
 	candidates := []string{
 		"Hardware found: NVIDIA NVENC (graphics).",
 		"NVIDIA NVENC (graphics): found, but it failed its test on this computer (the test wrote: Impossible to open the device).",
-		"No graphics encoder for HEVC can do this file's 10-bit colour; the processor does the encoding.",
+		"No graphics encoder for HEVC can do this file's 10-bit colour.",
 	}
 	w.EncoderCandidates = func(codec string, need10 bool, hdr *rules.HDR) []string {
 		gotCodec, gotNeed10, gotHDR = codec, need10, hdr != nil
 		return candidates
 	}
 	w.Encoder = func(string, bool, *rules.HDR) (string, string) {
-		return "", "No graphics encoder passed its test on this computer, so the processor does the encoding"
+		return "", "No graphics encoder passed its test on this computer"
 	}
 	if _, err := w.RunOne(context.Background()); err != nil {
 		t.Fatalf("RunOne: %v", err)
@@ -85,7 +85,7 @@ func TestEncoderCandidatesInTheEncodeSection(t *testing.T) {
 	}
 	joined := strings.Join(texts, "\n")
 	pos := -1
-	for _, want := range append(candidates, "No graphics encoder passed its test on this computer, so the processor does the encoding",
+	for _, want := range append(candidates, "No graphics encoder passed its test on this computer; using the processor",
 		"Chosen: x265 (processor)", "Settings: Encoder: libx265") {
 		i := strings.Index(joined, want)
 		if i < 0 {
@@ -102,7 +102,7 @@ func TestEncoderCandidatesInTheEncodeSection(t *testing.T) {
 		t.Errorf("the rejected candidate gives no reason:\n%s", joined)
 	}
 	// the encoder's own reason is said once: the Chosen line follows it, rather than repeating it
-	if n := strings.Count(joined, "No graphics encoder passed its test on this computer, so the processor does the encoding"); n != 1 {
+	if n := strings.Count(joined, "No graphics encoder passed its test on this computer; using the processor"); n != 1 {
 		t.Errorf("the encoder's reason appears %d times, want once:\n%s", n, joined)
 	}
 }

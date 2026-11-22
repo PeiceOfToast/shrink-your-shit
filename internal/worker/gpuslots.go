@@ -53,7 +53,7 @@ func (w *Worker) takeGPUSlot(ctx context.Context, job jobs.Job) (*GPUSlot, error
 	}
 	limit := w.GPUSlots()
 	if limit <= 0 {
-		w.jobf(job.ID, ": the graphics slots are set to 0, so the processor does the encoding")
+		w.jobf(job.ID, ": the graphics slots are set to 0, so no graphics encoder runs")
 		return nil, nil
 	}
 	said := false

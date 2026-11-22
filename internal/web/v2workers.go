@@ -1126,16 +1126,16 @@ func (v *workerView) offlineCount() int {
 
 // LocalEncoderFor is the graphics encoder the local worker uses for a plan whose video is codec ("" for the
 // processor). It is the main encoder's family in that codec's format, and only if that encoder passed its test
-// here; need10 also needs its 10-bit test (an HDR plan, or a 10-bit source). note is the job-log line when a
-// test says no (the processor is used then); it is empty for the processor by choice. The worker asks at each
-// job's start.
+// here; need10 also needs its 10-bit test (an HDR plan, or a 10-bit source). why is the reason a test said no,
+// without the processor clause (the worker adds it with rules.FallbackNote, only where the processor takes the
+// file); it is empty for the processor by choice. The worker asks at each job's start.
 func LocalEncoderFor(store *jobs.Store, chk *doctor.Checker) func(codec string, need10 bool, hdr *rules.HDR) (enc, why string) {
 	return func(codec string, need10 bool, hdr *rules.HDR) (string, string) {
 		cfg, _ := store.WorkerConfigOf(jobs.LocalWorker)
 		v := &workerView{store: store, eng: Engine{Doctor: chk}}
 		t, ok := v.tools()
 		caps := capabilities(t, ok)
-		if !ok { // nothing has been tested here yet: the processor takes this file, and the job log says so
+		if !ok { // nothing has been tested here yet, so no graphics encoder is known to work; the job log says so
 			return "", "the encoder test here has not finished yet"
 		}
 		return rules.EncoderWhy(codec, primaryEncoder(cfg.PrimaryEncoder, caps), need10, hdr, caps)
@@ -1165,7 +1165,7 @@ func LocalEncoderCandidates(store *jobs.Store, chk *doctor.Checker) func(codec s
 		v := &workerView{store: store, eng: Engine{Doctor: chk}}
 		t, ok := v.tools()
 		if !ok {
-			return []string{"Hardware found: the encoder test has not finished yet; the processor does the encoding."}
+			return []string{"Hardware found: the encoder test has not finished yet."}
 		}
 		return candidateLines(capabilities(t, ok), chk.Probes(), codec, need10, hdr)
 	}
@@ -1186,7 +1186,7 @@ func candidateLines(caps []map[string]any, probes map[string]doctor.Probe, codec
 	}
 	out := []string{}
 	if len(here) == 0 {
-		out = append(out, "Hardware found: no graphics encoder on this computer; the processor does the encoding.")
+		out = append(out, "Hardware found: no graphics encoder on this computer.")
 	} else {
 		out = append(out, "Hardware found: "+strings.Join(here, ", ")+".")
 	}
@@ -1220,7 +1220,7 @@ func candidateLines(caps []map[string]any, probes map[string]doctor.Probe, codec
 		}
 	}
 	if tried == 0 {
-		out = append(out, "No graphics encoder for "+format+" is listed here; the processor encodes it.")
+		out = append(out, "No graphics encoder for "+format+" is listed here.")
 	}
 	return out
 }
