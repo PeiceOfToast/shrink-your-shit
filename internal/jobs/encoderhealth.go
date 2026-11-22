@@ -13,11 +13,11 @@ import (
 // Its words say which encoder failed and why; a job with this step carries a warning.
 const EncoderFallbackStep = "encoder_fallback"
 
-// A worker whose graphics encoder fails encoderPauseAfter times in a row stops using it for encoderPauseFor: a
+// A worker whose graphics encoder fails encoderPauseAfter times in a row stops using it for EncoderPauseFor: a
 // broken driver would otherwise fail every file first.
 const (
 	encoderPauseAfter = 3
-	encoderPauseFor   = time.Hour
+	EncoderPauseFor   = time.Hour
 )
 
 // encoderHealth is one worker's run of graphics-encoder failures, kept in app_meta (no schema change).
@@ -72,7 +72,7 @@ func (s *Store) EncoderFell(id int64, worker, encoder, reason string) (bool, err
 	paused := h.Fails >= encoderPauseAfter
 	if paused {
 		h.Fails = 0
-		h.PausedUntil = s.now().Add(encoderPauseFor).UTC().Format(time.RFC3339)
+		h.PausedUntil = s.now().Add(EncoderPauseFor).UTC().Format(time.RFC3339)
 	}
 	return paused, s.saveEncoderHealth(worker, h)
 }

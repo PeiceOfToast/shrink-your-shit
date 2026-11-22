@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 )
 
 // Failures that may pass (DD-2): a slow or busy disk, a full one, ffmpeg stopped by the system, an
@@ -20,6 +22,7 @@ type retryKind int
 const (
 	retryGeneral retryKind = iota // something busy or slow: minutes
 	retrySpace                    // the disk is full: space frees up over hours
+	retryPaused                   // the graphics card is paused for an hour: the first wait outlasts the pause
 )
 
 // maxTries is how many tries a job gets in all; retryWaits[kind][n] is the wait after the n-th failed one.
@@ -29,6 +32,7 @@ var maxTries = 3
 var retryWaits = map[retryKind][]time.Duration{
 	retryGeneral: {5 * time.Minute, 30 * time.Minute},
 	retrySpace:   {30 * time.Minute, 2 * time.Hour},
+	retryPaused:  {jobs.EncoderPauseFor + 5*time.Minute, 2 * time.Hour},
 }
 
 // retryableError marks a failure (a *FailedError or *KeptError, whose plain words stay) as one that may pass.

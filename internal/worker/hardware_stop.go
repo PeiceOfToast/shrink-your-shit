@@ -16,7 +16,7 @@ const (
 	HardwareOnlyFailedWords    = "Hardware only: the graphics encoder failed, and this step never uses the processor. Your original was not touched."
 	HardwareFailFailedWords    = "The graphics encoder failed, and this step is set to fail rather than convert on the processor. Your original was not touched."
 	HardwareOnlySlotsWords     = "Hardware only: the graphics slots are set to 0, so no graphics encoder may run, and this step never uses the processor. Your original was not touched."
-	HardwarePausedWords        = "The graphics encoder is paused after three failures in a row. This step does not convert on the processor while it is paused, so the job waits and tries again. Your original was not touched."
+	HardwarePausedWords        = "The graphics encoder is paused after three failures in a row. This step does not convert on the processor while it is paused, so the job waits and tries again. If it still can't, press Retry once the card is back. Your original was not touched."
 )
 
 // HardwareStopWords is the plain words for a graphics encoder's failure that the Convert step's hardware choice

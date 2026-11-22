@@ -1692,7 +1692,7 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			case err == nil && paused && (plan.Video.Hardware == "only" || plan.Video.HardwareFail == "fail"):
 				// The Convert step does not let the processor take this file: the card is only temporarily out, so wait for it
 				w.jobf(job.ID, ": %s is paused until %s after three failures in a row; this step waits for it rather than using the processor", want, until.Local().Format("15:04"))
-				return "", retryable(failed(HardwarePausedWords, errors.New(want+" is paused after three failures in a row")), retryGeneral)
+				return "", retryable(failed(HardwarePausedWords, errors.New(want+" is paused after three failures in a row")), retryPaused)
 			case err == nil && paused:
 				w.jobf(job.ID, ": %s is paused until %s after three failures in a row; using the processor", want, until.Local().Format("15:04"))
 				chosenWhy = want + " is paused after three failures in a row"
