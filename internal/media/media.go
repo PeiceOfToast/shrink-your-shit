@@ -561,6 +561,7 @@ type Progress struct {
 	Speed       float64
 	ETASeconds  float64
 	TotalSize   int64 // bytes of the new file written so far (total_size=); 0 when ffmpeg says N/A
+	Ended       bool  // progress=end: ffmpeg has written the file and is exiting (foundation slice 12b)
 }
 
 // Transcode runs ffmpeg and reports each progress point through onProgress (on every out_time_us line,
@@ -594,6 +595,11 @@ func TranscodeLines(ctx context.Context, x Exec, ffmpeg string, args []string, d
 			p.Speed, _ = strconv.ParseFloat(strings.TrimSpace(strings.TrimSuffix(v, "x")), 64)
 		case "total_size": // "123456", or "N/A": the bytes of the new file ffmpeg has written so far
 			p.TotalSize, _ = strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+		}
+		if k == "progress" && v == "end" { // the last block: after the file is written, so nothing it says is progress
+			p.Ended = true
+			onProgress(p)
+			return
 		}
 		if k != "out_time_us" {
 			return

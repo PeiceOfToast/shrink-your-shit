@@ -373,7 +373,10 @@ func workerAPI(store *jobs.Store, t Transport, version string, eng Engine, joins
 			OutTimeUs *float64 // where its encode is: a worker that sends it is judged for the stall stop
 			Frame     *int64   `json:"frame"`     // frames so far, when it sends them (an older worker doesn't)
 			TotalSize *int64   `json:"totalSize"` // bytes of the new file so far, when it sends them
-			Encoder   string   // the graphics encoder it converts with ("" = the processor): the live label says it
+			// the new file's size on the worker's disk, when it sends it: its finishing step (a faststart rewrite, which
+			// prints no progress) is judged by that growth (slice 12b)
+			OutputBytes *int64 `json:"outputBytes"`
+			Encoder     string // the graphics encoder it converts with ("" = the processor): the live label says it
 		}
 		if !readJSON(w, r, &in) {
 			return
@@ -397,6 +400,10 @@ func workerAPI(store *jobs.Store, t Transport, version string, eng Engine, joins
 				}
 				if in.TotalSize != nil {
 					wrote = *in.TotalSize
+				}
+				if in.OutputBytes != nil {
+					rj.SendsOutput()
+					wrote = max(wrote, *in.OutputBytes)
 				}
 				rj.ConvertingFrames(*in.OutTimeUs, frame, wrote, j.SizeBefore, time.Now(), j.DurationSec)
 				rj.SetEncoder(in.Encoder)
