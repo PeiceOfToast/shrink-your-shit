@@ -236,7 +236,7 @@ func flowRoutes(api *http.ServeMux, store *jobs.Store, ss *settingsStore, eng En
 		if name == "" {
 			name = "Imported workflow"
 		}
-		f, err := addImported(store, name, imp.Doc)
+		f, err := addImported(store, name, imp.Doc, imp.Layout)
 		if err != nil {
 			storeErr(w, err)
 			return
@@ -256,7 +256,9 @@ func flowRoutes(api *http.ServeMux, store *jobs.Store, ss *settingsStore, eng En
 			serverError(w, err)
 			return
 		}
-		v["import"] = map[string]any{"missingGlobals": nonNil(imp.MissingGlobals), "unknownSteps": nonNil(imp.UnknownSteps)}
+		sc.LeaveFile = true // as a publish checks it: file references stay references until a job runs
+		v["import"] = map[string]any{"missingGlobals": nonNil(imp.MissingGlobals), "unknownSteps": nonNil(imp.UnknownSteps),
+			"issues": workflow.ValidateWith(imp.Doc, sc).Issues}
 		writeJSONStatus(w, http.StatusCreated, v)
 	})
 
@@ -306,10 +308,10 @@ func flowRoutes(api *http.ServeMux, store *jobs.Store, ss *settingsStore, eng En
 
 // addImported saves an imported workflow under name, or under the next free "(imported)" name when the name is
 // taken: an import never overwrites a workflow.
-func addImported(store *jobs.Store, name string, doc workflow.Doc) (jobs.Flow, error) {
+func addImported(store *jobs.Store, name string, doc workflow.Doc, layout workflow.Layout) (jobs.Flow, error) {
 	candidate := name
 	for n := 1; ; n++ {
-		f, err := store.AddWorkflow(candidate, doc)
+		f, err := store.AddWorkflowWithLayout(candidate, doc, layout)
 		if err == nil || !errors.Is(err, jobs.ErrNameTaken) || n > 50 {
 			return f, err
 		}

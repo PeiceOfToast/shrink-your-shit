@@ -200,3 +200,11 @@ func sealStoredVariables(q rowQuerier) error {
 	}
 	return nil
 }
+
+// SecretUnsetError names the workflow's secrets that a setting refers to but that have no value: a run would
+// fill them with nothing, so the job stops and names them.
+type SecretUnsetError struct{ Names []string }
+
+func (e *SecretUnsetError) Error() string {
+	return "the workflow's secret " + strings.Join(e.Names, ", ") + " has no value"
+}

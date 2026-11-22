@@ -61,6 +61,11 @@ func (w *Worker) resolveForFile(job jobs.Job, src media.Info, tmpl rules.Templat
 			record("its workflow's secret can't be opened on this computer.")
 			return tmpl, nil, failed(unreadableSecretWords(unreadable.Names), err)
 		}
+		var unset *jobs.SecretUnsetError
+		if errors.As(err, &unset) {
+			record("its workflow's secret has no value.")
+			return tmpl, nil, failed(unsetSecretWords(unset.Names), err)
+		}
 		// #561 review 2b: the raw error stays out of the job log's words (it can carry SQLite text);
 		// failed(..., err) keeps it in the program log.
 		record("its workflow could not be read.")

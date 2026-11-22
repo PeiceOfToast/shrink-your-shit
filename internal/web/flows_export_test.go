@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/shrink-your-shit/shrink-your-shit/internal/workflow"
 )
 
 func mapOf(t *testing.T, body string) map[string]any {
@@ -108,6 +110,9 @@ func TestImportWithMissingGlobalReportsItAndSavesADraft(t *testing.T) {
 	if got := fmt.Sprint(rep["missingGlobals"]); got != "[nope_global]" {
 		t.Errorf("missing globals %s, want [nope_global]", got)
 	}
+	if _, ok := rep["issues"].([]any); !ok {
+		t.Errorf("the import report has no issues list: %v", rep)
+	}
 	newID := idOf(t, imported)
 	_, revs := call("GET", "/api/v2/workflows/"+newID+"/revisions", "")
 	if strings.Contains(revs, `"number":1`) {
@@ -137,6 +142,141 @@ func TestImportRefusesNewerFormatAndNonExports(t *testing.T) {
 	}
 	_, list := call("GET", "/api/v2/workflows", "")
 	if strings.Count(list, `"name":"Newer"`) != 1 {
+		t.Errorf("a refused import saved something: %s", list)
+	}
+}
+
+// An imported secret has no value: the original keeps its own, and the export carries neither the value nor a
+// has-value flag.
+func TestImportedSecretHasNoValue(t *testing.T) {
+	srv, st := serverAt(t, filepath.Join(t.TempDir(), "s.db"))
+	call := func(method, path, body string) (int, string) { return post(t, srv, method, path, body) }
+	d := workflow.Preset()
+	d.Variables = []workflow.Variable{{Name: "api_token", Type: "secret", Value: "hunter2", HasValue: true}}
+	f, err := st.AddWorkflow("Keyed", d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	orig := fmt.Sprint(f.ID)
+	_, file := call("GET", "/api/flows/"+orig+"/export", "")
+	if strings.Contains(file, "hunter2") || strings.Contains(file, "hasValue") {
+		t.Fatalf("the export carries the secret's value or flag: %s", file)
+	}
+	code, body := call("POST", "/api/flows/import", file)
+	if code != http.StatusCreated {
+		t.Fatalf("import: %d %s", code, body)
+	}
+	newID := idOf(t, mapOf(t, body))
+	if got := secretHasValue(t, call, newID); got != false {
+		t.Errorf("imported secret hasValue %v, want false", got)
+	}
+	if got := secretHasValue(t, call, orig); got != true {
+		t.Errorf("the original's secret hasValue %v, want true", got)
+	}
+}
+
+// secretHasValue is the hasValue of the draft's api_token.
+func secretHasValue(t *testing.T, call func(method, path, body string) (int, string), id string) bool {
+	t.Helper()
+	_, body := call("GET", "/api/v2/workflows/"+id+"/draft", "")
+	wf, _ := mapOf(t, body)["workflow"].(map[string]any)
+	vs, _ := wf["variables"].([]any)
+	for _, v := range vs {
+		m := v.(map[string]any)
+		if m["name"] == "api_token" {
+			b, _ := m["hasValue"].(bool)
+			return b
+		}
+	}
+	t.Fatalf("draft of %s has no api_token: %s", id, body)
+	return false
+}
+
+// The import is one write: the drawing comes with the workflow, so a workflow is never stored without it.
+func TestImportSavesItsDrawingInOneWrite(t *testing.T) {
+	srv, st := serverAt(t, filepath.Join(t.TempDir(), "s.db"))
+	call := func(method, path, body string) (int, string) { return post(t, srv, method, path, body) }
+	f, err := st.AddWorkflow("Drawn", workflow.Preset())
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, _, err := st.Draft(f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lay := workflow.Layout{Nodes: map[string]workflow.NodeLayout{"n1": {X: 120, Y: 40}}}
+	if _, err := st.SaveDraft(f.ID, d.Doc, lay, d.Etag); err != nil {
+		t.Fatal(err)
+	}
+	_, file := call("GET", fmt.Sprintf("/api/flows/%d/export", f.ID), "")
+	code, body := call("POST", "/api/flows/import", file)
+	if code != http.StatusCreated {
+		t.Fatalf("import: %d %s", code, body)
+	}
+	newID := idOf(t, mapOf(t, body))
+	_, draft := call("GET", "/api/v2/workflows/"+newID+"/draft", "")
+	if !strings.Contains(draft, `"n1"`) || !strings.Contains(draft, `"x":120`) {
+		t.Errorf("the imported draft lost its drawing: %s", draft)
+	}
+}
+
+// A file with no workflow object, a schema this build can't open, or a step from a newer version is refused with
+// 400 and nothing is saved; a step this build knows but that fails validation is saved and reported in issues.
+func TestImportRefusesWhatThisBuildCannotOpen(t *testing.T) {
+	srv, _ := serverAt(t, filepath.Join(t.TempDir(), "s.db"))
+	call := func(method, path, body string) (int, string) { return post(t, srv, method, path, body) }
+	_, body := call("POST", "/api/v2/workflows", `{"name":"Refused"}`)
+	orig := idOf(t, mapOf(t, body))
+	_, file := call("GET", "/api/flows/"+orig+"/export", "")
+
+	cases := map[string]func(fm map[string]any){
+		"no workflow": func(fm map[string]any) { delete(fm, "workflow") },
+		"schema 0":    func(fm map[string]any) { fm["workflow"].(map[string]any)["schemaVersion"] = float64(0) },
+		"newer step": func(fm map[string]any) {
+			fm["workflow"].(map[string]any)["nodes"].([]any)[0].(map[string]any)["typeVersion"] = float64(99)
+		},
+	}
+	for name, edit := range cases {
+		fm := mapOf(t, file)
+		edit(fm)
+		raw, _ := json.Marshal(fm)
+		if code, body := call("POST", "/api/flows/import", string(raw)); code != http.StatusBadRequest {
+			t.Errorf("%s: %d %s, want 400", name, code, body)
+		}
+	}
+	_, list := call("GET", "/api/v2/workflows", "")
+	if strings.Count(list, `"name":"Refused"`) != 1 || strings.Contains(list, `"name":"Imported`) {
+		t.Errorf("a refused import saved something: %s", list)
+	}
+}
+
+// A file bigger than 8 MiB is refused with 413 and nothing is saved.
+func TestImportRefusesAFileOver8MiB(t *testing.T) {
+	srv, _ := serverAt(t, filepath.Join(t.TempDir(), "s.db"))
+	big := strings.Repeat("a", 8<<20+1)
+	code, body := post(t, srv, "POST", "/api/flows/import", big)
+	if code != http.StatusRequestEntityTooLarge || errCode(body) != "too_large" {
+		t.Errorf("an 8 MiB+1 file: %d %s", code, body)
+	}
+}
+
+// A file whose workflow is in a newer schema than this build reads is refused with its reason, and nothing is
+// saved.
+func TestImportRefusesNewerSchemaVersion(t *testing.T) {
+	srv, _ := serverAt(t, filepath.Join(t.TempDir(), "s.db"))
+	call := func(method, path, body string) (int, string) { return post(t, srv, method, path, body) }
+	_, body := call("POST", "/api/v2/workflows", `{"name":"Schema"}`)
+	orig := idOf(t, mapOf(t, body))
+	_, file := call("GET", "/api/flows/"+orig+"/export", "")
+	fm := mapOf(t, file)
+	fm["workflow"].(map[string]any)["schemaVersion"] = float64(99)
+	newer, _ := json.Marshal(fm)
+	code, body := call("POST", "/api/flows/import", string(newer))
+	if code != http.StatusBadRequest || !strings.Contains(body, "newer") {
+		t.Errorf("a newer schema: %d %s", code, body)
+	}
+	_, list := call("GET", "/api/v2/workflows", "")
+	if strings.Count(list, `"name":"Schema"`) != 1 {
 		t.Errorf("a refused import saved something: %s", list)
 	}
 }

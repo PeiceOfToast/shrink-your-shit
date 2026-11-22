@@ -9,8 +9,6 @@ import (
 	"slices"
 	"strings"
 	"time"
-
-	"github.com/shrink-your-shit/shrink-your-shit/internal/vars"
 )
 
 // A portable file is one workflow written out to be read on another machine (the export and import of
@@ -45,6 +43,11 @@ type Requires struct {
 // workflow's own variables go in: a global is named in requires, never copied.
 func Export(name string, d Doc, l Layout, appVersion string, now time.Time) Portable {
 	d = Masked(d)
+	for i := range d.Variables { // a secret's value is left out, and so is the flag that it has one: the import sets its own
+		if d.Variables[i].Type == "secret" {
+			d.Variables[i].HasValue = false
+		}
+	}
 	steps := map[string]int{}
 	for _, n := range d.Nodes {
 		steps[n.Type] = n.TypeVersion
@@ -86,6 +89,18 @@ func ReadPortable(raw []byte, globals map[string]Variable) (Import, error) {
 	if p.FormatVersion > PortableVersion {
 		return Import{}, fmt.Errorf("This export is in format version %d, which is newer than this version reads (%d). Update shrink-your-shit to open it. Nothing was changed.", p.FormatVersion, PortableVersion)
 	}
+	var probe struct {
+		Workflow *json.RawMessage `json:"workflow"`
+	}
+	if err := json.Unmarshal(raw, &probe); err != nil || probe.Workflow == nil || string(*probe.Workflow) == "null" {
+		return Import{}, errors.New("This export has no workflow in it. Nothing was changed.")
+	}
+	if p.Workflow.SchemaVersion > SchemaVersion {
+		return Import{}, fmt.Errorf("This workflow is in schema version %d, which is newer than this version reads (%d). Update shrink-your-shit to open it. Nothing was changed.", p.Workflow.SchemaVersion, SchemaVersion)
+	}
+	if p.Workflow.SchemaVersion != SchemaVersion { // no migrations exist yet, so an older schema cannot be upgraded either
+		return Import{}, fmt.Errorf("This workflow is in schema version %d, which this version can't open (it reads %d). Nothing was changed.", p.Workflow.SchemaVersion, SchemaVersion)
+	}
 	body, err := json.Marshal(p.Workflow)
 	if err != nil {
 		return Import{}, err
@@ -93,6 +108,16 @@ func ReadPortable(raw []byte, globals map[string]Variable) (Import, error) {
 	d, err := Load(body) // upgrades the document through the migrations, as a stored one is read
 	if err != nil {
 		return Import{}, errors.New("This workflow could not be read. Nothing was changed.")
+	}
+	for _, n := range d.Nodes {
+		if def, ok := Definition(n.Type); ok && n.TypeVersion > def.TypeVersion {
+			return Import{}, fmt.Errorf("A %s step in this workflow is version %d, which is newer than this version has (%d). Update shrink-your-shit to open it. Nothing was changed.", def.Name, n.TypeVersion, def.TypeVersion)
+		}
+	}
+	for i := range d.Variables { // whatever the file says, an imported secret has no value until someone gives it one
+		if d.Variables[i].Type == "secret" {
+			d.Variables[i].Value, d.Variables[i].HasValue = nil, false
+		}
 	}
 	imp := Import{Name: strings.TrimSpace(p.Name), Doc: d, Layout: p.Layout}
 	for _, g := range globalNames(d) {
@@ -118,33 +143,11 @@ func globalNames(d Doc) []string {
 	for _, name := range PublishedNames(d) {
 		own[name] = true
 	}
-	seen := map[string]bool{}
-	var walk func(v any)
-	walk = func(v any) {
-		switch x := v.(type) {
-		case string:
-			refs, _ := vars.Refs(x)
-			for _, r := range refs {
-				if !own[r.Name] && !BuiltinName(r.Name) {
-					seen[r.Name] = true
-				}
-			}
-		case map[string]any:
-			for _, e := range x {
-				walk(e)
-			}
-		case []any:
-			for _, e := range x {
-				walk(e)
-			}
+	out := []string{}
+	for name := range configRefs(d) {
+		if !own[name] && !BuiltinName(name) {
+			out = append(out, name)
 		}
-	}
-	for _, n := range d.Nodes {
-		walk(n.Config)
-	}
-	out := make([]string, 0, len(seen))
-	for name := range seen {
-		out = append(out, name)
 	}
 	slices.Sort(out)
 	return out
