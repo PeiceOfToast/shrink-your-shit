@@ -18,8 +18,8 @@ import (
 // logSectionNames are the job log's sections in the order they are shown, with their headings (log-spec sections 4
 // and 5). Lines written before sections existed have section "" and come last.
 var logSectionNames = []struct{ name, heading string }{
-	{"start", "Start"}, {"variables", "Variables"}, {"input", "Source file"}, {"encode", "Encode"}, {"output", "Output check"},
-	{"replace", "Save the result"}, {"summary", "Summary"}, {"", "Other lines"},
+	{"start", "Start"}, {"variables", "Variables"}, {"input", "Source file"}, {"check", "Check before converting"},
+	{"encode", "Encode"}, {"output", "Output check"}, {"replace", "Save the result"}, {"summary", "Summary"}, {"", "Other lines"},
 }
 
 // logSection is one section of a job's log: its name, its heading and its lines, in order. A workflow step's

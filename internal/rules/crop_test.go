@@ -148,6 +148,33 @@ func TestCropRefusesTheFullGPUPipeline(t *testing.T) {
 	}
 }
 
+// The rules' own answer to "is this the full pipeline?" must agree with the arguments that run: a cropped hevc_qsv
+// plan says no to both, and the uncropped plan says yes to both, so the no is the crop's doing (review 646 §1: a
+// cropped job logged "full GPU pipeline" and passed full to its decoder line and step-down rules while running
+// processor-decoded arguments).
+func TestCroppedPlanAgreesWithTheFullGPUPipelineArguments(t *testing.T) {
+	for _, enc := range []string{"hevc_qsv", "hevc_vaapi"} {
+		plain := gpuPlan(22, func(v *VideoEncode) { v.Height = 720 })
+		if !plain.HasFullPipeline(enc) {
+			t.Fatalf("%s: setup: the plan without a crop must be on the full pipeline", enc)
+		}
+		if _, ok := plain.FFmpegArgsFullGPU("in.mkv", "out.mkv", enc); !ok {
+			t.Fatalf("%s: setup: the plan without a crop must have the full-pipeline arguments", enc)
+		}
+		cropped := gpuPlan(22, func(v *VideoEncode) {
+			v.Height = 720
+			v.CropRect = &CropRect{W: 1920, H: 800, X: 0, Y: 140}
+		})
+		_, argsFull := cropped.FFmpegArgsFullGPU("in.mkv", "out.mkv", enc)
+		if got := cropped.HasFullPipeline(enc); got != argsFull {
+			t.Errorf("%s: HasFullPipeline %v, FFmpegArgsFullGPU ok %v: they must agree", enc, got, argsFull)
+		}
+		if cropped.HasFullPipeline(enc) {
+			t.Errorf("%s: a cropped plan reports the full pipeline", enc)
+		}
+	}
+}
+
 // The measured rectangle is not a setting: the fingerprint is the same whatever the worker measured, and the
 // person's choice to crop is part of it.
 func TestFingerprintLeavesOutTheMeasuredCrop(t *testing.T) {

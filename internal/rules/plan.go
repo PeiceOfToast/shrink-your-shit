@@ -388,24 +388,44 @@ func (p Plan) FFmpegArgsWith(in, out, enc string) ([]string, bool) {
 	if enc == "" || enc == "cpu" {
 		return p.ffmpegArgs(in, out, "", false), true
 	}
-	prefix, ok := formatPrefix[p.Video.Codec]
-	if !ok || !graphicsEncoders[enc] || !strings.HasPrefix(enc, prefix+"_") || p.Video.Copy ||
-		(p.Video.HDR != nil && p.Video.Codec != "libx265") {
+	if !p.usesGraphics(enc) {
 		return p.ffmpegArgs(in, out, "", false), false
 	}
 	return p.ffmpegArgs(in, out, enc, false), true
+}
+
+// CanEncodeWith reports whether FFmpegArgsWith would use enc: a graphics encoder of the plan's format that the plan
+// can take. It answers without building the arguments, so a check can ask before the output file has a path.
+func (p Plan) CanEncodeWith(enc string) bool { return p.usesGraphics(enc) }
+
+// HasFullPipeline reports whether enc can decode and encode in one graphics pipeline (FFmpegArgsFullGPU's ok).
+func (p Plan) HasFullPipeline(enc string) bool { return p.fullPipeline(enc) }
+
+// fullPipeline is the one condition behind HasFullPipeline and FFmpegArgsFullGPU, so a log line or a check that asks
+// "is this the full pipeline?" can't drift from the arguments that run. F4: a crop is a processor filter, so the card
+// cannot decode and scale the picture alone.
+func (p Plan) fullPipeline(enc string) bool {
+	prof, ok := ProfileFor(enc)
+	return p.usesGraphics(enc) && ok && prof.FullPipeline() && p.Video.CropRect == nil
+}
+
+// usesGraphics is whether FFmpegArgsWith uses enc for the plan's video: an encoder of the plan's format's family,
+// on a plan that can take a graphics encoder at all (an H.264 or AV1 HDR encode stays on the processor).
+func (p Plan) usesGraphics(enc string) bool {
+	prefix, ok := formatPrefix[p.Video.Codec]
+	return ok && graphicsEncoders[enc] && strings.HasPrefix(enc, prefix+"_") && !p.Video.Copy &&
+		(p.Video.HDR == nil || p.Video.Codec == "libx265")
 }
 
 // FFmpegArgsFullGPU is FFmpegArgsWith for the full graphics pipeline: the source is decoded on enc's family and
 // its frames stay on the device through the scale to the encoder. Only QSV and VAAPI have one; for any other
 // encoder, or when FFmpegArgsWith wouldn't use enc, ok is false and the arguments are FFmpegArgsWith's.
 func (p Plan) FFmpegArgsFullGPU(in, out, enc string) ([]string, bool) {
-	args, ok := p.FFmpegArgsWith(in, out, enc)
-	// F4: a crop is a processor filter, so the card cannot decode and scale the picture alone (no full pipeline).
-	if prof, has := ProfileFor(enc); !ok || !has || !prof.FullPipeline() || p.Video.CropRect != nil {
-		return args, false
+	if p.fullPipeline(enc) {
+		return p.ffmpegArgs(in, out, enc, true), true
 	}
-	return p.ffmpegArgs(in, out, enc, true), true
+	args, _ := p.FFmpegArgsWith(in, out, enc)
+	return args, false
 }
 
 // tenBitTargets are the targets a graphics encoder keeps 10-bit when the source is 10-bit: HEVC (main10) and AV1

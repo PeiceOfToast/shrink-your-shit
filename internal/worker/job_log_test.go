@@ -22,7 +22,13 @@ func TestEncodeStepAndFailureAreInTheDatabase(t *testing.T) {
 	s.encodeStderr = "Input #0, matroska\nInvalid data found when processing input\nlast line"
 	w.RunOne(context.Background())
 	steps, _ := s.store.RunSteps(s.id)
-	if len(steps) != 1 || steps[0].Name != "encode" || steps[0].Outcome != "failed" || !strings.HasPrefix(steps[0].Command, "ffmpeg ") {
+	var encode *jobs.RunStep // the check before the encode (L1) sorts first; this test is about the encode's own step
+	for i := range steps {
+		if steps[i].Name == "encode" {
+			encode = &steps[i]
+		}
+	}
+	if encode == nil || encode.Outcome != "failed" || !strings.HasPrefix(encode.Command, "ffmpeg ") {
 		t.Fatalf("steps %+v", steps)
 	}
 	f, _ := s.store.FailureOf(s.id)
