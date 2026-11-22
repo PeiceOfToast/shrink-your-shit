@@ -555,6 +555,14 @@ UPDATE jobs SET queued_rev = workflow_rev;`},
 	// not finished yet: the API then falls back to the probes table as it always did.
 	{60, "job output info", `
 ALTER TABLE jobs ADD COLUMN output_info TEXT;`},
+	// F7: how fast each finished encode ran, so the workers page can say from experience which encoder is
+	// fastest on each computer. On the encode step: the encoder the command names, the realtime multiple
+	// (media length / encode seconds, 3.2 for 3.2x) and the average frames per second. A row from before
+	// this, a copy (no encoder), and a conversion nothing measured keep 0 and stay out of the medians.
+	{61, "encoder speeds", `
+ALTER TABLE job_run_steps ADD COLUMN encoder TEXT NOT NULL DEFAULT '';
+ALTER TABLE job_run_steps ADD COLUMN speed REAL NOT NULL DEFAULT 0;
+ALTER TABLE job_run_steps ADD COLUMN fps REAL NOT NULL DEFAULT 0;`},
 }
 
 // legacyReasonCode is the SQL for the code of a reason stored before migration 23 as its sentence alone

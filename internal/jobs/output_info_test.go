@@ -23,7 +23,7 @@ func TestMigration60AddsOutputInfoAndOldJobsHaveNone(t *testing.T) {
 	}
 	s.Close()
 	db := rawDB(t, path) // back to version 58: as an install from before this left it
-	for _, q := range []string{`ALTER TABLE jobs DROP COLUMN output_info`, `ALTER TABLE jobs DROP COLUMN queued_rev`, `PRAGMA user_version=58`} {
+	for _, q := range append([]string{`ALTER TABLE jobs DROP COLUMN output_info`, `ALTER TABLE jobs DROP COLUMN queued_rev`, `PRAGMA user_version=58`}, rewindEncoderSpeeds...) {
 		if _, err := db.Exec(q); err != nil {
 			t.Fatal(q, err)
 		}

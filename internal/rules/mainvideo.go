@@ -69,15 +69,22 @@ func (p Plan) plannedPicture(src media.Info) (w, h int, scaled bool) {
 // the processor (a software encoder, or a copy). A remote worker reports the command it ran; the server
 // judges the uploaded file by the encoder in it.
 func GraphicsEncoderIn(args []string, index int) string {
+	enc := VideoEncoderIn(args, index)
+	if !graphicsEncoders[enc] { // a software encoder (libx265), a copy, or nothing
+		return ""
+	}
+	return enc
+}
+
+// VideoEncoderIn is the encoder an ffmpeg command names for the plan's main video: a graphics encoder, a
+// software one (libx265), or "copy"; "" when the command names none.
+func VideoEncoderIn(args []string, index int) string {
 	key := "-c:v:" + strconv.Itoa(index)
 	enc := ""
 	for i, a := range args {
 		if a == key && i+1 < len(args) {
 			enc = args[i+1]
 		}
-	}
-	if !graphicsEncoders[enc] { // a software encoder (libx265), a copy, or nothing
-		return ""
 	}
 	return enc
 }

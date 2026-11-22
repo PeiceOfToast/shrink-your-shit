@@ -100,7 +100,7 @@ func TestLibvaChatterIsNotOutput(t *testing.T) {
 	st, id := realJob(t, filepath.Join(t.TempDir(), "x.mkv"), 10)
 	w := &Worker{Queue: st}
 	w.recordEncode(id, []string{"-c:v", "libx265"}, time.Now(),
-		"libva info: Driver version: Intel iHD 24.1\nLIBVA INFO: uppercase driver line\nReal error line", errors.New("exit status 1"), "")
+		"libva info: Driver version: Intel iHD 24.1\nLIBVA INFO: uppercase driver line\nReal error line", errors.New("exit status 1"), "", encodeFigures{})
 	logLines, err := st.LogLines(id)
 	if err != nil {
 		t.Fatal(err)

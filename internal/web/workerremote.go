@@ -285,6 +285,10 @@ func remoteRoutes(mux *http.ServeMux, store *jobs.Store, gate func(http.Response
 			Steps    []jobs.RunStep
 			Failure  *jobs.FailureSummary
 			Info     *media.Info // its probe of the new file it made (foundation slice 4); nil from an older worker
+			// F7: how fast its encode ran, by its own clock; absent from a worker built before it
+			Encoder string
+			Speed   float64
+			FPS     float64
 		}
 		if !readJSON(w, r, &in) {
 			return
@@ -296,7 +300,8 @@ func remoteRoutes(mux *http.ServeMux, store *jobs.Store, gate func(http.Response
 			return
 		}
 		pl, _ := rj.Plan()
-		res := worker.RemoteResult{Stderr: in.Stderr, Command: in.Args, Code: in.Code}
+		res := worker.RemoteResult{Stderr: in.Stderr, Command: in.Args, Code: in.Code,
+			Encoder: in.Encoder, Speed: in.Speed, FPS: in.FPS}
 		if in.Info != nil {
 			res.Info = *in.Info // read as a probe: unknown fields are dropped, not passed on to the API
 		}

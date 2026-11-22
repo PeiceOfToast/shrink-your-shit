@@ -58,7 +58,7 @@ func TestConvertingReportsCarryFramesAndBytesWhenKnown(t *testing.T) {
 			if err := os.WriteFile(out, nil, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			if _, _, err := cl.convert(context.Background(), cv, l, rules.Snapshot{Plan: plan}, "/in.mkv", out); err != nil {
+			if _, _, _, err := cl.convert(context.Background(), cv, l, rules.Snapshot{Plan: plan}, "/in.mkv", out); err != nil {
 				t.Fatal(err)
 			}
 			rec.mu.Lock()
