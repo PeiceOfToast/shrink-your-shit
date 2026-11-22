@@ -155,6 +155,9 @@ type VideoEncode struct {
 	Hardware     string `json:"hardware,omitempty"`
 	HardwareFail string `json:"hardwareFail,omitempty"`
 	CPUCRF       int    `json:"cpuCRF,omitempty"`
+	// CardCRF is each graphics family's quality offset at this file's slider position (F3, CardOffsets), added
+	// to CRF for that family's card; nil when every offset is 0, so such a plan is unchanged.
+	CardCRF map[string]int `json:"cardCRF,omitempty"`
 }
 
 // cpuCRF is the CRF the processor encodes with: its own when the Convert step set one, else CRF.
@@ -456,7 +459,7 @@ func (p Plan) ffmpegArgs(in, out, gpu string, full bool) []string {
 		args = append(args, "-c:"+v, gpu, "-b:"+v, kbps)
 	default:
 		args = append(args, "-c:"+v, gpu)
-		args = append(args, profiles[fam].quality(v, p.Video.CRF)...)
+		args = append(args, profiles[fam].quality(v, p.Video.CRF+p.Video.CardCRF[fam])...)
 	}
 	if gpu == "" && p.Video.Preset != "" { // a graphics encoder has no x265 presets
 		args = append(args, "-preset:"+v, p.Video.Preset)
@@ -961,6 +964,9 @@ func compileSelectors(p Plan, s Selectors, info media.Info, langs []string, basi
 	src := sourceVideoKbps(info, v)
 	p.Video = VideoEncode{Codec: vf.Encoder, CRF: crf + vf.CRFOffset, Preset: vf.Presets[s.Speed], Tag: vf.Tag,
 		Index: info.MainVideoOrdinal(), Height: height, SquarePixels: v.SquarePixels}
+	if target == "hevc" { // CardOffsets are measured for HEVC only
+		p.Video.CardCRF = cardCRFFor(pos.Position)
+	}
 	switch s.RateControl { // user review 11-13 item A; the *_legacy meanings compile as they did before it
 	case "level": // the level's figure is the average, its peak 1.5x (never above the source)
 		p.Video.TargetKbps = CapKbps(s.MaxBitrate, target, w, h, v, src)
