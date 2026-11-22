@@ -312,3 +312,27 @@ func TestRegistryWords(t *testing.T) {
 		}
 	}
 }
+
+// A step this build doesn't have (an imported file from a newer version) is named once, by its type. Its links
+// get no port check, so no issue names a step with an empty name, and the steps after it aren't called unreachable.
+func TestUnknownStepIsNamedOnceAndItsLinksAreNotChecked(t *testing.T) {
+	d := roundTrip(t, FromTemplate(rules.SliderTemplate(3), nil))
+	unknown := d.Nodes[2].ID
+	d.Nodes[2].Type = "video.from_the_future"
+	var codes []string
+	for _, i := range Validate(d).Issues {
+		codes = append(codes, i.Code)
+		if i.Code == "unknown_port" || i.Code == "unreachable_node" {
+			t.Errorf("%s on %s: %q, want only the unknown step named", i.Code, i.NodeID, i.Message)
+		}
+		if i.Code != "unknown_node_type" && i.NodeID == unknown {
+			t.Errorf("%s on the unknown step: %q", i.Code, i.Message)
+		}
+		if strings.HasPrefix(i.Message, " ") {
+			t.Errorf("%s has an empty step name: %q", i.Code, i.Message)
+		}
+	}
+	if !slices.Contains(codes, "unknown_node_type") {
+		t.Errorf("issues %v, want unknown_node_type", codes)
+	}
+}
