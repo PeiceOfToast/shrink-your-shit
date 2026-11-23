@@ -19,11 +19,10 @@ import { allWorkers, allowJoin, denyJoin, dismissJoin, newPairing, type Pairing,
 import type { Capability, JoinRequest, Worker } from "../types/v2";
 import type { JobItem } from "../types/jobs";
 import { FileName } from "../FileName";
-import { encoderChip, formatsChip, graphicsLine, systemLine, usageBars } from "../workerCards";
+import { OS_NAMES, encoderChip, formatsChip, graphicsLine, systemLine, usageBars } from "../workerCards";
 import { runFields } from "../jobCards";
 
 // review 61dc891 P2-1: only what the server reports (a remote worker may send no OS or host): no guess, no stray dot
-const OS: Record<string, string> = { linux: "Linux", darwin: "macOS", windows: "Windows" };
 const going = (w: Worker) => w.status === "busy" || w.status === "online";
 // Status in words (SCREENS V7; design: no 'slots').
 function words(w: Worker): [string, string, string] {
@@ -265,7 +264,7 @@ function JoinCards({ joins, workers, on, reload }: { joins: JoinRequest[]; worke
       const asked = mins(t - Date.parse(j.askedAt)), left = Math.ceil((Date.parse(j.expiresAt) - t) / 60000);
       return <article key={j.id} className="card joinc" aria-labelledby={"jr-" + j.id}>
         <h3 id={"jr-" + j.id}>New worker wants to join</h3>
-        <p className="sm facts">{[j.name, j.address, OS[j.os ?? ""], j.hardware].filter(Boolean).join(" · ")}</p>
+        <p className="sm facts">{[j.name, j.address, OS_NAMES[j.os ?? ""], j.hardware].filter(Boolean).join(" · ")}</p>
         {j.replacesWorker && <p className="sm">A worker named {j.name} already exists. Allowing replaces it.</p>}
         <p className="sm muted">{asked < 1 ? "Asked just now" : "Asked " + plural(asked, "minute", "minutes") + " ago"} · {left <= 1 ? "expires in less than a minute" : "expires in " + left + " minutes"}</p>
         {err}
@@ -320,7 +319,7 @@ function EncoderChips({ w, reload }: { w: Worker; reload: () => void }) {
       <button className="btn sm ghost" type="button" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "Done" : "Change encoder"}</button></div>
     <ul className="ech">{cs.map((c) => {
       const chip = encoderChip(c.name, c.lit, c.lit && c.primary), fmts = c.lit ? formatsChip(c.formats) : "";
-      return <li key={c.name}><span className={"chip-enc " + chip.tone} title={c.lit ? undefined : c.why}>{chip.text}</span>{fmts && <span className="chip-enc chip-fmt">{fmts}</span>}</li>;
+      return <li key={c.name}><span className={"chip-enc " + chip.tone} title={c.lit ? undefined : c.why}>{chip.text}</span>{fmts && <span className="chip-enc ok">{fmts}</span>}</li>;
     })}</ul>
     {open && <EncoderCards w={w} reload={reload} />}
   </div>;
@@ -339,13 +338,13 @@ function Live({ w }: { w: Worker }) { // the detail page's live line: only the f
 
 // M4: the card's facts as a key-value list, with the usage bars under it, and the encoders beside it. Every value is one
 // the server sent; a missing one drops its row.
-function WorkerFacts({ w, reload }: { w: Worker; reload: () => void }) {
+function WorkerFacts({ w, reload, jobById }: { w: Worker; reload: () => void; jobById: Record<string, JobItem> }) {
   const [t] = words(w), l = w.live, gpu = l.gpu[0]?.utilPercent ?? null, bars = usageBars(l.cpuPercent, gpu);
   return <div className="wbody">
     <div className="wleft">
       <dl className="kv">
         <div><dt>Status</dt><dd>{t}</dd></div>
-        <div><dt>System</dt><dd>{systemLine(w.os, w.arch, l.memTotalBytes ? bytes(l.memTotalBytes) : "") || "—"}</dd></div>
+        <div><dt>System</dt><dd>{systemLine(w.host, w.os, w.arch, l.memTotalBytes ? bytes(l.memTotalBytes) : "") || "—"}</dd></div>
         <div><dt>Graphics card</dt><dd>{graphicsLine(gpuRows(w))}</dd></div>
         {l.memUsedBytes != null && l.memTotalBytes ? <div><dt>Memory</dt><dd>{bytes(l.memUsedBytes)} of {bytes(l.memTotalBytes)}</dd></div> : null}
         {w.lastHeartbeatAt && <div><dt>Last heard</dt><dd>{ago(w.lastHeartbeatAt)}</dd></div>}
@@ -358,6 +357,9 @@ function WorkerFacts({ w, reload }: { w: Worker; reload: () => void }) {
     <div className="wright">
       <EncoderChips w={w} reload={reload} />
       <p className="sm">{plural(w.slots.cpu.total, "file", "files")} at once · <Link to={"/workers/" + encodeURIComponent(w.id) + "?tab=limits"}>Change</Link></p>
+      {w.currentJobIds.map((id) => jobById[id]
+        ? <MiniJob key={id} j={jobById[id]} />
+        : <p key={id} className="sm">Converting <Link className="mono" to={"/jobs?tab=running&job=" + encodeURIComponent(id)}>{"Job " + id}</Link></p>)}
     </div>
   </div>;
 }
@@ -401,10 +403,7 @@ export function Workers() {
               <StartStop w={w} onDone={done} />
               <Link className="btn icon ghost gear" to={"/workers/" + encodeURIComponent(w.id) + "?tab=limits"} aria-label={"Settings for " + w.name} title="Settings"><Icon id="i-gear" /></Link></div>
             <div className="bd stack">
-              <WorkerFacts w={w} reload={ws.reload} />
-              {w.currentJobIds.map((id) => jobById[id]
-                ? <MiniJob key={id} j={jobById[id]} />
-                : <p key={id} className="sm">Converting <Link className="mono" to={"/jobs?tab=running&job=" + encodeURIComponent(id)}>{"Job " + id}</Link></p>)}
+              <WorkerFacts w={w} reload={ws.reload} jobById={jobById} />
               {mine.length > 0 && <div><h4 className="sm muted ec-h">Encoder speed</h4>
                 <ul className="sm speeds">{mine.map((s) => <li key={s.encoder} className="mono">{speedLine(s)}</li>)}</ul></div>}
             </div>

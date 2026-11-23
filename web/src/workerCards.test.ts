@@ -11,17 +11,21 @@ test("graphicsLine: an empty model never leaves an empty part or a doubled separ
   assert.equal(out, "8.0 GB");
   assert.ok(!/·\s*·/.test(out));
   assert.equal(graphicsLine([{ model: "  ", vram: "" }]), "Unnamed");
-  assert.equal(graphicsLine([]), "None found");
+  assert.equal(graphicsLine([]), "Not reported");
+});
+
+test("graphicsLine: a remote worker or an unreadable one sends no GPU list, so no card is claimed", () => {
+  assert.equal(graphicsLine([]), "Not reported");
 });
 
 test("graphicsLine: two cards are joined, an empty one is dropped", () => {
   assert.equal(graphicsLine([{ model: "Intel", vram: "" }, { model: "", vram: "" }, { model: "AMD", vram: "8.0 GB" }]), "Intel, AMD · 8.0 GB");
 });
 
-test("systemLine: only the parts the worker sent", () => {
-  assert.equal(systemLine("linux", "x86_64", "32 GB"), "Linux · x86_64 · 32 GB");
-  assert.equal(systemLine(undefined, undefined, ""), "");
-  assert.equal(systemLine("darwin", undefined, ""), "macOS");
+test("systemLine: host, OS, arch and memory, only the parts the worker sent", () => {
+  assert.equal(systemLine("box", "linux", "x86_64", "32 GB"), "box · Linux · x86_64 · 32 GB");
+  assert.equal(systemLine(undefined, undefined, undefined, ""), "");
+  assert.equal(systemLine(undefined, "darwin", undefined, ""), "macOS");
 });
 
 test("usageBars: a bar only when the value exists, rounded", () => {

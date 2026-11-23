@@ -2,17 +2,20 @@
 // chips. No React and no imports here, so Node can test them. Only what the server reports; a missing value adds no part.
 // Callers pass memory as text (already formatted); the helpers only join the parts.
 
-// "Linux · x86_64 · 32 GB": the OS, the architecture and the memory the worker reports. No core count: the API has none.
-export function systemLine(os: string | undefined, arch: string | undefined, memory: string): string {
-  const OS: Record<string, string> = { linux: "Linux", darwin: "macOS", windows: "Windows" };
-  return [OS[os ?? ""], arch, memory].filter(Boolean).join(" · ");
+// The one OS map: the list card's System row and the Jobs join card both read it.
+export const OS_NAMES: Record<string, string> = { linux: "Linux", darwin: "macOS", windows: "Windows" };
+
+// "amd64 host · Linux · x86_64 · 32 GB": the host, the OS, the architecture and the memory the worker reports. No core count: the API has none.
+export function systemLine(host: string | undefined, os: string | undefined, arch: string | undefined, memory: string): string {
+  return [host, OS_NAMES[os ?? ""], arch, memory].filter(Boolean).join(" · ");
 }
 
-// "NVIDIA · 8.0 GB", "None found". A card with no name and no memory adds nothing, so no empty part or doubled label ever
+// "NVIDIA · 8.0 GB". An empty list is not "no card": the server sends [] when it cannot read the GPUs and for a remote worker,
+// so it reads "Not reported". A card with no name and no memory adds nothing, so no empty part or doubled label ever
 // reaches the screen (the old live line printed "GPU · · GPU 34%" for a card with an empty model).
 export function graphicsLine(gpus: { model: string; vram: string }[]): string {
   const named = gpus.map((g) => [g.model.trim(), g.vram].filter(Boolean).join(" · ")).filter(Boolean);
-  return named.length ? named.join(", ") : gpus.length ? "Unnamed" : "None found";
+  return named.length ? named.join(", ") : gpus.length ? "Unnamed" : "Not reported";
 }
 
 // The thin bars under the list: Processor always when the server reads it, Graphics card only when it reads the busiest card.
