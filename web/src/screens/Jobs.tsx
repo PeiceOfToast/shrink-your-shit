@@ -6,8 +6,9 @@ import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "../Icon";
 import { MOCK, SignedOut, failed, type Answer } from "../api";
 import { bytes, clock, clockS, count, elapsed, plural, stepTime } from "../format";
-import { type LogLine, type LogProbe, convertDoneAgain, fileJobs, findSkip, getJob, getJobLog, jobAction, listJobs, listKept, restoreKept, type JobLog, type LogMove, type LogStep, type LogVariable } from "../jobsApi";
+import { type LogLine, type LogProbe, convertDoneAgain, fileJobs, findInTab, getJob, getJobLog, jobAction, listJobs, listKept, restoreKept, type JobLog, type LogMove, type LogStep, type LogVariable } from "../jobsApi";
 import { getWorkflow } from "../workflowApi";
+import { tabForState } from "../jobTab";
 import { stoppedTitle, whyHeading } from "../jobResult";
 import { getHealth, getSettings } from "../libraryApi";
 import { onLive } from "../live";
@@ -605,14 +606,16 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
   }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
   // review c610d24 P3: the actions follow the job's own state, not the tab it was opened from. A skipped job opened
   // without its row (another tab in the URL) finds its row in the Skipped list: Convert again needs its skip-N id.
-  const ended = d.data && (d.data.state === "skipped" || d.data.state === "cancelled");
-  // review a8f85e0 P3: the list holds the first 200 skips only; a job beyond them is looked for page by page (findSkip)
-  const skips = useData(async () => {
-    if (row || !ended) return null;
-    const first = await listJobs("skipped", "");
-    return failed(first) || first.items.some((x) => x.jobId === id) ? first : findSkip(id);
-  }, [id, !!row, !!ended]);
-  const own = row ?? skips.data?.items.find((x) => x.jobId === id);
+  // M5d: a job opened by a bare ?job= link has no row in the page it loaded. Its row is looked up in the list tab for
+  // its state (from the detail), so the saving line, the Size row and the failure reason show. The first page first.
+  const dState = d.data?.state;
+  const more = useData(async () => {
+    const t = tabForState(dState);
+    if (row || !t) return null;
+    const first = await listJobs(t, "");
+    return failed(first) || first.items.some((x) => x.jobId === id) ? first : findInTab(t, id);
+  }, [id, !!row, dState]);
+  const own = row ?? (more.data && !failed(more.data) ? more.data.items : []).find((x) => x.jobId === id);
   // E: this file's other jobs, newest first (not this job); left out when there are none
   const filePath = own?.path ?? "", fj = useData(() => (filePath ? fileJobs(filePath) : Promise.resolve([] as JobItem[])), [filePath]).data;
   const others = !fj || failed(fj) ? [] : fj.filter((x) => (x.jobId ?? x.id) !== id);
@@ -661,8 +664,9 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
   const showResult = !!(before || after || subsRow || lenRow), lenText = (x?: { durationSec?: number }) => (x?.durationSec != null ? elapsed(x.durationSec) : "—");
   const found = (log.data?.steps ?? []).filter((st) => (st.found?.length ?? 0) > 0);
   const kept0 = !!state && keptOrig({ state, reason: j?.reason ?? own?.reason, newFileRefused: j?.newFileRefused ?? own?.newFileRefused });
-  // U10: the header's size delta, the list row's wording; a failed or skipped job has none, nor a restored original
-  const delta = state === "completed" && own?.originalState !== "restored" ? saved(own?.beforeBytes, own?.afterBytes) : "";
+  // U10: the header's size delta, the list row's wording; a failed or skipped job has none, nor a restored original.
+  // M5d: the design's line is the percentage big and green, the sizes muted beside it (done 1).
+  const delta = state === "completed" && own?.originalState !== "restored" && own?.beforeBytes && own.afterBytes != null ? { pct: Math.round((100 * (own.beforeBytes - own.afterBytes)) / own.beforeBytes), sizes: bytes(own.beforeBytes) + " → " + bytes(own.afterBytes) } : null;
   return (
     <div className="drawer-wrap" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <aside className="drawer jobd" ref={box} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="jd-h">
@@ -671,7 +675,7 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
           {own && <span className="ltile codec">{tileOf(own)}</span>}
           <div className="sp">
             <h2 id="jd-h" className="clamp2" title={name}><FileName n={name} /></h2>
-            {delta && <p className="jd-delta">{delta}</p>}
+            {delta && <p className="jd-delta"><span className={"jd-pct" + (delta.pct < 0 ? " bigger" : "")}>{delta.pct >= 0 ? delta.pct + "% smaller" : -delta.pct + "% bigger"}</span> <span className="muted sm">{delta.sizes}</span></p>}
             {/* the header pill matches the list row: a kept-original job reads "Original kept" (review 572) */}
             {state && <span style={{ alignSelf: "flex-start" }}><Pill j={{ state, retryAt: j?.retryAt ?? own?.retryAt, subState: own?.subState, reason: j?.reason ?? own?.reason, warning: j?.warning }} /></span>}
           </div>

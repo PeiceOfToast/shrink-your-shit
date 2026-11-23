@@ -618,7 +618,9 @@ label.chk{cursor:pointer}
 .drawer.jobd section>h3{font-size:calc(15px*var(--font-scale));color:var(--text-2);font-weight:var(--fw-strong)}
 /* U10: drawer-only (the shared .kv stays 150px and .note is used on other screens): the File label column is 120px; the header's size delta is its largest text */
 .drawer.jobd .kv{grid-template-columns:120px minmax(0,1fr)}
-.drawer.jobd .jd-delta{margin:0;font-size:calc(22px*var(--font-scale));font-weight:var(--fw-strong);line-height:1.2;color:var(--text)}
+.drawer.jobd .jd-delta{margin:0;font-size:calc(22px*var(--font-scale));font-weight:var(--fw-strong);line-height:1.2;color:var(--text);display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px}
+.drawer.jobd .jd-pct{color:var(--success-text)}
+.drawer.jobd .jd-pct.bigger{color:var(--text)}
 .drawer.jobd .jd-found{width:100%;border-collapse:collapse}
 .drawer.jobd .jd-found th,.drawer.jobd .jd-found td{font-size:var(--fs-sm);padding:4px 0;vertical-align:top;text-align:left}
 .drawer.jobd .jd-found th{width:120px;padding-right:12px;color:var(--text-2);font-weight:500}
