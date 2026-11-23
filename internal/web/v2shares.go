@@ -503,6 +503,9 @@ var nfsRule = regexp.MustCompile(`^(?:[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0
 // it at a fake map.
 var uidMapFile = "/proc/self/uid_map"
 
+// gidMapFile is the group counterpart of uidMapFile.
+var gidMapFile = "/proc/self/gid_map"
+
 // inUserNamespace reports whether the process is in a user namespace (for example Docker inside a
 // Proxmox LXC), which stops the kernel allowing NFS and SMB mounts. The map is the whole host range
 // ("0 0 4294967295") outside one. An unreadable map counts as not in one.
@@ -786,33 +789,131 @@ func domainOpt(domain string) string {
 	return ",domain=" + domain
 }
 
+// hostOwner is the owner of the host mount: this container's user as the Proxmox host numbers it. The container's
+// uid and gid map to other numbers there, and "syp" usually is not a user on the host. A map that cannot be read
+// gives placeholders and a line saying how to work them out.
+func hostOwner() (owner, note string) {
+	uid, uok := hostID(uidMapFile, os.Getuid())
+	gid, gok := hostID(gidMapFile, os.Getgid())
+	if uok && gok {
+		return fmt.Sprintf("uid=%d,gid=%d", uid, gid), ""
+	}
+	return "uid=<host uid>,gid=<host gid>",
+		"# Replace <host uid> and <host gid>: each is the outside number in this container's uid_map and gid_map line, plus your id minus its inside number.\n"
+}
+
+// hostID maps id through a kernel id map (lines of "inside outside count") to the number the host gives it.
+func hostID(mapPath string, id int) (int, bool) {
+	b, err := os.ReadFile(mapPath)
+	if err != nil {
+		return 0, false
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+		f := strings.Fields(line)
+		if len(f) != 3 {
+			continue
+		}
+		inside, e1 := strconv.Atoi(f[0])
+		outside, e2 := strconv.Atoi(f[1])
+		count, e3 := strconv.Atoi(f[2])
+		if e1 != nil || e2 != nil || e3 != nil {
+			continue
+		}
+		if id >= inside && id < inside+count {
+			return outside + (id - inside), true
+		}
+	}
+	return 0, false
+}
+
+// mountOpts is the -o string for share sh. owner is the uid=,gid= pair the files get (SMB only): syp for the
+// app's own mount, the host's numbers for a host mount. creds, when set, is a credentials file used in place of
+// username=, for a mount that can't ask for the password (an /etc/fstab line, mounted at boot).
+func mountOpts(sh jobs.Share, owner, creds string) string {
+	if sh.Type != "smb" {
+		return "soft,nosuid,nodev,noexec"
+	}
+	login := "guest"
+	if !sh.Guest {
+		if creds != "" {
+			login = "credentials=" + creds
+		} else {
+			user, dom := helper.SplitDomain(sh.Username)
+			login = "username=" + user + domainOpt(dom)
+		}
+	}
+	return login + ",vers=3.1.1,soft,nosuid,nodev,noexec," + owner + ",file_mode=0660,dir_mode=0770"
+}
+
+// fsType is the mount type for share sh.
+func fsType(sh jobs.Share) string {
+	if sh.Type == "smb" {
+		return "cifs"
+	}
+	return "nfs"
+}
+
+// manualMountCommand is the sudo mount for share sh at target, the app's own folder.
+func manualMountCommand(sh jobs.Share, mntAddr, target, owner string) string {
+	return "sudo mount -t " + fsType(sh) + " " + shellQuote(mntAddr) + " " + shellQuote(target) + " -o " + shellQuote(mountOpts(sh, owner, ""))
+}
+
+// fstabField escapes a space or tab in an /etc/fstab field, which would otherwise split it.
+func fstabField(s string) string {
+	return strings.NewReplacer(" ", `\040`, "\t", `\011`).Replace(s)
+}
+
+// hostSetup is the manual setup in an unprivileged container, which can't mount: the Proxmox host mounts the
+// share into a host folder through /etc/fstab, so it comes back after the host restarts, and the container is
+// given that folder at mpt, where the app looks for the share. Every step runs on the host as root, which has no
+// sudo by default. NOT RUN on a real Proxmox host: the teams can't touch one.
+func hostSetup(sh jobs.Share, mntAddr, mpt string) map[string]any {
+	vol := sanitiseName(sh.Name, sh.ID)
+	host := "/mnt/" + vol
+	var owner, ownerNote, creds, credsLines, credsRemove string
+	if sh.Type == "smb" { // an NFS mount takes no owner option
+		owner, ownerNote = hostOwner()
+		if !sh.Guest {
+			creds = "/root/.syp-" + vol + ".cred"
+			user, dom := helper.SplitDomain(sh.Username)
+			// a quoted heredoc keeps every character of what is typed between the lines, a quote in the password included
+			body := "username=" + user + "\npassword=YOUR-PASSWORD\n"
+			if dom != "" {
+				body += "domain=" + dom + "\n"
+			}
+			credsLines = "# Save the share's sign-in where only root can read it. Put the real password in place of YOUR-PASSWORD:\n" +
+				"(umask 077 && cat > " + creds + ") <<'END'\n" + body + "END\n"
+			credsRemove = " and the file " + creds
+		}
+	}
+	line := fstabField(mntAddr) + " " + host + " " + fsType(sh) + " " + mountOpts(sh, owner, creds) + ",_netdev,nofail 0 0"
+	return map[string]any{
+		"kind": "command",
+		"text": "# This container runs in a user namespace (for example an unprivileged Proxmox LXC), so it can't mount network shares here.\n" +
+			"# On the Proxmox host, as root: make a host folder, add the share to /etc/fstab so it comes back after a restart, and mount it.\n" +
+			ownerNote + credsLines +
+			"mkdir -p " + host + " && printf '%s\\n' " + shellQuote(line) + " >> /etc/fstab && mount " + host + "\n" +
+			"# Pass that folder into the container where the app looks for the share, then restart the container.\n" +
+			"# Use mp1, mp2 … instead if this container already has mp0 (pct config <id> shows them).\n" +
+			"pct set <id> -mp0 " + host + ",mp=" + mpt + "\n" +
+			"pct restart <id>",
+		"removeText": "On the Proxmox host, as root: umount " + host + ", delete its line from /etc/fstab" + credsRemove +
+			", then pct set <id> -delete mp0 (or the mp number you used) and restart the container.",
+	}
+}
+
 func setupForMode(store *jobs.Store, sh jobs.Share) any {
 	mode, _ := detectMode()
 	mpt := mountPointFor(sh)
 	mntAddr := mountAddress(sh.Type, sh.Address)
 	switch mode {
 	case "manual":
-		mkdir := "sudo mkdir -p " + shellQuote(mpt) + " && "
-		var opts string
-		if sh.Type == "smb" {
-			mountCmd := "sudo mount -t cifs " + shellQuote(mntAddr) + " " + shellQuote(mpt) + " -o "
-			if sh.Guest {
-				opts = "guest,vers=3.1.1,soft,nosuid,nodev,noexec,uid=syp,gid=syp,file_mode=0660,dir_mode=0770"
-			} else {
-				user, dom := helper.SplitDomain(sh.Username)
-				opts = "username=" + user + domainOpt(dom) + ",vers=3.1.1,soft,nosuid,nodev,noexec,uid=syp,gid=syp,file_mode=0660,dir_mode=0770"
-			}
-			return map[string]any{
-				"kind":       "command",
-				"text":       mkdir + mountCmd + shellQuote(opts),
-				"removeText": "sudo umount " + shellQuote(mpt),
-			}
+		if inUserNamespace() {
+			return hostSetup(sh, mntAddr, mpt)
 		}
-		// NFS
-		opts = "soft,nosuid,nodev,noexec"
 		return map[string]any{
 			"kind":       "command",
-			"text":       mkdir + "sudo mount -t nfs " + shellQuote(mntAddr) + " " + shellQuote(mpt) + " -o " + shellQuote(opts),
+			"text":       "sudo mkdir -p " + shellQuote(mpt) + " && " + manualMountCommand(sh, mntAddr, mpt, "uid=syp,gid=syp"),
 			"removeText": "sudo umount " + shellQuote(mpt),
 		}
 	case "docker":
