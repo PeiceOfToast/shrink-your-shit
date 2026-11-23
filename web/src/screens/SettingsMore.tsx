@@ -274,10 +274,10 @@ function Commands({ settings }: { settings: ReturnType<typeof useData<FirstRunSe
       </div></section>);
 }
 
-// Updates (SCREENS:293, About block): the #324 switch, off until the person turns it on, and the version line.
+// Updates (SCREENS:293, About block): the #324 switch, off until the person turns it on, and when it last checked.
 const SENT = "Once a day it asks GitHub which stable release is newest. GitHub sees this app's version and your IP address, as with any web request. Nothing about your files or settings is sent. Checking installs nothing.";
 const at = (t: string) => `${day(t)}, ${new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
-function Updates({ version }: { version?: string }) {
+function Updates() {
   const st = useData(getSettings, []), u = useData(getUpdate, []), [busy, setBusy] = useState(false), [said, setSaid] = useState("");
   const on = !!st.data?.checkForUpdates, d = u.data, sw = useRef<HTMLInputElement>(null);
   const set = async (v: boolean) => { setBusy(true); setSaid(""); const r = await act(patchSettings({ checkForUpdates: v }), setSaid); setBusy(false); if (r) { st.reload(); u.reload(); } };
@@ -292,9 +292,9 @@ function Updates({ version }: { version?: string }) {
         </SettingRow>
         <div className="stack" style={{ padding: "0 var(--pad) 12px" }}>
         <div className="note"><Icon id="i-shield" /><span>The update check is the only thing Shrink Your Shit sends over the internet without you setting it up.</span></div>
-        {!d ? (version || u.error) && <p role="status" style={{ margin: 0 }}>{version && <span>Shrink Your Shit {version}. </span>}{u.error && <span className="muted">{u.error.message}</span>}</p>
+        {!d ? u.error && <p role="status" style={{ margin: 0 }}><span className="muted">{u.error.message}</span></p>
           : <div className="row" style={{ alignItems: "baseline" }}>
-          <p role="status" style={{ margin: 0 }}><span>Shrink Your Shit {d.current || version}. </span>
+          <p role="status" style={{ margin: 0 }}>
             {!d.enabled ? <span className="muted">Update checks are off. <a href="#upd-sw" onClick={toSwitch}>Turn them on</a></span>
               : d.available && d.latest ? <><span className="pill warn"><Icon id="i-download" />Version {d.latest} is available</span>{d.url && <> <a href={d.url} target="_blank" rel="noopener">What's new</a></>}</>
                 : d.error && d.checkedAt ? <span className="st warn"><Icon id="i-alert" /><span>Couldn't check for updates at {at(d.checkedAt)}.</span></span>
@@ -414,7 +414,7 @@ export function AboutSettings() {
           <SettingRow title="Version">{h.data?.version && <ValueChip>{h.data.version}</ValueChip>}</SettingRow>
           <SettingRow title="Licence" desc={<>Shrink Your Shit is free software under the GNU Affero General Public License, version 3. <a href="/licenses.md" target="_blank" rel="noopener">The licences of the parts this interface is built with</a> (React, React Flow and others).</>} />
         </div></section>
-      <Updates version={h.data?.version} />
+      <Updates />
       <section className="card" aria-labelledby="log-h"><div className="hd"><h2 id="log-h">Recent log lines</h2></div>
         <div className="bd"><pre className="mono sm" tabIndex={0} role="region" aria-labelledby="log-h" style={{ overflow: "auto", maxHeight: "16rem", margin: 0, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{h.data ? (h.data.logsTail.length ? h.data.logsTail.join("\n") : "Nothing has been logged yet.") : ""}</pre></div></section>
     </div>);
