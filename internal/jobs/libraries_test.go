@@ -452,3 +452,25 @@ func TestRenamedReplacesCountLikeReplaces(t *testing.T) {
 		t.Errorf("freed from half an hour ahead %d, want none (both went now)", n)
 	}
 }
+
+// A copy keeps the source's status: a copy of a switched-off workflow must not start out switched on.
+func TestDuplicateFlowKeepsStatus(t *testing.T) {
+	s := open(t)
+	for _, status := range []string{"disabled", "enabled"} {
+		f, err := s.AddFlow("Films "+status, rules.SliderTemplate(3))
+		if err != nil {
+			t.Fatal(err)
+		}
+		st := status
+		if err := s.SetWorkflowMeta(f.ID, nil, &st, nil, nil); err != nil {
+			t.Fatal(err)
+		}
+		dup, err := s.DuplicateFlow(f.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if m, _ := s.WorkflowMetaOf(dup.ID); m.Status != status {
+			t.Errorf("copy of a %s workflow is %q", status, m.Status)
+		}
+	}
+}
