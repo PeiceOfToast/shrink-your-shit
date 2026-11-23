@@ -148,7 +148,7 @@ export function BackupSettings() {
                     <input ref={file} type="file" accept=".gz,.json,application/gzip,application/json" hidden
                       onChange={(e) => { const f = e.target.files?.[0]; if (f) preview(f); }} />
                   </SettingRow>
-                  <div role="alert" style={{ padding: "0 var(--pad) 12px" }}>{fileError && <p className="st bad" style={{ margin: 0 }}><Icon id="i-alert" /><span>{fileError}</span></p>}</div>
+                  <div role="alert" style={fileError ? { padding: "0 var(--pad) 12px" } : undefined}>{fileError && <p className="st bad" style={{ margin: 0 }}><Icon id="i-alert" /><span>{fileError}</span></p>}</div>
                 </div>
               </section>
             </>}
