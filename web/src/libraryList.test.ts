@@ -101,6 +101,7 @@ test("a filter or search change drops the hidden libraries from the selection (t
   const a = lib({ id: "a" }), b = lib({ id: "b" }), c = lib({ id: "c" });
   assert.deepEqual(keepShown(["a", "b"], [a, b, c]), ["a", "b"]); // all still shown: nothing dropped
   assert.deepEqual(keepShown(["a", "b"], [b, c]), ["b"]); // a is now hidden: dropped
+  assert.deepEqual(keepShown(["3", "1", "2"], [{ id: "1" }, { id: "2" }, { id: "9" }]), ["1", "2"]); // jobs: any {id} rows, selection order kept
   assert.deepEqual(keepShown(["a", "b"], []), []); // nothing shown: the selection is empty
   assert.deepEqual(keepShown([], [a, b]), []);
   assert.deepEqual(keepShown(["b", "a"], [a, b]), ["b", "a"]); // order of the selection is kept

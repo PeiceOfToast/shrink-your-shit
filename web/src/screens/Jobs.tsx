@@ -20,7 +20,8 @@ import { useData } from "../useData";
 import { afterHeader, queuedLine } from "../jobResult";
 import type { Failure, JobAction, JobDetail, JobItem, JobProgressEvent, JobState, Probe, Tab, Pin } from "../types/jobs";
 import { stepLabel } from "../stepLabel";
-import { keepShownIds, runFields } from "../jobCards";
+import { runFields } from "../jobCards";
+import { keepShown } from "../libraryList";
 
 const TABS: [Tab, string][] = [["waiting", "Waiting"], ["running", "Running"], ["completed", "Done"], ["skipped", "Skipped"], ["failed", "Failed"]];
 // G5: the Done filter for originals waiting in the trash. The words come from design (SCREENS V6); keep them here.
@@ -153,7 +154,7 @@ export function Jobs() {
   const picked = items.filter((j) => sel.includes(j.id)), none = !picked.length || busy;
   // Select mode keeps only the rows still shown: a tab, library or search change drops the rest (and their ticks)
   const shownKey = items.map((j) => j.id).join("\n");
-  useEffect(() => setSel((s) => { const k = keepShownIds(s, shownKey ? shownKey.split("\n") : []); return k.length === s.length ? s : k; }), [shownKey]);
+  useEffect(() => setSel((s) => { const k = keepShown(s, items); return k.length === s.length ? s : k; }), [shownKey]);
   const run = async (a: JobAction) => {
     if (a === "cancel" && !window.confirm("Cancel " + plural(picked.length, "file", "files") + "? The files stay as they are. Nothing is deleted.")) return;
     const r = await act(jobAction(a, picked.map((j) => j.id), a === "reprioritize" ? prio : undefined), setSaid);
@@ -195,20 +196,21 @@ export function Jobs() {
       <div className="tabs" role="tablist" aria-label="Jobs">
         {TABS.map(([t, label]) => <button key={t} role="tab" type="button" aria-selected={tab === t} onClick={() => tab !== t && go(t)}>{label}{counts && <span className="n">{count(t === "completed" && (kept || left) && current ? current.total : counts[t])}</span>}</button>)}
       </div>
-      <div className="ltools" role="toolbar" aria-label="Jobs">
-        {!firstRun && <>
-          {(selecting || sel.length > 0) && <label className="hit selall"><input type="checkbox" aria-label="Select all files" checked={items.length > 0 && sel.length === items.length} onChange={(e) => setSel(e.target.checked ? items.map((j) => j.id) : [])} /><span className="sm">All</span></label>}
-          {(selecting || sel.length > 0) && <span className="desk">{actions}</span>}
-          {selecting && <details className="menu phone"><summary className="btn sm icon ghost" aria-label="More actions"><Icon id="i-more" /></summary><div className="pop" role="menu">{actions}</div></details>}
-        </>}
+      {!firstRun && (selecting || sel.length > 0) && <div className="ltools" role="toolbar" aria-label="Jobs selection">
+        <label className="hit selall"><input type="checkbox" aria-label="Select all files" checked={items.length > 0 && sel.length === items.length} onChange={(e) => setSel(e.target.checked ? items.map((j) => j.id) : [])} /><span className="sm">All</span></label>
+        <span className="desk">{actions}</span>
+        {selecting && <details className="menu phone"><summary className="btn sm icon ghost" aria-label="More actions"><Icon id="i-more" /></summary><div className="pop" role="menu">{actions}</div></details>}
         {picked.length > 0 && <span className="muted sm">{picked.length} selected</span>}
-        {/* parity 11-19 #2 (G4): pick a library here too; it sets the same ?libraryId= as "See its jobs", and the chip above stays.
-            One joined button per library (aria-pressed on the chosen one); hidden on the empty state and while loading or on error */}
+      </div>}
+      {/* parity 11-19 #2 (G4): pick a library here too; it sets the same ?libraryId= as "See its jobs", and the chip above stays.
+          One joined button per library (aria-pressed on the chosen one); hidden on the empty state and while loading or on error.
+          Its own row under the tabs (design jobs-running): the filter left, the search right. */}
+      <div className="lfilt">
         <span className="filt">{tab === "completed" && <span className="seg" role="group" aria-label="Original file">
           <button type="button" aria-pressed={kept} onClick={() => navigate(query("completed", library, kept ? "" : "kept"))}>{TRASH_WORDS}</button>
           <button type="button" aria-pressed={left} onClick={() => navigate(query("completed", library, left ? "" : "left"))}>{LEFT_WORDS}</button></span>}
         {!!current && !!libs.data && libs.data.length > 1 && items.length > 0 && <span className="seg" role="group" aria-label="Library">
-          <button type="button" aria-pressed={!library} onClick={() => navigate(query(tab, ""))}>All</button>
+          <button type="button" aria-pressed={!library} onClick={() => navigate(query(tab, ""))}>All libraries</button>
           {libs.data.map((l) => <button key={l.id} type="button" aria-pressed={library === l.id} onClick={() => navigate(query(tab, l.id))}>{l.name}</button>)}
         </span>}</span>
         <input className="input find" type="search" placeholder="Search file names" aria-label="Search file names" value={q} onChange={(e) => setQ(e.target.value)} />
@@ -223,6 +225,14 @@ export function Jobs() {
           {items.map((j) => {
             const p = j.progress, pct = p ? (p.percent ?? p.workflowPercent) : null, f = p ? runFields(p) : null, checked = sel.includes(j.id);
             const gain = j.state === "completed" && !!j.beforeBytes && j.afterBytes != null && j.afterBytes < j.beforeBytes;
+            // the facts chips: library, folder, pin, place, worker (the running card shows them above its four fields)
+            const facts = (<div className="chips">
+              <span className="mchip">{j.library}</span>
+              {j.folder !== "." && <span className="mchip">{j.folder}</span>}
+              {j.pin && <span className="mchip prio">{j.pin === "first" ? "First" : "Last"}</span>}
+              {tab === "waiting" && j.position != null && <span className="mchip">Place {j.position} in the queue</span>}
+              {j.worker && <span className="mchip">{j.worker === "builtin" ? "This computer" : j.worker}</span>}
+            </div>);
             return (
             <li key={j.id} className={"lcard" + (checked ? " sel" : "")}>
               {selecting && <label className="hit lcheck"><input type="checkbox" aria-label={"Select " + j.name} checked={checked} onChange={(e) => setSel(e.target.checked ? [...sel, j.id] : sel.filter((x) => x !== j.id))} /></label>}
@@ -230,15 +240,11 @@ export function Jobs() {
               <div className="lmain">
                 <div className="lname"><a className="ttl" href={"/jobs?tab=" + tab + "&job=" + encodeURIComponent(key(j))} data-job={key(j)} title={j.path}
                   onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); go(tab, key(j)); } }}><FileName n={j.name} /></a><span className="lchev" aria-hidden="true">›</span></div>
-                {f ? <div className="chips" aria-label="Conversion progress">{[f.step, f.speed, f.timeLeft, f.bitrate].map((x, i) => <span className="mchip" key={i}>{x}</span>)}</div>
-                  : <span className="lpath sm" title={reasonText(j) || undefined}><Detail j={j} /></span>}
-                <div className="chips">
-                  <span className="mchip">{j.library}</span>
-                  {j.folder !== "." && <span className="mchip">{j.folder}</span>}
-                  {j.pin && <span className="mchip prio">{j.pin === "first" ? "First" : "Last"}</span>}
-                  {tab === "waiting" && j.position != null && <span className="mchip">Place {j.position} in the queue</span>}
-                  {j.worker && <span className="mchip">{j.worker === "builtin" ? "This computer" : j.worker}</span>}
-                </div>
+                {!f && <span className="lpath sm" title={reasonText(j) || undefined}><Detail j={j} /></span>}
+                {facts}
+                {f && <div className="rfields" role="group" aria-label="Conversion progress">
+                  {([["Step", f.step], ["Speed", f.speed], ["Time left", f.timeLeft], ["Bitrate", f.bitrate]] as const).map(([label, value]) => <div className="rf" key={label}><span className="muted sm">{label}</span><span className="rfv">{value}</span></div>)}
+                </div>}
               </div>
               <div className="lside">
                 <span className={"sm nowrap" + (gain ? " gain" : "")}>{j.state === "completed" ? saved(j.beforeBytes, j.afterBytes) : bytes(j.bytes)}</span>

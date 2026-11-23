@@ -1,15 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { etaWords, keepShownIds, runFields } from "./jobCards.ts";
+import { etaWords, runFields } from "./jobCards.ts";
 import type { Progress } from "./types/jobs.ts";
 
 const base: Progress = { stage: "Converting video", percent: 48, workflowPercent: 40, elapsedS: 120, speed: null, etaS: null, fps: null, bitrateKbps: null };
-
-test("keepShownIds keeps only the shown ids, in the selection's order", () => {
-  assert.deepEqual(keepShownIds(["3", "1", "2"], ["1", "2", "9"]), ["1", "2"]);
-  assert.deepEqual(keepShownIds(["3"], ["1"]), []);
-  assert.deepEqual(keepShownIds([], ["1"]), []);
-});
 
 test("etaWords reads seconds as words", () => {
   assert.equal(etaWords(30), "under a minute");
