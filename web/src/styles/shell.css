@@ -430,7 +430,7 @@ label.chk{cursor:pointer}
 .ltools .desk{display:contents}
 .ltools .pop .btn{width:100%;justify-content:flex-start}
 .chips{display:inline-flex;gap:4px;flex-wrap:wrap}
-.mchip{display:inline-flex;align-items:center;height:var(--chip-h);padding:0 6px;border-radius:4px;background:var(--raised);color:var(--text-2);font-size:var(--fs-sm);white-space:nowrap}
+.mchip{display:inline-flex;align-items:center;height:var(--chip-h);padding:0 6px;border-radius:999px;background:var(--raised);color:var(--text-2);font-size:var(--fs-sm);white-space:nowrap}
 .phone,.tbl .sub.phone{display:none}
 @media (max-width:1100px){.tbl [data-p="6"],.tbl [data-p="7"]{display:none}}
 @media (max-width:900px){.tbl [data-p="4"],.tbl [data-p="5"]{display:none}}
@@ -963,3 +963,36 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 .edbar form.row{gap:6px}
 @media (max-width:900px){.editor.stackpage .edframe.stackframe{overflow:visible}}
 .gpi small{font-size:12.5px}.gpi .tt{font-size:12.5px}
+/* M3a: the Libraries list as cards (design libraries-list). A card: tile, name and chips, status and a second line on the right, the done bar on the bottom edge. */
+.lcards{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.lcard{position:relative;display:flex;align-items:center;gap:12px;padding:12px 16px 14px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);min-width:0;overflow:hidden}
+.lcard.sel{background:color-mix(in srgb,var(--accent) 10%,var(--surface))}
+.lcard .lcheck{flex:none}
+.lcard .lmain{flex:1 1 auto;min-width:0;display:grid;gap:6px}
+.lcard .lname{display:block}
+.lcard .chips{margin-top:0;display:flex;max-width:100%;min-width:0}
+.lcard .chips .mchip{max-width:100%}
+.lcard .mchip.mono{display:inline-block;overflow:hidden;text-overflow:ellipsis;line-height:var(--chip-h);vertical-align:middle}
+.lcard .mchip .ic{width:12px;height:12px;margin-right:4px}
+.lcard .mchip.mono{font-family:var(--font-mono,ui-monospace,monospace)}
+.lside{flex:none;display:flex;flex-direction:column;align-items:flex-end;gap:4px;text-align:right;max-width:50%}
+.lnote{display:flex;flex-direction:column;align-items:flex-end;gap:2px;font-size:var(--fs-sm);color:var(--text-2)}
+.lbar{position:absolute;left:0;right:0;bottom:0;height:3px;background:var(--raised)}
+.lbar>i{display:block;height:100%;background:var(--success)}
+/* M3a fix 1: the whole card opens the library (a stretched link on the name); the links and the checkbox on the card sit above it */
+.lcards:not(.selecting) .lname .ttl::after{content:"";position:absolute;inset:0}
+.lcard a.mchip,.lcard .lnote a,.lcard .lside a,.lcard .hit{position:relative;z-index:1}
+.lcard .lname .ttl{color:var(--text);font-weight:var(--fw-strong);text-decoration:none}
+.lcard a.mchip.wf{text-decoration:none}
+.lchev{display:none}
+.lskel .lmain .skel-b{margin:0;height:14px}
+.lskel .skel-pill{height:22px}
+.ltools .seg button{font-size:var(--fs-sm)}
+@media (max-width:640px){
+  .lcard{flex-wrap:wrap;row-gap:8px;padding:12px 12px 14px}
+  .lcard .lmain{flex:1 1 0;min-width:0}
+  .lside{flex:0 0 100%;flex-direction:row;flex-wrap:wrap;align-items:center;justify-content:space-between;text-align:left;max-width:none;padding-left:52px}
+  .lnote{flex-direction:row;flex-wrap:wrap;align-items:center;column-gap:10px}
+  .lcard .lname{display:flex;align-items:center;gap:8px}
+  .lchev{display:inline;margin-left:auto;font-size:20px;line-height:1;color:var(--text-2)}
+}
