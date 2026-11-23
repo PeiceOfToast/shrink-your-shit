@@ -75,7 +75,8 @@ jobs:
       # Windows and macOS: no ffmpeg on the runner, so the real tests skip there (fake runner only).
       - name: Test
         if: runner.os != 'Linux'
-        run: go test -count=1 ./...
+        # 15m, as on Linux: internal/worker takes about 7 minutes on windows-latest, so Go's 10m default is too close.
+        run: go test -count=1 -timeout 15m ./...
 
   # The real-ffmpeg tests again on ffmpeg 8: ubuntu-latest is moving to it (8.0.1) while the test job above
   # has the distribution's ffmpeg, so a break with a new ffmpeg shows here. A pinned static build (BtbN,
