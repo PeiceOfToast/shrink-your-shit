@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"strconv"
 	"testing"
+
+	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 )
 
 // F3: a graphics family's quality offset, by slider position. QSV is measured (11-23); the others are 0.
@@ -88,4 +90,31 @@ func containsRun(args, sub []string) bool {
 		}
 	}
 	return false
+}
+
+// A compiled plan carries the card offset for an HEVC target only: the offsets are measured for HEVC, so an
+// H.264 (or other) target's card encodes at its plain quality value.
+func TestCompiledCardCRFIsHEVCOnly(t *testing.T) {
+	info := func(codec string) media.Info {
+		return media.Info{Container: "matroska,webm", Ext: ".mkv", VideoCodec: codec, BitrateKbps: 6000, DurationSec: 600,
+			SizeBytes: 450 << 20, Streams: []media.Stream{{Index: 0, Type: "video", Codec: codec, Width: 1280, Height: 720,
+				FrameRate: 24, PixFmt: "yuv420p"}}}
+	}
+	for _, tc := range []struct {
+		format, source string
+		want           map[string]int
+	}{
+		{"hevc", "h264", map[string]int{"qsv": CardOffset("qsv", 1)}},
+		{"h264", "hevc", nil},
+	} {
+		s := DefaultSelectors(1)
+		s.Format = tc.format
+		p := compileSelectors(Plan{Kind: KindSelectors}, s, info(tc.source), nil, false)
+		if p.Skip != "" {
+			t.Fatalf("%s target from %s: skipped (%s), want a conversion", tc.format, tc.source, p.SkipCode)
+		}
+		if !reflect.DeepEqual(p.Video.CardCRF, tc.want) {
+			t.Errorf("%s target: CardCRF = %v, want %v", tc.format, p.Video.CardCRF, tc.want)
+		}
+	}
 }
