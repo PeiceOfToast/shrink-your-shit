@@ -17,6 +17,7 @@ import { ACCENTS, THEMES, keep, keepRail, railCollapsed, useAppearance } from ".
 import { Link, usePath } from "./router";
 import { noWorker } from "./workersApi";
 import { convertingLabel, problemWorkers } from "./topbarBadges";
+import { menuEscape } from "./menuFocus";
 
 const mac = /Mac|iPhone|iPad/.test(navigator.platform);
 
@@ -35,7 +36,7 @@ export function ThemeMenu() {
   return (
     // Tabbing out closes it. Only a real element outside counts: Safari and Firefox on macOS don't focus a clicked
     // button, so a click inside can blur with relatedTarget null, and closing then would lose the click.
-    <details className="menu" ref={ref} onBlur={(e) => e.relatedTarget instanceof Node && !e.currentTarget.contains(e.relatedTarget) && close()}>
+    <details className="menu" ref={ref} onKeyDown={menuEscape} onBlur={(e) => e.relatedTarget instanceof Node && !e.currentTarget.contains(e.relatedTarget) && close()}>
       <summary className="btn icon" aria-label="Theme" title="Theme"><Icon id="i-drop" /></summary>
       <div className="pop" role="menu">
         <div className="hd">Theme</div>

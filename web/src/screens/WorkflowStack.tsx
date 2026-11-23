@@ -16,6 +16,7 @@ import "../styles/variables.css";
 import { getSettings, listLibraries, shrunk } from "../libraryApi";
 import type { TemplateVar } from "../mock/variables";
 import type { AddStep, ID, JSONSchema, Node, PublishPreview, StepDefinition, ValidationIssue, Variable, Workflow, WorkflowDoc, WorkflowRevision } from "../types/v2";
+import { closeMenuToSummary, menuEscape } from "../menuFocus";
 
 // The step definitions and the server's words for each step of the document being edited.
 // libs: the folders of the libraries that use this workflow, for "Next to each library" (V5a).
@@ -400,12 +401,12 @@ function Step({ n, i, mv, open, toggle, update, issues, otherwise, inline }: { n
           : def.alwaysOn ? <span className="muted sm nowrap">Always on</span>
           : <>{mv.fixed && !inline && <span className="muted sm nowrap" title={mv.reason ?? FIXED_LINE}>Set place</span>}
             <input type="checkbox" role="switch" className="switch" aria-label={(def.name) + " on"} checked={n.enabled} onChange={(e) => update({ ...n, enabled: e.target.checked })} /></>}
-        {!end && !inline && <details className="menu">
+        {!end && !inline && <details className="menu" onKeyDown={menuEscape}>
           <summary className="btn icon ghost" id={n.id + "-more"} aria-label={"More for " + nm}><Icon id="i-more" /></summary>
           <div className="pop" role="menu">
-            <button className="it" type="button" role="menuitem" aria-disabled={mv.up ? undefined : true} onClick={(e) => { (e.currentTarget.closest("details") as HTMLDetailsElement).open = false; if (mv.up) mv.act("up"); }}>Move up</button>
-            <button className="it" type="button" role="menuitem" aria-disabled={mv.down ? undefined : true} onClick={(e) => { (e.currentTarget.closest("details") as HTMLDetailsElement).open = false; if (mv.down) mv.act("down"); }}>Move down</button>
-            <button className="it" type="button" role="menuitem" aria-disabled={mv.del ? undefined : true} onClick={(e) => { (e.currentTarget.closest("details") as HTMLDetailsElement).open = false; if (mv.del) mv.act("del"); }}>Delete</button>
+            <button className="it" type="button" role="menuitem" aria-disabled={mv.up ? undefined : true} onClick={(e) => { closeMenuToSummary(e.currentTarget); if (mv.up) mv.act("up"); }}>Move up</button>
+            <button className="it" type="button" role="menuitem" aria-disabled={mv.down ? undefined : true} onClick={(e) => { closeMenuToSummary(e.currentTarget); if (mv.down) mv.act("down"); }}>Move down</button>
+            <button className="it" type="button" role="menuitem" aria-disabled={mv.del ? undefined : true} onClick={(e) => { closeMenuToSummary(e.currentTarget); if (mv.del) mv.act("del"); }}>Delete</button>
             {mv.fixed && <><hr /><p className="hd" style={{ whiteSpace: "normal", maxWidth: 260 }}>{mv.reason ?? FIXED_LINE}</p></>}
           </div></details>}
         {hasOptions && !inline ? <button className="btn icon ghost" type="button" aria-expanded={open} aria-controls={n.id + "-opts"} aria-label={"Options for " + def.name} onClick={toggle}><Icon id={open ? "i-chev-d" : "i-chev-r"} /></button>

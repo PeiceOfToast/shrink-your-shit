@@ -11,6 +11,7 @@ import { useData } from "../useData";
 import { addShare, checkShare, deleteShare, getShares, patchShare, reconnectShare, testShare } from "../sharesApi";
 import { shareIntro } from "../shareIntro";
 import type { Share, ShareTestResult, SharesResponse, ShareType } from "../types/shares";
+import { closeMenuToSummary, menuEscape } from "../menuFocus";
 
 async function act<T>(p: Promise<Answer<T>>, say: (m: string) => void): Promise<T | null> {
   try { const r = await p; if (failed(r)) return (say(r.error.message), null); return r; } catch (_) { return null; }
@@ -32,7 +33,6 @@ function ShareRow({ share, resp, first, onChanged, said }: { share: Share; resp:
   const canReconnect = share.status !== "connected" && resp.mode === "app";
   const canCheck = share.status !== "connected" && (resp.mode === "manual" || resp.mode === "docker");
   const reconnect = async () => { const r = await act(canReconnect ? reconnectShare(share.id) : checkShare(share.id), said); if (r) { said("Done."); onChanged(); } };
-  const closeMenu = (e: React.MouseEvent) => { (e.currentTarget.closest("details") as HTMLDetailsElement | null)?.removeAttribute("open"); };
   const waiting = share.status === "waiting_setup" && !!share.setup;
 
   return (
@@ -43,13 +43,13 @@ function ShareRow({ share, resp, first, onChanged, said }: { share: Share; resp:
           <span style={{ display: "inline-flex", flexWrap: "wrap", gap: 6 }}><ValueChip><span className="mono" style={{ whiteSpace: "normal", overflowWrap: "anywhere" }}>{share.address}</span></ValueChip><ValueChip>{TYPE[share.type].label}</ValueChip></span>
           <span style={{ display: "block" }}>{libs ? "Used by " + libs : "Not used"}</span></>}>
         <span className={"st " + statusClass}><Icon id={statusIcon} /><span>{statusWord}{share.since ? " since " + new Date(share.since).toLocaleDateString([], { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }) : ""}</span></span>
-        <details className="menu">
+        <details className="menu" onKeyDown={menuEscape}>
           <summary className="btn icon ghost sm" aria-label={"Actions for " + share.name}><Icon id="i-more" /></summary>
           <div className="pop" role="menu">
-            {canReconnect && <button className="it" type="button" onClick={(e) => { closeMenu(e); reconnect(); }}>Reconnect</button>}
-            {canCheck && <button className="it" type="button" onClick={(e) => { closeMenu(e); reconnect(); }}>Check again</button>}
-            <button className="it" type="button" onClick={(e) => { closeMenu(e); setEditing(true); }}>Edit</button>
-            <button className="it" type="button" onClick={(e) => { closeMenu(e); setRemoving(true); }}>Remove…</button>
+            {canReconnect && <button className="it" type="button" onClick={(e) => { closeMenuToSummary(e.currentTarget); reconnect(); }}>Reconnect</button>}
+            {canCheck && <button className="it" type="button" onClick={(e) => { closeMenuToSummary(e.currentTarget); reconnect(); }}>Check again</button>}
+            <button className="it" type="button" onClick={(e) => { closeMenuToSummary(e.currentTarget); setEditing(true); }}>Edit</button>
+            <button className="it" type="button" onClick={(e) => { closeMenuToSummary(e.currentTarget); setRemoving(true); }}>Remove…</button>
           </div>
         </details>
       </SettingRow>
