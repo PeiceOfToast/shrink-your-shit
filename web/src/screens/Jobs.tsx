@@ -321,15 +321,14 @@ function CheckFound({ lines, reason, code }: { lines: string[]; reason: string; 
     </section>);
 }
 
-function WhyFailed({ id, msg, code, worker, f, found = [], kept = false }: { id: string; msg: string; code: string; worker: string | null; f: Failure; found?: string[]; kept?: boolean }) {
-  const fd = readFound(found), ff = fd.errors.length ? fd.errors : f.keyLines; // V6c: one ffmpeg box
+function WhyFailed({ id, msg, code, worker, f, found = [] }: { id: string; msg: string; code: string; worker: string | null; f: Failure; found?: string[] }) {
+  const fd = readFound(found), ff = fd.errors.length ? fd.errors : f.keyLines ?? []; // V6c: one ffmpeg box
   const t = stepTime(f.afterMs), box = useRef<HTMLElement>(null), ver = useData(getHealth, []).data?.version;
   // Copy summary: the plain text a bug report needs (V6b item 5): the job, its worker and the app version, then the box
   const copy = () => navigator.clipboard?.writeText("Job " + id + " · " + (worker ?? "no worker") + " · Shrink Your Shit " + (ver ?? "") + "\n" + (box.current?.innerText ?? "")).catch(() => {});
   return (
     <section ref={box} className="note" role="region" aria-label={whyHeading(code, true)} style={{ display: "block", borderLeft: "3px solid var(--error)" }}>
       <h3><Icon id="i-alert" /> {whyHeading(code, true)} <span className="pill bad">Failed</span></h3>
-      {kept && <p className="sm" style={{ margin: 0 }}><strong>The original is untouched.</strong></p>}
       <p style={{ fontSize: "var(--fs-lg)" }}>{msg}</p>
       <p className="sm muted mono">{code}</p>
       <p className="sm">In step {f.stepIndex + 1} of {f.stepCount}, <a href={"#job-step-" + (f.stepIndex + 1)}>{stepLabel(f.step, found)}</a>, after {t}{f.mediaTime ? " (at " + f.mediaTime + " in the video)" : ""}.</p>
@@ -691,7 +690,10 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
           </div>
         </div>
         <div className="bd">
-          {kept0 && <p style={{ margin: 0 }}>{WORD.kept}</p>}
+          {/* M5d failed 2: a failed job whose original is untouched gets the shield card (design), above the buttons */}
+          {kept0 && (state === "failed"
+            ? <div className="jd-shield" role="note"><Icon id="i-shield" /><div><strong>The original is untouched.</strong><p className="sm muted" style={{ margin: "2px 0 0" }}>The new file was thrown away. Retry runs the workflow again from the original.</p></div></div>
+            : <p style={{ margin: 0 }}>{WORD.kept}</p>)}
           {(done && ca?.possible) || (state === "skipped" || state === "cancelled" || state === "failed" || state === "retry_wait") ? <div className="row">
             {(state === "failed" || state === "retry_wait") && <button className={"btn sm" + (state === "failed" ? " primary" : "")} type="button" onClick={() => run("retry")}><Icon id="i-refresh" />{state === "retry_wait" ? "Try now" : "Retry"}</button>}
             {done && ca?.possible && <button className="btn sm" type="button" aria-expanded={again} onClick={() => setAgain(!again)}><Icon id="i-arrow-r" />Convert again</button>}
@@ -720,7 +722,7 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
           {others.length > 0 && <p className="sm" style={{ marginTop: 8 }}>This file's other jobs: {others.map((x, i) => <span key={x.jobId ?? x.id}>{i > 0 && " · "}<a className="linkbtn" href={"/jobs?tab=" + tabOf(x.state) + "&job=" + encodeURIComponent(x.jobId ?? x.id)} onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); navigate("/jobs?tab=" + tabOf(x.state) + "&job=" + encodeURIComponent(x.jobId ?? x.id)); }}}>{WORD[x.state] ?? x.state} {x.finishedAt ? new Date(x.finishedAt).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : ""}</a></span>)}</p>}
         </section>
           {j?.removed && j.reason?.code === "removed" ? <div className="note"><Icon id="i-info" /><div>Its library was removed, so this file won't be converted.</div></div>
-            : j?.failure ? <WhyFailed id={id} msg={reason} code={j.reason?.code ?? ""} worker={j.worker ?? null} f={j.failure} found={found.flatMap((st) => st.found!)} kept={kept0} />
+            : j?.failure ? <WhyFailed id={id} msg={reason} code={j.reason?.code ?? ""} worker={j.worker ?? null} f={j.failure} found={found.flatMap((st) => st.found!)} />
             : found.length ? <CheckFound lines={found.flatMap((st) => st.found!)} reason={reason} code={j?.reason?.code ?? ""} />
             : reason && <section><h3>{whyHeading(j?.reason?.code ?? "", false)}</h3><p>{reason}</p>{skip && rule && <p className="sm">The rule is <a className="linkbtn" href={"/workflows/" + encodeURIComponent(rule.id)} onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); navigate("/workflows/" + encodeURIComponent(rule.id)); }}}>{rule.name}</a>.</p>}</section>}
           {back && kept && <div role="alertdialog" aria-label="Get the original back?" style={{ padding: 12, border: "1px solid var(--border-strong)", borderRadius: "var(--radius)", background: "var(--raised)" }}
@@ -741,7 +743,7 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
           </section>}
           {/* review db7b1f1 P2: the scan sentence only for a file a scan left out; a cancelled file whose job the server
               doesn't send yet claims nothing about scans or steps */}
-          {scan && <section><h3>Timeline</h3><p className="muted">{state === "cancelled" ? "Cancelled." : "This file was left out when its library was scanned, so it has no job and no steps."}</p></section>}
+          {scan && <section><h3>Timeline</h3><p>{state === "cancelled" ? "Cancelled." : "This file was left out when its library was scanned, so it has no job and no steps."}</p></section>}
           {!scan && (active ? <JobLog id={id} name={name} /> : <StepLog d={log} id={id} worker={j?.worker ?? null} failedIdx={j?.failure?.stepIndex ?? null} kept={kept0} hasResult={showResult} />)}
           {/* a done job's .srt files saved beside the new file: one line, then each name; no field, no line */}
           {state === "completed" && !!j?.subtitleFiles?.length && <section><h3>Subtitles saved as files</h3>{j.subtitleFiles.map((n) => <div key={n} style={{ overflowWrap: "anywhere" }}><code>{n}</code></div>)}</section>}
