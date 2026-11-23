@@ -134,18 +134,20 @@ export function Overview() {
   const act = async (p: Promise<Answer<unknown>>) => { try { const r = await p; setSaid(failed(r) ? r.error.message : ""); } catch (e) { if (!(e instanceof SignedOut)) throw e; } o.reload(); wl.reload(); };
   // loading (design loading-1 to -3): the head's switch and Scan don't wait on the summary; each section keeps its real heading over card-shaped placeholders
   if (!o.data) {
-    const lw = wl.data ?? [], ph = (k: number) => <li key={k} className="lcard lskel" aria-hidden="true"><span className="ltile skel-ph" /><div className="lmain"><div className="skel-b" /><div className="skel-b skel-w60" /></div></li>;
+    const lw = wl.data ?? [], bar = (w: number, h: number, r: number) => <span className="skel-ph" style={{ width: w, height: h, borderRadius: r }} />;
+    // the design's inner shape: a square tile, three pills on the left, a pill over a short bar on the right
+    const ph = (k: number) => <li key={k} className="lcard lskel" aria-hidden="true"><span className="ltile skel-ph" /><div className="lmain"><div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>{bar(72, 22, 11)}{bar(110, 22, 11)}{bar(88, 22, 11)}</div></div><div style={{ marginLeft: "auto", display: "grid", gap: 6, justifyItems: "end" }}>{bar(110, 22, 11)}{bar(70, 10, 4)}</div></li>;
     return <div className="stack ov">
       <PageHead icon="i-dashboard" title="Dashboard">
         {wl.data ? <WorkersSwitch n={lw.filter((w) => w.status === "busy" || w.status === "online").length} m={lw.length} busy={lw.some((w) => w.currentJobIds.length > 0)} finishing={lw.filter((w) => w.status === "draining").length} onSet={(a) => act(allWorkers(a))} /> : <span className="skel-ph skel-sw" aria-hidden="true" />}
         <button className="btn sm ghost" type="button" onClick={() => (MOCK ? scanAll() : act(scanAllLibraries()))}><Icon id="i-refresh" />Scan all libraries</button>
       </PageHead>
       {o.error ? <LoadFailed error={o.error} reload={o.reload} /> : <>
-        <section className="tiles" aria-hidden="true">{[0, 1, 2].map((k) => <div key={k} className="tile"><div className="skel-b skel-w40" /><div className="skel-ph" style={{ width: "60%", height: 28 }} /></div>)}</section>
-        <section className="sec"><h2>Converting now</h2><ul className="lcards" aria-hidden="true">{ph(0)}</ul></section>
+        <section className="tiles" aria-hidden="true">{[0, 1, 2].map((k) => <div key={k} className="tile"><span className="skel-ph" style={{ width: "40%", height: 12 }} /><span className="skel-ph" style={{ width: 120, height: 30, gridColumn: 2, gridRow: 1, justifySelf: "end" }} /><span className="skel-ph" style={{ width: "60%", height: 12 }} /></div>)}</section>
+        <section className="sec"><h2>Converting now</h2><ul className="lcards" aria-hidden="true">{[0, 1].map(ph)}</ul></section>
         <section className="sec"><h2>Libraries</h2><ul className="lcards" aria-hidden="true">{[0, 1, 2].map(ph)}</ul></section>
-        <section className="sec"><h2>Workers</h2><div className="skel-b" aria-hidden="true" /></section>
-        <section className="sec"><h2>Last 30 days</h2><div className="skel-b" aria-hidden="true" /></section>
+        <section className="sec"><h2>Workers</h2><ul className="lcards" aria-hidden="true">{[0].map(ph)}</ul></section>
+        <section className="sec"><h2>Last 30 days</h2><div className="lcard lskel" aria-hidden="true" style={{ minHeight: 160, display: "block" }}><span className="skel-ph" style={{ width: "40%", height: 12 }} /><div className="skel-ph" style={{ display: "block", width: "100%", height: 110, marginTop: 12 }} /></div></section>
       </>}
     </div>;
   }
