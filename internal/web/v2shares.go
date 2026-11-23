@@ -826,21 +826,79 @@ func hostID(mapPath string, id int) (int, bool) {
 	return 0, false
 }
 
-// manualMountCommand is the sudo mount for share sh at target, the same whether the target is the
-// app's own folder or a host folder that a container is given.
-// owner is the uid=,gid= pair the files get: syp for the app's own mount, the host's numbers for a host mount.
-func manualMountCommand(sh jobs.Share, mntAddr, target, owner string) string {
-	if sh.Type == "smb" {
-		var opts string
-		if sh.Guest {
-			opts = "guest,vers=3.1.1,soft,nosuid,nodev,noexec," + owner + ",file_mode=0660,dir_mode=0770"
+// mountOpts is the -o string for share sh. owner is the uid=,gid= pair the files get (SMB only): syp for the
+// app's own mount, the host's numbers for a host mount. creds, when set, is a credentials file used in place of
+// username=, for a mount that can't ask for the password (an /etc/fstab line, mounted at boot).
+func mountOpts(sh jobs.Share, owner, creds string) string {
+	if sh.Type != "smb" {
+		return "soft,nosuid,nodev,noexec"
+	}
+	login := "guest"
+	if !sh.Guest {
+		if creds != "" {
+			login = "credentials=" + creds
 		} else {
 			user, dom := helper.SplitDomain(sh.Username)
-			opts = "username=" + user + domainOpt(dom) + ",vers=3.1.1,soft,nosuid,nodev,noexec," + owner + ",file_mode=0660,dir_mode=0770"
+			login = "username=" + user + domainOpt(dom)
 		}
-		return "sudo mount -t cifs " + shellQuote(mntAddr) + " " + shellQuote(target) + " -o " + shellQuote(opts)
 	}
-	return "sudo mount -t nfs " + shellQuote(mntAddr) + " " + shellQuote(target) + " -o " + shellQuote("soft,nosuid,nodev,noexec")
+	return login + ",vers=3.1.1,soft,nosuid,nodev,noexec," + owner + ",file_mode=0660,dir_mode=0770"
+}
+
+// fsType is the mount type for share sh.
+func fsType(sh jobs.Share) string {
+	if sh.Type == "smb" {
+		return "cifs"
+	}
+	return "nfs"
+}
+
+// manualMountCommand is the sudo mount for share sh at target, the app's own folder.
+func manualMountCommand(sh jobs.Share, mntAddr, target, owner string) string {
+	return "sudo mount -t " + fsType(sh) + " " + shellQuote(mntAddr) + " " + shellQuote(target) + " -o " + shellQuote(mountOpts(sh, owner, ""))
+}
+
+// fstabField escapes a space or tab in an /etc/fstab field, which would otherwise split it.
+func fstabField(s string) string {
+	return strings.NewReplacer(" ", `\040`, "\t", `\011`).Replace(s)
+}
+
+// hostSetup is the manual setup in an unprivileged container, which can't mount: the Proxmox host mounts the
+// share into a host folder through /etc/fstab, so it comes back after the host restarts, and the container is
+// given that folder at mpt, where the app looks for the share. Every step runs on the host as root, which has no
+// sudo by default. NOT RUN on a real Proxmox host: the teams can't touch one.
+func hostSetup(sh jobs.Share, mntAddr, mpt string) map[string]any {
+	vol := sanitiseName(sh.Name, sh.ID)
+	host := "/mnt/" + vol
+	var owner, ownerNote, creds, credsLines, credsRemove string
+	if sh.Type == "smb" { // an NFS mount takes no owner option
+		owner, ownerNote = hostOwner()
+		if !sh.Guest {
+			creds = "/root/.syp-" + vol + ".cred"
+			user, dom := helper.SplitDomain(sh.Username)
+			format, args := `username=%s\npassword=%s\n`, shellQuote(user)+" 'YOUR-PASSWORD'"
+			if dom != "" {
+				format, args = format+`domain=%s\n`, args+" "+shellQuote(dom)
+			}
+			credsLines = "# Save the share's sign-in where only root can read it. Put the real password in place of YOUR-PASSWORD:\n" +
+				"(umask 077 && printf '" + format + "' " + args + " > " + creds + ")\n"
+			credsRemove = " and the file " + creds
+		}
+	}
+	line := fstabField(mntAddr) + " " + host + " " + fsType(sh) + " " + mountOpts(sh, owner, creds) + ",_netdev 0 0"
+	return map[string]any{
+		"kind": "command",
+		"text": "# This container runs in a user namespace (for example an unprivileged Proxmox LXC), so it can't mount network shares here.\n" +
+			"# On the Proxmox host, as root: make a host folder, add the share to /etc/fstab so it comes back after a restart, and mount it.\n" +
+			ownerNote + credsLines +
+			"mkdir -p " + host + " && printf '%s\\n' " + shellQuote(line) + " >> /etc/fstab && mount " + host + "\n" +
+			"# Pass that folder into the container where the app looks for the share, then restart the container.\n" +
+			"# Use mp1, mp2 … instead if this container already has mp0 (pct config <id> shows them).\n" +
+			"pct set <id> -mp0 " + host + ",mp=" + mpt + "\n" +
+			"pct restart <id>",
+		"removeText": "On the Proxmox host, as root: umount " + host + ", delete its line from /etc/fstab" + credsRemove +
+			", then pct set <id> -delete mp0 (or the mp number you used) and restart the container.",
+	}
 }
 
 func setupForMode(store *jobs.Store, sh jobs.Share) any {
@@ -850,24 +908,7 @@ func setupForMode(store *jobs.Store, sh jobs.Share) any {
 	switch mode {
 	case "manual":
 		if inUserNamespace() {
-			// An unprivileged container can't mount, so the host mounts the share into a folder and the
-			// container gets that folder. Same mount command, run on the host; the options stay in one place.
-			vol := sanitiseName(sh.Name, sh.ID)
-			host := "/mnt/" + vol
-			var owner, ownerNote string
-			if sh.Type == "smb" { // an NFS mount takes no owner option
-				owner, ownerNote = hostOwner()
-			}
-			return map[string]any{
-				"kind": "command",
-				"text": "# This container runs in a user namespace (for example an unprivileged Proxmox LXC), so it can't mount network shares here.\n" +
-					"# On the Proxmox host, mount the share into a host folder:\n" + ownerNote +
-					"sudo mkdir -p " + host + " && " + manualMountCommand(sh, mntAddr, host, owner) + "\n" +
-					"# Pass that folder into the container where the app looks for the share, then restart the container:\n" +
-					"pct set <id> -mp0 " + host + ",mp=" + mountPointFor(sh) + "\n" +
-					"pct restart <id>",
-				"removeText": "On the Proxmox host: sudo umount " + host + ", then pct set <id> -delete mp0 and restart the container.",
-			}
+			return hostSetup(sh, mntAddr, mpt)
 		}
 		return map[string]any{
 			"kind":       "command",
