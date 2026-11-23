@@ -769,7 +769,7 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 .tbl.wk tr.dim td,.tbl.wk tr.dim a{color:var(--text-2)}
 @media (max-width:900px){
   .tbl.wk,.tbl.wk tbody{display:block}
-  .tbl.wk thead{display:none}
+  .tbl.wk thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap} /* the column names stay for screen readers */
   .tbl.wk tr{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;padding:10px 0;border-bottom:1px solid var(--border)}
   .tbl.wk td{display:block;grid-column:1/-1;border:0;height:auto;padding:0}
   .tbl.wk td.nm{grid-column:1;grid-row:1}

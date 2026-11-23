@@ -304,7 +304,7 @@ export function readFound(lines: string[]) {
   return { rows, errors, driver };
 }
 const copyBox = (title: string, ls: string[]) => ls.length > 0 && <div className="stack" style={{ gap: 4 }}><div className="row" style={{ justifyContent: "space-between" }}><span className="sm">{title}</span>
-  <button className="btn sm ghost" type="button" onClick={() => navigator.clipboard?.writeText(ls.join("\n")).catch(() => {})}><Icon id="i-copy" />Copy</button></div><pre className="joblog sm">{ls.join("\n")}</pre></div>;
+  <button className="btn sm ghost" type="button" onClick={() => navigator.clipboard?.writeText(ls.join("\n")).catch(() => {})}><Icon id="i-copy" />Copy</button></div><pre className="joblog sm" role="group" tabIndex={0} aria-label={title}>{ls.join("\n")}</pre></div>;
 // U10: the drawer's two-column table (label, value); its styles are drawer-scoped (.drawer.jobd .jd-found)
 const FoundRows = ({ rows }: { rows: [string, string][] }) => rows.length > 0 ? <table className="jd-found"><tbody>{rows.map(([k, v], i) => <tr key={i}><th scope="row">{k}</th><td style={{ whiteSpace: "pre-line", fontVariantNumeric: "tabular-nums" }}>{v}</td></tr>)}</tbody></table> : null;
 const Driver = ({ ls }: { ls: string[] }) => ls.length > 0 ? <details><summary className="sm" style={{ cursor: "pointer" }}>Driver messages ({ls.length})</summary>{copyBox("Driver messages", ls)}</details> : null;
@@ -337,7 +337,7 @@ function WhyFailed({ id, msg, code, worker, f, found = [] }: { id: string; msg: 
       {f.ffmpegRan === false
         ? <p className="sm muted">ffmpeg didn't run.</p>
         : ff.length > 0 && <div className="stack" style={{ gap: 4 }}><div className="row" style={{ justifyContent: "space-between" }}><span className="sm">{(f.step === "encode" || f.step === "check" ? "What ffmpeg said" : "The error")}</span><button className="btn sm ghost" type="button" onClick={() => navigator.clipboard?.writeText(ff.join("\n")).catch(() => {})}><Icon id="i-copy" />Copy</button></div>
-          <pre className="joblog">{ff.join("\n")}</pre></div>}
+          <pre className="joblog" role="group" tabIndex={0} aria-label={f.step === "encode" || f.step === "check" ? "What ffmpeg said" : "The error"}>{ff.join("\n")}</pre></div>}
       <Driver ls={fd.driver} />
       <div className="row" style={{ gap: 8, flexWrap: "wrap", marginTop: 12 }}>
         <a className="btn sm" href={"#job-step-" + (f.stepIndex + 1)}><Icon id="i-file" />Open the full log</a>
@@ -359,7 +359,7 @@ const lvlPills = (ls: LogLine[]) => <>{cnt(ls, "warning") > 0 && <span className
 const linesBlock = (ls: LogLine[], id: string) => {
   const cap = 200, n = ls.length;
   return <>{n > cap && <p className="sm">Last {cap} of {n.toLocaleString()} lines · <a href={"/api/v2/jobs/" + encodeURIComponent(id) + "/log/download"}>Download all {n.toLocaleString()} lines</a></p>}
-    {n > 0 && <div className="joblog sm" tabIndex={0} aria-label="Log lines">{(n > cap ? ls.slice(-cap) : ls).map(logLineEl)}</div>}</>;
+    {n > 0 && <div className="joblog sm" role="group" tabIndex={0} aria-label="Log lines">{(n > cap ? ls.slice(-cap) : ls).map(logLineEl)}</div>}</>;
 };
 // G6: copy the whole log, not just the search hits (spec: "Copy the whole log"); over about 1 MB it is too long for
 // the clipboard. Plain http (http://IP:8484) has no clipboard API, so as in Workers the text is selected in a
@@ -493,7 +493,7 @@ function StepLog({ d, id, worker, failedIdx, kept, hasResult }: { d: { loaded: b
         {(st.decision || st.reason) && <p className="sm">{st.decision} {st.reason && <span className="muted">{st.reason}</span>}</p>}
         {(st.set ?? []).map((x) => <p className="sm" key={x.name}>Set <code>{"{{" + x.name + "}}"}</code> = {x.value ?? <span className="muted">Hidden</span>}</p>)}
         {st.command && <div className="stack" style={{ gap: 4 }}><div className="row" style={{ justifyContent: "space-between" }}><span className="sm">Command</span><button className="btn sm ghost" type="button" onClick={() => navigator.clipboard?.writeText(st.command ?? "").catch(() => {})}><Icon id="i-copy" />Copy</button></div>
-          <pre className="joblog sm">{st.command}</pre></div>}
+          <pre className="joblog sm" role="group" tabIndex={0} aria-label="Command">{st.command}</pre></div>}
         {old && st.probe && <p className="sm">Source: {sourceLine(st.probe)}</p>}
         {progress && <p className="sm">{progress}</p>}
         {ls.length > 0 && linesBlock(ls, id)}
@@ -501,8 +501,8 @@ function StepLog({ d, id, worker, failedIdx, kept, hasResult }: { d: { loaded: b
         {(st.moves ?? []).map((m, j) => <p className="sm" key={j}>{moveLine(m)}</p>)}
         {st.outputLines > 0 && !sectioned && <details open={st.outcome === "failed" || st.outcome === "skipped"}><summary className="sm">Show ffmpeg output ({st.outputLines} lines)</summary>
           {st.outputLines > 200 && <p className="sm"><a href={"/api/v2/jobs/" + encodeURIComponent(id) + "/log/download"}>Download all {st.outputLines.toLocaleString()} lines</a></p>}
-          <pre className="joblog sm">{text(st.output)}</pre></details>}
-        {(st.found?.length ?? 0) > 0 && !sectioned && <pre className="joblog sm">{st.found!.join("\n")}</pre>}
+          <pre className="joblog sm" role="group" tabIndex={0} aria-label="ffmpeg output">{text(st.output)}</pre></details>}
+        {(st.found?.length ?? 0) > 0 && !sectioned && <pre className="joblog sm" role="group" tabIndex={0} aria-label="What the check found">{st.found!.join("\n")}</pre>}
         {st.result && <p className="sm">{st.result}</p>}
       </div> });
   });
@@ -713,7 +713,7 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
             <h2 id="jd-h" className="clamp2" title={name}><FileName n={name} /></h2>
             {delta && <p className="jd-delta"><span className={"jd-pct" + (delta.pct < 0 ? " bigger" : "")}>{delta.pct >= 0 ? delta.pct + "% smaller" : -delta.pct + "% bigger"}</span> <span className="muted sm">{delta.sizes}</span></p>}
             {state === "failed" && reason && <p className="sm" style={{ color: "var(--error-text)", margin: 0 }}>{cap(reason)}</p>}
-            {state === "skipped" && <p className="sm muted">Left out when its library was scanned</p>}
+            {scan && state === "skipped" && <p className="sm muted">Left out when its library was scanned</p>}
           </div>
           {/* SCREENS V6b header: Retry, Cancel or Stop, the job ID to copy under the pill (the body keeps the rest) */}
           <div className="row nw" style={{ gap: 6, flexWrap: "wrap", alignItems: "flex-start" }}>
