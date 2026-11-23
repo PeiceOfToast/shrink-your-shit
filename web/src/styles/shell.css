@@ -439,7 +439,7 @@ label.chk{cursor:pointer}
 @media (max-width:1100px){.tbl [data-p="6"],.tbl [data-p="7"]{display:none}}
 @media (max-width:900px){.tbl [data-p="4"],.tbl [data-p="5"]{display:none}}
 @media (max-width:1100px){.tbl .sub.runs{display:block}} /* Workflows: the Recent runs column (data-p 6) is hidden here; its line shows under the name */
-@media (max-width:599px){.tbl.jobs [data-p="3"]{display:none}.tline li{flex-wrap:wrap}.tline li>.nowrap{flex-basis:100%;padding-left:24px}} /* E: phones drop the Jobs table's Worker column; a Timeline time sits under its step */
+@media (max-width:599px){.tbl.jobs [data-p="3"]{display:none}.tline li>.nowrap{padding-left:8px}} /* E: phones drop the Jobs table's Worker column; a Timeline time sits under its step */
 @media (max-width:640px){
   .phone{display:revert}
   .ltools .desk{display:none}
@@ -621,10 +621,20 @@ label.chk{cursor:pointer}
 .drawer.jobd section>h3{font-size:calc(15px*var(--font-scale));color:var(--text-2);font-weight:var(--fw-strong)}
 /* U10: drawer-only (the shared .kv stays 150px and .note is used on other screens): the File label column is 120px; the header's size delta is its largest text */
 .drawer.jobd .kv{grid-template-columns:120px minmax(0,1fr)}
-.drawer.jobd .jd-delta{margin:0;font-size:calc(22px*var(--font-scale));font-weight:var(--fw-strong);line-height:1.2;color:var(--text)}
+.drawer.jobd .jd-delta{margin:0;font-size:calc(22px*var(--font-scale));font-weight:var(--fw-strong);line-height:1.2;color:var(--text);display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px}
+.drawer.jobd .jd-pct{color:var(--success-text)}
+.drawer.jobd .jd-pct.bigger{color:var(--text)}
+/* M5d: the drawer's sections are bordered cards with a title bar (File, What the check found, Timeline, Log); a note keeps its own frame */
+.drawer.jobd .bd>section:not(.note){flex:none;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);overflow:hidden;padding:0 0 14px}
+.drawer.jobd .bd>section:not(.note)>h3{margin:0 0 12px;padding:10px 16px;border-bottom:1px solid var(--border);background:var(--raised)}
+.drawer.jobd .bd>section:not(.note)>:not(h3){margin-left:16px;margin-right:16px}
+.drawer.jobd .bd>section:not(.note)>.kv{margin-right:16px}
+.drawer.jobd .jd-shield{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border:1px solid var(--border-strong);border-radius:var(--radius);background:var(--surface)}
+.drawer.jobd .jd-shield>.ic{color:var(--text-2);flex:none;margin-top:2px}
 .drawer.jobd .jd-found{width:100%;border-collapse:collapse}
 .drawer.jobd .jd-found th,.drawer.jobd .jd-found td{font-size:var(--fs-sm);padding:4px 0;vertical-align:top;text-align:left}
 .drawer.jobd .jd-found th{width:120px;padding-right:12px;color:var(--text-2);font-weight:500}
+.sr-only{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 @media (max-width:599px){.drawer.jobd>.hd.failed .pill{display:none}} /* a failed job's header hides the pill: the Why box says Failed */
 .tline{list-style:none;margin:0;padding:0}
 .tline li{display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-bottom:1px solid var(--border)}
@@ -1083,3 +1093,14 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 .linkbtn.enc-change{font-size:var(--fs-sm);color:var(--text-2);text-decoration:none}
 .linkbtn.enc-change:hover{text-decoration:underline}
 .radio.top{align-items:flex-start;padding-top:10px}
+
+/* M5d fix 2: the log rows open with a chevron; the header's saving stays on one line; the File card stacks at phones;
+   the back arrow is for narrow widths only; the failed check card is a title-bar card, not a note with a red edge */
+details.stepd > summary { list-style: none; cursor: pointer; }
+details.stepd > summary::-webkit-details-marker { display: none; }
+details.stepd > summary::before { content: "▸"; display: inline-block; width: 1em; color: var(--muted); transition: transform .15s; }
+details.stepd[open] > summary::before { transform: rotate(90deg); }
+.jd-pct { white-space: nowrap; }
+@media (min-width: 1100px) { .drawer.jobd .jd-back { display: none; } }
+@media (max-width: 640px) { .drawer.jobd .kv { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 599px) { .drawer.jobd #job-result .kvt th:last-child, .drawer.jobd #job-result .kvt td:last-child { padding-right: 16px; } } /* M5d fix 2b: the New file column keeps the card's padding at 390 */

@@ -16,13 +16,14 @@ export async function listJobs(tab: Tab, q: string, library = "", limit = 200, k
   const ps = rs as JobsPage[];
   return { ...ps[0], items: ps.flatMap((p) => p.items) };
 }
-// review a8f85e0 P3: a skipped or stopped job's row in the Skipped tab when it isn't in the first page. Its own row went
-// when it was skipped or stopped, so its detail has no file name to search by: page through the tab, 500 at a time
-export async function findSkip(jobId: string): Promise<Answer<JobsPage>> {
-  if (MOCK) return listJobs("skipped", "");
+// review a8f85e0 P3: a job's row in its list tab when it isn't in the first page. Its own row went when it was
+// skipped or stopped (or it is an old finished job), so its detail has no file name to search by: page through the
+// tab, 500 at a time
+export async function findInTab(tab: Tab, jobId: string): Promise<Answer<JobsPage>> {
+  if (MOCK) return listJobs(tab, "");
   for (let at = 0; ; at += 500) {
-    const r = await call<JobsPage>("GET", "/api/v2/jobs?tab=skipped&limit=500&offset=" + at);
-    if (failed(r) || r.items.some((x) => x.jobId === jobId) || !r.items.length || at + r.items.length >= r.total) return r;
+    const r = await call<JobsPage>("GET", "/api/v2/jobs?tab=" + tab + "&limit=500&offset=" + at);
+    if (failed(r) || r.items.some((x) => (x.jobId ?? x.id) === jobId) || !r.items.length || at + r.items.length >= r.total) return r;
   }
 }
 // E: the job's log by step (GET /log, a finished job's full record; /log/stream stays for running jobs)
