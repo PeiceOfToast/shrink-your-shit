@@ -1027,3 +1027,38 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
   /* fix 3: reserve room on the right for the absolutely placed ›, so the tag chip and the favourite note end before it */
   .lcard.wfcard{padding-right:40px}
 }
+
+/* M4 Workers cards: one block. Card two-up at 1440, one column at 390; the facts and the encoders side by side. */
+.wgrid{grid-template-columns:repeat(auto-fill,minmax(min(480px,100%),1fr))}
+.wgrid>.wcard.wide{grid-column:1/-1}
+.wbody{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px 24px;align-items:start}
+.wleft,.wright{min-width:0;display:grid;gap:8px;align-content:start}
+@media (max-width:699px){.wbody{grid-template-columns:minmax(0,1fr)}}
+.wleft .kv{grid-template-columns:minmax(0,1fr);gap:8px;margin:0}
+.wleft .kv>div{display:grid;grid-template-columns:minmax(104px,max-content) minmax(0,1fr);gap:12px;align-items:baseline}
+.kv dt{color:var(--text-2)}
+.kv dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.ubar{display:grid;grid-template-columns:minmax(0,120px) minmax(0,1fr) auto;gap:10px;align-items:center;color:var(--text-2);font-size:var(--fs-sm)}
+.ubar-t{display:block;height:6px;border-radius:3px;background:var(--raised);overflow:hidden}
+.ubar-t i{display:block;height:100%;background:var(--accent);border-radius:3px}
+.ec-hd{display:flex;align-items:center;justify-content:space-between;gap:8px;min-width:0}
+.ec-hd .ec-h{margin:0}
+.ech{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px}
+.ech li{display:flex;flex-wrap:wrap;gap:4px;max-width:100%;min-width:0}
+.chip-enc{display:inline-flex;align-items:center;max-width:100%;min-height:var(--chip-h);padding:0 8px;border-radius:999px;font-size:var(--fs-sm);background:var(--raised);color:var(--text-2);overflow-wrap:anywhere}
+.chip-enc.accent{background:var(--accent-soft);color:var(--accent-text);font-weight:var(--fw-strong)}
+.chip-enc.ok{background:color-mix(in srgb,var(--success) 14%,transparent);color:var(--success-text)}
+.chip-enc.muted{color:var(--text-2)}
+.mjob{position:relative;display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:6px 14px;align-items:center;margin-top:12px;padding:12px 14px 14px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);min-width:0;overflow:hidden}
+.mjob>.ltile{grid-row:span 2}
+.mjob-m{min-width:0;display:grid;gap:8px}
+.mjob-t{position:static;color:var(--text);font-weight:var(--fw-strong);text-decoration:none;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mjob-t::after{content:"";position:absolute;inset:0}
+.mjob-t .fn{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block}
+.mjob-f{display:flex;flex-wrap:wrap;gap:6px 18px;margin:0}
+.mjob-f dt{color:var(--text-2);font-size:var(--fs-sm)}
+.mjob-f dd{margin:0;font-weight:var(--fw-strong)}
+.mjob .pill{position:relative;z-index:1;justify-self:end}
+.mjob-bar{position:absolute;left:0;right:0;bottom:0;height:3px;background:var(--raised)}
+.mjob-bar i{display:block;height:100%;background:var(--accent)}
+@media (max-width:479px){.mjob{grid-template-columns:auto minmax(0,1fr)}.mjob .pill{grid-column:2;justify-self:start}}
