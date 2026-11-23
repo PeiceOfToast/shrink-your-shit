@@ -20,12 +20,16 @@ export function menuEscape(e: KeyboardEvent<HTMLDetailsElement>) {
 // One document listener for every ⋯ menu (fix 1): Escape closes an open menu even when focus is not inside it, which
 // is the case after a mouse click in Safari and Firefox on macOS (they don't focus the summary). It stops the event
 // there, so a drawer or dialog behind the menu stays open; with no menu open it does nothing. It listens in the capture
-// phase, so a drawer open at page load, e.g. /jobs?job=…, does not also close behind the menu.
+// phase because the drawer's handler does not stop propagation: without capture, Escape would close the drawer instead
+// of the menu. A modal with focus inside it (palette, folder picker, confirm, drawer) that does not hold the open menu
+// gets Escape first, so this listener leaves it alone.
 export function installMenuEscape(): () => void {
   const esc = (e: globalThis.KeyboardEvent) => {
     if (e.key !== "Escape") return;
     const open = document.querySelectorAll<HTMLDetailsElement>("details.menu[open]");
     if (!open.length) return;
+    const modal = (document.activeElement as HTMLElement | null)?.closest('[aria-modal="true"]');
+    if (modal && !Array.from(open).some((m) => modal.contains(m))) return;
     e.stopImmediatePropagation();
     open.forEach((m) => closeMenuToSummary(m));
   };
