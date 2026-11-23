@@ -197,12 +197,6 @@ export function summary(s: State): Summary {
 }
 
 // Actions. Each is the same action as its one place (Workers, Libraries, Jobs); here it changes the mock state.
-export function startAll() {
-  change((s) => s.workers.forEach((w) => {
-    if (w.status === "paused") (w.status = "online", (w.statusSince = new Date().toISOString()));
-  }));
-  change(() => log("setting.changed", "All workers started"));
-}
 export function stopAll(now = true) {
   if (!now) { // Stop after these files: a busy worker finishes them (drain), an idle one stops
     for (const w of state.workers) if (w.status === "online" || w.status === "busy") workerAction(w.id, w.currentJobIds.length ? "drain" : "stop");

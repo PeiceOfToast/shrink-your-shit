@@ -167,8 +167,7 @@ textarea.input{min-height:72px;font-family:var(--mono);font-size:var(--fs-sm)}
 @media (max-width:640px){.setrow,.setrow.wide{grid-template-columns:minmax(0,1fr)}.setrow .ctl,.setrow .langs{justify-content:flex-start}
   /* Connections at a phone width: the status takes a line of its own, and the buttons after it */
   .setrow .ctl>.stline{flex-basis:100%}
-  /* a ghost button's 10 px side padding and 1 px border push its text in 11 px: pull the flush group back so the text lines up with the title */
-  .setrow .ctl>.flush>.btn.ghost:first-child{margin-left:-11px}}
+}
 /* M2c: at about 1024 px a wide control (the Accent choices) takes at most half the row, so its description keeps room; 1440 and 390 are unchanged */
 @media (min-width:641px) and (max-width:1100px){.setrow.wide{grid-template-columns:minmax(0,1fr) minmax(0,50%)}}
 /* Settings > Health: one line per check, dividers between them (settings-health design) */
@@ -380,6 +379,7 @@ td .tnc{max-width:230px}
 .signin .row{margin-top:16px}
 .signin .where{margin-top:24px}
 .signin .btn.primary{width:100%}
+.signin .field p.st{margin-bottom:0}
 .signin .where>summary{text-decoration:underline}
 .signin .input[aria-invalid="true"]{border-color:var(--error-text)}
 @media (max-width:479px){.signin{margin-inline:calc(16px - var(--page-pad));padding-top:68px}.signin .field{margin-top:16px}} /* the page gutter is 16px here, whatever --page-pad is */
@@ -445,6 +445,9 @@ label.chk{cursor:pointer}
 .ltools .pop .btn{width:100%;justify-content:flex-start}
 .chips{display:inline-flex;gap:4px;flex-wrap:wrap}
 .mchip{display:inline-flex;align-items:center;height:var(--chip-h);padding:0 6px;border-radius:999px;background:var(--raised);color:var(--text-2);font-size:var(--fs-sm);white-space:nowrap}
+/* a removable chip (Settings > Your languages): the pill grows to hold a 24px × inside it, so the × is not cut off */
+.mchip.removable{height:auto;min-height:var(--chip-h);padding:2px 2px 2px 8px;gap:4px}
+.mchip.removable>.btn{width:24px;height:24px;min-width:24px;min-height:24px;padding:0;margin:0;border-radius:999px}
 .phone,.tbl .sub.phone{display:none}
 @media (max-width:1100px){.tbl [data-p="6"],.tbl [data-p="7"]{display:none}}
 @media (max-width:900px){.tbl [data-p="4"],.tbl [data-p="5"]{display:none}}
