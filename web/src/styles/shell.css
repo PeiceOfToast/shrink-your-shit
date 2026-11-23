@@ -944,8 +944,7 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 .edsegs>*{min-height:32px;padding:0 12px;display:inline-flex;align-items:center;gap:6px;border:0;border-right:1px solid var(--border-strong);background:var(--surface);color:var(--text-2);font:inherit;font-size:var(--fs);text-decoration:none;cursor:pointer}
 .edsegs>*:last-child{border-right:0}
 .edsegs>span{cursor:default;opacity:.6}
-.edsegs [aria-current=page]{opacity:1}
-.edsegs [aria-current=page]{background:var(--raised);color:var(--text);font-weight:var(--fw-strong);box-shadow:inset 0 -3px 0 var(--accent)}
+.edsegs [aria-current=page]{opacity:1;background:var(--raised);color:var(--text);font-weight:var(--fw-strong);box-shadow:inset 0 -3px 0 var(--accent)}
 .edstatus{padding:4px var(--page-pad) 0;display:flex;flex-direction:column;gap:4px}.edstatus p{margin:0;min-height:0}.edstatus p:empty{display:none}
 .edpanel{margin:8px var(--page-pad);max-height:60vh;overflow:auto} /* ui-shop: a long publish panel scrolls inside the fixed-height editor instead of being cut */
 .editor .edframe{display:grid;grid-template-columns:minmax(0,1fr) 320px;grid-template-rows:minmax(0,1fr);flex:1 1 0;min-height:0;background:var(--surface)} /* flex:none: as a growing flex item the canvas fed its own height back and the page scrolled for metres */
