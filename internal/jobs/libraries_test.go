@@ -474,3 +474,27 @@ func TestDuplicateFlowKeepsStatus(t *testing.T) {
 		}
 	}
 }
+
+// A copy keeps the source's description and tags, but not its favourite star.
+func TestDuplicateFlowKeepsDescriptionAndTags(t *testing.T) {
+	s := open(t)
+	f, err := s.AddFlow("Films", rules.SliderTemplate(3))
+	if err != nil {
+		t.Fatal(err)
+	}
+	desc, fav := "Shrink films", true
+	if err := s.SetWorkflowMeta(f.ID, &desc, nil, &fav, []string{"films", "4k"}); err != nil {
+		t.Fatal(err)
+	}
+	dup, err := s.DuplicateFlow(f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := s.WorkflowMetaOf(dup.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Description != desc || strings.Join(m.Tags, ",") != "films,4k" || m.Favourite {
+		t.Errorf("copy meta = %+v, want description %q, tags [films 4k], no favourite", m, desc)
+	}
+}
