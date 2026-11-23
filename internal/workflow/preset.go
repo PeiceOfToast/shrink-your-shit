@@ -37,7 +37,7 @@ func FromTemplate(t rules.Template, prev *Doc) Doc {
 			node(TypeInput, map[string]any{"ignore": orEmpty(s.Ignore)}),
 			node(TypeSkips, map[string]any{"includeDolbyVision": s.IncludeDolbyVision}),
 			node(TypeConvert, convertConfig(s)),
-			node(TypeAudio, map[string]any{"audio": s.Audio, "onlyMyLanguages": s.OnlyMyLanguages}),
+			node(TypeAudio, audioConfig(s)),
 			node(TypeSubtitles, map[string]any{"subtitles": s.Subtitles}),
 			node(TypeContainer, map[string]any{"fileType": s.FileType}),
 			node(TypeVerify, map[string]any{}),
@@ -152,6 +152,11 @@ func ToTemplateWith(d Doc, current rules.Template, sc Scopes) (rules.Template, [
 	}
 	d = resolved
 	order, ok := straightChain(d)
+	if !ok { // W11: a path of the Shrink videos steps whose input is not first has no straight chain; name the step out of place
+		if iss, bad := pathOrderIssue(d); bad {
+			return rules.Template{}, []Issue{iss}
+		}
+	}
 	if !ok || hasOnError(d) || hasRunCards(d) { // V6a: checks; V6b: a step's own failure choice; FB1b: actions and ends on the chain
 		t, issues := branchTemplate(d)
 		if len(issues) == 0 { // FB4b: a hand-over's other workflow lives in the template the store read for the run, never in this document
@@ -171,9 +176,13 @@ func ToTemplateWith(d Doc, current rules.Template, sc Scopes) (rules.Template, [
 		}
 		return t, nil
 	}
-	if !slices.Equal(types, PresetOrder) {
+	if !samePresetSteps(types) {
 		return rules.Template{}, []Issue{chainIssue(order)}
 	}
+	if iss, bad := orderIssue(order); bad { // W11: every step is here, in an order the engine can't honour
+		return rules.Template{}, []Issue{iss}
+	}
+	stepOrder := stepOrderOf(types)
 	s, issues := selectorsOf(order, sc.LeaveFile)
 	if len(issues) > 0 {
 		return rules.Template{}, issues
@@ -181,11 +190,11 @@ func ToTemplateWith(d Doc, current rules.Template, sc Scopes) (rules.Template, [
 	if cur, ok := current.SelectorsView(); ok {
 		cur.Notes = nil
 		cur.Audio, cur.OnlyMyLanguages, _ = rules.StandardAudio(cur.Audio, cur.OnlyMyLanguages)
-		if reflect.DeepEqual(cur, s) {
+		if reflect.DeepEqual(cur, s) && current.StepOrder == stepOrder {
 			return current, nil
 		}
 	}
-	return rules.Template{Kind: rules.KindSelectors, Selectors: &s, CompilerVersion: rules.CompilerVersion}, nil
+	return rules.Template{Kind: rules.KindSelectors, Selectors: &s, CompilerVersion: rules.CompilerVersion, StepOrder: stepOrder}, nil
 }
 
 // selectorsOf reads the preset chain's configs (missing keys take their defaults; a turned-off audio,
@@ -221,7 +230,8 @@ func selectorsOf(order []Node, leaveFile bool) (rules.Selectors, []Issue) {
 	if s.HardwareFail == "next" {
 		s.HardwareFail = ""
 	}
-	s.RateControl = strOf(cv, "rateControl", "") // item A; the *_legacy values keep a saved flow's files
+	s.RemoveBlackBars = boolOf(cv, "removeBlackBars", false) // F4: off unless the step asks for it
+	s.RateControl = strOf(cv, "rateControl", "")             // item A; the *_legacy values keep a saved flow's files
 	if s.RateControl == "quality" {
 		s.RateControl = "" // the default is saved as absent, so an unchanged flow keeps its template
 	}
@@ -236,6 +246,7 @@ func selectorsOf(order []Node, leaveFile bool) (rules.Selectors, []Issue) {
 	}
 	if a := by[TypeAudio]; a.Enabled {
 		s.Audio, s.OnlyMyLanguages = strOf(a.Config, "audio", s.Audio), boolOf(a.Config, "onlyMyLanguages", s.OnlyMyLanguages)
+		s.EvenLoudness = boolOf(a.Config, "evenLoudness", false) // F5: off unless the step asks for it
 	} else {
 		s.Audio, s.OnlyMyLanguages = "as_is", false
 	}
@@ -371,6 +382,123 @@ func chainIssue(order []Node) Issue {
 	return notRunnable("The steps that convert run in the Shrink videos order. Put this path's steps in that order."+draft, "")
 }
 
+// samePresetSteps is true when the path has each Shrink videos step once and no other step.
+func samePresetSteps(types []string) bool {
+	if len(types) != len(PresetOrder) {
+		return false
+	}
+	for _, t := range PresetOrder {
+		if !slices.Contains(types, t) {
+			return false
+		}
+	}
+	return true
+}
+
+// orderIssue says which step a path puts out of order (W11), or false when the order can be run. Every
+// step after the input; skips before the convert; the convert, audio, subtitles and file type before the
+// verify (it checks the finished file); the commit last. Audio, subtitles and file type run in the same
+// ffmpeg process as the convert, so their order among those steps changes no result.
+func orderIssue(order []Node) (Issue, bool) {
+	pos := map[string]int{}
+	byType := map[string]Node{}
+	for i, n := range order {
+		pos[n.Type] = i
+		byType[n.Type] = n
+	}
+	type check struct{ first, then string } // first must come before then
+	var checks []check
+	for _, t := range PresetOrder {
+		if t != TypeInput {
+			checks = append(checks, check{TypeInput, t})
+		}
+	}
+	checks = append(checks, check{TypeSkips, TypeConvert})
+	for _, t := range []string{TypeConvert, TypeAudio, TypeSubtitles, TypeContainer} {
+		checks = append(checks, check{t, TypeVerify})
+	}
+	for _, t := range PresetOrder {
+		if t != TypeCommit {
+			checks = append(checks, check{t, TypeCommit})
+		}
+	}
+	for _, c := range checks {
+		if pos[c.first] > pos[c.then] {
+			n := byType[c.then]
+			return notRunnable("'"+nodeName(n)+"' must come after '"+nodeName(byType[c.first])+"'. You can save the workflow as a draft meanwhile.", n.ID), true
+		}
+	}
+	return Issue{}, false
+}
+
+// pathOrderIssue (W11) is orderIssue for a path whose input is not its first step: straightChain starts at the
+// input, so such a path has no straight chain. It takes the path from the one step nothing leads into, and only
+// when that path is the Shrink videos steps, each once.
+func pathOrderIssue(d Doc) (Issue, bool) {
+	next := map[string]string{}
+	leadsTo := map[string]bool{}
+	for _, e := range d.Edges {
+		if e.FromPort != "success" || e.ToPort != "in" {
+			return Issue{}, false
+		}
+		next[e.From] = e.To
+		leadsTo[e.To] = true
+	}
+	byID := map[string]Node{}
+	var start string
+	for _, n := range d.Nodes {
+		byID[n.ID] = n
+		if !leadsTo[n.ID] {
+			if start != "" {
+				return Issue{}, false
+			}
+			start = n.ID
+		}
+	}
+	var order []Node
+	for id := start; id != ""; id = next[id] {
+		n, ok := byID[id]
+		if !ok || len(order) == len(d.Nodes) {
+			return Issue{}, false
+		}
+		order = append(order, n)
+	}
+	if start == "" || len(order) != len(d.Nodes) {
+		return Issue{}, false
+	}
+	types := make([]string, len(order))
+	for i, n := range order {
+		types[i] = n.Type
+	}
+	if !samePresetSteps(types) {
+		return Issue{}, false
+	}
+	return orderIssue(order)
+}
+
+// stepLabelOf is a workflow step's name in the job log's step sections (rules.StepDecision.Label), for the
+// steps that have a section.
+var stepLabelOf = map[string]string{TypeConvert: rules.StepConvertVideo, TypeAudio: rules.StepAudio,
+	TypeSubtitles: rules.StepSubtitles, TypeContainer: rules.StepFileType}
+
+// stepOrderOf is the job log's step-section order for a path's steps (W11), labels joined by commas. It is ""
+// when the path runs them in the Shrink videos order, so a stored flow keeps its bytes.
+func stepOrderOf(types []string) string {
+	labels := func(ts []string) string {
+		var out []string
+		for _, t := range ts {
+			if l, ok := stepLabelOf[t]; ok {
+				out = append(out, l)
+			}
+		}
+		return strings.Join(out, ",")
+	}
+	if got, def := labels(types), labels(PresetOrder); got != def {
+		return got
+	}
+	return ""
+}
+
 func notRunnable(msg, nodeID string) Issue {
 	return Issue{Code: "not_runnable_yet", Severity: "error", Message: msg, NodeID: nodeID}
 }
@@ -429,6 +557,16 @@ func hasOnError(d Doc) bool {
 	return false
 }
 
+// audioConfig is the Audio step's config for s; F5's choice only when it is on, so a flow saved without it
+// reads back exactly as it was.
+func audioConfig(s rules.Selectors) map[string]any {
+	c := map[string]any{"audio": s.Audio, "onlyMyLanguages": s.OnlyMyLanguages}
+	if s.EvenLoudness {
+		c["evenLoudness"] = true
+	}
+	return c
+}
+
 // convertConfig is the Convert video step's config for s; the rate control keys only when it is not the default.
 func convertConfig(s rules.Selectors) map[string]any {
 	c := map[string]any{"quality": s.Quality, "format": s.Format, "resolution": s.Resolution, "maxBitrate": s.MaxBitrate, "speed": s.Speed}
@@ -440,6 +578,9 @@ func convertConfig(s rules.Selectors) map[string]any {
 	}
 	if s.CPUQuality != 0 {
 		c["cpuQuality"] = s.CPUQuality
+	}
+	if s.RemoveBlackBars { // F4: only when asked for, so a flow saved without it reads back exactly as it was
+		c["removeBlackBars"] = true
 	}
 	if s.RateControl != "" && s.RateControl != "quality" {
 		c["rateControl"] = s.RateControl

@@ -241,9 +241,13 @@ func TestRoughPictureWarning(t *testing.T) {
 	if !strings.Contains(b, "Low may look blocky in dark or fast scenes for 4K HDR files at 50-60 fps (7.8 Mbps).") {
 		t.Errorf("GET warnings: %s", b)
 	}
-	_, w := post(t, srv, "POST", path+"/warnings", `{"quality":3,"maxBitrate":"none","fileType":"keep"}`)
+	// a higher level than Low does not warn; a level flow with no max is refused (Validate), so none is not a case here
+	_, w := post(t, srv, "POST", path+"/warnings", `{"quality":3,"maxBitrate":"high","fileType":"keep"}`)
 	if !strings.Contains(w, `"warnings":[]`) {
-		t.Errorf("no limit: %s", w)
+		t.Errorf("high: %s", w)
+	}
+	if code, e := post(t, srv, "POST", path+"/warnings", `{"quality":3,"maxBitrate":"none","fileType":"keep"}`); code != 400 || !strings.Contains(e, "Bitrate level needs Low, Medium or High") {
+		t.Errorf("level with no max: want 400, got %d %s", code, e)
 	}
 	if f, _ := st.GetFlow(lib.FlowID); f.Template.Selectors == nil || f.Template.Selectors.MaxBitrate != "low" {
 		t.Error("the warnings check saved something")

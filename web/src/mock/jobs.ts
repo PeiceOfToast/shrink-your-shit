@@ -114,7 +114,7 @@ export function mockJobLog(id: string): JobLog | { error: { code: string; messag
   if ("error" in log || !log.sections?.length) return log;
   const sections: LogSection[] = log.sections.map((s) => ({ ...s, lines: [...s.lines] }));
   const into = (secId: string, title: string, lines: LogLine[]) => { let s = sections.find((x) => x.id === secId); if (!s) { s = { id: secId, title, lines: [] }; sections.push(s); } s.lines.push(...lines); };
-  const STEP: Record<string, number> = { encode: 0, check: 1, replace: 2 }; // the server's step index (worker.go)
+  const STEP: Record<string, number> = { preflight: 0, encode: 1, check: 2, replace: 3 }; // the server's step index (worker.go)
   const steps = log.steps.map((st) => {
     // only the keys v2joblog.go sends: no decision or reason text, set or speeds (moves is sent, so it stays)
     const { warnings, errors, decision, reason, set, speedX, avgKbps, path, ...rest } = st;
@@ -141,6 +141,7 @@ function mockJobLogRaw(id: string): JobLog | { error: { code: string; message: s
   }
   if (id === "failed-replace") {
     return { state: "complete", ...runInfo("failed"), steps: [
+      { name: "preflight", startedAt: "2026-11-11T14:00:00Z", tookMs: 1000, outcome: "ok", command: null, probe: null, check: null, outputLines: 0, output: [], result: "Done", found: [] },
       { name: "encode", startedAt: "2026-11-11T14:00:00Z", tookMs: 120000, outcome: "ok", command: "ffmpeg -i in.mkv -c:v libx265 -crf 22 out.mkv", probe: { codec: "h264", width: 1920, height: 1080, frameRate: 23.976, bitDepth: 8, hdr: false, bitrateKbps: 8000, durationSec: 3600, audioTracks: 0, subtitleTracks: 0 }, check: { score: 0.967, min: 0.95, passed: true }, outputLines: 10, output: ["[hevc @ 0x55d1] output file #0 does not contain any stream"], result: "Done", found: [] },
       { name: "check", startedAt: "2026-11-11T14:02:00Z", tookMs: 5000, outcome: "ok", command: null, probe: null, check: { score: 0.967, min: 0.95, passed: true }, outputLines: 0, output: [], result: "Passed", found: [] },
       { name: "replace", startedAt: "2026-11-11T14:02:05Z", tookMs: 500, outcome: "failed", command: null, probe: null, check: null, outputLines: 0, output: [], result: "Failed", found: [] },
@@ -170,6 +171,7 @@ function mockJobLogRaw(id: string): JobLog | { error: { code: string; message: s
     step("check", "failed", { found: found[id], result: j.reason?.message ?? "Failed", errors: [j.reason?.message ?? "The picture check failed."] }),
   ] };
   if (failed) return { state: "complete", final: f48191 ? "kept" : "done", ...runInfo("failed"), steps: [
+    step("preflight", "ok", { result: "Done" }),
     step("encode", "failed", { ...conv, result: "Failed" }),
   ] };
   // the server's replace moves, in order: the original to the trash, the new file into its place, a sidecar; 48166 also has a failed remove
@@ -181,6 +183,7 @@ function mockJobLogRaw(id: string): JobLog | { error: { code: string; message: s
     ...(failedRemove ? [{ action: "remove", from: "/media/movies/.syp-trash/Sample (2020).mkv", to: null, ok: false, error: "Permission denied" }] : []),
   ];
   return { state: "complete", final: "done", ...runInfo("converted"), summary: { ...runInfo("converted").summary, tempRemoved: failedRemove ? false : true }, steps: [
+    step("preflight", "ok", { result: "Done" }),
     step("encode", "ok", { ...conv, decision: "Converted the video to HEVC at Balanced quality", reason: "The file is H.264, and the workflow converts to HEVC.", speedX: 3.4, avgKbps: 2450, set: [{ name: "target_codec", value: "hevc" }, { name: "api_key" }], result: "Done · 41% smaller" }),
     step("replace", "ok", { tookMs: 1500, decision: "Saved the new file in place of the original", reason: "It is smaller and passed the picture check.", moves, result: "Done" }),
   ] };
@@ -197,9 +200,9 @@ export function mockJob(id: string): JobDetail | null {
     // removed: as the server, a job-backed skip's own row is gone (removed: true)
     id, state: j.state, removed: j.origin === "scan", reason, attempts: j.attempts ?? 0,
     // the sample's failure (E-API-SHAPE): the sentence is the reason's; the server sends raw step name 'encode' or 'check'
-    ...(j.state === "failed" && j.id === "48190" ? { failure: { step: "encode", stepIndex: 0, stepCount: 1, afterMs: 252000, mediaTime: "00:41:12", hint: "The file is corrupt or uses an unsupported codec.", ffmpegRan: true, exitCode: 1, keyLines: ["[hevc @ 0x55d1] Error while decoding stream #0:0: Invalid data found when processing input", "Conversion failed!"] } } : {}),
-    ...(j.state === "failed" && j.id === "48191" ? { failure: { step: "encode", stepIndex: 0, stepCount: 1, afterMs: 0, mediaTime: null, hint: "Free some space on that disk, then press Retry.", ffmpegRan: false, exitCode: null, keyLines: [] } } : {}),
-    ...(j.state === "failed" && j.id === "failed-replace" ? { failure: { step: "replace", stepIndex: 2, stepCount: 3, afterMs: 500, mediaTime: null, hint: null, ffmpegRan: true, exitCode: 1, keyLines: ["rename /mnt/shrunk/file.tmp /mnt/shrunk/file.mkv: permission denied"] } } : {}), retryAt: j.retryAt ?? null, error: null, worker: j.worker ?? null,
+    ...(j.state === "failed" && j.id === "48190" ? { failure: { step: "encode", stepIndex: 1, stepCount: 2, afterMs: 252000, mediaTime: "00:41:12", hint: "The file is corrupt or uses an unsupported codec.", ffmpegRan: true, exitCode: 1, keyLines: ["[hevc @ 0x55d1] Error while decoding stream #0:0: Invalid data found when processing input", "Conversion failed!"] } } : {}),
+    ...(j.state === "failed" && j.id === "48191" ? { failure: { step: "encode", stepIndex: 1, stepCount: 2, afterMs: 0, mediaTime: null, hint: "Free some space on that disk, then press Retry.", ffmpegRan: false, exitCode: null, keyLines: [] } } : {}),
+    ...(j.state === "failed" && j.id === "failed-replace" ? { failure: { step: "replace", stepIndex: 3, stepCount: 4, afterMs: 500, mediaTime: null, hint: null, ffmpegRan: true, exitCode: 1, keyLines: ["rename /mnt/shrunk/file.tmp /mnt/shrunk/file.mkv: permission denied"] } } : {}), retryAt: j.retryAt ?? null, error: null, worker: j.worker ?? null,
     file: { path: j.path, bytes: j.beforeBytes ?? j.bytes }, createdAt: at(300), updatedAt: at(5),
     library: { id: j.libraryId, name: j.library }, workflow: { id: "w1", revisionId: "w1r4", version: 4, ...(j.id === "48165" ? { queuedVersion: 3 } : {}) },
     events: old ? [] : [{ seq: 1, at: at(300), from: null, to: "queued", reason: null, workerId: null },

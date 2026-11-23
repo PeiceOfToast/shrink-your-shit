@@ -28,6 +28,9 @@ type Selectors struct {
 	Hardware     string `json:"hardware,omitempty"`
 	HardwareFail string `json:"hardwareFail,omitempty"`
 	CPUQuality   int    `json:"cpuQuality,omitempty"`
+	// RemoveBlackBars (F4): cut the black bars the picture has, when a sample of the file agrees on them. Off
+	// by default, so a flow that never set it compiles as it did.
+	RemoveBlackBars bool `json:"removeBlackBars,omitempty"`
 	// Notices are coded notes shown on the flow until its next publish (migration 38: bitrate_meaning_changed).
 	Notices []Notice `json:"notices,omitempty"`
 	Audio   string   `json:"audio"` // AvailableAudio (S6: design E's six choices)
@@ -56,6 +59,10 @@ type Selectors struct {
 	// Notes are sentences about this flow shown once (S6: "Audio choices changed in this update…", from
 	// migration 19); a save makes a new template without them (contract 23:33Z).
 	Notes []string `json:"notes,omitempty"`
+
+	// EvenLoudness (F5, "Even out loudness"): the converted audio tracks are normalised to one target, LoudnessI
+	// LUFS. Off by default; a copied track is never touched, so it never forces a conversion by itself.
+	EvenLoudness bool `json:"evenLoudness,omitempty"`
 }
 
 // What this version can save and run (UI-API-CONTRACT.md addendum 13): the UI shows the rest disabled.

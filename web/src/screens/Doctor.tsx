@@ -2,31 +2,44 @@
 // something needs doing, the fix (a sentence, so no Copy button: design). Check again re-runs the fast checks; Test encoders again runs the
 // test encodes too (up to ~15 s). It changes no settings; Test encoders again also refreshes which encoder conversions use. Open before the first run (App.tsx), linked from
 // the first-run page and from the Dashboard when a check fails.
+// Look (M2c, design settings-health-*.png): a banner for the summary (the .note look, green when all is well), then one card per group, one line per check.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "../Icon";
 import { PageHead } from "../PageHead";
 import { SignedOut, failed } from "../api";
 import { getDoctor } from "../doctorApi";
-import { clock, plural } from "../format";
+import { encoderRows, healthSummary, libraryRows, type HealthTone } from "../doctorSummary";
+import { clock } from "../format";
 import { SettingsTabs } from "../pages";
 import type { Doctor, DoctorCheck } from "../types/doctor";
 import type { Issue } from "../types/v1";
 
-const PILL: Record<DoctorCheck["status"], [string, string, string]> = { ok: ["", "OK", "i-check-c"], warn: ["warn", "Warning", "i-alert"], bad: ["bad", "Fail", "i-x-c"], absent: ["", "Not present", "i-minus"] };
+// the status word is read by screen readers only; the icon and the line's colour carry it on screen
+const STATUS: Record<DoctorCheck["status"], { word: string; icon: string; tone: string }> = {
+  ok: { word: "OK", icon: "i-check-c", tone: "ok" },
+  warn: { word: "Warning", icon: "i-alert", tone: "warn" },
+  bad: { word: "Fail", icon: "i-x-c", tone: "bad" },
+  absent: { word: "Not present", icon: "i-info", tone: "wait" },
+};
 const GROUPS: [string, (id: string) => boolean][] = [
   ["Tools", (id) => ["ffmpeg", "ffprobe", "x265", "ssim"].includes(id)],
   ["Encoders", (id) => id.startsWith("encoder:")],
   ["Data folder", (id) => id === "data"],
   ["Libraries", (id) => id === "libraries" || id.startsWith("library:")],
 ];
+const TONE_TEXT: Record<HealthTone, string> = { ok: "var(--success-text)", warn: "var(--warning-text)", bad: "var(--error-text)" };
 const group = (id: string) => GROUPS.find(([, f]) => f(id))?.[0] ?? "Other";
 
+
 function Check({ c }: { c: DoctorCheck }) {
-  const [cls, word, icon] = PILL[c.status] ?? PILL.warn, absent = c.status === "absent";
+  const s = STATUS[c.status] ?? STATUS.warn, absent = c.status === "absent", bad = c.status === "bad";
   return (
     <li className="stack" style={{ gap: 4 }}>
-      <div className="row nw" style={{ alignItems: "baseline", gap: 8 }}><span className={"pill " + cls}><Icon id={icon} />{word}</span><span style={absent ? { color: "var(--text-2)" } : undefined}>{c.detail}</span></div>
-      {c.hint && !absent && <p className="muted" style={{ margin: "0 0 0 4px" }}><strong>Fix:</strong> {c.hint}</p>}
+      <div className="row nw" style={{ alignItems: "flex-start", gap: 8 }}>
+        <span className={"st " + s.tone} style={{ marginTop: 2 }}><Icon id={s.icon} /><span className="sr">{s.word}: </span></span>
+        <span style={{ color: absent ? "var(--text-2)" : bad ? "var(--error-text)" : undefined, overflowWrap: "anywhere" }}>{c.detail}</span>
+      </div>
+      {c.hint && !absent && <p style={{ margin: "0 0 0 24px", color: bad ? "var(--error-text)" : "var(--text)" }}><strong>Fix:</strong> {c.hint}</p>}
     </li>);
 }
 
@@ -44,8 +57,8 @@ export function HealthSettings() {
   }, []);
   useEffect(() => { run(false); }, [run]);
   const notHere = error && ["http_404", "not_found"].includes(error.code);
-  const fails = d?.checks.filter((c) => c.status === "bad").length ?? 0, warns = d?.checks.filter((c) => c.status === "warn").length ?? 0;
-  const summary = !d ? "" : fails || warns ? [fails && plural(fails, "check failed", "checks failed"), warns && plural(warns, "warning", "warnings")].filter(Boolean).join(", ") + "." : "Everything checks out.";
+  const sum = d ? healthSummary(d.checks) : null;
+  const icon = sum?.tone === "bad" ? "i-x-c" : sum?.tone === "warn" ? "i-alert" : "i-check-c";
 
   return (
     <div className="stack">
@@ -54,16 +67,16 @@ export function HealthSettings() {
       <p className="muted" style={{ margin: 0 }}>Checks that this computer can convert your files. It changes no settings. Fixed an encoder? Test encoders again, and the next conversion uses it.</p>
       {notHere ? <p className="muted">This server can't run the health checks yet.</p>
         : error && !d ? <p className="st bad" role="alert"><Icon id="i-alert" /><span>{error.message}</span></p>
-          : !d ? <div className="empty" role="status">Checking…</div>
+          : !d || !sum ? <div className="empty" role="status">Checking…</div>
             : <>
-              <section className="card" aria-labelledby="hs-h">
-                <div className="hd"><h2 id="hs-h">{summary}</h2></div>
-                <div className="bd stack">
-                  <p style={{ margin: 0 }}>Conversions use {d.encoder.hardware ? "" : "the "}{d.encoder.label}.</p>
+              <section className={"note " + sum.tone} aria-labelledby="hs-h" style={{ alignItems: "flex-start" }}>
+                <Icon id={icon} />
+                <div className="sp stack" style={{ gap: 8 }}>
+                  <h2 id="hs-h" style={{ margin: 0, fontSize: "1.125rem", color: TONE_TEXT[sum.tone] }}>{sum.text}</h2>
                   <p className="muted" style={{ margin: 0 }}>Checked at {clock(d.ranAt)}. {d.encodersTestedAt ? "Encoders tested at " + clock(d.encodersTestedAt) + "." : "Encoders not tested yet."} Version {d.version}.</p>
                   <div className="row" style={{ gap: 8 }}>
                     <button className="btn sm" type="button" aria-disabled={!!busy} onClick={() => { if (!busy) run(false); }}>{busy === "check" ? "Checking…" : "Check again"}</button>
-                    <button className="btn sm" type="button" aria-disabled={!!busy} onClick={() => { if (!busy) run(true); }}>{busy === "test" ? "Testing encoders…" : "Test encoders again"}</button>
+                    <button className="btn sm ghost" type="button" aria-disabled={!!busy} onClick={() => { if (!busy) run(true); }}>{busy === "test" ? "Testing encoders…" : "Test encoders again"}</button>
                   </div>
                   <p className="muted" role="status" style={{ margin: 0 }}>{busy === "test" && "Testing encoders… This takes up to 15 seconds."}</p>
                   {error && <p className="st bad" role="alert" style={{ margin: 0 }}><Icon id="i-alert" /><span>{error.message}</span></p>}
@@ -72,8 +85,8 @@ export function HealthSettings() {
               {GROUPS.map(([g]) => g).concat("Other").map((g) => { const cs = d.checks.filter((c) => group(c.id) === g); return cs.length > 0 &&
                 <section key={g} className="card" aria-labelledby={"hg-" + g}>
                   <div className="hd"><h2 id={"hg-" + g}>{g}</h2></div>
-                  <div className="bd"><ul className="stack" style={{ listStyle: "none", padding: 0, margin: 0 }}>
-                    {cs.map((c) => <Check key={c.id} c={c} />)}</ul></div>
+                  <ul className="health">
+                    {(g === "Libraries" ? libraryRows(cs) : g === "Encoders" ? encoderRows(cs) : cs).map((c) => <Check key={c.id} c={c} />)}</ul>
                 </section>; })}
             </>}
     </div>);

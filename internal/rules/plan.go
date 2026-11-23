@@ -84,6 +84,10 @@ type Plan struct {
 	// its source had ("default+forced", or "0" for none). ffmpeg does not carry the flags into WebM, so the
 	// default flag would land on whichever subtitle ffmpeg picks. Empty for every other container.
 	SubDispositions []string `json:"subDispositions,omitempty"`
+
+	// EvenLoudness: the converted audio tracks are measured and normalised (F5). Omitted when off, so existing
+	// Plans and fingerprints are unchanged.
+	EvenLoudness bool `json:"evenLoudness,omitempty"`
 }
 
 // Skip codes: why a file is not converted, as the Preview counts them (UI-API-CONTRACT.md, the open
@@ -146,6 +150,10 @@ type VideoEncode struct {
 	TenBit bool `json:"tenBit,omitempty"`
 	// Format is the video format made (S6: h264, av1, vp9); "" is HEVC, as every Plan before S6.
 	Format string `json:"format,omitempty"`
+	// Crop (F4): the person asked for the black bars to be cut. CropRect is what the worker measured for this
+	// file; nil means no crop (no bars, or the samples did not agree), and the arguments are as they were.
+	Crop     bool      `json:"crop,omitempty"`
+	CropRect *CropRect `json:"cropRect,omitempty"`
 	// Extra are the encoder's own arguments (S6: SVT-AV1's tune, VP9's constant quality and speed).
 	Extra []string `json:"extra,omitempty"`
 	// Hardware, HardwareFail and CPUCRF are the Convert step's graphics choices (W7). Hardware "" (auto) uses the
@@ -209,7 +217,7 @@ func (t Template) CompileWith(info media.Info, f Facts) (p Plan) {
 		if v := info.Video(); v != nil && v.BitDepth > 8 && p.Video.Codec != "" && !p.Video.Copy {
 			p.Video.TenBit = true
 		}
-		p = withStepDecisions(p, info)
+		p = orderSteps(withStepDecisions(p, info), t.StepOrder)
 	}()
 	if t.Branches != nil { // V6a: the path the file's answers lead down
 		b, ds, ok := route(*t.Branches, info, f)
@@ -258,7 +266,7 @@ func (t Template) CompileWith(info media.Info, f Facts) (p Plan) {
 		// Basic (S4): the position's selectors, its audio choice, always MKV, replace only
 		s := DefaultSelectors(pos.Position)
 		s.Audio, s.FileType = BasicAudio(t.Params.Audio), "mkv"
-		return compileSelectors(p, s, info, SplitLanguages(t.Languages), true)
+		return runSteps(p, info, []Step{SelectorsStep{S: s, Langs: SplitLanguages(t.Languages), Basic: true}})
 	case KindSelectors:
 		if t.Selectors == nil {
 			p.Skip, p.SkipCode = "its library's setting has a choice this version cannot run", SkipSettingCannotRun
@@ -272,7 +280,7 @@ func (t Template) CompileWith(info media.Info, f Facts) (p Plan) {
 			}
 			return p
 		}
-		return compileSelectors(p, s, info, SplitLanguages(t.Languages), false)
+		return runSteps(p, info, []Step{SelectorsStep{S: s, Langs: SplitLanguages(t.Languages)}})
 	default:
 		p.Skip, p.SkipCode = fmt.Sprintf("flows of kind %q cannot run yet", t.Kind), SkipSettingCannotRun
 		return p
@@ -383,23 +391,44 @@ func (p Plan) FFmpegArgsWith(in, out, enc string) ([]string, bool) {
 	if enc == "" || enc == "cpu" {
 		return p.ffmpegArgs(in, out, "", false), true
 	}
-	prefix, ok := formatPrefix[p.Video.Codec]
-	if !ok || !graphicsEncoders[enc] || !strings.HasPrefix(enc, prefix+"_") || p.Video.Copy ||
-		(p.Video.HDR != nil && p.Video.Codec != "libx265") {
+	if !p.usesGraphics(enc) {
 		return p.ffmpegArgs(in, out, "", false), false
 	}
 	return p.ffmpegArgs(in, out, enc, false), true
+}
+
+// CanEncodeWith reports whether FFmpegArgsWith would use enc: a graphics encoder of the plan's format that the plan
+// can take. It answers without building the arguments, so a check can ask before the output file has a path.
+func (p Plan) CanEncodeWith(enc string) bool { return p.usesGraphics(enc) }
+
+// HasFullPipeline reports whether enc can decode and encode in one graphics pipeline (FFmpegArgsFullGPU's ok).
+func (p Plan) HasFullPipeline(enc string) bool { return p.fullPipeline(enc) }
+
+// fullPipeline is the one condition behind HasFullPipeline and FFmpegArgsFullGPU, so a log line or a check that asks
+// "is this the full pipeline?" can't drift from the arguments that run. F4: a crop is a processor filter, so the card
+// cannot decode and scale the picture alone.
+func (p Plan) fullPipeline(enc string) bool {
+	prof, ok := ProfileFor(enc)
+	return p.usesGraphics(enc) && ok && prof.FullPipeline() && p.Video.CropRect == nil
+}
+
+// usesGraphics is whether FFmpegArgsWith uses enc for the plan's video: an encoder of the plan's format's family,
+// on a plan that can take a graphics encoder at all (an H.264 or AV1 HDR encode stays on the processor).
+func (p Plan) usesGraphics(enc string) bool {
+	prefix, ok := formatPrefix[p.Video.Codec]
+	return ok && graphicsEncoders[enc] && strings.HasPrefix(enc, prefix+"_") && !p.Video.Copy &&
+		(p.Video.HDR == nil || p.Video.Codec == "libx265")
 }
 
 // FFmpegArgsFullGPU is FFmpegArgsWith for the full graphics pipeline: the source is decoded on enc's family and
 // its frames stay on the device through the scale to the encoder. Only QSV and VAAPI have one; for any other
 // encoder, or when FFmpegArgsWith wouldn't use enc, ok is false and the arguments are FFmpegArgsWith's.
 func (p Plan) FFmpegArgsFullGPU(in, out, enc string) ([]string, bool) {
-	args, ok := p.FFmpegArgsWith(in, out, enc)
-	if prof, has := ProfileFor(enc); !ok || !has || !prof.FullPipeline() {
-		return args, false
+	if p.fullPipeline(enc) {
+		return p.ffmpegArgs(in, out, enc, true), true
 	}
-	return p.ffmpegArgs(in, out, enc, true), true
+	args, _ := p.FFmpegArgsWith(in, out, enc)
+	return args, false
 }
 
 // tenBitTargets are the targets a graphics encoder keeps 10-bit when the source is 10-bit: HEVC (main10) and AV1
@@ -414,6 +443,35 @@ var tenBitTargets = map[string]bool{"libx265": true, "libsvtav1": true}
 // to" line that read it; on the processor libx264 and libvpx-vp9 keep 10 bits too, which convertingTo names.
 func (p Plan) EncodeTenBit() bool {
 	return p.Video.HDR != nil || (p.Video.TenBit && tenBitTargets[p.Video.Codec])
+}
+
+// Filter is one video filter in a plan's order: Text is ffmpeg's filter, and Card says whether it runs on the
+// graphics card (true) or the processor (false). Video only for now; audio filters will get their own list.
+type Filter struct {
+	Text string
+	Card bool
+}
+
+// filterChain is the filter text for -filter:v, in order. The frames start on the card when onCard (the full
+// pipeline decodes there) and on the processor otherwise. The family's upload goes in front of the first card
+// filter that meets processor frames, and at the end when a card encoder (encoderOnCard) meets them. A processor
+// filter after card frames would need a download, which nothing builds yet: it panics, as a plan is built in code.
+func filterChain(entries []Filter, onCard bool, upload []string, encoderOnCard bool) []string {
+	var out []string
+	for _, f := range entries {
+		switch {
+		case f.Card && !onCard:
+			out = append(out, upload...)
+			onCard = true
+		case !f.Card && onCard:
+			panic("rules: processor filter " + f.Text + " after card frames needs a download, which is not built")
+		}
+		out = append(out, f.Text)
+	}
+	if encoderOnCard && !onCard {
+		out = append(out, upload...)
+	}
+	return out
 }
 
 // ffmpegArgs builds the arguments; gpu is a graphics encoder's name, or "" for the processor's. full is the full
@@ -491,22 +549,22 @@ func (p Plan) ffmpegArgs(in, out, gpu string, full bool) []string {
 			args = append(args, "-pix_fmt:"+v, pixFmt10(fam))
 		}
 	}
-	var vf []string
+	var vf []Filter
+	if r := p.Video.CropRect; r != nil { // F4: the crop comes first, so the scale and the upload see the cut picture
+		vf = append(vf, Filter{Text: r.Filter()})
+	}
 	if p.Video.Height > 0 {
 		if full {
-			vf = append(vf, profiles[fam].scale(p.Video.Height, ten10))
+			vf = append(vf, Filter{Text: profiles[fam].scale(p.Video.Height, ten10), Card: true})
 		} else {
-			vf = append(vf, "scale=-2:"+strconv.Itoa(p.Video.Height))
+			vf = append(vf, Filter{Text: "scale=-2:" + strconv.Itoa(p.Video.Height)})
 			if p.Video.SquarePixels { // the scale keeps the shape by carrying a SAR; rounding leaves 1280:1281, so a square source gets 1:1
-				vf = append(vf, "setsar=1")
+				vf = append(vf, Filter{Text: "setsar=1"})
 			}
 		}
 	}
-	if up := profiles[fam].Upload(ten10); up != nil && !full { // software frames go up to the device last, after any scale
-		vf = append(vf, up...)
-	}
-	if len(vf) > 0 {
-		args = append(args, "-filter:"+v, strings.Join(vf, ","))
+	if chain := filterChain(vf, full, profiles[fam].Upload(ten10), gpu != ""); len(chain) > 0 {
+		args = append(args, "-filter:"+v, strings.Join(chain, ","))
 	}
 	args = append(args, p.trackArgs()...)
 	args = append(args, p.subtitleDispositionArgs()...)
@@ -654,6 +712,7 @@ func (p Plan) trackArgs() []string {
 		if o.added {
 			op := o.op
 			args = append(args, "-c:"+a, op.Encoder, "-b:"+a, strconv.Itoa(op.Kbps)+"k", "-ac:"+a, strconv.Itoa(op.Channels))
+			args = append(args, p.loudnessArgs(op, a)...)
 			if op.Title != "" && perTrack {
 				args = append(args, "-metadata:s:"+a, "title="+op.Title)
 			}
@@ -666,6 +725,8 @@ func (p Plan) trackArgs() []string {
 				if op.Channels > 0 { // a downmix (S4's stereo AAC): never more channels than the track has
 					args = append(args, "-ac:"+a, strconv.Itoa(op.Channels))
 				}
+				// F5: only a track the worker measured gets a loudness filter
+				args = append(args, p.loudnessArgs(op, a)...)
 				if op.Title != "" && perTrack { // over the source's title, which ffmpeg copies with the track
 					args = append(args, "-metadata:s:"+a, "title="+op.Title)
 				}
@@ -734,6 +795,7 @@ func (p Plan) Expect(src media.Info, packets int64) Expect {
 			n++
 		}
 	}
+	e.Crop = p.Video.CropRect                          // F4: the picture comparison crops the original the same way
 	if f := p.Video.Format; f != "" && !p.Video.Copy { // S6: the encoded stream is in the chosen format
 		n := 0
 		for k := range e.Streams {
@@ -904,7 +966,9 @@ func (s Snapshot) Fingerprint() string {
 	p.Tracks = append([]TrackOp(nil), p.Tracks...) // a copy, so the track titles leave the fingerprint and the plan keeps them
 	for i := range p.Tracks {
 		p.Tracks[i].Title = ""
+		p.Tracks[i].Loudness = nil // what the measuring pass read (F5): a measurement, not a setting
 	}
+	p.Video.CropRect = nil // what the worker measured for this file, not a setting (F4)
 	// (SrtNames is resolved after RecordPlan, so it is not in the stored snapshot this fingerprints.)
 	b, _ := json.Marshal(struct {
 		Plan                          Plan
@@ -930,6 +994,7 @@ func compileSelectors(p Plan, s Selectors, info media.Info, langs []string, basi
 	pos, _ := SliderAt(s.Quality)
 	v := info.Video()
 	p.Output, p.MinSSIM, p.KeepIfBigger = s.AfterConverting, pos.MinSSIM, s.KeepIfBigger
+	p.EvenLoudness = s.EvenLoudness
 	p.OutputName, p.SrtName, p.TrackTitle = s.OutputName, s.SrtName, s.TrackTitle
 	if s.AfterConverting == "folder" {
 		p.OutputDir, p.FolderMode = s.OutputDir, s.FolderMode
@@ -987,6 +1052,7 @@ func compileSelectors(p Plan, s Selectors, info media.Info, langs []string, basi
 	// W7: the Convert step's graphics choices. The defaults are saved as absent, so a flow that never set them
 	// compiles as it did. A processor quality of its own applies where quality is the CRF (not a bitrate).
 	p.Video.Hardware, p.Video.HardwareFail = s.Hardware, s.HardwareFail
+	p.Video.Crop = s.RemoveBlackBars // F4: the worker measures the bars for a file that asks for it
 	if p.Video.Hardware == "auto" {
 		p.Video.Hardware = ""
 	}

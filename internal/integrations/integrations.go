@@ -193,8 +193,12 @@ type Service struct {
 	client *http.Client
 	now    func() time.Time
 	logf   func(string, ...any)
-	mu     sync.Mutex // guards the saved document
+	mu     sync.Mutex // guards the saved document and told
 	wg     sync.WaitGroup
+	// told is, per job, the connections a tell card told in that job's run (their ids). The run's global tell
+	// skips them: a Plex card does not silence Jellyfin (per server, 11-22). ForgetTold clears a job's entry
+	// when its run ends, so a retry of the job tells again.
+	told map[int64]map[string]bool
 }
 
 // New makes the service over st.
@@ -562,6 +566,30 @@ func (s *Service) Tell(jobID int64, from, finalPath string) {
 // server" / "Tell the downloader" card). It answers in words, which instances were told, or an error when
 // none of them is connected and on, which the card reports as a warning.
 func (s *Service) TellKinds(jobID int64, from, finalPath string, want []Kind) (string, error) {
+	names, err := s.tellConnections(jobID, from, finalPath, want, true)
+	if err != nil {
+		return "", err
+	}
+	if len(names) == 0 {
+		return "", errors.New("none of these is connected and on in Settings > Connections")
+	}
+	return "Told " + strings.Join(names, ", "), nil
+}
+
+// TellRest is the run's global tell for the given kinds (per connection, 11-22): every enabled connection of
+// those kinds that no tell card of this run told. A connection a card told is skipped, once. Nothing left to
+// tell is not an error: the run's tell cards already covered it.
+func (s *Service) TellRest(jobID int64, from, finalPath string, want []Kind) (string, error) {
+	names, err := s.tellConnections(jobID, from, finalPath, want, false)
+	if err != nil || len(names) == 0 {
+		return "", err
+	}
+	return "Told " + strings.Join(names, ", "), nil
+}
+
+// tellConnections starts a tell for each enabled connection of the kinds want. A card's tell (card true) records
+// each one it starts for the run; the rest of the run (card false) skips those, and takes their entries.
+func (s *Service) tellConnections(jobID int64, from, finalPath string, want []Kind, card bool) ([]string, error) {
 	if from != "" && from != finalPath {
 		if _, err := os.Stat(from); err == nil {
 			from = "" // the original is still there: nothing was replaced (as Tell)
@@ -571,11 +599,14 @@ func (s *Service) TellKinds(jobID int64, from, finalPath string, want []Kind) (s
 	f, err := s.load()
 	s.mu.Unlock()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	var names []string
 	for _, r := range f.Items {
 		if !r.Enabled || !slices.Contains(want, r.Kind) {
+			continue
+		}
+		if !s.connectionTold(jobID, r.ID, card) {
 			continue
 		}
 		rec := r
@@ -586,10 +617,35 @@ func (s *Service) TellKinds(jobID int64, from, finalPath string, want []Kind) (s
 		}()
 		names = append(names, rec.Name)
 	}
-	if len(names) == 0 {
-		return "", errors.New("none of these is connected and on in Settings > Connections")
+	return names, nil
+}
+
+// connectionTold is the per-connection bookkeeping of a tell: a card's tell records connection id for the job
+// and returns true; the rest of the run returns false for a connection a card recorded and true for the others.
+// The record is kept until ForgetTold, so both kinds' rest calls skip it.
+func (s *Service) connectionTold(jobID int64, id string, card bool) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if card {
+		if s.told == nil {
+			s.told = map[int64]map[string]bool{}
+		}
+		if s.told[jobID] == nil {
+			s.told[jobID] = map[string]bool{}
+		}
+		s.told[jobID][id] = true
+		return true
 	}
-	return "Told " + strings.Join(names, ", "), nil
+	return !s.told[jobID][id]
+}
+
+// ForgetTold ends a job's run for the tell record: the connections its cards told are no longer held back.
+// The worker calls it once per run, when the run ends (a defer, so a failed or panicking run clears it too),
+// which keeps a disabled connection's entry from outliving the run.
+func (s *Service) ForgetTold(jobID int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.told, jobID)
 }
 
 // lookupBudget is how long one "Ask the downloader for details" may spend across every instance it asks.

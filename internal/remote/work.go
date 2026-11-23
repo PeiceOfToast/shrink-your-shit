@@ -223,7 +223,7 @@ func (c *Client) workOne(ctx context.Context, cv Converter) (did bool, err error
 		ext = "." + snap.Plan.Container
 	}
 	out := filepath.Join(dir, "new"+ext)
-	stderr, ran, err := c.convert(ctx, cv, l, snap, src, out)
+	stderr, ran, speed, err := c.convert(ctx, cv, l, snap, src, out)
 	if err != nil {
 		if leaseGone(err) || ctx.Err() != nil {
 			return true, err
@@ -277,6 +277,7 @@ func (c *Client) workOne(ctx context.Context, cv Converter) (did bool, err error
 	if info.Video() != nil {
 		body["info"] = info
 	}
+	addSpeed(body, speed) // F7: the server remembers this worker's speed for the encoder it ran
 	return true, c.report(ctx, l, body)
 }
 
@@ -473,8 +474,8 @@ func (c *Client) download(ctx context.Context, l *Lease, to string) error {
 // convert runs the plan's ffmpeg, reporting progress (which renews the lease). Its rungs are worker.Attempt's: the
 // graphics encoder first (encoderArgs), then the processor when the graphics encoder fails in a way the processor can
 // fix. It also returns the ffmpeg arguments that ran (the processor's after a graphics encoder fell back), so the job
-// log records the command that was executed.
-func (c *Client) convert(ctx context.Context, cv Converter, l *Lease, snap rules.Snapshot, src, out string) (string, []string, error) {
+// log records the command that was executed, and how fast it went (F7), measured on this computer.
+func (c *Client) convert(ctx context.Context, cv Converter, l *Lease, snap rules.Snapshot, src, out string) (string, []string, encodeSpeed, error) {
 	cctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	// the server judges the encode for its stall stop between "converting" (sent at the start, then with the
@@ -488,7 +489,7 @@ func (c *Client) convert(ctx context.Context, cv Converter, l *Lease, snap rules
 		c.note(ctx, l, note)
 	}
 	if enc == "" && snap.Plan.Video.Hardware == "only" && !snap.Plan.Video.Copy { // no card can take the file: refused before ffmpeg runs
-		return "", nil, &hardwareStop{words: worker.HardwareOnlyNoEncoderWords, err: errors.New("no graphics encoder for this file")}
+		return "", nil, encodeSpeed{}, &hardwareStop{words: worker.HardwareOnlyNoEncoderWords, err: errors.New("no graphics encoder for this file")}
 	}
 	if !snap.Plan.Video.Copy { // the same Chosen line the local worker logs (a copy is not encoded, so no line)
 		why := "" // the processor was chosen: the note above says why, and this line does not repeat it (as local)
@@ -498,7 +499,7 @@ func (c *Client) convert(ctx context.Context, cv Converter, l *Lease, snap rules
 		c.note(ctx, l, worker.ChosenLine(snap.Plan, enc, args, why))
 	}
 	if e := report(map[string]any{"stage": "converting", "outTimeUs": 0, "encoder": enc}); leaseGone(e) {
-		return "", args, e
+		return "", args, encodeSpeed{}, e
 	}
 	rep := &encodeReports{label: enc, out: out, duration: l.Job.DurationSec}
 	send := func(body map[string]any) { // a lost lease stops the encode
@@ -507,9 +508,12 @@ func (c *Client) convert(ctx context.Context, cv Converter, l *Lease, snap rules
 			cancel()
 		}
 	}
-	var last time.Time // the throttle of the progress reports (the progress callback's own)
+	var last time.Time     // the throttle of the progress reports (the progress callback's own)
+	ranAt := time.Time{}   // when the rung that ran started (F7)
+	ranFrames := int64(-1) // the last frame count it reported (-1: none)
 	run := func(_ context.Context, rargs []string) (string, error) {
 		rep.startRung()
+		ranAt, ranFrames = time.Now(), -1
 		// close alone is not enough: select can take a ready tick after the close, so the tick's last report could land
 		// after the encode's end. Wait for the goroutine to exit before the run returns.
 		stopTick, tickDone := make(chan struct{}), make(chan struct{})
@@ -522,6 +526,7 @@ func (c *Client) convert(ctx context.Context, cv Converter, l *Lease, snap rules
 				send(map[string]any{"stage": "checking"})
 				return
 			}
+			ranFrames = p.Frame
 			if time.Since(last) < ProgressEvery {
 				return
 			}
@@ -564,10 +569,49 @@ func (c *Client) convert(ctx context.Context, cv Converter, l *Lease, snap rules
 		}
 	}
 	if g := rep.lost(); g != nil {
-		return stderr, args, g
+		return stderr, args, encodeSpeed{}, g
 	}
 	report(map[string]any{"stage": "checking"}) // the encode ended (also when it failed): no longer judged
-	return stderr, args, err
+	// F7: this computer's own clock and ffmpeg's frames, for the server's remembered speeds. The server's
+	// clock around this call also counts the transfers, so it cannot measure the encode.
+	speed := encodeSpeed{}
+	if err == nil && !snap.Plan.Video.Copy && l.Job.DurationSec > 0 {
+		speed = measureSpeed(l.Job.DurationSec, time.Since(ranAt).Seconds(), ranFrames, rules.VideoEncoderIn(args, snap.Plan.Video.Index))
+	}
+	return stderr, args, speed, err
+}
+
+// minEncodeSecs floors a measured encode's time. The Windows clock can read 0 for a run that finished at once
+// (a test's fake exec does), and a real encode never takes this little, so the floor changes no real speed.
+const minEncodeSecs = 0.001
+
+// measureSpeed is one finished encode's figures (F7): the job's length over the time it took, and the frames
+// per second when ffmpeg reported a count (frames < 0 means none).
+func measureSpeed(durationSec, secs float64, frames int64, encoder string) encodeSpeed {
+	secs = max(secs, minEncodeSecs)
+	sp := encodeSpeed{encoder: encoder, speed: durationSec / secs}
+	if frames > 0 {
+		sp.fps = float64(frames) / secs
+	}
+	return sp
+}
+
+// addSpeed puts the encode's figures in a success report (F7), for the server's remembered speeds. Nothing
+// measured it (a copy, or an encode that failed): the report carries none.
+func addSpeed(body map[string]any, sp encodeSpeed) {
+	if sp.encoder == "" {
+		return
+	}
+	body["encoder"], body["speed"], body["fps"] = sp.encoder, sp.speed, sp.fps
+}
+
+// encodeSpeed is how fast one finished encode ran (F7), for the server's remembered speeds: the encoder the
+// command named, the realtime multiple of the job's length, and the average frames per second (0 when ffmpeg
+// did not report them). The zero value is "nothing measured it": a copy, a failure, an older worker.
+type encodeSpeed struct {
+	encoder string
+	speed   float64
+	fps     float64
 }
 
 // encodeReports is what an encode's converting reports share: the encoder on the live label, the position and

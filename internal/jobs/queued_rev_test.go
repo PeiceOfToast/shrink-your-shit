@@ -363,7 +363,7 @@ func TestQueuedRevisionIsBackfilledFromTheRunRevision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, q := range []string{`ALTER TABLE jobs DROP COLUMN queued_rev`, `ALTER TABLE jobs DROP COLUMN output_info`, `PRAGMA user_version=58`} {
+	for _, q := range append([]string{`ALTER TABLE jobs DROP COLUMN queued_rev`, `ALTER TABLE jobs DROP COLUMN output_info`, `PRAGMA user_version=58`}, rewindEncoderSpeeds...) {
 		if _, err := s.db.Exec(q); err != nil {
 			t.Fatal(q, err)
 		}

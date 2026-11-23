@@ -185,3 +185,18 @@ func TestPreviewSampleThroughALinkedLibraryPath(t *testing.T) {
 		}
 	}
 }
+
+// Preview and save check a level flow the same way: a stored level with a max previews, and a body with no max is refused.
+func TestPreviewChecksAStoredLevelLikeSave(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	s := rules.DefaultSelectors(3)
+	s.RateControl, s.MaxBitrate = "level", "medium"
+	l, _ := st.AddLibrary("Movies", t.TempDir(), s.Template(), false)
+	path := fmt.Sprintf("/api/libraries/%d/preview", l.ID)
+	if code, b := post(t, srv, "POST", path, `{"setting":{"quality":3,"maxBitrate":"medium","fileType":"keep"}}`); code != 200 {
+		t.Errorf("level with a max: want 200, got %d %s", code, b)
+	}
+	if code, b := post(t, srv, "POST", path, `{"setting":{"quality":3,"maxBitrate":"none","fileType":"keep"}}`); code != 400 || !strings.Contains(b, "Bitrate level needs Low, Medium or High") {
+		t.Errorf("level with no max: want 400, got %d %s", code, b)
+	}
+}

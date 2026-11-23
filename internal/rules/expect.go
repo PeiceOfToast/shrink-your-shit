@@ -69,6 +69,9 @@ type Expect struct {
 	// instead of against the original exactly; the worker fills it once the encoder is chosen, so the
 	// snapshot shows what the file was judged against. Nil for a copied video (the exact comparison).
 	MainVideo *MainVideo `json:",omitempty"`
+	// Crop is the black-bar crop the encode made (F4): the picture comparison crops the original the same way
+	// before it scales it. Nil = no crop.
+	Crop *CropRect `json:",omitempty"`
 }
 
 // HDRExpect is an HDR original's colour description and static metadata, as the new file must show

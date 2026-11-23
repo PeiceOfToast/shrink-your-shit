@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -646,11 +647,42 @@ func capabilities(t doctor.Tools, ok bool) []map[string]any {
 		add("encoder", e, encoderLabels[e], "gpu", test, detail)
 		annotate(e, "gpu")
 	}
+	// Each graphics device's record (L2): what its hardware decoders read and whether its scale filter runs on
+	// the card. Only a measured device is listed; the processor is not, since it decodes and scales everything
+	// ffmpeg has and the brief says not to test it.
+	for _, d := range t.Devices {
+		test := "failed" // every probe failed: the entry says so, the key and its other values stay as they were
+		if d.Passed() {
+			test = "passed"
+		}
+		out = append(out, map[string]any{"key": "device:" + d.Family, "kind": "device", "label": "Graphics device (" + d.Family + ")",
+			"slot": "gpu", "test": test, "testedAt": at, "family": d.Family, "decode": d.Decode, "scale": d.Scale, "hdrMeta": d.HDRMeta})
+	}
 	if t.FFprobe != "" {
 		add("tool", "ffprobe", "ffprobe "+t.FFprobeVersion, "cpu", "passed", "")
 	}
 	if t.SSIM {
 		add("filter", "ssim", "Picture check (SSIM)", "cpu", "passed", "")
+	}
+	return out
+}
+
+// encoderSpeedSamples is how many of a worker's and encoder's latest conversions a remembered speed is
+// the median of (F7): recent enough to follow a change, enough to smooth one slow file.
+const encoderSpeedSamples = 50
+
+// speedViews is the remembered encoder speeds for the workers API (F7): per worker and encoder, the median
+// realtime multiple and frames per second over its last conversions, and how many conversions that is.
+// fps is absent when no conversion said it (an older remote worker reports none).
+func speedViews(speeds []jobs.EncoderSpeed) []map[string]any {
+	out := make([]map[string]any, 0, len(speeds))
+	for _, s := range speeds {
+		v := map[string]any{"worker": s.Worker, "encoder": s.Encoder,
+			"speed": math.Round(s.Speed*100) / 100, "samples": s.Samples}
+		if s.FPS > 0 {
+			v["fps"] = math.Round(s.FPS*10) / 10
+		}
+		out = append(out, v)
 	}
 	return out
 }
@@ -677,7 +709,13 @@ func v2Workers(api *http.ServeMux, v *workerView) {
 			serverError(w, err)
 			return
 		}
-		writeJSON(w, map[string]any{"items": items, "total": len(items), "joinRequests": v.joinViews(time.Now())})
+		speeds, err := v.store.EncoderSpeeds(encoderSpeedSamples)
+		if err != nil {
+			serverError(w, err)
+			return
+		}
+		writeJSON(w, map[string]any{"items": items, "total": len(items), "joinRequests": v.joinViews(time.Now()),
+			"encoderSpeeds": speedViews(speeds)})
 	}
 	api.HandleFunc("GET /api/v2/workers", list)
 	api.HandleFunc("GET /api/v2/workers/{id}", func(w http.ResponseWriter, r *http.Request) {

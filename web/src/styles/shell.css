@@ -50,7 +50,8 @@ code,.mono{font-family:var(--mono);font-size:max(.92em,var(--fs-sm))}
 .crumb .cur{overflow:hidden;text-overflow:ellipsis}
 .search{flex:1;max-width:420px;min-width:0;display:flex;align-items:center;gap:8px;height:36px;padding:0 10px;border:1px solid var(--border-strong);border-radius:var(--radius-sm);background:var(--surface);color:var(--text-2);cursor:text;font:inherit;text-align:left}
 .search .k{margin-left:auto;font-size:var(--fs-sm);border:1px solid var(--border-strong);border-radius:4px;padding:0 5px;white-space:nowrap}
-.activity{display:inline-flex;align-items:center;gap:6px;color:var(--accent-text);text-decoration:none;font-weight:600;white-space:nowrap}
+.activity{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-width:36px;min-height:36px;color:var(--accent-text);text-decoration:none;font-weight:600;font-size:var(--fs-sm);white-space:nowrap}
+.activity:hover{text-decoration:underline}.activity .ic{width:14px;height:14px}
 .menu{position:relative}
 .menu>summary{list-style:none;cursor:pointer}
 .menu>summary::-webkit-details-marker{display:none}
@@ -123,6 +124,11 @@ textarea.input{min-height:72px;font-family:var(--mono);font-size:var(--fs-sm)}
 .seg button{min-height:34px;padding:0 12px;border:0;border-right:1px solid var(--border-strong);background:var(--surface);color:var(--text);font:inherit;cursor:pointer}
 .seg button:last-child{border-right:0}
 .seg button[aria-pressed=true]{background:var(--raised);font-weight:var(--fw-strong);box-shadow:inset 0 -3px 0 var(--accent)}
+/* Appearance's Seg: radios in the same look (M2b fix 5). Same metrics as .seg button; the ring shows on the segment, not the hidden radio */
+.seg.radios label{position:relative;display:inline-flex;align-items:center;min-height:34px;padding:0 12px;border-right:1px solid var(--border-strong);background:var(--surface);color:var(--text);cursor:pointer}
+.seg.radios label:last-child{border-right:0}
+.seg.radios label.on{background:var(--raised);font-weight:var(--fw-strong);box-shadow:inset 0 -3px 0 var(--accent)}
+.seg.radios label:has(input:focus-visible){outline:2px solid var(--focus);outline-offset:-2px}
 .chip{display:inline-flex;align-items:center;gap:6px;min-height:26px;padding:0 10px;border-radius:13px;border:1px solid var(--border-strong);background:var(--surface);font-size:var(--fs-sm);white-space:nowrap}
 .chip.sel{background:var(--raised);border-color:var(--accent)}
 .tag{display:inline-block;padding:0 8px;border-radius:4px;background:var(--raised);font-size:var(--fs-sm);color:var(--text-2)}
@@ -147,6 +153,23 @@ textarea.input{min-height:72px;font-family:var(--mono);font-size:var(--fs-sm)}
 .card>.hd h2,.card>.hd h3{font-size:calc(15px*var(--font-scale))}
 .card>.hd h2 a,.card>.hd h3 a{color:var(--text);text-decoration:none}
 .card>.hd h2 a:hover,.card>.hd h3 a:hover{text-decoration:underline}
+/* SettingRow (web/src/SettingRow.tsx): title and muted description left, controls right, a divider between rows; the controls move under the text on a phone */
+.setrow{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,45%);gap:var(--s3) var(--s4);align-items:center;padding:12px var(--pad)}
+.bd>.setrow+.setrow,.bd>.setrow+p:not(:empty),.bd>p+.setrow{border-top:1px solid var(--border)}
+.setrow .ttl{font-weight:600}
+.setrow .sub{margin:2px 0 0}
+.setrow .ctl{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;align-items:center;min-width:0}
+.setrow .langs{flex:1 1 280px;min-width:0;display:flex;flex-direction:row;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:8px}
+.setrow.wide{grid-template-columns:minmax(0,1fr) auto}
+@media (max-width:640px){.setrow,.setrow.wide{grid-template-columns:minmax(0,1fr)}.setrow .ctl,.setrow .langs{justify-content:flex-start}
+  /* Connections at a phone width: the status takes a line of its own, and the buttons after it */
+  .setrow .ctl>.stline{flex-basis:100%}
+  /* a ghost button's 10 px side padding and 1 px border push its text in 11 px: pull the flush group back so the text lines up with the title */
+  .setrow .ctl>.flush>.btn.ghost:first-child{margin-left:-11px}}
+/* M2c: at about 1024 px a wide control (the Accent choices) takes at most half the row, so its description keeps room; 1440 and 390 are unchanged */
+@media (min-width:641px) and (max-width:1100px){.setrow.wide{grid-template-columns:minmax(0,1fr) minmax(0,50%)}}
+/* Settings > Health: one line per check, dividers between them (settings-health design) */
+.health{list-style:none;margin:0;padding:0}.health>li{padding:12px var(--pad)}.health>li+li{border-top:1px solid var(--border)}
 .card>.bd{padding:var(--pad)}
 .grid{display:grid;gap:var(--gap)}
 .cols2{grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -241,7 +264,8 @@ table.tbl{width:100%;border-collapse:collapse}
   .kv{grid-template-columns:minmax(0,1fr)}.kv dt{margin-top:6px}
   .hide-sm{display:none!important}
 }
-@media (prefers-reduced-motion:no-preference){.spin{animation:spin 1.2s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}}
+/* the spinner stops for the system's reduce-motion setting and for the app's Motion = Reduce (M2c; same switch as --motion) */
+@media (prefers-reduced-motion:no-preference){:root:not([data-motion="reduced"]) .spin{animation:spin 1.2s linear infinite}}@keyframes spin{to{transform:rotate(360deg)}}
 .row .badge,.card .badge{margin-left:0}
 .palette .r>span:first-of-type{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .palette .r .hint{white-space:nowrap;flex:none}
@@ -394,8 +418,9 @@ label.chk{cursor:pointer}
 .list .tbl td.sizec{width:1%;text-align:right;color:var(--text-2)}
 .uline{position:absolute;left:0;right:0;bottom:0;height:3px}
 .uline i{display:block;height:100%;background:var(--accent)}
-.ltile.codec{font-size:var(--fs-sm);line-height:1.15;text-align:center;font-variant-numeric:tabular-nums}
+.ltile.codec{font-size:var(--fs-sm);line-height:1.15;text-align:center;font-variant-numeric:tabular-nums;width:64px}
 .ltile.codec b{font-weight:var(--fw-strong)}
+.lside .saved{font-weight:var(--fw-strong)} /* the saving line: bold, the size of the file name (design jobs-done) */
 .tbl td .failedlink{display:block;margin-top:2px;font-size:var(--fs-sm);font-weight:600;color:var(--error-text)} /* Libraries: "2 failed" under the Status chip */
 .ltools{display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-height:36px}
 .ltools .btn.sm{min-height:32px}
@@ -406,7 +431,7 @@ label.chk{cursor:pointer}
 .ltools .desk{display:contents}
 .ltools .pop .btn{width:100%;justify-content:flex-start}
 .chips{display:inline-flex;gap:4px;flex-wrap:wrap}
-.mchip{display:inline-flex;align-items:center;height:var(--chip-h);padding:0 6px;border-radius:4px;background:var(--raised);color:var(--text-2);font-size:var(--fs-sm);white-space:nowrap}
+.mchip{display:inline-flex;align-items:center;height:var(--chip-h);padding:0 6px;border-radius:999px;background:var(--raised);color:var(--text-2);font-size:var(--fs-sm);white-space:nowrap}
 .phone,.tbl .sub.phone{display:none}
 @media (max-width:1100px){.tbl [data-p="6"],.tbl [data-p="7"]{display:none}}
 @media (max-width:900px){.tbl [data-p="4"],.tbl [data-p="5"]{display:none}}
@@ -520,6 +545,8 @@ label.chk{cursor:pointer}
 .sheethd{align-items:center;gap:8px;margin:-8px 0 8px}
 .checkline{margin:-6px 0 0}
 .linkbtn{background:none;border:0;padding:0;font:inherit;color:inherit;text-decoration:underline;cursor:pointer}
+/* a row title that opens Edit: it reads as the bold title, not as a link */
+.ttlbtn{background:none;border:0;padding:0;font:inherit;font-weight:600;color:inherit;text-align:left;cursor:pointer}
 @media (max-width:640px){
   .sline{gap:8px;padding-left:8px}
   .sopts{position:fixed;inset:0;z-index:60;overflow:auto;border:0;background:var(--bg);padding:12px var(--page-pad) 48px}
@@ -620,6 +647,7 @@ label.chk{cursor:pointer}
 .wcard dd a{display:block}
 /* Encoder cards (SCREENS V7, 11-13): lit = its test passed; dim (grey, with "(no)") = not there or failed. Words, not colour alone */
 .ec-h{margin:0 0 6px;font-weight:var(--fw-strong)}
+.speeds{list-style:none;margin:0;padding:0;display:grid;gap:2px;overflow-wrap:anywhere}
 .ec-grid{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:8px}
 .ec-grid.big{grid-template-columns:repeat(auto-fill,minmax(200px,1fr))}
 .ec{min-width:0;display:flex;flex-direction:column;gap:2px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-2);font-size:var(--fs-sm);overflow-wrap:anywhere}
@@ -698,6 +726,8 @@ body{font-variant-numeric:tabular-nums} /* [taste: tabular numerals in anything 
 @media (max-width:640px){
   .tabs{flex-wrap:wrap;overflow:visible;row-gap:4px} /* tabs wrap to a second row: nothing hides past the edge */
   .pagehead>.sp{flex-basis:100%;height:0} /* header actions wrap onto their own row under the title */
+  .pagehead .tt{flex:1 1 0} /* the icon tile stays beside the title block (design 390), not above it */
+  .pagehead .sub{white-space:normal}
 }
 p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; .st stays one line in pills and table cells */
 @media (max-width:600px){
@@ -934,3 +964,101 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 .edbar form.row{gap:6px}
 @media (max-width:900px){.editor.stackpage .edframe.stackframe{overflow:visible}}
 .gpi small{font-size:12.5px}.gpi .tt{font-size:12.5px}
+/* M3a: the Libraries list as cards (design libraries-list). A card: tile, name and chips, status and a second line on the right, the done bar on the bottom edge. */
+.lcards{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.lcard{position:relative;display:flex;align-items:center;gap:12px;padding:12px 16px 14px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);min-width:0;overflow:hidden}
+.lcard.sel{background:color-mix(in srgb,var(--accent) 10%,var(--surface))}
+/* a selected card's status pill keeps an outline: its raised fill is close to the selected tint */
+.lcard.sel .pill{box-shadow:inset 0 0 0 1px var(--border-strong)}
+.lcard .lcheck{flex:none}
+.lcard .lmain{flex:1 1 auto;min-width:0;display:grid;gap:6px}
+/* item 10 (fix 2b): the name is a flex row at every width, so the title (a flex item) can take an ellipsis before the pill */
+.lcard .lname{display:flex;align-items:baseline;gap:8px;min-width:0}
+.lcard .lname .ttl{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lcard .chips{margin-top:0;display:flex;max-width:100%;min-width:0}
+.lcard .chips .mchip{max-width:100%}
+.lcard .mchip.mono{display:inline-block;overflow:hidden;text-overflow:ellipsis;line-height:var(--chip-h);vertical-align:middle}
+.lcard .mchip .ic{width:12px;height:12px;margin-right:4px}
+.lcard .mchip.mono{font-family:var(--font-mono,ui-monospace,monospace)}
+.rfields{display:flex;flex-wrap:wrap;gap:6px 22px;min-width:0}
+.rf{display:grid;gap:2px;min-width:0}
+.rf .rfv{font-weight:var(--fw-strong);overflow-wrap:anywhere}
+.lfilt{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px}
+.lfilt .filt{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.lfilt .seg button{font-size:var(--fs-sm)}
+.lfilt .find{width:240px;max-width:100%;min-height:32px;font-size:var(--fs-sm)}
+@media (max-width:640px){.lfilt .find{width:100%;min-height:44px}}
+.lside{flex:none;display:flex;flex-direction:column;align-items:flex-end;gap:4px;text-align:right;max-width:50%}
+.lnote{display:flex;flex-direction:column;align-items:flex-end;gap:2px;font-size:var(--fs-sm);color:var(--text-2)}
+.lbar{position:absolute;left:0;right:0;bottom:0;height:3px;background:var(--raised)}
+.lbar>i{display:block;height:100%;background:var(--success)}
+/* M3a fix 1: the whole card opens the library (a stretched link on the name); the links and the checkbox on the card sit above it */
+.lcards:not(.selecting) .lname .ttl::after{content:"";position:absolute;inset:0}
+.lcard a.mchip,.lcard .lnote a,.lcard .lside a,.lcard .hit{position:relative;z-index:1}
+.lcard .lname .ttl{color:var(--text);font-weight:var(--fw-strong);text-decoration:none}
+.lcard a.mchip.wf{text-decoration:none}
+.lcard .mchip.wf{min-width:0;max-width:100%;overflow:hidden}
+.lcard .mchip.wf .cut{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lchev{display:none}
+.lskel .lmain .skel-b{margin:0;height:14px}
+.lskel .skel-pill{height:22px}
+.ltools .seg button{font-size:var(--fs-sm)}
+/* Workflows cards (M3b): the ⋯ menu pops out of the card, so it is not clipped; the star, switch and menu sit above the stretched name link; long text is cut with an ellipsis (the full text is in title) */
+.lcard.wfcard{overflow:visible;position:relative}
+/* fix 2: the card whose ⋯ menu is open sits above its neighbours, so the menu is not painted under the next card's switch */
+.lcard.wfcard:has(details[open]){z-index:2}
+.wfcard .lname{display:flex;align-items:baseline;gap:8px;min-width:0}
+.wfcard .lname .ttl{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* the Tag pick sizes to its text, capped at 16rem; a long tag is cut with an ellipsis (its full text is in the option) */
+.ltools .tagsel{min-width:0;max-width:min(16rem,100%);flex:0 1 auto;overflow:hidden;text-overflow:ellipsis}
+.wfcard .lside .menu,.wfcard .lside .hit{position:relative;z-index:1}
+.wfcard .wfact{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.wfcard .cut{display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wfcard .chips .mchip{max-width:100%;overflow:hidden}
+@media (max-width:640px){
+  .lcard{flex-wrap:wrap;row-gap:8px;padding:12px 12px 14px}
+  .lcard .lmain{flex:1 1 0;min-width:0}
+  .lside{flex:0 0 100%;flex-direction:row;flex-wrap:wrap;align-items:center;justify-content:space-between;text-align:left;max-width:none;padding-left:52px}
+  .lnote{flex-direction:row;flex-wrap:wrap;align-items:center;column-gap:10px}
+  .lcard .lname{display:flex;align-items:center;gap:8px}
+  /* fix 2: at 390 the actions row wraps below the name, so the › is centred on the whole card, not on the first row (job cards too, M3c fix 2) */
+  .lcard .lchev{display:inline;position:absolute;right:12px;top:50%;transform:translateY(-50%);margin:0;font-size:20px;line-height:1;color:var(--text-2);pointer-events:none}
+  .lcard{padding-right:40px}
+  /* fix 3: reserve room on the right for the absolutely placed ›, so the tag chip and the favourite note end before it */
+  .lcard.wfcard{padding-right:40px}
+}
+
+/* M4 Workers cards: one block. Card two-up at 1440, one column at 390; the facts and the encoders side by side. */
+.wgrid{grid-template-columns:repeat(auto-fill,minmax(min(480px,100%),1fr))}
+.wgrid>.wcard.wide{grid-column:1/-1}
+.wbody{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px 24px;align-items:start}
+.wleft,.wright{min-width:0;display:grid;gap:8px;align-content:start}
+@media (max-width:699px){.wbody{grid-template-columns:minmax(0,1fr)}}
+.wleft .kv{grid-template-columns:minmax(0,1fr);gap:8px;margin:0}
+.wleft .kv>div{display:grid;grid-template-columns:minmax(104px,max-content) minmax(0,1fr);gap:12px;align-items:baseline}
+.kv dt{color:var(--text-2)}
+.kv dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.ubar{display:grid;grid-template-columns:minmax(0,120px) minmax(0,1fr) auto;gap:10px;align-items:center;color:var(--text-2);font-size:var(--fs-sm)}
+.ubar-t{display:block;height:6px;border-radius:3px;background:var(--raised);overflow:hidden}
+.ubar-t i{display:block;height:100%;background:var(--accent);border-radius:3px}
+.ec-hd{display:flex;align-items:center;justify-content:space-between;gap:8px;min-width:0}
+.ec-hd .ec-h{margin:0}
+.ech{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px}
+.ech li{display:flex;flex-wrap:wrap;gap:4px;max-width:100%;min-width:0}
+.chip-enc{display:inline-flex;align-items:center;max-width:100%;min-height:var(--chip-h);padding:0 8px;border-radius:999px;font-size:var(--fs-sm);background:var(--raised);color:var(--text-2);overflow-wrap:anywhere}
+.chip-enc.accent{background:var(--accent-soft);color:var(--accent-text);font-weight:var(--fw-strong)}
+.chip-enc.ok{background:color-mix(in srgb,var(--success) 14%,transparent);color:var(--success-text)}
+.chip-enc.muted{color:var(--text-2)}
+.mjob{position:relative;display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:6px 14px;align-items:center;margin-top:12px;padding:12px 14px 14px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);min-width:0;overflow:hidden}
+.mjob>.ltile{grid-row:span 2}
+.mjob-m{min-width:0;display:grid;gap:8px}
+.mjob-t{position:static;color:var(--text);font-weight:var(--fw-strong);text-decoration:none;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mjob-t::after{content:"";position:absolute;inset:0}
+.mjob-t .fn{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block}
+.mjob-f{display:flex;flex-wrap:wrap;gap:6px 18px;margin:0}
+.mjob-f dt{color:var(--text-2);font-size:var(--fs-sm)}
+.mjob-f dd{margin:0;font-weight:var(--fw-strong)}
+.mjob .pill{position:relative;z-index:1;justify-self:end}
+.mjob-bar{position:absolute;left:0;right:0;bottom:0;height:3px;background:var(--raised)}
+.mjob-bar i{display:block;height:100%;background:var(--accent)}
+@media (max-width:479px){.mjob{grid-template-columns:auto minmax(0,1fr)}.mjob .pill{grid-column:2;justify-self:start}}

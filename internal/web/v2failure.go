@@ -19,9 +19,16 @@ func failureView(store *jobs.Store, id int64, errorCode, path, outputPath, messa
 		return nil
 	}
 	_, hint := jobs.FailureWords(failureCode(store, id, errorCode), failureFacts(store, id, path, outputPath, message))
-	name := ""
-	if steps, err := store.RunSteps(id); err == nil && f.Step >= 0 && f.Step < len(steps) {
-		name = steps[f.Step].Name
+	// The summary names a run step by its index, and the page counts steps by position: since L1's check step sorts
+	// before the encode (index -1), the two differ, so the position, the count and the name come from the steps.
+	name, position, count := "", f.Step, f.StepCount
+	if steps, err := store.RunSteps(id); err == nil {
+		for i, st := range steps {
+			if st.Index == f.Step {
+				name, position, count = st.Name, i, len(steps)
+				break
+			}
+		}
 	}
 	keys := f.KeyLines
 	if len(keys) > 5 {
@@ -41,7 +48,7 @@ func failureView(store *jobs.Store, id int64, errorCode, path, outputPath, messa
 		exit = f.ExitCode
 	}
 	// ffmpegRan is false when ffmpeg never started (the UI says "ffmpeg didn't run."); exitCode is null then, and when a signal ended it
-	return map[string]any{"step": name, "stepIndex": f.Step, "stepCount": f.StepCount, "afterMs": f.AfterMs,
+	return map[string]any{"step": name, "stepIndex": position, "stepCount": count, "afterMs": f.AfterMs,
 		"mediaTime": media, "hint": hintOut, "exitCode": exit, "ffmpegRan": f.FfmpegRan, "keyLines": keys}
 }
 

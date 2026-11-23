@@ -384,7 +384,7 @@ func TestMigration7BackfillsSkipReasons(t *testing.T) {
 	}
 	dropLogSections(t, s)
 	// back to version 6: as an install from before 21b left it
-	for _, q := range append(append([]string{}, rewindShareMigrations...), `DROP TRIGGER events_job_removed`, // first: since 32 it reads jobs.attempts
+	for _, q := range append(append(append([]string{}, rewindShareMigrations...), rewindEncoderSpeeds...), `DROP TRIGGER events_job_removed`, // first: since 32 it reads jobs.attempts
 		`DROP INDEX files_reason`, `DROP INDEX jobs_output`, `ALTER TABLE files DROP COLUMN reason`,
 		`ALTER TABLE jobs DROP COLUMN started`, `ALTER TABLE jobs DROP COLUMN output_mtime`,
 		`ALTER TABLE originals DROP COLUMN aside`, `ALTER TABLE jobs DROP COLUMN stop_requested`, `DROP TABLE sidecars`, // and migrations 8, 9 and 10
@@ -585,6 +585,10 @@ func rewind20(s *Store) {
 // rewindShareMigrations takes away what migration 41 (library share pause) added, for tests that set user_version below it.
 var rewindShareMigrations = []string{`ALTER TABLE libraries DROP COLUMN share_paused_since`, `ALTER TABLE libraries DROP COLUMN share_paused_id`}
 
+// rewindEncoderSpeeds takes away what migration 61 (F7) added to the run log's steps, for tests that set
+// user_version below it: the next open adds those columns again, so they must be gone first.
+var rewindEncoderSpeeds = []string{`ALTER TABLE job_run_steps DROP COLUMN encoder`, `ALTER TABLE job_run_steps DROP COLUMN speed`, `ALTER TABLE job_run_steps DROP COLUMN fps`}
+
 // rewind15 takes away what migration 15 added, for tests that set user_version below it.
 func rewind15(s *Store) {
 	s.db.Exec(`ALTER TABLE libraries DROP COLUMN last_scan`)
@@ -777,7 +781,7 @@ func TestBitrateMeaningsMigration(t *testing.T) {
 		l, _ := s.AddLibrary("/"+name, "/"+name, sel.Template(), true)
 		ids[name] = l.FlowID
 	}
-	for _, q := range append([]string{`ALTER TABLE jobs DROP COLUMN tags`, `ALTER TABLE jobs DROP COLUMN output_info`, `ALTER TABLE files DROP COLUMN decided_at`, `ALTER TABLE jobs DROP COLUMN subtitle_files`, `ALTER TABLE jobs DROP COLUMN workflow_rev`, `ALTER TABLE jobs DROP COLUMN queued_rev`, `ALTER TABLE jobs DROP COLUMN output_gone_at`, `DROP INDEX IF EXISTS jobs_newest`, `ALTER TABLE shares DROP COLUMN mount_point`, `ALTER TABLE workers DROP COLUMN primary_encoder`, `ALTER TABLE workers DROP COLUMN os`, `ALTER TABLE workers DROP COLUMN arch`}, rewindShareMigrations...) { // 42 and 41 run again on the next open
+	for _, q := range append([]string{`ALTER TABLE jobs DROP COLUMN tags`, `ALTER TABLE jobs DROP COLUMN output_info`, `ALTER TABLE files DROP COLUMN decided_at`, `ALTER TABLE jobs DROP COLUMN subtitle_files`, `ALTER TABLE jobs DROP COLUMN workflow_rev`, `ALTER TABLE jobs DROP COLUMN queued_rev`, `ALTER TABLE jobs DROP COLUMN output_gone_at`, `DROP INDEX IF EXISTS jobs_newest`, `ALTER TABLE shares DROP COLUMN mount_point`, `ALTER TABLE workers DROP COLUMN primary_encoder`, `ALTER TABLE workers DROP COLUMN os`, `ALTER TABLE workers DROP COLUMN arch`}, append(rewindShareMigrations, rewindEncoderSpeeds...)...) { // 42, 41 and 61 run again on the next open
 		s.db.Exec(q)
 	}
 	s.db.Exec(`PRAGMA user_version = 37`) // migration 38 runs on the next open
