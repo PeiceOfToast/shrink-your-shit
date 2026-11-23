@@ -43,6 +43,33 @@ test("a failing check keeps its own row under the joined ok row, in every librar
   assert.equal(rows[2].detail, "Kids: readable and writable, enough free space.");
 });
 
+test("a library whose checks all fail: no joined row, each failure its own row", () => {
+  const rows = libraryRows([
+    lib("library:1:access", "bad", "Movies: not readable."),
+    lib("library:1:space", "bad", "Movies: 1 GB free; the largest video here needs 4 GB."),
+  ]);
+  assert.deepEqual(rows.map((r) => r.id), ["library:1:access", "library:1:space"]);
+  assert.ok(rows.every((r) => r.status === "bad"));
+});
+
+test("a library with only warnings: no joined row, one row per warning", () => {
+  const rows = libraryRows([
+    lib("library:1:space", "warn", "Movies: 3.1 GB free; the largest video here needs 9.4 GB."),
+    lib("library:1:hardlinks", "warn", "Movies: 12 files are shared with another folder."),
+  ]);
+  assert.deepEqual(rows.map((r) => r.id), ["library:1:space", "library:1:hardlinks"]);
+  assert.ok(rows.every((r) => r.status === "warn"));
+});
+
+test("a library name that contains ': ' joins cleanly from its full name", () => {
+  const rows = libraryRows([
+    lib("library:1:access", "ok", "My: Movies: readable and writable."),
+    lib("library:1:space", "ok", "My: Movies: enough free space."),
+  ]);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].detail, "My: Movies: readable and writable, enough free space.");
+});
+
 test("a library whose names don't line up keeps one row per check", () => {
   const cs = [lib("library:1:access", "ok", "Movies: readable and writable."), lib("library:1:space", "ok", "Films: enough free space.")];
   assert.deepEqual(libraryRows(cs).map((r) => r.id), ["library:1:access", "library:1:space"]);

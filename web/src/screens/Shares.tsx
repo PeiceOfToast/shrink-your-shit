@@ -6,6 +6,7 @@ import { Icon } from "../Icon";
 import { failed, type Answer } from "../api";
 import { Empty, LoadFailed, PageHead } from "../PageHead";
 import { SettingsTabs } from "../pages";
+import { SettingRow, ValueChip } from "../SettingRow";
 import { useData } from "../useData";
 import { addShare, checkShare, deleteShare, getShares, patchShare, reconnectShare, testShare } from "../sharesApi";
 import type { Share, ShareTestResult, SharesResponse, ShareType } from "../types/shares";
@@ -19,32 +20,28 @@ const TYPE: Record<ShareType, { label: string; hint: string }> = {
   nfs: { label: "NFS", hint: "Linux servers and NAS boxes set up for NFS." },
 };
 
-function ShareRow({ share, resp, onChanged, said }: { share: Share; resp: SharesResponse; onChanged: () => void; said: (m: string) => void }) {
+// One share as a row of the Shares card: name, path and type on the left, status and the ⋯ menu on the right. Why it isn't
+// connected, and the commands that finish its setup, sit full width under the row, so the commands can be copied whole.
+function ShareRow({ share, resp, first, onChanged, said }: { share: Share; resp: SharesResponse; first: boolean; onChanged: () => void; said: (m: string) => void }) {
   const [removing, setRemoving] = useState(false), [editing, setEditing] = useState(false);
   const libs = share.libraries.map((l) => l.name).join(", ");
   const statusClass = share.status === "connected" ? "ok" : share.status === "not_connected" ? "bad" : share.status === "waiting_setup" ? "warn" : "";
   const statusIcon = share.status === "connected" ? "i-check-c" : share.status === "connecting" || share.status === "waiting_setup" ? "i-clock" : "i-alert";
+  const statusWord = share.status === "connected" ? "Connected" : share.status === "connecting" ? "Connecting…" : share.status === "waiting_setup" ? "Waiting for setup on the server" : "Not connected";
   const canReconnect = share.status !== "connected" && resp.mode === "app";
   const canCheck = share.status !== "connected" && (resp.mode === "manual" || resp.mode === "docker");
   const reconnect = async () => { const r = await act(canReconnect ? reconnectShare(share.id) : checkShare(share.id), said); if (r) { said("Done."); onChanged(); } };
   const closeMenu = (e: React.MouseEvent) => { (e.currentTarget.closest("details") as HTMLDetailsElement | null)?.removeAttribute("open"); };
+  const waiting = share.status === "waiting_setup" && !!share.setup;
 
   return (
-    <tr>
-      <td className="idc"><button className="ttl linkbtn" type="button" onClick={() => setEditing(true)}>{share.name}</button>
-        <span className="sub mono">{share.address}</span>
-        {share.reason && <span className="sub phone">{share.reason.message}</span>}
-        {share.libraries.length > 0 && <span className="sub phone">Used by {libs}</span>}
-        <span className="sub phone">{TYPE[share.type].label}</span></td>
-      <td data-p="2">{TYPE[share.type].label}</td>
-      <td className="stc"><span className={"st " + statusClass}><Icon id={statusIcon} /><span>{share.status === "connected" ? "Connected" : share.status === "connecting" ? "Connecting…" : share.status === "waiting_setup" ? "Waiting for setup on the server" : "Not connected"}<span className="desk">{share.since ? " since " + new Date(share.since).toLocaleDateString([], { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }) : ""}</span></span></span>
-        {share.reason && <span className="sub desk">{share.reason.message}</span>}
-        {share.status === "waiting_setup" && share.setup && resp.modeReason === "unprivileged_container" && <p className="hint desk" style={{ margin: "8px 0 0" }}>Shrink Your Shit runs in an unprivileged container here, so it can't connect network shares itself. Mount each share on the host with the commands below, or run it on a full computer or VM, or in a privileged Proxmox container with <code>mount=nfs;cifs</code>.</p>}
-        {share.status === "waiting_setup" && share.setup && <div className="codebox desk" style={{ marginTop: 8 }}><code>{share.setup.text}</code><button className="btn sm" type="button" onClick={() => navigator.clipboard?.writeText(share.setup!.text).catch(() => {})}><Icon id="i-copy" />Copy</button></div>}
-        {(canReconnect || canCheck) && <div className="row desk" style={{ marginTop: 8 }}>{canReconnect && <button className="btn sm" type="button" onClick={() => reconnect()}><Icon id="i-refresh" />Reconnect</button>}{canCheck && <button className="btn sm" type="button" onClick={() => reconnect()}><Icon id="i-refresh" />Check again</button>}</div>}
-      </td>
-      <td data-p="2">{libs ? <a href="#">{libs}</a> : <span className="muted">Not used</span>}</td>
-      <td className="actc">
+    <div style={first ? undefined : { borderTop: "1px solid var(--border)" }}>
+      <SettingRow
+        title={<button className="ttlbtn" type="button" onClick={() => setEditing(true)}>{share.name}</button>}
+        desc={<>
+          <span style={{ display: "inline-flex", flexWrap: "wrap", gap: 6 }}><ValueChip><span className="mono" style={{ whiteSpace: "normal", overflowWrap: "anywhere" }}>{share.address}</span></ValueChip><ValueChip>{TYPE[share.type].label}</ValueChip></span>
+          <span style={{ display: "block" }}>{libs ? "Used by " + libs : "Not used"}</span></>}>
+        <span className={"st " + statusClass}><Icon id={statusIcon} /><span>{statusWord}{share.since ? " since " + new Date(share.since).toLocaleDateString([], { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }) : ""}</span></span>
         <details className="menu">
           <summary className="btn icon ghost sm" aria-label={"Actions for " + share.name}><Icon id="i-more" /></summary>
           <div className="pop" role="menu">
@@ -54,10 +51,20 @@ function ShareRow({ share, resp, onChanged, said }: { share: Share; resp: Shares
             <button className="it" type="button" onClick={(e) => { closeMenu(e); setRemoving(true); }}>Remove…</button>
           </div>
         </details>
-        {removing && createPortal(<RemoveDialog share={share} onCancel={() => setRemoving(false)} onDone={() => { setRemoving(false); onChanged(); }} said={said} />, document.body)}
-        {editing && createPortal(<ShareSheet share={share} resp={resp} onDone={() => { setEditing(false); onChanged(); }} onCancel={() => setEditing(false)} said={said} />, document.body)}
-      </td>
-    </tr>
+      </SettingRow>
+      {(share.reason || waiting || canReconnect || canCheck) && <div className="stack" style={{ padding: "0 var(--pad) 12px" }}>
+        {share.reason && <p className="muted" style={{ margin: 0 }}>{share.reason.message}</p>}
+        {waiting && resp.modeReason === "unprivileged_container" && <p className="hint" style={{ margin: 0 }}>Shrink Your Shit runs in an unprivileged container here, so it can't connect network shares itself. Mount each share on the host with the commands below, or run it on a full computer or VM, or in a privileged Proxmox container with <code>mount=nfs;cifs</code>.</p>}
+        {waiting && <div className="codebox"><code>{share.setup!.text}</code></div>}
+        {(waiting || canReconnect || canCheck) && <div className="row" style={{ gap: 8 }}>
+          {waiting && <button className="btn sm" type="button" onClick={() => navigator.clipboard?.writeText(share.setup!.text).catch(() => {})}><Icon id="i-copy" />Copy</button>}
+          {canReconnect && <button className="btn sm" type="button" onClick={() => reconnect()}><Icon id="i-refresh" />Reconnect</button>}
+          {canCheck && <button className="btn sm" type="button" onClick={() => reconnect()}><Icon id="i-refresh" />Check again</button>}
+        </div>}
+      </div>}
+      {removing && createPortal(<RemoveDialog share={share} onCancel={() => setRemoving(false)} onDone={() => { setRemoving(false); onChanged(); }} said={said} />, document.body)}
+      {editing && createPortal(<ShareSheet share={share} resp={resp} onDone={() => { setEditing(false); onChanged(); }} onCancel={() => setEditing(false)} said={said} />, document.body)}
+    </div>
   );
 }
 
@@ -201,23 +208,20 @@ export function SharesSettings() {
   const data = resp.data;
   return (
     <div className="stack">
-      <PageHead icon="i-shares" title="Settings" />
+      <PageHead icon="i-settings" title="Settings" />
       <SettingsTabs at="shares" />
       <p className="muted" role="status">{said}</p>
       {resp.error && is404(resp.error) ? <p className="muted">This server doesn't have network shares yet.</p> : resp.error && !data ? <LoadFailed error={resp.error} reload={resp.reload} /> : resp.error ? <p className="st bad" role="alert"><Icon id="i-alert" /><span>{resp.error.message}</span></p> : !data ? <div className="empty">Loading…</div> : <>
-        <div className="row" style={{ gap: 6 }}>
-          <p className="muted" style={{ margin: 0 }}>Use a folder on a NAS or another computer as a library. Shrink Your Shit connects to it and reconnects after a restart.</p>
-          <span className="sp" />
-          <button className="btn primary" type="button" onClick={() => setAdding(true)}><Icon id="i-plus" />Add a share</button>
-        </div>
+        <section className="card" aria-labelledby="h-shares">
+          <div className="hd"><h2 id="h-shares">Shares</h2><span className="sp" />
+            <button className="btn primary sm" type="button" onClick={() => setAdding(true)}><Icon id="i-plus" />Add a share</button></div>
+          <div className="bd" style={{ padding: 0 }}>
+        <p className="muted" style={{ margin: 0, padding: "12px var(--pad)", borderBottom: (data.items ?? []).length ? "1px solid var(--border)" : undefined }}>Use a folder on a NAS or another computer as a library. Shrink Your Shit connects to it and reconnects after a restart.</p>
         {(data.items ?? []).length === 0
-          ? <Empty icon="i-shares" text="No network shares yet. Libraries can still use any folder this computer can already see." />
-          : <div className="list"><table className="tbl"><thead><tr>
-            <th>Name</th><th data-p="2">Type</th><th className="stc">Status</th><th data-p="2">Used by</th><th><span className="sr">Actions</span></th>
-          </tr></thead>
-              <tbody>{(data.items ?? []).map((s) => <ShareRow key={s.id} share={s} resp={data} onChanged={resp.reload} said={setSaid} />)}</tbody>
-            </table>
-          </div>}
+          ? <div style={{ padding: "0 var(--pad) 12px" }}><Empty icon="i-shares" text="No network shares yet. Libraries can still use any folder this computer can already see." /></div>
+          : (data.items ?? []).map((s, i) => <ShareRow key={s.id} share={s} resp={data} first={i === 0} onChanged={resp.reload} said={setSaid} />)}
+          </div>
+        </section>
         {adding && <ShareSheet resp={data} onDone={() => { setAdding(false); resp.reload(); }} onCancel={() => setAdding(false)} said={setSaid} />}
       </>}
     </div>
