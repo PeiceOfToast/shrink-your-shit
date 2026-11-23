@@ -78,7 +78,7 @@ func TestDoctorPassedEncoderIsTimedAndCPUStillConverts(t *testing.T) {
 	if qsv.Status != "ok" || !strings.HasPrefix(qsv.Detail, "Intel Quick Sync encoded a test clip in ") || !strings.HasSuffix(qsv.Detail, " s.") {
 		t.Errorf("qsv: %+v", qsv)
 	}
-	if nv := checkByID(t, d.Checks, "encoder:nvenc"); nv.Status != "absent" || nv.Detail != "No NVIDIA card found." || nv.Hint != nil {
+	if nv := checkByID(t, d.Checks, "encoder:nvenc"); nv.Status != "absent" || nv.Detail != "No NVIDIA card found. That is fine." || nv.Hint != nil {
 		t.Errorf("nvenc: %+v", nv)
 	}
 	use := checkByID(t, d.Checks, "encoder:in-use")
@@ -98,7 +98,7 @@ func TestDoctorPresentEncoderThatFailsIsBad(t *testing.T) {
 		t.Errorf("present: %+v", va)
 	}
 	absent := c.API(context.Background(), APIInput{DataDir: t.TempDir(), Device: func(string) string { return "missing" }}, false)
-	if va := checkByID(t, absent.Checks, "encoder:vaapi"); va.Status != "absent" || va.Detail != "No VA-API graphics found." {
+	if va := checkByID(t, absent.Checks, "encoder:vaapi"); va.Status != "absent" || va.Detail != "No VA-API graphics found. That is fine." {
 		t.Errorf("absent: %+v", va)
 	}
 }
@@ -299,4 +299,38 @@ func TestDoctorMovedAsideHasItsOwnCodeAndHint(t *testing.T) {
 	if n != 1 {
 		t.Errorf("%d checks with the moved-aside ID, want 1", n)
 	}
+}
+
+// The HEVC and picture-check rows say what each is for, both when present and when missing.
+func TestDoctorHEVCAndPictureCheckSentences(t *testing.T) {
+	ok := checkByID(t, apiChecker(fakeFFmpeg(true, true, nil, nil), 1<<40).API(context.Background(), APIInput{DataDir: t.TempDir()}, false).Checks, "x265")
+	if ok.Detail != "This ffmpeg has the HEVC encoder (x265)." {
+		t.Errorf("x265 ok: %+v", ok)
+	}
+	d := apiChecker(fakeFFmpeg(false, false, nil, nil), 1<<40).API(context.Background(), APIInput{DataDir: t.TempDir()}, false)
+	if x := checkByID(t, d.Checks, "x265"); x.Status != "bad" || x.Detail != "This ffmpeg has no HEVC encoder (x265)." {
+		t.Errorf("x265 bad: %+v", x)
+	}
+	if s := checkByID(t, d.Checks, "ssim"); s.Status != "bad" || s.Detail != "This ffmpeg has no picture-check filter (ssim), which the safety check needs." {
+		t.Errorf("ssim bad: %+v", s)
+	}
+	if s := checkByID(t, apiChecker(fakeFFmpeg(true, true, nil, nil), 1<<40).API(context.Background(), APIInput{DataDir: t.TempDir()}, false).Checks, "ssim"); s.Detail != "This ffmpeg has the picture-check filter (ssim)." {
+		t.Errorf("ssim ok: %+v", s)
+	}
+}
+
+// A library with no videos gets the folder hint in its new words.
+func TestDoctorFolderHintSaysWhereToChange(t *testing.T) {
+	c := apiChecker(fakeFFmpeg(true, true, nil, nil), 1<<40)
+	c.KnownOriginals = func() (map[string]bool, error) { return map[string]bool{}, nil }
+	d := c.API(context.Background(), APIInput{DataDir: t.TempDir(), Libs: []Library{{ID: 9, Name: "Movies", Path: t.TempDir()}}}, false)
+	for _, ch := range d.Checks {
+		if strings.HasPrefix(ch.ID, "library:9:") && ch.Hint != nil && strings.Contains(*ch.Hint, "Check again") {
+			if *ch.Hint != "Change the folder on the Libraries page, then press Check again." {
+				t.Errorf("folder hint: %+v", ch)
+			}
+			return
+		}
+	}
+	t.Errorf("no library check with the folder hint: %+v", d.Checks)
 }

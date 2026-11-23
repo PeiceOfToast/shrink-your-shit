@@ -142,14 +142,14 @@ func toolChecks(t Tools) []DoctorCheck {
 		out = append(out, DoctorCheck{ID: "ffprobe", Label: "ffprobe", Status: "bad", Detail: "ffprobe is not found.", Hint: hint(fix)})
 	}
 	if t.X265 {
-		out = append(out, DoctorCheck{ID: "x265", Label: "HEVC encoder (libx265)", Status: "ok", Detail: "This ffmpeg has the x265 encoder."})
+		out = append(out, DoctorCheck{ID: "x265", Label: "HEVC encoder (libx265)", Status: "ok", Detail: "This ffmpeg has the HEVC encoder (x265)."})
 	} else {
-		out = append(out, DoctorCheck{ID: "x265", Label: "HEVC encoder (libx265)", Status: "bad", Detail: "This ffmpeg has no x265 encoder.", Hint: hint(fix)})
+		out = append(out, DoctorCheck{ID: "x265", Label: "HEVC encoder (libx265)", Status: "bad", Detail: "This ffmpeg has no HEVC encoder (x265).", Hint: hint(fix)})
 	}
 	if t.SSIM {
-		out = append(out, DoctorCheck{ID: "ssim", Label: "Picture check (ssim)", Status: "ok", Detail: "This ffmpeg has the ssim filter."})
+		out = append(out, DoctorCheck{ID: "ssim", Label: "Picture check (ssim)", Status: "ok", Detail: "This ffmpeg has the picture-check filter (ssim)."})
 	} else {
-		out = append(out, DoctorCheck{ID: "ssim", Label: "Picture check (ssim)", Status: "bad", Detail: "This ffmpeg has no ssim filter, which the safety check needs.", Hint: hint(fix)})
+		out = append(out, DoctorCheck{ID: "ssim", Label: "Picture check (ssim)", Status: "bad", Detail: "This ffmpeg has no picture-check filter (ssim), which the safety check needs.", Hint: hint(fix)})
 	}
 	return out
 }
@@ -185,6 +185,7 @@ func encoderChecks(in APIInput, probes map[string]Probe, inUse string) []DoctorC
 			status := "warn"
 			if device == "missing" { // no card here: nothing to fix, so it isn't a warning
 				status = "absent"
+				detail += " That is fine."
 			}
 			out = append(out, DoctorCheck{ID: id, Label: label, Status: status, Detail: detail})
 		}
@@ -246,7 +247,7 @@ func (c *Checker) libraryChecks(ctx context.Context, l Library) []DoctorCheck {
 			key := map[string]string{"read_only": "access", "unreadable": "access", "system_folder": "access",
 				"low_space": "space", "hardlinks": "hardlinks"}[is.Code]
 			if key == "" {
-				h := "Fix the folder, then check again on the Libraries page."
+				h := "Change the folder on the Libraries page, then press Check again."
 				if is.Code == "orphaned_originals" {
 					h = "Move them back or delete them, then press Check again."
 				}
