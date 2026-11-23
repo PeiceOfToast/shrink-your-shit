@@ -1,7 +1,7 @@
 // The drawer's wording (dev: `npm test`, Node 22.6+ with --experimental-strip-types).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { afterHeader, newFileVideo, queuedLine, ruleName, savedPercent, stoppedTitle, videoDetail, whyHeading, workerLabel } from "./jobResult.ts";
+import { afterHeader, fileFacts, newFileVideo, queuedLine, ruleName, savedPercent, stoppedTitle, videoDetail, whyHeading, workerLabel } from "./jobResult.ts";
 
 test("a kept job's Result column says the new file was not kept", () => {
   assert.equal(afterHeader(true), "New file (not kept)");
@@ -70,4 +70,11 @@ test("savedPercent: a whole percentage, rounded", () => {
   assert.equal(savedPercent(1000, 500), 50);
   assert.equal(savedPercent(18.9e6, 8.5e6), 55); // 55.02 → 55
   assert.equal(savedPercent(1000, 1100), -10); // a bigger file: negative
+});
+
+test("fileFacts: the subtitle count and the length from a check line; a part it lacks is left out", () => {
+  assert.deepEqual(fileFacts("hevc 1280x720 25.000 fps 8-bit, 0 audio, 2 subtitles, 0:00:20"), { subtitles: 2, length: "0:00:20" });
+  assert.deepEqual(fileFacts("h264 640x360 24 fps 8-bit, 1 audio, 0 subtitles, 1:02:03.5"), { subtitles: 0, length: "1:02:03.5" });
+  assert.deepEqual(fileFacts("hevc 1280x720, 0 audio"), null);
+  assert.equal(fileFacts(undefined), null);
 });

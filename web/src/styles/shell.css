@@ -1077,6 +1077,6 @@ details.stepd > summary::-webkit-details-marker { display: none; }
 details.stepd > summary::before { content: "▸"; display: inline-block; width: 1em; color: var(--muted); transition: transform .15s; }
 details.stepd[open] > summary::before { transform: rotate(90deg); }
 .jd-pct { white-space: nowrap; }
-.drawer.jobd .jd-check { display: block; border-top: 1px solid var(--border); padding: 12px 0; }
 @media (min-width: 1100px) { .drawer.jobd .jd-back { display: none; } }
 @media (max-width: 640px) { .drawer.jobd .kv { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 599px) { .drawer.jobd #job-result .kvt th:last-child, .drawer.jobd #job-result .kvt td:last-child { padding-right: 16px; } } /* M5d fix 2b: the New file column keeps the card's padding at 390 */

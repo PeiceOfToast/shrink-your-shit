@@ -44,3 +44,12 @@ export const videoDetail = (codec: string | undefined, s: { Width?: number; Heig
 
 // Rounding for the header's size change: the percentage as a whole number, the sizes as the list row shows them.
 export const savedPercent = (beforeBytes: number, afterBytes: number): number => Math.round((100 * (beforeBytes - afterBytes)) / beforeBytes);
+
+// The subtitle count and the length clock from a check's "New file:" or "Original:" line ("hevc 1280x720 …, 0 audio, 2 subtitles, 0:00:20").
+// A part the line doesn't carry is left out, not guessed; null when neither is there.
+export const fileFacts = (line: string | undefined): { subtitles?: number; length?: string } | null => {
+  if (!line) return null;
+  const subs = /(\d+) subtitles?\b/.exec(line);
+  const clock = /(\d+:\d{2}:\d{2}(?:\.\d+)?)\s*$/.exec(line.trim());
+  return subs || clock ? { subtitles: subs ? Number(subs[1]) : undefined, length: clock ? clock[1] : undefined } : null;
+};

@@ -18,7 +18,7 @@ import { Empty, LoadFailed, PageHead } from "../PageHead";
 import { Link, navigate, useSearch } from "../router";
 import { listWorkers, noWorker } from "../workersApi";
 import { useData } from "../useData";
-import { afterHeader, newFileVideo, queuedLine, ruleName, savedPercent, videoDetail, workerLabel } from "../jobResult";
+import { afterHeader, fileFacts, newFileVideo, queuedLine, ruleName, savedPercent, videoDetail, workerLabel } from "../jobResult";
 import type { Failure, JobAction, JobDetail, JobItem, JobProgressEvent, JobState, Probe, Tab, Pin } from "../types/jobs";
 import { stepLabel } from "../stepLabel";
 import { closeMenuToSummary, menuEscape, useCloseOnOutside } from "../menuFocus";
@@ -328,7 +328,7 @@ function WhyFailed({ id, msg, code, worker, f, found = [] }: { id: string; msg: 
   const copy = () => navigator.clipboard?.writeText("Job " + id + " · " + (worker ?? "no worker") + " · Shrink Your Shit " + (ver ?? "") + "\n" + (box.current?.innerText ?? "")).catch(() => {});
   return (
     <section ref={box} className="jd-check" role="region" aria-label={code === "workflow_stopped" ? whyHeading(code, true) : "What the check found"}>
-      <h3><Icon id="i-alert" /> {code === "workflow_stopped" ? whyHeading(code, true) : "What the check found"} <span className="pill bad">Failed</span></h3>
+      <h3>{code === "workflow_stopped" ? whyHeading(code, true) : "What the check found"} <span className="pill bad">Failed</span></h3>
       <p style={{ fontSize: "var(--fs-lg)" }}>{msg}</p>
       <p className="sm muted mono">{code}</p>
       <p className="sm">In step {f.stepIndex + 1} of {f.stepCount}, <a href={"#job-step-" + (f.stepIndex + 1)}>{stepLabel(f.step, found)}</a>, after {t}{f.mediaTime ? " (at " + f.mediaTime + " in the video)" : ""}.</p>
@@ -454,7 +454,7 @@ function StepLog({ d, id, worker, failedIdx, kept, hasResult }: { d: { loaded: b
     const s = l.start!;
     const startHits = q ? countIn([...(errOnly ? [] : [s.reason, s.workflow?.name, worker]), ...(errOnly ? startL.filter(nonInfo) : startL).map((y) => y.text)].filter(Boolean).join("\n").toLowerCase(), q) : 0;
     raw.push({ key: "start", title: "Start", head: <>{when && <span className="sm muted">{clock(when)}</span>}{lvlPills(startL)}</>, hits: startHits, dflt: false, show: (!errOnly || startL.some(nonInfo)) && (!q || startHits > 0),
-      body: errOnly ? linesBlock(startL.filter(nonInfo), id) : <>{s.reason && <p className="sm">{s.reason}</p>}{worker && <p className="sm">Worker: {worker}</p>}{s.workflow?.name && <p className="sm">Workflow: {s.workflow.name}{s.workflow.revision != null && ", revision " + s.workflow.revision}</p>}{s.appVersion && <p className="sm">App version {s.appVersion}</p>}{linesBlock(startL, id)}</> });
+      body: errOnly ? linesBlock(startL.filter(nonInfo), id) : <>{s.reason && <p className="sm">{s.reason}</p>}{worker && <p className="sm">Worker: {workerLabel(worker)}</p>}{s.workflow?.name && <p className="sm">Workflow: {s.workflow.name}{s.workflow.revision != null && ", revision " + s.workflow.revision}</p>}{s.appVersion && <p className="sm">App version {s.appVersion}</p>}{linesBlock(startL, id)}</> });
     raw.push({ key: "variables", title: "Variables", head: changed.length ? <span className="sm muted">{changed.length} changed</span> : null,
       hits: q ? countIn(vars.map((v) => [v.name, v.start, v.end].join(" ")).join("\n").toLowerCase(), q) : 0, dflt: false, show: !errOnly,
       body: vars.length === 0 ? <p className="sm muted">No variables were set for this job.</p> : <>
@@ -519,7 +519,7 @@ function StepLog({ d, id, worker, failedIdx, kept, hasResult }: { d: { loaded: b
       <p className="sm">Time taken: {stepTime(s.tookMs)}</p>
       {(s.passes != null || s.bytesWritten != null) && <p className="sm">{[s.passes != null && plural1(s.passes, "ffmpeg pass", "ffmpeg passes"), s.bytesWritten != null && bytes(s.bytesWritten) + " written"].filter(Boolean).join(" · ")}</p>}
       {s.slowestStep != null && <p className="sm">Slowest step: {stepLabel(s.slowestStep.name)} ({stepTime(s.slowestStep.tookMs)})</p>}
-      {worker && <p className="sm">Worker: {worker}</p>}
+      {worker && <p className="sm">Worker: {workerLabel(worker)}</p>}
       {(WORD[l.final ?? ""] ?? l.final) && <p className="sm">Result: {WORD[l.final ?? ""] ?? l.final}</p>}
       {hasResult && <p className="sm"><a href="#job-result" onClick={(e) => { e.preventDefault(); document.getElementById("job-result")?.scrollIntoView({ block: "start" }); }}>Before and after: see Result</a></p>}{linesBlock(summL, id)}</> });
   }
@@ -673,9 +673,15 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
   // one fetch of the log for the step list and What the check found; fetched again when the job stops running
   const log = useData(() => (scan || active ? Promise.resolve(null as unknown as JobLog) : getJobLog(id)), [id, scan, active]);
   // the Result table also takes the log's subtitles and length (contract v2 summary before/after); a row shows only with data
-  const sumS = log.data?.summary, subsRow = !!(sumS?.before?.subtitles || sumS?.after?.subtitles), lenRow = sumS?.before?.durationSec != null || sumS?.after?.durationSec != null;
+  const sumS = log.data?.summary;
   const lenText = (x?: { durationSec?: number }) => (x?.durationSec != null ? elapsed(x.durationSec) : "—");
   const found = (log.data?.steps ?? []).filter((st) => (st.found?.length ?? 0) > 0);
+  // Subtitles and Length: the summary's values when the server sends them, else the check's "New file:" / "Original:" line; a row shows only when a side has a value
+  const foundRows = readFound(found.flatMap((st) => st.found!)).rows;
+  const newFacts = fileFacts(foundRows.find(([k]) => k === "New file")?.[1]), origFacts = fileFacts(foundRows.find(([k]) => k === "Original")?.[1]);
+  const subsNew = sumS?.after?.subtitles ?? newFacts?.subtitles, subsOld = sumS?.before?.subtitles ?? origFacts?.subtitles;
+  const lenNew = sumS?.after?.durationSec != null ? lenText(sumS.after) : newFacts?.length, lenOld = sumS?.before?.durationSec != null ? lenText(sumS.before) : origFacts?.length;
+  const subsRow = subsNew != null || subsOld != null, lenRow = lenNew != null || lenOld != null;
   const kept0 = !!state && keptOrig({ state, reason: j?.reason ?? own?.reason, newFileRefused: j?.newFileRefused ?? own?.newFileRefused });
   // A done job's New file line (the check's codec, size and fps) reads in the Video row, as the design has it: "HEVC 1280x720 25.000 fps 8-bit"
   const newFile = readFound(found.flatMap((st) => st.found!)).rows.find(([k]) => k === "New file")?.[1];
@@ -755,7 +761,7 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
             <tr><th>Video</th>{before ? <td>{before.video}</td> : <td rowSpan={4 + (subsRow ? 1 : 0) + (lenRow ? 1 : 0)} className="muted">Not recorded for this job</td>}<td>{videoNew}</td></tr>
             <tr><th>Audio</th>{before && <td>{before.audio}</td>}<td>{after?.audio ?? "—"}</td></tr>
             <tr><th>Bitrate</th>{before && <td>{before.bitrate}</td>}<td>{after?.bitrate ?? "—"}</td></tr>
-            <tr><th>Size</th>{before && <td>{before.size}</td>}<td>{after?.size ?? "—"}</td></tr>{subsRow && <tr><th>Subtitles</th>{before && <td>{sumS?.before?.subtitles ?? "—"}</td>}<td>{sumS?.after?.subtitles ?? "—"}</td></tr>}{lenRow && <tr><th>Length</th>{before && <td>{lenText(sumS?.before)}</td>}<td>{lenText(sumS?.after)}</td></tr>}{state === "completed" && encNew && <tr><th>Encoder</th><td>—</td><td>{encNew}</td></tr>}</tbody></table></section>}
+            <tr><th>Size</th>{before && <td>{before.size}</td>}<td>{after?.size ?? "—"}</td></tr>{subsRow && <tr><th>Subtitles</th>{before && <td>{subsOld ?? "—"}</td>}<td>{subsNew ?? "—"}</td></tr>}{lenRow && <tr><th>Length</th>{before && <td>{lenOld ?? "—"}</td>}<td>{lenNew ?? "—"}</td></tr>}{state === "completed" && encNew && <tr><th>Encoder</th><td>—</td><td>{encNew}</td></tr>}</tbody></table></section>}
           {!scan && <section><h3>Timeline</h3>
             {!j ? <p className="muted">Loading…</p> : !j.steps.length && !j.events.length ? <p className="muted">No step history for jobs from before the update.</p> : <>
               {j.steps.length > 0 && <ol className="tline">{j.steps.map((s, i) => <li key={i} className={s.ok ? "" : SOFT.includes(s.step) ? "warn" : "bad"}><Icon id={s.ok ? "i-check-c" : SOFT.includes(s.step) ? "i-alert" : "i-x-c"} /><span className="sp">{cap(s.words)}</span><span className="muted sm nowrap">{clock(s.at)}</span></li>)}</ol>}
