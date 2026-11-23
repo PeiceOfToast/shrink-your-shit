@@ -191,10 +191,10 @@ func FailureWords(code string, f FailureFacts) (message, hint string) {
 		}
 		return "The new file didn't pass a check. The original is untouched.", "Check the workflow's Convert step, then Retry."
 	case "hardware_choice": // the stored words say which stop it was (hardware_stop.go); design's next step (W7)
-		return f.Stored, "To let the processor finish files like this, set the Convert step's Graphics card to Automatic, or If the graphics card fails to Try another way. Then Retry."
-	case "killed":
+		return f.Stored, "To let the processor finish files like this, set the Convert step's 'Graphics card' to 'Automatic', or its 'If the graphics card fails' to 'Try another way'. Then Retry."
+	case "killed": // shown only on the failed row, after the automatic retries are used up (design, W7)
 		return "The conversion was stopped by the system before it finished. The original is untouched.",
-			"It's tried again by itself. If it keeps happening, the machine may be short of memory."
+			"It was tried again and stopped each time, so this machine may be short of memory. Close other programs, or lower 'Files at once' on the Workers page, then Retry."
 	case "worker_lost":
 		return "The worker stopped answering during the conversion.", "Check that the worker is running. The file can be retried on any worker."
 	case "stalled":

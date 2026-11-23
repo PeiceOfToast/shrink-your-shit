@@ -49,7 +49,7 @@ func TestRemoteCPUOnlyNeverUsesTheCard(t *testing.T) {
 	if len(x.calls) != 1 || !slices.Contains(x.calls[0], "libx264") || slices.Contains(x.calls[0], "h264_qsv") {
 		t.Errorf("ffmpeg calls %v: want the processor alone", x.calls)
 	}
-	if !slices.ContainsFunc(notes, func(s string) bool { return strings.Contains(s, "CPU only, as the Convert step says") }) {
+	if !slices.ContainsFunc(notes, func(s string) bool { return strings.Contains(s, "Processor only, as the Convert step says") }) {
 		t.Errorf("notes %q: want the CPU-only line", notes)
 	}
 }

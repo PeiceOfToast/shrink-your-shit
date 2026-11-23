@@ -206,6 +206,9 @@ func TestConverterKilledBySignalIsTriedAgain(t *testing.T) {
 	s.encodeErr = fmt.Errorf("ffmpeg: %w", killed)
 	s.retrying().RunOne(context.Background())
 	s.wantRetry(1, 5*time.Minute, "Converting stopped with an error")
+	if c := s.job().ErrorCode; c != jobs.ReasonKilled { // the code that gives the failed row design's killed sentence (W7)
+		t.Errorf("stored code %q, want %q", c, jobs.ReasonKilled)
+	}
 	exited := exec.Command("sh", "-c", "exit 1").Run()
 	if KilledBySignal(exited) {
 		t.Error("an ordinary exit seen as killed")

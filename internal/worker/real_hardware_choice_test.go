@@ -68,7 +68,7 @@ func TestRealHardwareChoicesOnConvert(t *testing.T) {
 		if j, _ := st.Get(id); j.Status != jobs.Done {
 			t.Fatalf("status %s, error %q", j.Status, j.Error)
 		}
-		if !has(log, "CPU only, as the Convert step says") {
+		if !has(log, "Processor only, as the Convert step says") {
 			t.Errorf("no CPU-only line:\n%s", strings.Join(log, "\n"))
 		}
 		if has(log, "hevc_vaapi") {

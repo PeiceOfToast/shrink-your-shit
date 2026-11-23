@@ -724,7 +724,7 @@ func (r *encodeReports) finishingReport() map[string]any {
 // one ("" for the processor by choice, and for a server that sends no main encoder).
 func encoderArgs(plan rules.Plan, main *string, caps []map[string]any, source *media.Info, src, out string) (args []string, enc, note string) {
 	if plan.Video.Hardware == "cpu" && !plan.Video.Copy { // the Convert step says never the graphics card
-		return plan.FFmpegArgs(src, out), "", "CPU only, as the Convert step says"
+		return plan.FFmpegArgs(src, out), "", "Processor only, as the Convert step says"
 	}
 	if main == nil || plan.Video.Copy {
 		return plan.FFmpegArgs(src, out), "", ""
