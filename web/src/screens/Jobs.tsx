@@ -695,7 +695,12 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
   const delta = state === "completed" && own?.originalState !== "restored" && own?.beforeBytes && own.afterBytes != null ? { pct: savedPercent(own.beforeBytes, own.afterBytes), sizes: bytes(own.beforeBytes) + " → " + bytes(own.afterBytes) } : null;
   return (
     <div className="drawer-wrap" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="drawer jobd" ref={box} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="jd-h">
+      <div className="drawer jobd" ref={box} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="jd-h" onKeyDown={(e) => {
+        // aria-modal: Tab wraps inside the drawer (same rule as FolderPicker). Collapsed <details> summaries count; hidden or disabled elements do not.
+        if (e.key !== "Tab") return;
+        const f = [...box.current!.querySelectorAll<HTMLElement>("button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary")].filter((el) => el.getClientRects().length > 0), i = f.indexOf(document.activeElement as HTMLElement), last = f.length - 1;
+        if (e.shiftKey ? i <= 0 : i === -1 || i === last) { e.preventDefault(); (e.shiftKey ? f[last] : f[0])?.focus(); }
+      }}>
         <div className={"hd" + (state === "failed" && !kept0 ? " failed" : "")}>
           <button className="btn icon ghost jd-back" type="button" aria-label="Close" onClick={onClose}><Icon id="i-chev-l" /></button>
           {own && <span className="ltile codec">{tileOf(own)}</span>}
