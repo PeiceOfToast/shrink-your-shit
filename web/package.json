@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "typecheck": "tsc --noEmit",
-    "test": "node --test --experimental-strip-types src/refFit.test.ts src/jobResult.test.ts src/gpuJobs.test.ts src/httpError.test.ts src/importReport.test.ts src/encoderSpeeds.test.ts src/stepLabel.test.ts src/topbarBadges.test.ts src/doctorSummary.test.ts src/libraryList.test.ts src/workflowList.test.ts src/shareIntro.test.ts src/jobCards.test.ts src/workerCards.test.ts src/getStarted.test.ts src/convertedLine.test.ts src/format.test.ts",
+    "test": "node --test --experimental-strip-types src/refFit.test.ts src/jobResult.test.ts src/gpuJobs.test.ts src/httpError.test.ts src/importReport.test.ts src/encoderSpeeds.test.ts src/stepLabel.test.ts src/topbarBadges.test.ts src/doctorSummary.test.ts src/libraryList.test.ts src/workflowList.test.ts src/shareIntro.test.ts src/jobCards.test.ts src/workerCards.test.ts src/getStarted.test.ts src/libraryForm.test.ts src/convertedLine.test.ts src/format.test.ts",
     "build": "tsc --noEmit && vite build && node -e \"require('fs').writeFileSync('../internal/web/next/dist/.keep', '')\""
   },
   "dependencies": {
