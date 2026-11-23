@@ -14,6 +14,16 @@ export function healthSummary(checks: { status: string }[]): { tone: HealthTone;
 // with its Fix. If the names don't line up, the ok checks keep one row each.
 type Check = { id: string; label: string; status: "ok" | "warn" | "bad" | "absent"; detail: string; hint: string | null };
 const libOf = (c: Check) => c.id.split(":").slice(0, 2).join(":");
+// The library's name is the longest "<name>: " prefix that every detail starts with, so "My: Movies" joins as one name.
+// "" when the details don't share one (then each check keeps its own row).
+function libName(details: string[]): string {
+  let best = "";
+  for (let i = details[0].indexOf(": "); i !== -1; i = details[0].indexOf(": ", i + 1)) {
+    const prefix = details[0].slice(0, i + 2);
+    if (details.every((d) => d.startsWith(prefix))) best = prefix.slice(0, -2);
+  }
+  return best;
+}
 export function libraryRows(cs: Check[]): Check[] {
   const out: Check[] = [], done = new Set<string>();
   for (const c of cs) {
@@ -23,8 +33,8 @@ export function libraryRows(cs: Check[]): Check[] {
     done.add(lib);
     const mine = cs.filter((x) => libOf(x) === lib);
     const oks = mine.filter((x) => x.status === "ok"), rest = mine.filter((x) => x.status !== "ok");
-    const name = oks.length ? oks[0].detail.slice(0, Math.max(0, oks[0].detail.indexOf(": "))) : "";
-    if (oks.length && oks.every((x) => x.detail.startsWith(name + ": "))) {
+    const name = oks.length ? libName(oks.map((x) => x.detail)) : "";
+    if (name) {
       const clauses = oks.map((x) => x.detail.slice(name.length + 2).replace(/\.$/, "")).join(", ");
       out.push({ id: lib + ":ok", label: oks[0].label, status: "ok", detail: name + ": " + clauses + ".", hint: null });
     } else out.push(...oks); // one ok check, or names that don't line up: one row per check
