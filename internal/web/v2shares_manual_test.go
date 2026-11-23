@@ -37,7 +37,7 @@ func TestManualSetupInAUserNamespaceMountsOnTheHost(t *testing.T) {
 		t.Errorf("kind: %v", setup["kind"])
 	}
 	owner := fmt.Sprintf("uid=%d,gid=%d", 100000+os.Getuid(), 100000+os.Getgid())
-	for _, want := range []string{"mkdir -p /mnt/media && printf '%s\\n' '//nas/media /mnt/media cifs guest,", owner + ",file_mode=0660,dir_mode=0770,_netdev 0 0' >> /etc/fstab && mount /mnt/media",
+	for _, want := range []string{"mkdir -p /mnt/media && printf '%s\\n' '//nas/media /mnt/media cifs guest,", owner + ",file_mode=0660,dir_mode=0770,_netdev,nofail 0 0' >> /etc/fstab && mount /mnt/media",
 		"Use mp1, mp2", "pct set <id> -mp0 /mnt/media,mp=" + mountPointFor(sh), "pct restart <id>", "user namespace"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("manual userns text missing %q:\n%s", want, text)
@@ -133,14 +133,20 @@ func TestManualUserNamespaceSignInUsesACredentialsFile(t *testing.T) {
 	setup, _ := setupForMode(nil, sh).(map[string]any)
 	text, _ := setup["text"].(string)
 	for _, want := range []string{
-		"(umask 077 && printf 'username=%s\\npassword=%s\\ndomain=%s\\n' 'ann' 'YOUR-PASSWORD' 'HOME' > /root/.syp-films.cred)",
+		"(umask 077 && cat > /root/.syp-films.cred) <<'END'\nusername=ann\npassword=YOUR-PASSWORD\ndomain=HOME\nEND\n",
 		"'//nas/my\\040films /mnt/films cifs credentials=/root/.syp-films.cred,vers=3.1.1,",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("missing %q:\n%s", want, text)
 		}
 	}
-	if strings.Contains(text, "username=ann") || strings.Contains(text, "sudo") {
+	fstab := ""
+	for _, l := range strings.Split(text, "\n") {
+		if strings.Contains(l, ">> /etc/fstab") {
+			fstab = l
+		}
+	}
+	if fstab == "" || strings.Contains(fstab, "username=") || strings.Contains(text, "sudo") {
 		t.Errorf("the fstab line must use the credentials file, without sudo:\n%s", text)
 	}
 	if rm, _ := setup["removeText"].(string); !strings.Contains(rm, "/root/.syp-films.cred") {

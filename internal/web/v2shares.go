@@ -876,16 +876,17 @@ func hostSetup(sh jobs.Share, mntAddr, mpt string) map[string]any {
 		if !sh.Guest {
 			creds = "/root/.syp-" + vol + ".cred"
 			user, dom := helper.SplitDomain(sh.Username)
-			format, args := `username=%s\npassword=%s\n`, shellQuote(user)+" 'YOUR-PASSWORD'"
+			// a quoted heredoc keeps every character of what is typed between the lines, a quote in the password included
+			body := "username=" + user + "\npassword=YOUR-PASSWORD\n"
 			if dom != "" {
-				format, args = format+`domain=%s\n`, args+" "+shellQuote(dom)
+				body += "domain=" + dom + "\n"
 			}
 			credsLines = "# Save the share's sign-in where only root can read it. Put the real password in place of YOUR-PASSWORD:\n" +
-				"(umask 077 && printf '" + format + "' " + args + " > " + creds + ")\n"
+				"(umask 077 && cat > " + creds + ") <<'END'\n" + body + "END\n"
 			credsRemove = " and the file " + creds
 		}
 	}
-	line := fstabField(mntAddr) + " " + host + " " + fsType(sh) + " " + mountOpts(sh, owner, creds) + ",_netdev 0 0"
+	line := fstabField(mntAddr) + " " + host + " " + fsType(sh) + " " + mountOpts(sh, owner, creds) + ",_netdev,nofail 0 0"
 	return map[string]any{
 		"kind": "command",
 		"text": "# This container runs in a user namespace (for example an unprivileged Proxmox LXC), so it can't mount network shares here.\n" +
