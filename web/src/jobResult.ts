@@ -19,11 +19,18 @@ export const whyHeading = (code: string, withFailure: boolean): string =>
 export const stoppedTitle = (message: string): string =>
   /^stopped by/i.test(message) ? message : "Stopped by its workflow: " + message;
 
-// The codec as the app writes it on both sides of the Result table: "H.264", "HEVC" (the server sends h264 / hevc).
-export const codecName = (codec: string): string => codec.toUpperCase().replace("H264", "H.264");
+// The server's codec words (internal/preview/firstfiles.go, codecWords; keep the two in step). A codec not listed is its capitals.
+const CODEC_WORDS: Record<string, string> = { h264: "H.264", hevc: "HEVC", av1: "AV1", vp9: "VP9", vp8: "VP8",
+  mpeg2video: "MPEG-2", mpeg1video: "MPEG-1", mpeg4: "MPEG-4", msmpeg4v3: "MPEG-4", vc1: "VC-1",
+  wmv1: "WMV", wmv2: "WMV", wmv3: "WMV", prores: "ProRes" };
+// The codec as the app writes it on both sides of the Result table: "H.264", "HEVC", "MPEG-4", "ProRes" (the server sends h264 / hevc / mpeg4 ...).
+export const codecName = (codec: string): string => CODEC_WORDS[codec.toLowerCase()] ?? codec.toUpperCase();
 
 // A done job's New file line ("hevc 1280x720 25.000 fps 8-bit, 0 audio, …") as the Video row's value: the codec as codecName writes it, then the rest up to the first comma.
 export const newFileVideo = (line: string): string => line.split(",")[0].replace(/^\w+/, codecName);
+
+// The subtitle count of a job's before or after probe: its subtitle streams. undefined when the server sent no stream list, so nothing is guessed.
+export const subtitleCount = (streams: { type: string }[] | undefined): number | undefined => (streams ? streams.filter((s) => s.type === "subtitle").length : undefined);
 
 // The worker as the drawer says it: the built-in worker is "This computer" (the Workers screen's wording); a job with no worker shows a dash.
 // The built-in pool's id starts "builtin" (builtin, builtin-2, ...; the server's workerName rule in internal/web/system.go:104).

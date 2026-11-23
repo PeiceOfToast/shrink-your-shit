@@ -18,7 +18,7 @@ import { Empty, LoadFailed, PageHead } from "../PageHead";
 import { Link, navigate, useSearch } from "../router";
 import { listWorkers, noWorker } from "../workersApi";
 import { useData } from "../useData";
-import { afterHeader, fileFacts, newFileVideo, queuedLine, ruleName, savedPercent, videoDetail, workerLabel } from "../jobResult";
+import { afterHeader, fileFacts, newFileVideo, queuedLine, ruleName, savedPercent, subtitleCount, videoDetail, workerLabel } from "../jobResult";
 import type { Failure, JobAction, JobDetail, JobItem, JobProgressEvent, JobState, Probe, Tab, Pin } from "../types/jobs";
 import { stepLabel } from "../stepLabel";
 import { closeMenuToSummary, menuEscape, useCloseOnOutside } from "../menuFocus";
@@ -359,7 +359,7 @@ const lvlPills = (ls: LogLine[]) => <>{cnt(ls, "warning") > 0 && <span className
 const linesBlock = (ls: LogLine[], id: string) => {
   const cap = 200, n = ls.length;
   return <>{n > cap && <p className="sm">Last {cap} of {n.toLocaleString()} lines · <a href={"/api/v2/jobs/" + encodeURIComponent(id) + "/log/download"}>Download all {n.toLocaleString()} lines</a></p>}
-    {n > 0 && <div className="joblog sm">{(n > cap ? ls.slice(-cap) : ls).map(logLineEl)}</div>}</>;
+    {n > 0 && <div className="joblog sm" tabIndex={0} aria-label="Log lines">{(n > cap ? ls.slice(-cap) : ls).map(logLineEl)}</div>}</>;
 };
 // G6: copy the whole log, not just the search hits (spec: "Copy the whole log"); over about 1 MB it is too long for
 // the clipboard. Plain http (http://IP:8484) has no clipboard API, so as in Workers the text is selected in a
@@ -683,7 +683,8 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
   // Subtitles and Length: the summary's values when the server sends them, else the check's "New file:" / "Original:" line; a row shows only when a side has a value
   const foundRows = readFound(found.flatMap((st) => st.found!)).rows;
   const newFacts = fileFacts(foundRows.find(([k]) => k === "New file")?.[1]), origFacts = fileFacts(foundRows.find(([k]) => k === "Original")?.[1]);
-  const subsNew = sumS?.after?.subtitles ?? newFacts?.subtitles, subsOld = sumS?.before?.subtitles ?? origFacts?.subtitles;
+  // M5d P3: a done job with no "Original:" line counts the subtitle streams in its before probe, as Length reads before.durationSec
+  const subsNew = sumS?.after?.subtitles ?? newFacts?.subtitles, subsOld = sumS?.before?.subtitles ?? origFacts?.subtitles ?? subtitleCount(j?.metadata?.before?.streams);
   const lenNew = sumS?.after?.durationSec != null ? lenText(sumS.after) : j?.metadata?.after?.durationSec != null ? lenText(j.metadata.after) : newFacts?.length;
   const lenOld = sumS?.before?.durationSec != null ? lenText(sumS.before) : j?.metadata?.before?.durationSec != null ? lenText(j.metadata.before) : origFacts?.length;
   const subsRow = subsNew != null || subsOld != null, lenRow = lenNew != null || lenOld != null;
@@ -691,7 +692,6 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
   // A done job's New file line (the check's codec, size and fps) reads in the Video row, as the design has it: "HEVC 1280x720 25.000 fps 8-bit"
   const newFile = readFound(found.flatMap((st) => st.found!)).rows.find(([k]) => k === "New file")?.[1];
   const videoNew = state === "completed" && newFile ? newFileVideo(newFile) : after?.video ?? "—";
-  const encNew = readFound(found.flatMap((st) => st.found!)).rows.find(([k]) => k === "Encoder")?.[1];
   // design 11: the Result card only when the new file has values (a failed job with only its original has none)
   const showResult = !!(after || sumS?.after?.subtitles || sumS?.after?.durationSec != null || (state === "completed" && newFile));
   // U10: the header's size delta, the list row's wording; a failed or skipped job has none, nor a restored original.
@@ -772,7 +772,7 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
             <tr><th>Video</th>{before ? <td>{before.video}</td> : <td rowSpan={4 + (subsRow ? 1 : 0) + (lenRow ? 1 : 0)} className="muted">Not recorded for this job</td>}<td>{videoNew}</td></tr>
             <tr><th>Audio</th>{before && <td>{before.audio}</td>}<td>{after?.audio ?? "—"}</td></tr>
             <tr><th>Bitrate</th>{before && <td>{before.bitrate}</td>}<td>{after?.bitrate ?? "—"}</td></tr>
-            <tr><th>Size</th>{before && <td>{before.size}</td>}<td>{after?.size ?? "—"}</td></tr>{subsRow && <tr><th>Subtitles</th>{before && <td>{subsOld ?? "—"}</td>}<td>{subsNew ?? "—"}</td></tr>}{lenRow && <tr><th>Length</th>{before && <td>{lenOld ?? "—"}</td>}<td>{lenNew ?? "—"}</td></tr>}{state === "completed" && encNew && <tr><th>Encoder</th><td>—</td><td>{encNew}</td></tr>}</tbody></table></section>}
+            <tr><th>Size</th>{before && <td>{before.size}</td>}<td>{after?.size ?? "—"}</td></tr>{subsRow && <tr><th>Subtitles</th>{before && <td>{subsOld ?? "—"}</td>}<td>{subsNew ?? "—"}</td></tr>}{lenRow && <tr><th>Length</th>{before && <td>{lenOld ?? "—"}</td>}<td>{lenNew ?? "—"}</td></tr>}</tbody></table></section>}
           {!scan && <section><h3>Timeline</h3>
             {!j ? <p className="muted">Loading…</p> : !j.steps.length && !j.events.length ? <p className="muted">No step history for jobs from before the update.</p> : <>
               {j.steps.length > 0 && <ol className="tline">{j.steps.map((s, i) => <li key={i} className={s.ok ? "" : SOFT.includes(s.step) ? "warn" : "bad"}><Icon id={s.ok ? "i-check-c" : SOFT.includes(s.step) ? "i-alert" : "i-x-c"} /><span className="sp">{cap(s.words)}</span><span className="muted sm nowrap">{clock(s.at)}</span></li>)}</ol>}
