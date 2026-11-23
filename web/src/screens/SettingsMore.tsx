@@ -141,7 +141,7 @@ function Languages({ codes, setCodes, say }: { codes: string[]; setCodes: Dispat
           <li key={c} className="mchip">{name(c)} <button className="btn sm icon ghost" type="button" aria-label={"Remove " + name(c)} onClick={() => (setCodes(codes.filter((x) => x !== c)), say(name(c) + " removed. Press Save to keep it."))}><Icon id="i-x" /></button></li>))}</ul>
           : <p className="muted" style={{ margin: 0 }}>None yet.</p>}
         {adding ? (
-          <div className="row" style={{ gap: 8, position: "relative" }} onBlur={(e) => !e.currentTarget.contains(e.relatedTarget as Node) && (setOpen(false), setAt(-1))}>
+          <div className="row" style={{ gap: 8, position: "relative", flex: "1 1 100%" }} onBlur={(e) => !e.currentTarget.contains(e.relatedTarget as Node) && (setOpen(false), setAt(-1))}>
             {/* an own list, not a datalist: the browser's datalist popup is its own chrome and opened off the screen
                 (review item B); .lang-opts (shell.css) is left-anchored under the field and never wider than the screen */}
             <input ref={box} id="lang-add" className="input" aria-label="Add a language" autoComplete="off" role="combobox" aria-expanded={open} aria-controls="lang-opts" aria-autocomplete="list" aria-activedescendant={at >= 0 ? "lang-o" + at : undefined} value={typed}
