@@ -9,12 +9,16 @@ import (
 	"testing"
 )
 
-// F3: a graphics family's quality offset, by slider position. Only QSV is measured; every entry is 0 until then.
+// F3: a graphics family's quality offset, by slider position. QSV is measured (11-23); the others are 0.
 func TestCardOffsetLookups(t *testing.T) {
-	for _, fam := range []string{"qsv", "nvenc", "vaapi", "amf"} {
-		for q := 1; q <= 5; q++ {
+	want := map[int]int{1: -2, 2: -2, 3: -1, 4: -1, 5: -1}
+	for q := 1; q <= 5; q++ {
+		if got := CardOffset("qsv", q); got != want[q] {
+			t.Errorf("CardOffset(qsv, %d) = %d, want %d (measured)", q, got, want[q])
+		}
+		for _, fam := range []string{"nvenc", "vaapi", "amf"} {
 			if got := CardOffset(fam, q); got != 0 {
-				t.Errorf("CardOffset(%s, %d) = %d, want 0 (not measured yet)", fam, q, got)
+				t.Errorf("CardOffset(%s, %d) = %d, want 0 (not measured)", fam, q, got)
 			}
 		}
 	}
@@ -29,13 +33,20 @@ func TestCardOffsetLookups(t *testing.T) {
 	}
 }
 
-// A plan with no measured offset carries no CardCRF, so its JSON (and fingerprint) is what it was before F3.
-func TestZeroOffsetsLeavePlanUnchanged(t *testing.T) {
+// Only measured families are carried: a plan names qsv's offset and no other family's.
+func TestCardCRFCarriesOnlyMeasured(t *testing.T) {
 	for q := 1; q <= 5; q++ {
-		if m := cardCRFFor(q); m != nil {
-			t.Errorf("cardCRFFor(%d) = %v, want nil while every offset is 0", q, m)
+		if m := cardCRFFor(q); !reflect.DeepEqual(m, map[string]int{"qsv": CardOffset("qsv", q)}) {
+			t.Errorf("cardCRFFor(%d) = %v, want only qsv", q, m)
 		}
 	}
+	if m := cardCRFFor(9); m != nil {
+		t.Errorf("cardCRFFor(9) = %v, want nil (no such position)", m)
+	}
+}
+
+// A plan with no offset carries no CardCRF, so its JSON (and fingerprint) is what it was before F3.
+func TestZeroOffsetsLeavePlanUnchanged(t *testing.T) {
 	b, _ := json.Marshal(VideoEncode{Codec: "libx265", CRF: 23})
 	if want := `{"codec":"libx265","crf":23,"preset":"","tag":""}`; string(b) != want {
 		t.Errorf("VideoEncode JSON = %s, want %s", b, want)

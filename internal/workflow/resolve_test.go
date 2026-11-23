@@ -223,7 +223,7 @@ func mustResolve(t *testing.T, d Doc) Doc {
 
 // A workflow with no references is untouched: same doc, same logic hash, and the same plan fingerprint
 // for every file as the build before W1 (the fingerprints were taken from a699472c, with the preset and
-// a variable nothing uses).
+// a variable nothing uses; re-taken for F3 on 11-23, when HEVC plans began carrying the measured QSV offset).
 func TestAWorkflowWithoutRefsCompilesAsBefore(t *testing.T) {
 	d := docWith([]Variable{{Name: "q", Type: "number", Value: float64(3)}}, nil)
 	if HasRefs(d) {
@@ -240,7 +240,7 @@ func TestAWorkflowWithoutRefsCompilesAsBefore(t *testing.T) {
 	if len(issues) > 0 {
 		t.Fatalf("%+v", issues)
 	}
-	want := []string{"814cfc30bfed7e91", "cdaae850eb2905f5", "96b1fe1cada38047", "299d9c16a882b422", "814cfc30bfed7e91"}
+	want := []string{"42af87f7efbdc46e", "d8e63e1d0bcec55a", "96b1fe1cada38047", "62d75867ac73c63c", "42af87f7efbdc46e"}
 	for i, info := range files() {
 		if f := (rules.Snapshot{Plan: tm.Compile(info)}).Fingerprint(); f != want[i] {
 			t.Errorf("file %d: plan fingerprint %s, want %s (the plan this workflow always had)", i, f, want[i])

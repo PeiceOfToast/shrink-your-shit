@@ -30,10 +30,13 @@ var VideoFormats = map[string]VideoFormat{
 
 // CardOffsets are the graphics encoders' quality offsets (F3): added to a card rung's quality value so it
 // gives about the picture the processor's CRF gives at the same slider position. Keyed by family, then by
-// slider position (1..5). They apply to the HEVC rung only. Only QSV is measured (CT 124, see
-// slices/f3-measurements.md); every other family stays at 0 until it is measured on real hardware.
+// slider position (1..5). They apply to the HEVC rung only. Only QSV is measured: hevc_qsv's
+// global_quality needed 1 to 2 lower than libx265's CRF for the same SSIM, on two 10 s 1080p cuts on
+// CT 124 (11-23; table in slices/f3-measurements.md). vaapi runs on the same Intel cards but with a fixed QP
+// (CQP), a different scale, so it is not given QSV's numbers. Every other family stays at 0 until it is
+// measured on real hardware.
 var CardOffsets = map[string]map[int]int{
-	"qsv":   {1: 0, 2: 0, 3: 0, 4: 0, 5: 0},
+	"qsv":   {1: -2, 2: -2, 3: -1, 4: -1, 5: -1},
 	"nvenc": {1: 0, 2: 0, 3: 0, 4: 0, 5: 0},
 	"vaapi": {1: 0, 2: 0, 3: 0, 4: 0, 5: 0},
 	"amf":   {1: 0, 2: 0, 3: 0, 4: 0, 5: 0},
