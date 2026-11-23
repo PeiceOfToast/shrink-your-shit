@@ -232,6 +232,7 @@ func (c *Checker) libraryChecks(ctx context.Context, l Library) []DoctorCheck {
 	}
 	var extra []DoctorCheck
 	rank := map[string]int{"ok": 0, "warn": 1, "bad": 2}
+	where := l.Name + " (" + l.Path + ")" // the access and folder rows name the folder, so the person can find it
 	add := func(issues []Issue, bad bool) {
 		for _, is := range issues {
 			if is.Code == "no_converter" || is.Code == "no_hw_encoder" { // reported by the tool checks
@@ -255,7 +256,7 @@ func (c *Checker) libraryChecks(ctx context.Context, l Library) []DoctorCheck {
 					h = "Delete them when you no longer need them, then press Check again."
 				}
 				extra = append(extra, DoctorCheck{ID: prefix + ":" + is.Code, Label: "Library: " + l.Name, Status: status,
-					Detail: l.Name + ": " + is.Message, Hint: hint(h)})
+					Detail: where + ": " + is.Message, Hint: hint(h)})
 				continue
 			}
 			s := slots[key]
@@ -265,7 +266,14 @@ func (c *Checker) libraryChecks(ctx context.Context, l Library) []DoctorCheck {
 			if s.detail != "" {
 				s.detail += " "
 			}
-			s.detail += l.Name + ": " + is.Message
+			if key == "access" {
+				s.detail += where + ": " + is.Message
+				if is.Code == "unreadable" { // the app cannot read the folder at all: say read access, not just write
+					s.hint = "Check that " + l.Path + " exists, and give the app's user read and write access to it."
+				}
+			} else {
+				s.detail += l.Name + ": " + is.Message
+			}
 		}
 	}
 	add(r.Blockers, true)
