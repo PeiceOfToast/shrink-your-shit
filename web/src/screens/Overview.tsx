@@ -9,6 +9,7 @@ import { MOCK, SignedOut, failed, type Answer } from "../api";
 import { bytes, clock, count, encoderName, plural } from "../format";
 import { getSummary, scanAllLibraries } from "../dashApi";
 import { getDoctor } from "../doctorApi";
+import { listJobs } from "../jobsApi";
 const HEALTH_HIDDEN = "syp-health-dismissed"; // the failed checks the Dismiss was for
 import { onLive } from "../live";
 import { LoadFailed, PageHead } from "../PageHead";
@@ -22,8 +23,6 @@ import type { JobProgressEvent } from "../types/jobs";
 
 const STATE: Record<string, [string, string]> = { busy: ["Converting", "run"], online: ["Ready", ""], draining: ["Finishing", "warn"], paused: ["Off", ""], offline: ["Offline", "bad"], stalled: ["Not responding", "bad"] };
 const slots = (w: O["workers"][number]) => w.slots.cpu ?? { used: w.slots.used ?? 0, total: w.slots.total ?? 0 };
-// review a7d25ec P2-1: a percentage as people read it (one decimal below 10, whole above; "under 0.1%" for a sliver)
-const pctTxt = (n: number) => (n > 0 && n < 0.1 ? "under 0.1%" : (n < 10 ? Math.round(n * 10) / 10 : Math.round(n)) + "%");
 const pct = (n: number | null) => (n == null ? null : Math.max(0, Math.min(100, Math.round(n))));
 const left = (s: number | null) => (s == null ? "not known yet" : s < 90 ? "under 2 min" : "about " + (s < 5400 ? Math.round(s / 60) + " min" : Math.round(s / 3600) + " h"));
 const perGB = (s: number | null) => (s == null ? "not recorded" : s < 60 ? Math.round(s) + " s" : Math.floor(s / 60) + " min" + (Math.round(s % 60) ? " " + Math.round(s % 60) + " s" : ""));
@@ -112,8 +111,10 @@ export function Overview() {
   const hideHealth = () => { setHidKey(failKey); try { localStorage.setItem(HEALTH_HIDDEN, failKey); } catch { /* hidden for this visit only */ }
     const h = document.querySelector<HTMLElement>(".pagehead h1"); if (h) { h.tabIndex = -1; h.focus(); } }; // the button goes away: focus the heading, as Workers does
   const o = useData(getOverview, [], 15000), sum = useData<{ last24h: { failed: number } }>(() => (MOCK ? Promise.resolve(summary(mockState())) : getSummary()), [], 30000);
+  // the newest failed jobs for "Needs attention" (the list's own page; the 24 h count is the summary's)
+  const fails = useData(() => listJobs("failed", "", "", 3), [], 30000);
   const [live, setLive] = useState<Record<string, Partial<OverviewJob> & { stage?: string }>>({}), [said, setSaid] = useState("");
-  const reload = useRef(o.reload); reload.current = () => (o.reload(), wl.reload());
+  const reload = useRef(o.reload); reload.current = () => (o.reload(), wl.reload(), fails.reload());
   useEffect(() => {
     let t: ReturnType<typeof setTimeout> | undefined, clear = false;
     return onLive((type, data) => {
@@ -141,6 +142,8 @@ export function Overview() {
     return { id: w.id, name: w.name, kind: ow?.kind ?? "remote", status: w.status, slots: w.slots, cpuPercent: ow?.cpuPercent ?? null, gpuPercent: ow?.gpuPercent ?? null, jobs: w.currentJobIds.map(jobInfo) }; }) : v.workers;
   const on = rows.filter((w) => w.status === "busy" || w.status === "online").length, fin = rows.filter((w) => w.status === "draining").length;
   const busy = rows.some((w) => w.jobs.length > 0), failed24 = sum.data && !failed(sum.data) ? sum.data.last24h.failed : null;
+  const failedRows = fails.data && !failed(fails.data) ? fails.data.items : [], stopped = rows.filter((w) => w.status === "paused").length;
+  const slotUsed = rows.reduce((a, w) => a + slots(w).used, 0), slotTotal = rows.reduce((a, w) => a + slots(w).total, 0);
   const rec = v.daily.filter((d) => d.recorded), first = rec[0]?.day, add = (f: (d: Day) => number) => rec.reduce((a, d) => a + f(d), 0);
   const tot = { done: add((d) => d.completed), skipped: add((d) => d.skipped), failed: add((d) => d.failed), freed: add((d) => d.freedBytes), saved: add((d) => d.savedBytes ?? 0), waiting: add((d) => d.waitingBytes ?? 0), kept: add((d) => d.couldFreeBytes ?? 0) };
   // run 2 (11-19): a kept original (headline couldFree) is in savedBytes but neither freed nor in the trash. A server with
@@ -175,7 +178,7 @@ export function Overview() {
       <section className="tiles" aria-label="Totals">
         <div className="tile">
           <span className="l">Space saved</span>
-          <span className={"v" + (h.freed > 0 ? " ok" : "")}>{h.freed > 0 ? bytes(h.freed) : "Nothing saved yet"}</span>
+          <span className={"v" + (h.freed > 0 ? " ok" : "")}>{bytes(h.freed)}</span>
           <div className="d">
             {more.length > 0 && <div>{more}</div>}
             {noLibs && h.freed <= 0 && <div><Link to="/libraries/new">Add a library</Link> to start.</div>}
@@ -196,7 +199,8 @@ export function Overview() {
           <span className="l">Right now</span>
           <span className="v">{count(v.active.length)} <small>converting now</small></span>
           {/* no daily series for a live count, so no sparkline: there is no history to draw it from */}
-          <div className="d"><div>{rows.length ? <>{on} of {rows.length} workers on</> : <Link to="/workers">No workers yet</Link>}</div></div>
+          <div className="d"><div>{count(h.filesWaiting)} waiting{failed24 != null && <> · <Link to="/jobs?tab=failed" className={failed24 > 0 ? "bad" : undefined}>{count(failed24)} failed in 24 h</Link></>}</div>
+            {stopped > 0 && <div>{plural(stopped, "worker", "workers")} stopped</div>}</div>
         </div>
         {/* U13: on a phone the third tile splits in two, so the tiles stay 2 x 2 (CSS shows these and hides "Right now") */}
         <div className="tile rt-ph">
@@ -211,40 +215,86 @@ export function Overview() {
         </div>
       </section>
 
-      <section className="sec" aria-labelledby="ov-j"><h2 id="ov-j">Converting now <Link className="more" to="/jobs?tab=running">All jobs</Link></h2>
+      {/* empty install: the three steps to a first conversion (design empty-1); each step's line says what it waits for */}
+      {noLibs && <section className="sec" aria-labelledby="ov-g"><h2 id="ov-g">Get started</h2>
+        <ul className="lcards" aria-label="Get started">
+          <li className="lcard"><span className="ltile" aria-hidden="true"><Icon id="i-library" /></span>
+            <div className="lmain"><div className="lname"><span className="ttl">Add your first library</span></div><span className="muted sm">The folder with your videos. Nothing is converted by looking.</span></div>
+            <div className="lside"><Link className="btn sm primary" to="/libraries/new">Set up</Link></div></li>
+          <li className="lcard"><span className="ltile" aria-hidden="true"><Icon id="i-workflow" /></span>
+            <div className="lmain"><div className="lname"><span className="ttl">A workflow is made for you</span></div><span className="muted sm">"Shrink videos": HEVC, balanced quality, same resolution. Change it any time.</span></div>
+            <div className="lside"><span className="muted sm">after step 1</span></div></li>
+          <li className="lcard"><span className="ltile" aria-hidden="true"><Icon id="i-worker" /></span>
+            <div className="lmain"><div className="lname"><span className="ttl">Start the worker on this computer</span></div><span className="muted sm">Nothing converts until a worker is on.</span></div>
+            <div className="lside"><span className="muted sm">after step 2</span></div></li>
+        </ul></section>}
+
+      {/* design busy-1 / failures-1: failed jobs first, each with its reason in red; the list is the newest three */}
+      {failedRows.length > 0 && <section className="sec" aria-labelledby="ov-f"><h2 id="ov-f">Needs attention {failed24 != null && <span className="muted sm">{count(failed24)} failed in 24 h</span>} <Link className="more" to="/jobs?tab=failed">Failed jobs</Link></h2>
+        <ul className="lcards" aria-label="Failed jobs">
+          {failedRows.map((j) => <li key={j.id} className="lcard">
+            <span className="ltile codec" aria-hidden="true">{j.codec ?? ""}{j.resolution && <><br />{j.resolution}</>}</span>
+            <div className="lmain">
+              <div className="lname"><Link className="ttl" to={"/jobs?tab=failed&job=" + encodeURIComponent(j.jobId ?? j.id)} title={j.path}>{j.name}</Link><span className="lchev" aria-hidden="true">›</span></div>
+              <div className="chips"><span className="mchip">{j.library}</span>{j.newFileRefused && <span className="mchip">Original kept</span>}</div>
+            </div>
+            <div className="lside">
+              <span className="bad sm">{j.reason?.message ?? "Failed"}</span>
+              <span className="pill bad"><Icon id="i-alert" />Failed</span>
+              {j.finishedAt && <span className="lnote">{clock(j.finishedAt)}</span>}
+            </div>
+          </li>)}
+        </ul></section>}
+
+      <section className="sec" aria-labelledby="ov-j"><h2 id="ov-j">Converting now {rows.length > 0 && <span className="muted sm">{slotUsed} of {slotTotal} slots</span>} <Link className="more" to="/jobs?tab=running">All jobs</Link></h2>
         {!v.active.length ? <p className="muted">{on > 0 ? "Nothing is converting." : "Nothing is converting. Turn workers on to start."}</p> : (
-          // U7: the Jobs running row (U4's list grammar): a tile, the name, the facts, a 3 px progress underline, the expected saving on the right
-          <div className="list rows"><table className="tbl jobs"><tbody>{v.active.map((a0) => { const a = { ...a0, ...live[a0.jobId] }, p = pct(a.percent), w = workerOf(a.jobId);
-              return <tr key={a.jobId}>
-                <td className="tile"><span className="ltile codec"><Icon id="i-file" /></span></td>
-                <td className="idc">
-                  <div className="lname"><Link className="ttl" to={"/jobs?tab=running&job=" + encodeURIComponent(a.jobId)}>{a.name}</Link></div>
-                  <div className="chips">{a.library && <span className="mchip">{a.library.name}</span>}{w && <span className="mchip">{w}</span>}</div>
-                  <div className="sub live">{p != null && <>{p}% · </>}<span>Step: {a.stage ?? "not known yet"}</span>{a.speed != null && <> · <span>Speed: {Math.round(a.speed * 10) / 10}×</span></>}{a.etaS != null && <> · <span>Time left: {left(a.etaS)}</span></>}</div>
-                  {p != null && <span className="uline" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={p} aria-label={a.name}><i style={{ width: p + "%" }} /></span>}
-                </td>
-                <td className="sizec sm" data-l="Expected saving">{a.expectedSavingBytes == null ? "Saving: not known yet" : a.expectedSavingBytes < 0 ? "Saving: none, about " + bytes(-a.expectedSavingBytes) + " bigger so far" : "about " + bytes(a.expectedSavingBytes) + " saving expected"}</td>
-              </tr>; })}</tbody></table></div>)}
+          // design busy-1: the Jobs running card (the M4 mini card's grammar): tile, name, the Step / Speed / Time left fields, a status pill, a bar along the bottom
+          <ul className="lcards" aria-label="Converting now">{v.active.map((a0) => { const a = { ...a0, ...live[a0.jobId] }, p = pct(a.percent), w = workerOf(a.jobId);
+              return <li key={a.jobId} className="lcard">
+                <span className="ltile codec" aria-hidden="true"><Icon id="i-file" /></span>
+                <div className="lmain">
+                  <div className="lname"><Link className="ttl" to={"/jobs?tab=running&job=" + encodeURIComponent(a.jobId)}>{a.name}</Link><span className="lchev" aria-hidden="true">›</span></div>
+                  <div className="chips">{a.library && <span className="mchip">{a.library.name}</span>}<span className="mchip">{w ?? "This computer"}</span></div>
+                  <div className="rfields">
+                    <div className="rf"><span className="muted sm">Step</span><span className="rfv">{a.stage ?? "not known yet"}</span></div>
+                    <div className="rf"><span className="muted sm">Speed</span><span className="rfv">{a.speed != null ? Math.round(a.speed * 10) / 10 + "×" : "—"}</span></div>
+                    <div className="rf"><span className="muted sm">Time left</span><span className="rfv">{a.etaS != null ? left(a.etaS) : "—"}</span></div>
+                  </div>
+                </div>
+                <div className="lside">
+                  <span className="pill run"><Icon id="i-play" />{p != null ? "Running · " + p + "%" : "Running"}</span>
+                  <span className="lnote">{a.expectedSavingBytes == null ? "Saving: not known yet" : a.expectedSavingBytes < 0 ? "Saving: none, about " + bytes(-a.expectedSavingBytes) + " bigger so far" : "about " + bytes(a.expectedSavingBytes) + " saving expected"}</span>
+                </div>
+                {p != null && <div className="lbar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={p} aria-label={a.name}><i style={{ width: p + "%" }} /></div>}
+              </li>; })}</ul>)}
         {v.active.some((a) => a.expectedSavingEstimated) && <p className="muted">Savings are estimated from the size so far; the final number shows when a file is done.</p>}
       </section>
 
       <section className="sec" aria-labelledby="ov-l"><h2 id="ov-l">Libraries <Link className="more" to="/libraries">Libraries page</Link></h2>
         {!v.libraries.length ? <p className="muted">No libraries yet. <Link to="/libraries">Add one</Link>.</p> : <>
           {/* U7: one row per library; the bar is saved ÷ (saved + size now), the figures are the Libraries page's own */}
-          <div className="list rows"><table className="tbl jobs"><tbody>{v.libraries.map((l) => { const share = l.saved + l.bytesNow > 0 ? (100 * l.saved) / (l.saved + l.bytesNow) : null;
+          {/* design busy-2: a library is a card (the Libraries page's card grammar): tile, name, fact chips; saved and the share of the total on the right; a bar along the bottom */}
+          <ul className="lcards" aria-label="Libraries">{v.libraries.map((l) => { const total = l.saved + l.bytesNow, share = total > 0 ? (100 * l.saved) / total : null, sp = share == null ? null : Math.round(share);
               const frees = h.nextFreeAt ? ", frees from " + dayName(h.nextFreeAt.slice(0, 10)) : "";
               const facts = [l.saved === 0 && l.waitingToFree > 0 ? bytes(l.waitingToFree) + " smaller" + frees : null, l.saved > 0 && l.waitingToFree > 0 ? bytes(l.waitingToFree) + " more" + frees : null, (l.grew ?? 0) > 0 ? bytes(l.grew!) + " added by bigger files" : null].filter(Boolean);
-              return <tr key={l.id}>
-                <td className="idc">
-                  <div className="lname"><Link className="ttl" to={"/libraries/" + l.id}>{l.name}</Link></div>
-                  <div className="chips">{(["Done", "Waiting", "Skipped", "Failed"] as const).map((k, i) => <span key={k} className="mchip">{k} {count([l.counts.done, l.counts.waiting, l.counts.skipped, l.counts.failed][i])}</span>)}</div>
-                  {(facts.length > 0 || (l.saved === 0 && l.couldFree > 0)) && <div className="sub libfacts">{facts.join(" · ")}{l.saved === 0 && l.couldFree > 0 && <>{facts.length > 0 && " · "}<Link className="ul over" to={"/jobs?tab=completed&left=1&libraryId=" + encodeURIComponent(String(l.id))}>{"could free " + bytes(l.couldFree) + " by removing the originals"}</Link></>}</div>}
-                </td>
-                <td className="sizec sm nowrap" data-l="Saved">{l.saved > 0 ? <><b className="gain">{bytes(l.saved)}</b> saved{l.savedPercent != null && " · " + pctTxt(l.savedPercent)}</> : l.waitingToFree > 0 ? <><b className="hide-phone">{bytes(l.waitingToFree)} smaller</b></> : "Nothing saved yet"}
-                  <span className="sub">Size now: {bytes(l.bytesNow)}</span>
-                  <span className="savebar hide-phone" role="img" aria-label={share == null ? "No size yet" : "Saved " + share.toFixed(1) + "% of saved plus size now"}><i style={{ width: (share ?? 0) + "%" }} /></span></td>
-                <td className="stc">{l.state === "no_workflow" ? <span className="pill warn">No workflow</span> : l.state === "paused" ? <span className="pill warn">Paused</span> : l.state === "paused_share" ? <span className="pill warn">Share not connected yet</span> : <span className="pill">Watching</span>}</td>
-              </tr>; })}</tbody></table></div>
+              const files = l.counts.done + l.counts.waiting + l.counts.skipped + l.counts.failed;
+              return <li key={l.id} className="lcard">
+                <span className="ltile" aria-hidden="true"><Icon id="i-library" /></span>
+                <div className="lmain">
+                  <div className="lname"><Link className="ttl" to={"/libraries/" + l.id}>{l.name}</Link><span className="lchev" aria-hidden="true">›</span></div>
+                  <div className="chips"><span className="mchip">{count(l.counts.waiting)} waiting</span><span className="mchip">{plural(files, "file", "files")}</span>{facts.map((f) => <span key={f} className="mchip">{f}</span>)}</div>
+                </div>
+                <div className="lside">
+                  {l.saved > 0 ? <span className="saved nowrap"><b className="gain">{bytes(l.saved)}</b> saved</span> : <span className="sm nowrap">{l.waitingToFree > 0 ? bytes(l.waitingToFree) + " smaller" : "Nothing saved yet"}</span>}
+                  <span className="lnote">
+                    {sp != null && <span>{sp}% of {bytes(total)}</span>}
+                    {l.counts.failed > 0 && <Link className="over" to={"/jobs?tab=failed&libraryId=" + encodeURIComponent(String(l.id))}>{count(l.counts.failed)} failed</Link>}
+                    {l.couldFree > 0 && l.saved === 0 && <Link to={"/jobs?tab=completed&left=1&libraryId=" + encodeURIComponent(String(l.id))}>{"could free " + bytes(l.couldFree)}</Link>}
+                    {l.state === "no_workflow" ? <span className="pill warn">No workflow</span> : l.state === "paused" ? <span className="pill warn">Paused</span> : l.state === "paused_share" ? <span className="pill warn">Share not connected yet</span> : null}
+                  </span>
+                </div>
+                {sp != null && <div className="lbar" role="progressbar" aria-label={l.name + ": " + sp + "% saved"} aria-valuemin={0} aria-valuemax={100} aria-valuenow={sp}><i style={{ width: (share ?? 0) + "%" }} /></div>}
+              </li>; })}</ul>
           <details className="libhelp"><summary>What Saved and Size now mean</summary>
             <p className="muted sm">Saved is space already freed. A replaced original waits in the trash until its date: it no longer counts in Size now, but it isn't freed yet, which is the 'frees from' figure. Sizes are updated when a library is scanned.</p></details></>}
       </section>
