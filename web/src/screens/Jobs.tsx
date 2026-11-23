@@ -20,7 +20,7 @@ import { useData } from "../useData";
 import { afterHeader, queuedLine } from "../jobResult";
 import type { Failure, JobAction, JobDetail, JobItem, JobProgressEvent, JobState, Probe, Tab, Pin } from "../types/jobs";
 import { stepLabel } from "../stepLabel";
-import { runFields } from "../jobCards";
+import { runFields, runningFor } from "../jobCards";
 import { keepShown } from "../libraryList";
 
 const TABS: [Tab, string][] = [["waiting", "Waiting"], ["running", "Running"], ["completed", "Done"], ["skipped", "Skipped"], ["failed", "Failed"]];
@@ -213,7 +213,7 @@ export function Jobs() {
           <button type="button" aria-pressed={!kept && !left} onClick={() => navigate(query("completed", library, ""))}>All</button>
           <button type="button" aria-pressed={kept} onClick={() => navigate(query("completed", library, kept ? "" : "kept"))}>{TRASH_WORDS}</button>
           <button type="button" aria-pressed={left} onClick={() => navigate(query("completed", library, left ? "" : "left"))}>{LEFT_WORDS}</button></span>}
-        {!!current && !!libs.data && libs.data.length > 1 && (items.length > 0 || !!library) && <span className="seg" role="group" aria-label="Library">
+        {!!page.data && !page.error && !!libs.data && libs.data.length > 1 && (items.length > 0 || !!library) && <span className="seg" role="group" aria-label="Library">
           <button type="button" aria-pressed={!library} onClick={() => navigate(query(tab, ""))}>All libraries</button>
           {libs.data.map((l) => <button key={l.id} type="button" aria-pressed={library === l.id} onClick={() => navigate(query(tab, l.id))}>{l.name}</button>)}
         </span>}</span>
@@ -229,12 +229,12 @@ export function Jobs() {
           {items.map((j) => {
             const p = j.progress, pct = p ? (p.percent ?? p.workflowPercent) : null, f = p ? runFields(p) : null, checked = sel.includes(j.id);
             const gain = j.state === "completed" && !!j.beforeBytes && j.afterBytes != null && j.afterBytes < j.beforeBytes;
-            // the facts chips: library, folder, pin, place, worker (the running card shows them above its four fields)
+            // the facts chips: library, folder, pin, place, worker (the running card shows them above its five fields)
             const facts = (<div className="chips">
               <span className="mchip">{j.library}</span>
               {j.folder !== "." && <span className="mchip">{j.folder}</span>}
               {j.pin && <span className="mchip prio">{j.pin === "first" ? "First" : "Last"}</span>}
-              {tab === "waiting" && j.position != null && <span className="mchip">Place {j.position} in the queue</span>}
+              {tab === "waiting" && (j.position != null ? <span className="mchip">Place {j.position} in the queue</span> : <span className="mchip">Not taken now</span>)}
               {j.worker && <span className="mchip">{j.worker === "builtin" ? "This computer" : j.worker}</span>}
             </div>);
             return (
@@ -247,13 +247,14 @@ export function Jobs() {
                 {!f && <span className="lpath sm" title={reasonText(j) || undefined}><Detail j={j} /></span>}
                 {facts}
                 {f && <div className="rfields" role="group" aria-label="Conversion progress">
-                  {([["Step", f.step], ["Speed", f.speed], ["Time left", f.timeLeft], ["Bitrate", f.bitrate]] as const).map(([label, value]) => <div className="rf" key={label}><span className="muted sm">{label}</span><span className="rfv">{value}</span></div>)}
+                  {([["Step", f.step], ["Frames/s", f.fps], ["Speed", f.speed], ["Time left", f.timeLeft], ["Bitrate", f.bitrate]] as const).map(([label, value]) => <div className="rf" key={label}><span className="muted sm">{label}</span><span className="rfv">{value}</span></div>)}
                 </div>}
               </div>
               <div className="lside">
                 <span className={(j.state === "completed" ? "saved nowrap" : "sm nowrap") + (gain ? " gain" : "")}>{j.state === "completed" ? saved(j.beforeBytes, j.afterBytes) : bytes(j.bytes)}</span>
                 <Pill j={j} pct={pct} />
                 {tab === "completed" && j.finishedAt && <span className="lnote">Finished {clock(j.finishedAt)}</span>}
+                {p && p.elapsedS > 0 && <span className="lnote">{runningFor(p.elapsedS)}</span>}
               </div>
               {pct != null && <span className="uline" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(pct)} aria-label={j.progress?.stage || "Progress"}><i style={{ width: pct + "%" }} /></span>}
             </li>);})}
