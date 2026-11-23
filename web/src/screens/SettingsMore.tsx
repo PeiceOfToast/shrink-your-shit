@@ -221,7 +221,10 @@ export function SafetySettings() {
         <section className="card" aria-labelledby="keep-h"><div className="hd"><h2 id="keep-h">Keeping originals</h2></div>
           <div className="bd stack" style={{ padding: 0, gap: 0 }}>
             <SettingRow title={<label htmlFor="keep-days">Keep originals for (days)</label>} descId="keep-h2" desc="0 means the original is deleted right after the new file has been checked.">
-              <input id="keep-days" className="input" type="number" inputMode="numeric" min={0} max={365} step={1} value={now} onChange={(e) => setDays(e.target.value)} aria-describedby="keep-h2" style={{ width: 140, maxWidth: "100%" }} />
+              <div className="row nw" style={{ gap: 8 }}>
+                <input id="keep-days" className="input" type="number" inputMode="numeric" min={0} max={365} step={1} value={now} onChange={(e) => setDays(e.target.value)} aria-describedby="keep-h2" style={{ width: 140, maxWidth: "100%" }} />
+                <span className="muted">days</span>
+              </div>
             </SettingRow>
             {st.data.trashPath && <SettingRow title="Where originals are kept" desc="Next to each file, in a folder of their own.">
               <span className="mono">.syp-trash</span>

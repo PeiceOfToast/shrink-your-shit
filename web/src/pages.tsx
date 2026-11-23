@@ -45,12 +45,12 @@ export function NotFound() {
   );
 }
 
-function Choice<T extends string | number>({ legend, name, value, options, onPick }: {
-  legend: string; name: string; value: T; options: [T, string, string?][]; onPick: (v: T) => void;
+function Choice<T extends string | number>({ legend, name, value, options, desc, onPick }: {
+  legend: string; name: string; value: T; options: [T, string, string?][]; desc?: string; onPick: (v: T) => void;
 }) {
   return (
-    <SettingRow title={<span id={name + "-h"}>{legend}</span>}>
-      <div className="choice prefs" role="radiogroup" aria-labelledby={name + "-h"}>
+    <SettingRow title={<span id={name + "-h"}>{legend}</span>} desc={desc} descId={name + "-d"}>
+      <div className="choice prefs" role="radiogroup" aria-labelledby={name + "-h"} aria-describedby={desc ? name + "-d" : undefined}>
         <div className="row">
           {options.map(([v, label, swatch]) => (
             <label key={String(v)} className="radio">
@@ -66,12 +66,12 @@ function Choice<T extends string | number>({ legend, name, value, options, onPic
 }
 
 // A segmented choice (the design's .seg): one button per option, the chosen one pressed.
-function Seg<T extends string | number>({ legend, name, value, options, onPick }: {
-  legend: string; name: string; value: T; options: [T, string][]; onPick: (v: T) => void;
+function Seg<T extends string | number>({ legend, name, value, options, desc, onPick }: {
+  legend: string; name: string; value: T; options: [T, string][]; desc?: string; onPick: (v: T) => void;
 }) {
   return (
-    <SettingRow title={<span id={name + "-h"}>{legend}</span>}>
-      <div className="seg" role="group" aria-labelledby={name + "-h"}>
+    <SettingRow title={<span id={name + "-h"}>{legend}</span>} desc={desc} descId={name + "-d"}>
+      <div className="seg" role="group" aria-labelledby={name + "-h"} aria-describedby={desc ? name + "-d" : undefined}>
         {options.map(([v, label]) => <button key={String(v)} type="button" aria-pressed={v === value} onClick={() => onPick(v)}>{label}</button>)}
       </div>
     </SettingRow>
@@ -127,11 +127,12 @@ export function AppearanceSettings() {
       <SettingsTabs at="appearance" />
       <div className="card">{/* clean pass 2 (7.1): the tab names the panel, so no second "Appearance" heading */}
         <div className="bd stack" style={{ padding: 0, gap: 0 }}>
-          <Choice legend="Theme" name="theme" value={draft.theme} options={THEMES.map(([v, l]) => [v, l])} onPick={set("theme")} />
-          <Choice legend="Accent" name="accent" value={draft.accent} options={ACCENTS} onPick={set("accent")} />
-          <Seg legend="Density" name="density" value={draft.density} options={DENSITIES} onPick={set("density")} />
-          <Seg legend="Text size" name="textSize" value={draft.textSize} options={TEXT_SIZES} onPick={set("textSize")} />
-          <Seg legend="Motion" name="motion" value={draft.motion} options={MOTIONS} onPick={set("motion")} />
+          {/* descriptions say only what the app does now (checked in tokens.css, shell.css, prefs.ts) */}
+          <Choice legend="Theme" name="theme" value={draft.theme} desc="Dark is the default." options={THEMES.map(([v, l]) => [v, l])} onPick={set("theme")} />
+          <Choice legend="Accent" name="accent" value={draft.accent} desc="Used for the active item, links and the focus ring." options={ACCENTS} onPick={set("accent")} />
+          <Seg legend="Density" name="density" value={draft.density} desc="Compact makes rows 44 px instead of 48." options={DENSITIES} onPick={set("density")} />
+          <Seg legend="Text size" name="textSize" value={draft.textSize} desc="Scales the text in the app." options={TEXT_SIZES} onPick={set("textSize")} />
+          <Seg legend="Motion" name="motion" value={draft.motion} desc="Reduce motion turns off transitions in the app." options={MOTIONS} onPick={set("motion")} />
         </div>
       </div>
       {/* one Save for this tab, left-aligned; the note says only what is true here */}
