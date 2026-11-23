@@ -621,6 +621,11 @@ label.chk{cursor:pointer}
 .drawer.jobd .jd-delta{margin:0;font-size:calc(22px*var(--font-scale));font-weight:var(--fw-strong);line-height:1.2;color:var(--text);display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px}
 .drawer.jobd .jd-pct{color:var(--success-text)}
 .drawer.jobd .jd-pct.bigger{color:var(--text)}
+/* M5d: the drawer's sections are bordered cards with a title bar (File, What the check found, Timeline, Log); a note keeps its own frame */
+.drawer.jobd .bd>section:not(.note){border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);overflow:hidden;padding:0 0 14px}
+.drawer.jobd .bd>section:not(.note)>h3{margin:0 0 12px;padding:10px 16px;border-bottom:1px solid var(--border);background:var(--raised)}
+.drawer.jobd .bd>section:not(.note)>:not(h3){margin-left:16px;margin-right:16px}
+.drawer.jobd .bd>section:not(.note)>.kv{margin-right:16px}
 .drawer.jobd .jd-found{width:100%;border-collapse:collapse}
 .drawer.jobd .jd-found th,.drawer.jobd .jd-found td{font-size:var(--fs-sm);padding:4px 0;vertical-align:top;text-align:left}
 .drawer.jobd .jd-found th{width:120px;padding-right:12px;color:var(--text-2);font-weight:500}

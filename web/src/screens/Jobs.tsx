@@ -321,7 +321,7 @@ function CheckFound({ lines, reason, code }: { lines: string[]; reason: string; 
     </section>);
 }
 
-function WhyFailed({ id, msg, code, worker, f, found = [] }: { id: string; msg: string; code: string; worker: string | null; f: Failure; found?: string[] }) {
+function WhyFailed({ id, msg, code, worker, f, found = [], kept = false }: { id: string; msg: string; code: string; worker: string | null; f: Failure; found?: string[]; kept?: boolean }) {
   const fd = readFound(found), ff = fd.errors.length ? fd.errors : f.keyLines; // V6c: one ffmpeg box
   const t = stepTime(f.afterMs), box = useRef<HTMLElement>(null), ver = useData(getHealth, []).data?.version;
   // Copy summary: the plain text a bug report needs (V6b item 5): the job, its worker and the app version, then the box
@@ -329,6 +329,7 @@ function WhyFailed({ id, msg, code, worker, f, found = [] }: { id: string; msg: 
   return (
     <section ref={box} className="note" role="region" aria-label={whyHeading(code, true)} style={{ display: "block", borderLeft: "3px solid var(--error)" }}>
       <h3><Icon id="i-alert" /> {whyHeading(code, true)} <span className="pill bad">Failed</span></h3>
+      {kept && <p className="sm" style={{ margin: 0 }}><strong>The original is untouched.</strong></p>}
       <p style={{ fontSize: "var(--fs-lg)" }}>{msg}</p>
       <p className="sm muted mono">{code}</p>
       <p className="sm">In step {f.stepIndex + 1} of {f.stepCount}, <a href={"#job-step-" + (f.stepIndex + 1)}>{stepLabel(f.step, found)}</a>, after {t}{f.mediaTime ? " (at " + f.mediaTime + " in the video)" : ""}.</p>
@@ -676,19 +677,23 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
           <div className="sp">
             <h2 id="jd-h" className="clamp2" title={name}><FileName n={name} /></h2>
             {delta && <p className="jd-delta"><span className={"jd-pct" + (delta.pct < 0 ? " bigger" : "")}>{delta.pct >= 0 ? delta.pct + "% smaller" : -delta.pct + "% bigger"}</span> <span className="muted sm">{delta.sizes}</span></p>}
-            {/* the header pill matches the list row: a kept-original job reads "Original kept" (review 572) */}
-            {state && <span style={{ alignSelf: "flex-start" }}><Pill j={{ state, retryAt: j?.retryAt ?? own?.retryAt, subState: own?.subState, reason: j?.reason ?? own?.reason, warning: j?.warning }} /></span>}
+            {state === "failed" && reason && <p className="sm" style={{ color: "var(--error-text)", margin: 0 }}>{reason}</p>}
+            {state === "skipped" && <p className="sm muted">Left out when its library was scanned</p>}
           </div>
-          {/* SCREENS V6b header: Retry, Cancel or Stop, and the job ID to copy (the body keeps the rest) */}
-          <div className="row nw" style={{ gap: 6, flexWrap: "wrap" }}>
+          {/* SCREENS V6b header: Retry, Cancel or Stop, the job ID to copy under the pill (the body keeps the rest) */}
+          <div className="row nw" style={{ gap: 6, flexWrap: "wrap", alignItems: "flex-start" }}>
             {active && <button className="btn sm" type="button" onClick={() => run("cancel")}><Icon id="i-stop" />{state === "queued" || state === "retry_wait" ? "Cancel" : "Stop"}</button>}
-            <button className="btn sm ghost" type="button" title="Copy the job ID" onClick={() => navigator.clipboard?.writeText(id).then(() => setSaid("Job ID " + id + " copied."), () => setSaid("Job ID: " + id))}><Icon id="i-copy" />ID {id}</button>
+            <div style={{ display: "grid", justifyItems: "end", gap: 6 }}>
+              {/* the header pill matches the list row: a kept-original job reads "Original kept" (review 572) */}
+              {state && <Pill j={{ state, retryAt: j?.retryAt ?? own?.retryAt, subState: own?.subState, reason: j?.reason ?? own?.reason, warning: j?.warning }} />}
+              <button className="btn sm ghost" type="button" title="Copy the job ID" onClick={() => navigator.clipboard?.writeText(id).then(() => setSaid("Job ID " + id + " copied."), () => setSaid("Job ID: " + id))}><Icon id="i-copy" />ID {id}</button>
+            </div>
           </div>
         </div>
         <div className="bd">
           {kept0 && <p style={{ margin: 0 }}>{WORD.kept}</p>}
           {(done && ca?.possible) || (state === "skipped" || state === "cancelled" || state === "failed" || state === "retry_wait") ? <div className="row">
-            {(state === "failed" || state === "retry_wait") && <button className="btn sm" type="button" onClick={() => run("retry")}><Icon id="i-refresh" />{state === "retry_wait" ? "Try now" : "Retry"}</button>}
+            {(state === "failed" || state === "retry_wait") && <button className={"btn sm" + (state === "failed" ? " primary" : "")} type="button" onClick={() => run("retry")}><Icon id="i-refresh" />{state === "retry_wait" ? "Try now" : "Retry"}</button>}
             {done && ca?.possible && <button className="btn sm" type="button" aria-expanded={again} onClick={() => setAgain(!again)}><Icon id="i-arrow-r" />Convert again</button>}
             {(state === "skipped" || state === "cancelled") && (!j?.removed || !!own?.id.startsWith("skip-")) && <button className="btn sm" type="button" onClick={() => run("requeue")}><Icon id="i-arrow-r" />Convert again</button>}
             <span className="sp" />
@@ -702,25 +707,32 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
           {/* review db7b1f1 P3: "removed" is the server's flag, not a person's word. Only a job removed with its library
               gets a note; a job that ended as a skip shows its reason under Why like any other. */}
           {done && j?.warning && <div className="note warn"><Icon id="i-alert" /><div style={{ display: "grid", gap: 6 }}>{warnLines(j).map((w, i) => <div key={i}>{w}</div>)}</div></div>}
-          {j?.removed && j.reason?.code === "removed" ? <div className="note"><Icon id="i-info" /><div>Its library was removed, so this file won't be converted.</div></div>
-            : j?.failure ? <WhyFailed id={id} msg={reason} code={j.reason?.code ?? ""} worker={j.worker ?? null} f={j.failure} found={found.flatMap((st) => st.found!)} />
-            : found.length ? <CheckFound lines={found.flatMap((st) => st.found!)} reason={reason} code={j?.reason?.code ?? ""} />
-            : reason && <section><h3>{whyHeading(j?.reason?.code ?? "", false)}</h3><p>{reason}</p></section>}
           <section><h3>File</h3><dl className="kv">
             {(own?.path ?? j?.file?.path) && <><dt>Source</dt><dd className="mono sm">{slashWrap(own?.path ?? j?.file?.path ?? "")}</dd></>} {/* review 54ff228: no '-' when the server doesn't keep the path (a removed library's job) */}
             {(j?.library || own) && <><dt>Library</dt><dd>{j?.library?.name ?? own?.library}</dd></>}
             {own?.state === "completed" && <>{own.originalState !== "restored" && <><dt>Size</dt><dd>{saved(own.beforeBytes, own.afterBytes)}</dd>{(own.afterBytes ?? 0) > (own.beforeBytes ?? 0) && <><dt /><dd className="muted sm">Used because it passed every check, even though it is bigger.</dd></>}</>} {/* review 66edc3d P3: after a restore the file is the original again: no saving */}
               <dt>Original</dt><dd>{kept ? keptLine : own.originalState === "kept" ? keptWords(own.keptDaysLeft ?? 0) : own.originalState === "restored" ? "Put back in place. The smaller version was deleted." : own.originalState === "deleted" ? "Deleted. The new file replaced it." : own.originalState === "left_in_place" ? "Left where it was. The new file is in another folder." + freeNote : own.originalState === "kept_beside" ? "Kept next to the new file, in the same folder." + freeNote : "Left in place"}</dd></>}
             {!own && kept && <><dt>Original</dt><dd>{keptLine}</dd></>}
+            {(j?.workflow || rule) && <><dt>Workflow</dt><dd>{rule ? <a className="linkbtn" href={"/workflows/" + encodeURIComponent(rule.id)} onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); navigate("/workflows/" + encodeURIComponent(rule.id)); }}}>{rule.name}</a> : own?.flow?.name ?? "Its library's workflow"}{j?.workflow && " · v" + j.workflow.version}{queuedLine(j?.workflow) && <span className="sm muted"> · {queuedLine(j?.workflow)}</span>}</dd></>}
+            {(j?.worker ?? own?.worker) && <><dt>Worker</dt><dd>{j?.worker ?? own?.worker}</dd></>}
+            {skip && before?.video && <><dt>Video</dt><dd>{[before.video, before.size, elapsed(j?.metadata?.before?.durationSec ?? 0)].filter(Boolean).join(" · ")}</dd></>}
           </dl>
           {others.length > 0 && <p className="sm" style={{ marginTop: 8 }}>This file's other jobs: {others.map((x, i) => <span key={x.jobId ?? x.id}>{i > 0 && " · "}<a className="linkbtn" href={"/jobs?tab=" + tabOf(x.state) + "&job=" + encodeURIComponent(x.jobId ?? x.id)} onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); navigate("/jobs?tab=" + tabOf(x.state) + "&job=" + encodeURIComponent(x.jobId ?? x.id)); }}}>{WORD[x.state] ?? x.state} {x.finishedAt ? new Date(x.finishedAt).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : ""}</a></span>)}</p>}
         </section>
+          {j?.removed && j.reason?.code === "removed" ? <div className="note"><Icon id="i-info" /><div>Its library was removed, so this file won't be converted.</div></div>
+            : j?.failure ? <WhyFailed id={id} msg={reason} code={j.reason?.code ?? ""} worker={j.worker ?? null} f={j.failure} found={found.flatMap((st) => st.found!)} kept={kept0} />
+            : found.length ? <CheckFound lines={found.flatMap((st) => st.found!)} reason={reason} code={j?.reason?.code ?? ""} />
+            : reason && <section><h3>{whyHeading(j?.reason?.code ?? "", false)}</h3><p>{reason}</p>{skip && rule && <p className="sm">The rule is <a className="linkbtn" href={"/workflows/" + encodeURIComponent(rule.id)} onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); navigate("/workflows/" + encodeURIComponent(rule.id)); }}}>{rule.name}</a>.</p>}</section>}
           {back && kept && <div role="alertdialog" aria-label="Get the original back?" style={{ padding: 12, border: "1px solid var(--border-strong)", borderRadius: "var(--radius)", background: "var(--raised)" }}
             onKeyDown={(e) => e.key === "Escape" && (e.stopPropagation(), closeBack())}>
             <p style={{ margin: "0 0 8px" }}><strong>Get the original of “{name}” back?</strong> The original ({bytes(kept.originalBytes)}) goes back in place and the smaller version{kept.newPath && kept.newPath.split(/[\\/]/).pop() !== name ? ", " + kept.newPath.split(/[\\/]/).pop() + "," : ""} is deleted. This file won't be converted again unless you press Convert again.</p>
             <div className="row"><button className="btn primary" type="button" autoFocus onClick={getBack}>Get original back</button><button className="btn ghost" type="button" onClick={closeBack}>Cancel</button></div></div>}
-          {/* G7: a skipped file links to the workflow whose rule skipped it (a scan's skip has no job: its library's workflow) */}
-          {(j?.workflow || rule) && <section><h3>Workflow</h3><p>{rule ? <a className="linkbtn" href={"/workflows/" + encodeURIComponent(rule.id)} onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); navigate("/workflows/" + encodeURIComponent(rule.id)); }}}>Change rule in {rule.name}</a> : own?.flow?.name ?? "Its library's workflow"}{j?.workflow && " · v" + j.workflow.version}</p>{queuedLine(j?.workflow) && <p className="sm muted">{queuedLine(j?.workflow)}</p>}</section>}
+          {/* #148: before is the original; null for an older job that replaced a file of the same name: said so, never blank */}
+          {showResult && <section id="job-result"><h3>{state === "completed" ? "What the check found" : "Result"}</h3><table className="tbl kvt"><thead><tr><th /><th>{state === "completed" ? "Original" : "Before"}</th><th>{afterHeader(kept0)}</th></tr></thead><tbody>
+            <tr><th>Video</th>{before ? <td>{before.video}</td> : <td rowSpan={4 + (subsRow ? 1 : 0) + (lenRow ? 1 : 0)} className="muted">Not recorded for this job</td>}<td>{after?.video ?? "—"}</td></tr>
+            <tr><th>Audio</th>{before && <td>{before.audio}</td>}<td>{after?.audio ?? "—"}</td></tr>
+            <tr><th>Bitrate</th>{before && <td>{before.bitrate}</td>}<td>{after?.bitrate ?? "—"}</td></tr>
+            <tr><th>Size</th>{before && <td>{before.size}</td>}<td>{after?.size ?? "—"}</td></tr>{subsRow && <tr><th>Subtitles</th>{before && <td>{sumS?.before?.subtitles ?? "—"}</td>}<td>{sumS?.after?.subtitles ?? "—"}</td></tr>}{lenRow && <tr><th>Length</th>{before && <td>{lenText(sumS?.before)}</td>}<td>{lenText(sumS?.after)}</td></tr>}</tbody></table></section>}
           {!scan && <section><h3>Timeline</h3>
             {!j ? <p className="muted">Loading…</p> : !j.steps.length && !j.events.length ? <p className="muted">No step history for jobs from before the update.</p> : <>
               {j.steps.length > 0 && <ol className="tline">{j.steps.map((s, i) => <li key={i} className={s.ok ? "" : SOFT.includes(s.step) ? "warn" : "bad"}><Icon id={s.ok ? "i-check-c" : SOFT.includes(s.step) ? "i-alert" : "i-x-c"} /><span className="sp">{cap(s.words)}</span><span className="muted sm nowrap">{clock(s.at)}</span></li>)}</ol>}
@@ -731,12 +743,6 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
               doesn't send yet claims nothing about scans or steps */}
           {scan && <section><h3>Timeline</h3><p className="muted">{state === "cancelled" ? "Cancelled." : "This file was left out when its library was scanned, so it has no job and no steps."}</p></section>}
           {!scan && (active ? <JobLog id={id} name={name} /> : <StepLog d={log} id={id} worker={j?.worker ?? null} failedIdx={j?.failure?.stepIndex ?? null} kept={kept0} hasResult={showResult} />)}
-          {/* #148: before is the original; null for an older job that replaced a file of the same name: said so, never blank */}
-          {showResult && <section id="job-result"><h3>Result</h3><table className="tbl kvt"><thead><tr><th /><th>Before</th><th>{afterHeader(kept0)}</th></tr></thead><tbody>
-            <tr><th>Video</th>{before ? <td>{before.video}</td> : <td rowSpan={4 + (subsRow ? 1 : 0) + (lenRow ? 1 : 0)} className="muted">Not recorded for this job</td>}<td>{after?.video ?? "—"}</td></tr>
-            <tr><th>Audio</th>{before && <td>{before.audio}</td>}<td>{after?.audio ?? "—"}</td></tr>
-            <tr><th>Bitrate</th>{before && <td>{before.bitrate}</td>}<td>{after?.bitrate ?? "—"}</td></tr>
-            <tr><th>Size</th>{before && <td>{before.size}</td>}<td>{after?.size ?? "—"}</td></tr>{subsRow && <tr><th>Subtitles</th>{before && <td>{sumS?.before?.subtitles ?? "—"}</td>}<td>{sumS?.after?.subtitles ?? "—"}</td></tr>}{lenRow && <tr><th>Length</th>{before && <td>{lenText(sumS?.before)}</td>}<td>{lenText(sumS?.after)}</td></tr>}</tbody></table></section>}
           {/* a done job's .srt files saved beside the new file: one line, then each name; no field, no line */}
           {state === "completed" && !!j?.subtitleFiles?.length && <section><h3>Subtitles saved as files</h3>{j.subtitleFiles.map((n) => <div key={n} style={{ overflowWrap: "anywhere" }}><code>{n}</code></div>)}</section>}
         </div>
