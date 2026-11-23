@@ -21,3 +21,12 @@ func TestEncoderDetailNamesVP9CapBesideCRF(t *testing.T) {
 		t.Errorf("encoderDetail = %q, want %q", got, want)
 	}
 }
+
+// Uncapped VP9 runs "-b:v 0" (constant quality): that isn't a cap, so the line names only the -crf.
+func TestEncoderDetailOmitsVP9ZeroBitrate(t *testing.T) {
+	args := []string{"-c:v:0", "libvpx-vp9", "-crf:v:0", "33", "-b:v", "0", "-deadline", "good", "-cpu-used", "2"}
+	want := "Encoder: libvpx-vp9, -crf 33, hardware: none"
+	if got := encoderDetail(args); got != want {
+		t.Errorf("encoderDetail = %q, want %q", got, want)
+	}
+}

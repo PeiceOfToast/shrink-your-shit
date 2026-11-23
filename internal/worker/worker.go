@@ -2980,8 +2980,9 @@ func encoderDetail(args []string) string {
 			break
 		}
 	}
-	// VP9's constrained quality has -crf and the -b:v cap together: the quality is named above, so the cap is named too
-	if v := argOf("-b:v"); matched != "-b:v" && v != "" {
+	// VP9's constrained quality has -crf and the -b:v cap together: the quality is named above, so the cap is named too.
+	// "-b:v 0" is VP9's plain constant quality (no cap), so it isn't named.
+	if v := argOf("-b:v"); matched != "-b:v" && v != "" && v != "0" {
 		quality += ", -b:v " + v
 	}
 	// the cap and buffer, when the encode uses them (the plan's -maxrate:v/-bufsize:v), so the log shows the whole rate control
