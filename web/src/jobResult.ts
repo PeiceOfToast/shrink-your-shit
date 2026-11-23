@@ -19,8 +19,11 @@ export const whyHeading = (code: string, withFailure: boolean): string =>
 export const stoppedTitle = (message: string): string =>
   /^stopped by/i.test(message) ? message : "Stopped by its workflow: " + message;
 
-// A done job's New file line ("hevc 1280x720 25.000 fps 8-bit, 0 audio, …") as the Video row's value: the codec in capitals, then the rest up to the first comma.
-export const newFileVideo = (line: string): string => line.split(",")[0].replace(/^\w+/, (w) => w.toUpperCase());
+// The codec as the app writes it on both sides of the Result table: "H.264", "HEVC" (the server sends h264 / hevc).
+export const codecName = (codec: string): string => codec.toUpperCase().replace("H264", "H.264");
+
+// A done job's New file line ("hevc 1280x720 25.000 fps 8-bit, 0 audio, …") as the Video row's value: the codec as codecName writes it, then the rest up to the first comma.
+export const newFileVideo = (line: string): string => line.split(",")[0].replace(/^\w+/, codecName);
 
 // The worker as the drawer says it: the built-in worker is "This computer" (the Workers screen's wording); a job with no worker shows a dash.
 export const workerLabel = (w: string | null | undefined): string => (!w ? "—" : w === "builtin" ? "This computer" : w);
@@ -32,7 +35,7 @@ export const ruleName = (jobWorkflow: { id: string } | null | undefined, name: s
 // The fields are the scan's stream fields (types/jobs.ts Probe.streams); a missing one is left out, not guessed.
 export const videoDetail = (codec: string | undefined, s: { Width?: number; Height?: number; frameRate?: number; bitDepth?: number } | undefined): string | null => {
   if (!s && !codec) return null;
-  const c = codec ? codec.toUpperCase().replace("H264", "H.264") : "";
+  const c = codec ? codecName(codec) : "";
   const size = s?.Width && s?.Height ? s.Width + "x" + s.Height : "";
   const fps = s?.frameRate ? s.frameRate.toFixed(3) + " fps" : "";
   const depth = s?.bitDepth ? s.bitDepth + "-bit" : "";

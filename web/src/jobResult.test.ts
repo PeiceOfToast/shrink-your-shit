@@ -41,6 +41,11 @@ test("newFileVideo: the codec in capitals, then the size, fps and bit depth, wit
   assert.equal(newFileVideo("hevc 1280x720 25.000 fps 8-bit, 0 audio, 0 subtitles, 0:00:20"), "HEVC 1280x720 25.000 fps 8-bit");
 });
 
+test("the codec reads the same on both sides: H.264, not H264", () => {
+  assert.equal(newFileVideo("h264 1280x720 25.000 fps 8-bit, 0 audio, 0 subtitles, 0:00:20"), "H.264 1280x720 25.000 fps 8-bit");
+  assert.equal(videoDetail("h264", { Width: 1280, Height: 720, frameRate: 25, bitDepth: 8 }), newFileVideo("h264 1280x720 25.000 fps 8-bit, 0 audio"));
+});
+
 test("workerLabel: the built-in worker is This computer, another worker keeps its name, none is a dash", () => {
   assert.equal(workerLabel("builtin"), "This computer");
   assert.equal(workerLabel("nas-1"), "nas-1");
