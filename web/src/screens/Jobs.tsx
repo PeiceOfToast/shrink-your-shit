@@ -312,8 +312,8 @@ const Driver = ({ ls }: { ls: string[] }) => ls.length > 0 ? <details><summary c
 function CheckFound({ lines, reason, code }: { lines: string[]; reason: string; code: string }) {
   const f = readFound(lines), title = code === "workflow_stopped" ? whyHeading(code, false) : "What the check found";
   return (
-    <section className="note" role="region" aria-label={title} style={{ display: "block" }}>
-      <h3><Icon id="i-info" /> {title}</h3>
+    <section role="region" aria-label={title}>
+      <h3>{title}</h3>
       {reason && <p>{reason.charAt(0).toUpperCase() + reason.slice(1)}</p>}
       <FoundRows rows={f.rows} />
       {copyBox("What ffmpeg said", f.errors)}
