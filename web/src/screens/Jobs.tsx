@@ -598,9 +598,13 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
   const d = useData(() => (scan ? Promise.resolve(null as unknown as JobDetail) : getJob(id)), [id]);
   const [said, setSaid] = useState(""), box = useRef<HTMLDivElement>(null);
   useEffect(() => onLive((type, data) => { if (type === "job.state" && (data as { jobId?: string })?.jobId === id) d.reload(); }), [id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // M5d fix 5: the Escape listener is set up once per job, so it reads the latest onClose here (a bare ?job= link
+  // moves the URL to the job's tab after mount; a closure from mount would close to the wrong tab).
+  const close = useRef(onClose);
+  useEffect(() => { close.current = onClose; });
   useEffect(() => {
     box.current?.focus();
-    const esc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && close.current();
     document.addEventListener("keydown", esc);
     return () => { document.removeEventListener("keydown", esc); (document.querySelector('[data-job="' + CSS.escape(id) + '"]') as HTMLElement | null)?.focus(); };
   }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -696,9 +700,10 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
   return (
     <div className="drawer-wrap" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="drawer jobd" ref={box} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="jd-h" onKeyDown={(e) => {
-        // aria-modal: Tab wraps inside the drawer (same rule as FolderPicker). Collapsed <details> summaries count; hidden or disabled elements do not.
+        // aria-modal: Tab wraps inside the drawer (same rule as FolderPicker). Collapsed <details> summaries count; their bodies,
+        // hidden or disabled elements do not (checkVisibility: getClientRects still counts a closed details' body). M5d fix 5.
         if (e.key !== "Tab") return;
-        const f = [...box.current!.querySelectorAll<HTMLElement>("button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary")].filter((el) => el.getClientRects().length > 0), i = f.indexOf(document.activeElement as HTMLElement), last = f.length - 1;
+        const f = [...box.current!.querySelectorAll<HTMLElement>("button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, [tabindex=\"0\"]")].filter((el) => el.checkVisibility()), i = f.indexOf(document.activeElement as HTMLElement), last = f.length - 1;
         if (e.shiftKey ? i <= 0 : i === -1 || i === last) { e.preventDefault(); (e.shiftKey ? f[last] : f[0])?.focus(); }
       }}>
         <div className={"hd" + (state === "failed" && !kept0 ? " failed" : "")}>
