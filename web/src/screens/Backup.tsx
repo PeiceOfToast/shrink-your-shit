@@ -130,16 +130,18 @@ export function BackupSettings() {
                 <div className="hd"><h2 id="bk-h">Back up</h2><span className="sp" />
                   <button className="btn primary sm" type="button" onClick={backUp} aria-disabled={!!busy}>{busy === "make" ? "Backing up…" : "Back up now"}</button></div>
                 <div className="bd stack">
-                  <p className="muted" style={{ margin: 0 }}>Share passwords and API keys are locked with this computer's key, which isn't in the backup. Restored on another computer, they need typing again.</p>
+                  <div className="note"><Icon id="i-shield" /><span>Share passwords and API keys are locked with this computer's key, which isn't in the backup. Restored on another computer, they need typing again.</span></div>
                   {d.data.backups.length === 0 ? <p className="muted" style={{ margin: 0 }}>No backups yet.</p>
                     : <ul className="stack" style={{ listStyle: "none", padding: 0, margin: 0 }} aria-label="Backups">
                       {d.data.backups.map((b) => <Row key={b.id} b={b} onRestore={preview} reload={d.reload} said={setSaid} />)}
                     </ul>}
-                  <p className="muted" style={{ margin: 0 }}>A backup is made on its own before every update and database change. The last {count(d.data.keep)} of those are kept; yours stay until you delete them.</p>
+                </div>
+                <div className="bd stack" style={{ padding: 0, gap: 0 }}>
+                  <SettingRow title="Automatic backups" desc={`A backup is made on its own before every update and database change. The last ${count(d.data.keep)} of those are kept; yours stay until you delete them.`} />
                 </div>
               </section>
               <section className="card" aria-labelledby="rf-h">
-                <div className="hd"><h2 id="rf-h">Restore from a file</h2></div>
+                <div className="hd"><h2 id="rf-h">Restore</h2></div>
                 <div className="bd stack" style={{ padding: 0, gap: 0 }}>
                   <SettingRow title="Restore from a file" desc="Choose a backup file from this or another computer. You'll see what it holds before anything changes.">
                     <button className="btn" type="button" onClick={() => { if (!busy) file.current?.click(); }} aria-disabled={!!busy}>Choose a backup file…</button>

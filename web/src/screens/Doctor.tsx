@@ -8,7 +8,7 @@ import { Icon } from "../Icon";
 import { PageHead } from "../PageHead";
 import { SignedOut, failed } from "../api";
 import { getDoctor } from "../doctorApi";
-import { healthSummary, type HealthTone } from "../doctorSummary";
+import { encoderRows, healthSummary, libraryRows, type HealthTone } from "../doctorSummary";
 import { clock } from "../format";
 import { SettingsTabs } from "../pages";
 import type { Doctor, DoctorCheck } from "../types/doctor";
@@ -29,6 +29,7 @@ const GROUPS: [string, (id: string) => boolean][] = [
 ];
 const TONE_TEXT: Record<HealthTone, string> = { ok: "var(--success-text)", warn: "var(--warning-text)", bad: "var(--error-text)" };
 const group = (id: string) => GROUPS.find(([, f]) => f(id))?.[0] ?? "Other";
+
 
 function Check({ c }: { c: DoctorCheck }) {
   const s = STATUS[c.status] ?? STATUS.warn, absent = c.status === "absent", bad = c.status === "bad";
@@ -72,7 +73,7 @@ export function HealthSettings() {
                 <Icon id={icon} />
                 <div className="sp stack" style={{ gap: 8 }}>
                   <h2 id="hs-h" style={{ margin: 0, fontSize: "1.125rem", color: TONE_TEXT[sum.tone] }}>{sum.text}</h2>
-                  <p className="muted" style={{ margin: 0 }}>Conversions use {d.encoder.hardware ? "" : "the "}{d.encoder.label}. Checked at {clock(d.ranAt)}. {d.encodersTestedAt ? "Encoders tested at " + clock(d.encodersTestedAt) + "." : "Encoders not tested yet."} Version {d.version}.</p>
+                  <p className="muted" style={{ margin: 0 }}>Checked at {clock(d.ranAt)}. {d.encodersTestedAt ? "Encoders tested at " + clock(d.encodersTestedAt) + "." : "Encoders not tested yet."} Version {d.version}.</p>
                   <div className="row" style={{ gap: 8 }}>
                     <button className="btn sm" type="button" aria-disabled={!!busy} onClick={() => { if (!busy) run(false); }}>{busy === "check" ? "Checking…" : "Check again"}</button>
                     <button className="btn sm ghost" type="button" aria-disabled={!!busy} onClick={() => { if (!busy) run(true); }}>{busy === "test" ? "Testing encoders…" : "Test encoders again"}</button>
@@ -85,7 +86,7 @@ export function HealthSettings() {
                 <section key={g} className="card" aria-labelledby={"hg-" + g}>
                   <div className="hd"><h2 id={"hg-" + g}>{g}</h2></div>
                   <ul className="health">
-                    {cs.map((c) => <Check key={c.id} c={c} />)}</ul>
+                    {(g === "Libraries" ? libraryRows(cs) : g === "Encoders" ? encoderRows(cs) : cs).map((c) => <Check key={c.id} c={c} />)}</ul>
                 </section>; })}
             </>}
     </div>);
