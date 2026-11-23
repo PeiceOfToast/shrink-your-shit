@@ -11,6 +11,18 @@ test("etaWords reads seconds as words", () => {
   assert.equal(etaWords(725), "about 12 min");
 });
 
+test("etaWords: from 90 min the time reads in hours, to the nearest half hour under 10 h", () => {
+  assert.equal(etaWords(5340), "about 89 min"); // 89 min: still minutes
+  assert.equal(etaWords(5400), "about 1.5 h"); // 90 min
+  assert.equal(etaWords(26400), "about 7.5 h"); // 7 h 20 min rounds to 7.5
+  assert.equal(etaWords(35400), "about 10 h"); // 9 h 50 min is nearest 10 h
+});
+
+test("etaWords: from 10 h the time reads in whole hours", () => {
+  assert.equal(etaWords(36000), "about 10 h");
+  assert.equal(etaWords(50400), "about 14 h");
+});
+
 test("runFields: a value not sent reads as a dash", () => {
   assert.deepEqual(runFields(base), { step: "Converting video", fps: "—", speed: "—", timeLeft: "—", bitrate: "—" });
 });
