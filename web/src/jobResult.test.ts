@@ -1,7 +1,7 @@
 // The drawer's wording (dev: `npm test`, Node 22.6+ with --experimental-strip-types).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { afterHeader, fileFacts, newFileVideo, queuedLine, ruleName, savedPercent, stoppedTitle, videoDetail, whyHeading, workerLabel } from "./jobResult.ts";
+import { afterHeader, codecName, fileFacts, newFileVideo, queuedLine, ruleName, savedPercent, stoppedTitle, subtitleCount, videoDetail, whyHeading, workerLabel } from "./jobResult.ts";
 
 test("a kept job's Result column says the new file was not kept", () => {
   assert.equal(afterHeader(true), "New file (not kept)");
@@ -78,4 +78,21 @@ test("fileFacts: the subtitle count and the length from a check line; a part it 
   assert.deepEqual(fileFacts("h264 640x360 24 fps 8-bit, 1 audio, 0 subtitles, 1:02:03.5"), { subtitles: 0, length: "1:02:03.5" });
   assert.deepEqual(fileFacts("hevc 1280x720, 0 audio"), null);
   assert.equal(fileFacts(undefined), null);
+});
+
+test("codecName: the server's words for mpeg4, mpeg2video and prores; an unknown codec in capitals", () => {
+  assert.equal(codecName("mpeg4"), "MPEG-4");
+  assert.equal(codecName("mpeg2video"), "MPEG-2");
+  assert.equal(codecName("prores"), "ProRes");
+  assert.equal(codecName("h264"), "H.264");
+  assert.equal(codecName("H264"), "H.264");
+  assert.equal(codecName("theora"), "THEORA");
+  assert.equal(newFileVideo("mpeg4 720x576 25.000 fps 8-bit, 1 audio, 0 subtitles, 0:00:20"), "MPEG-4 720x576 25.000 fps 8-bit");
+  assert.equal(newFileVideo("prores 1920x1080 23.976 fps 10-bit, 2 audio, 0 subtitles, 0:01:00"), "ProRes 1920x1080 23.976 fps 10-bit");
+});
+
+test("subtitleCount: the subtitle streams of a probe; nothing when the server sent no list", () => {
+  assert.equal(subtitleCount([{ type: "video" }, { type: "audio" }, { type: "subtitle" }, { type: "subtitle" }]), 2);
+  assert.equal(subtitleCount([{ type: "video" }, { type: "audio" }]), 0);
+  assert.equal(subtitleCount(undefined), undefined);
 });
