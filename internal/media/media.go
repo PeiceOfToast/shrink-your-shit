@@ -590,7 +590,7 @@ func TranscodeLines(ctx context.Context, x Exec, ffmpeg string, args []string, d
 		case "fps":
 			p.FPS, _ = strconv.ParseFloat(v, 64)
 		case "bitrate": // "4074.8kbits/s", or "N/A"
-			p.BitrateKbps, _ = strconv.ParseFloat(strings.TrimSuffix(v, "kbits/s"), 64)
+			p.BitrateKbps, _ = strconv.ParseFloat(strings.TrimSpace(strings.TrimSuffix(v, "kbits/s")), 64) // ffmpeg pads it: "  45.1kbits/s"
 		case "speed": // "1.25x", or "N/A"
 			p.Speed, _ = strconv.ParseFloat(strings.TrimSpace(strings.TrimSuffix(v, "x")), 64)
 		case "total_size": // "123456", or "N/A": the bytes of the new file ffmpeg has written so far

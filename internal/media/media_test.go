@@ -90,7 +90,7 @@ func TestTranscodeReportsTotalSize(t *testing.T) {
 // source time left at that speed; "N/A" reads as unknown.
 func TestTranscodeProgressFields(t *testing.T) {
 	f := &FakeExec{Lines: []string{"frame=750", "fps=50.0", "bitrate=4074.8kbits/s", "out_time_us=29000000", "speed=2.00x", "progress=continue",
-		"fps=48.5", "bitrate=4100.2kbits/s", "out_time_us=30000000", "speed=2.00x", "progress=continue",
+		"fps=48.5", "bitrate=  4100.2kbits/s", "out_time_us=30000000", "speed=2.00x", "progress=continue",
 		"bitrate=N/A", "speed=N/A", "out_time_us=31000000"}}
 	var got []Progress
 	Transcode(context.Background(), f, "ffmpeg", nil, 60, func(p Progress) { got = append(got, p) })
@@ -100,7 +100,7 @@ func TestTranscodeProgressFields(t *testing.T) {
 	if g := got[0]; g.FPS != 50 || g.BitrateKbps != 4074.8 || g.Speed != 0 || g.ETASeconds != -1 { // speed comes after out_time in a block
 		t.Errorf("first %+v", g)
 	}
-	if g := got[1]; g.Percent != 50 || g.FPS != 48.5 || g.Speed != 2 || g.ETASeconds != 15 {
+	if g := got[1]; g.Percent != 50 || g.FPS != 48.5 || g.BitrateKbps != 4100.2 || g.Speed != 2 || g.ETASeconds != 15 { // ffmpeg pads the bitrate
 		t.Errorf("second %+v", g)
 	}
 	if g := got[2]; g.BitrateKbps != 0 || g.Speed != 0 || g.ETASeconds != -1 {

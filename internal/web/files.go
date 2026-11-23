@@ -223,7 +223,7 @@ func fileItem(store *jobs.Store, libs []jobs.Library, row jobs.FileRow, card str
 			it["originalState"] = "deleted" // replaced with nothing kept (0 keep days, or before slice 18)
 		}
 	case jobs.CardFailed:
-		it["jobId"], it["detail"], it["attempts"] = jobID, row.Error, max(row.Attempts, 1)
+		it["jobId"], it["detail"], it["attempts"], it["finishedAt"] = jobID, row.Error, max(row.Attempts, 1), row.Updated // when it failed
 		it["title"] = "Converting did not finish"
 		if row.Status == jobs.Kept {
 			it["title"] = "A check said no, so the original was kept"
