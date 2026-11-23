@@ -26,6 +26,12 @@ export function usageBars(cpuPercent: number | null | undefined, gpuPercent: num
   return out;
 }
 
+// The usage bars from the live reading: the Graphics card bar follows the first GPU's utilisation, whether or not the
+// server lists a card (the card list stays empty until V4), so a value the server sent always shows.
+export function workerBars(cpuPercent: number | null | undefined, liveGpu: { utilPercent: number | null }[]): { label: string; pct: number }[] {
+  return usageBars(cpuPercent, liveGpu[0]?.utilPercent ?? null);
+}
+
 // One encoder type's chip: "Processor · works · used first" (accent), "Processor · works" (green), "NVIDIA · not found" (muted).
 export function encoderChip(name: string, lit: boolean, primary: boolean): { text: string; tone: "accent" | "ok" | "muted" } {
   if (!lit) return { text: name + " · not found", tone: "muted" };

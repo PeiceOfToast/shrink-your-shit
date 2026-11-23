@@ -19,7 +19,7 @@ import { allWorkers, allowJoin, denyJoin, dismissJoin, newPairing, type Pairing,
 import type { Capability, JoinRequest, Worker } from "../types/v2";
 import type { JobItem } from "../types/jobs";
 import { FileName } from "../FileName";
-import { OS_NAMES, encoderChip, formatsChip, graphicsLine, systemLine, usageBars } from "../workerCards";
+import { OS_NAMES, encoderChip, formatsChip, graphicsLine, systemLine, workerBars } from "../workerCards";
 import { runFields } from "../jobCards";
 
 // review 61dc891 P2-1: only what the server reports (a remote worker may send no OS or host): no guess, no stray dot
@@ -339,8 +339,8 @@ function Live({ w }: { w: Worker }) { // the detail page's live line: only the f
 // M4: the card's facts as a key-value list, with the usage bars under it, and the encoders beside it. Every value is one
 // the server sent; a missing one drops its row.
 function WorkerFacts({ w, reload, jobById }: { w: Worker; reload: () => void; jobById: Record<string, JobItem> }) {
-  // the Graphics card bar follows the cards the worker reports: a live 0 with no card listed is no reading (M5a item 7)
-  const [t] = words(w), l = w.live, gpu = l.gpu[0]?.utilPercent ?? null, bars = usageBars(l.cpuPercent, w.gpus.length ? gpu : null);
+  // the Graphics card bar shows when the live reading has a value (M5a item 7); the card list is not required (empty until V4)
+  const [t] = words(w), l = w.live, gpu = l.gpu[0]?.utilPercent ?? null, bars = workerBars(l.cpuPercent, l.gpu);
   return <div className="wbody">
     <div className="wleft">
       <dl className="kv">
