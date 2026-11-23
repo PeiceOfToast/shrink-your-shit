@@ -31,6 +31,8 @@ type Selectors struct {
 	// RemoveBlackBars (F4): cut the black bars the picture has, when a sample of the file agrees on them. Off
 	// by default, so a flow that never set it compiles as it did.
 	RemoveBlackBars bool `json:"removeBlackBars,omitempty"`
+	// BitDepth is the Convert step's depth: keep ("" too) | 8 | 10. 10 is HEVC and AV1 only (Validate says so).
+	BitDepth string `json:"bitDepth,omitempty"`
 	// Notices are coded notes shown on the flow until its next publish (migration 38: bitrate_meaning_changed).
 	Notices []Notice `json:"notices,omitempty"`
 	Audio   string   `json:"audio"` // AvailableAudio (S6: design E's six choices)
@@ -117,6 +119,15 @@ func (s Selectors) Validate() error {
 	}
 	if _, ok := SpeedPresets[s.Speed]; !ok {
 		return invalid("speed", s.Speed)
+	}
+	switch s.BitDepth {
+	case "", "keep", "8":
+	case "10":
+		if s.Format != "" && s.Format != "hevc" && s.Format != "av1" {
+			return notYet("10-bit needs HEVC or AV1.")
+		}
+	default:
+		return invalid("bitDepth", s.BitDepth)
 	}
 	switch {
 	case !contains(allFormats, s.Format):

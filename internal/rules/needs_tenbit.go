@@ -13,6 +13,9 @@ func NeedsTenBit(p Plan, source *media.Info) bool {
 	if p.Video.HDR != nil || p.Video.TenBit {
 		return true
 	}
+	if p.Video.BitDepth == 8 { // the person forced 8 bits: a 10-bit source does not need a 10-bit encoder
+		return false
+	}
 	if source == nil || p.Video.Codec == "" || p.Video.Copy {
 		return false
 	}

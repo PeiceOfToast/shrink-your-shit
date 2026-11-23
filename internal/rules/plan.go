@@ -148,6 +148,10 @@ type VideoEncode struct {
 	// 10-bit the same way HDR's does (main10 and p010 frames) without HDR's colour tags: an SDR file stays
 	// SDR. Compile sets it from the probe; false is every 8-bit source, whose arguments do not change.
 	TenBit bool `json:"tenBit,omitempty"`
+	// BitDepth is the depth the person chose on the Convert step: 8 or 10. 0 is keep (the source's depth, as before).
+	// 8 makes a 10-bit SDR source 8-bit on every path; it never changes an HDR plan, which stays 10-bit. 10 makes an
+	// 8-bit HEVC or AV1 encode 10-bit. Compile zeroes it where it would change nothing, and for a copied video.
+	BitDepth int `json:"bitDepth,omitempty"`
 	// Format is the video format made (S6: h264, av1, vp9); "" is HEVC, as every Plan before S6.
 	Format string `json:"format,omitempty"`
 	// Crop (F4): the person asked for the black bars to be cut. CropRect is what the worker measured for this
@@ -214,8 +218,20 @@ func (t Template) CompileWith(info media.Info, f Facts) (p Plan) {
 		// The plan carries the source's bit depth: a 10-bit (or deeper) first video stream keeps its depth
 		// through the encode where the target's encoder has one (VideoEncode.TenBit). A copied video is the
 		// same bytes, so it is not marked.
-		if v := info.Video(); v != nil && v.BitDepth > 8 && p.Video.Codec != "" && !p.Video.Copy {
-			p.Video.TenBit = true
+		if p.Video.Copy || p.Video.Codec == "" {
+			p.Video.BitDepth = 0
+		}
+		if v := info.Video(); v != nil && p.Video.Codec != "" && !p.Video.Copy {
+			switch {
+			case p.Video.HDR != nil: // HDR is 10-bit whatever the choice; its depth is not the choice's
+				p.Video.BitDepth = 0
+				p.Video.TenBit = v.BitDepth > 8
+			case p.Video.BitDepth == 8 && v.BitDepth <= 8: // 8 of an 8-bit source changes nothing
+				p.Video.BitDepth = 0
+			case p.Video.BitDepth == 8: // a forced 8-bit encode of a deeper source: not TenBit
+			case p.Video.BitDepth == 10 || v.BitDepth > 8:
+				p.Video.TenBit = true
+			}
 		}
 		p = orderSteps(withStepDecisions(p, info), t.StepOrder)
 	}()
@@ -437,6 +453,32 @@ func (p Plan) FFmpegArgsFullGPU(in, out, enc string) ([]string, bool) {
 // the "converting to" line: convertingTo names the depth of the encoder that runs.
 var tenBitTargets = map[string]bool{"libx265": true, "libsvtav1": true}
 
+// fullScale is the full pipeline's scale filter for the plan's height. A plan that chose its depth names the frames'
+// format in the filter when the family's scale filter does not set one (scale_qsv takes the frames as the decoder
+// made them, so an 8-bit choice of a 10-bit file, or a 10-bit choice of an 8-bit file, would keep the wrong depth).
+func fullScale(p Plan, fam string, ten10 bool) string {
+	sc := profiles[fam].scale(p.Video.Height, ten10)
+	if p.Video.BitDepth != 0 && sc != "" && !strings.Contains(sc, "format=") {
+		f := "nv12"
+		if ten10 {
+			f = pixFmt10(fam)
+		}
+		sc += ":format=" + f
+	}
+	return sc
+}
+
+// bitDepthOf is the plan's depth for the Convert step's choice: 8 or 10, and 0 for keep (or anything else).
+func bitDepthOf(choice string) int {
+	switch choice {
+	case "8":
+		return 8
+	case "10":
+		return 10
+	}
+	return 0
+}
+
 // EncodeTenBit answers a different question from NeedsTenBit: whether the target's encoder arguments make 10 bits.
 // EncodeTenBit says whether a graphics encoder makes a 10-bit video: HDR (S3), or a 10-bit source kept at its depth
 // by a target whose card encoder has one (tenBitTargets). It is a card's arguments' 10-bit flags and its "converting
@@ -540,6 +582,10 @@ func (p Plan) ffmpegArgs(in, out, gpu string, full bool) []string {
 				args = append(args, "-pix_fmt:"+v, pixFmt10(fam))
 			}
 		}
+	} else if gpu == "" && p.Video.BitDepth == 8 { // the person's 8 bits: the processor's encoder would keep a 10-bit source's depth
+		args = append(args, "-pix_fmt:"+v, "yuv420p")
+	} else if gpu == "" && p.Video.BitDepth == 10 { // the person's 10 bits: an 8-bit source is made 10-bit (HEVC and AV1 only)
+		args = append(args, "-pix_fmt:"+v, "yuv420p10le")
 	} else if ten10 && gpu != "" { // a 10-bit SDR source keeps its depth on a graphics encoder: main10 and p010
 		// (the processor's encoder already keeps the source's depth on its own, and its arguments are today's).
 		if strings.HasPrefix(gpu, "hevc_") { // HEVC's name for the 10-bit profile; AV1's profile 0 already covers p010
@@ -555,7 +601,7 @@ func (p Plan) ffmpegArgs(in, out, gpu string, full bool) []string {
 	}
 	if p.Video.Height > 0 {
 		if full {
-			vf = append(vf, Filter{Text: profiles[fam].scale(p.Video.Height, ten10), Card: true})
+			vf = append(vf, Filter{Text: fullScale(p, fam, ten10), Card: true})
 		} else {
 			vf = append(vf, Filter{Text: "scale=-2:" + strconv.Itoa(p.Video.Height)})
 			if p.Video.SquarePixels { // the scale keeps the shape by carrying a SAR; rounding leaves 1280:1281, so a square source gets 1:1
@@ -1053,6 +1099,7 @@ func compileSelectors(p Plan, s Selectors, info media.Info, langs []string, basi
 	// compiles as it did. A processor quality of its own applies where quality is the CRF (not a bitrate).
 	p.Video.Hardware, p.Video.HardwareFail = s.Hardware, s.HardwareFail
 	p.Video.Crop = s.RemoveBlackBars // F4: the worker measures the bars for a file that asks for it
+	p.Video.BitDepth = bitDepthOf(s.BitDepth)
 	if p.Video.Hardware == "auto" {
 		p.Video.Hardware = ""
 	}
