@@ -19,7 +19,7 @@ import { allWorkers, allowJoin, denyJoin, dismissJoin, newPairing, type Pairing,
 import type { Capability, JoinRequest, Worker } from "../types/v2";
 import type { JobItem } from "../types/jobs";
 import { FileName } from "../FileName";
-import { OS_NAMES, encoderChip, formatsChip, graphicsLine, systemLine, usageBars } from "../workerCards";
+import { OS_NAMES, encoderChip, formatsChip, graphicsLine, systemLine, workerBars } from "../workerCards";
 import { runFields } from "../jobCards";
 
 // review 61dc891 P2-1: only what the server reports (a remote worker may send no OS or host): no guess, no stray dot
@@ -339,7 +339,8 @@ function Live({ w }: { w: Worker }) { // the detail page's live line: only the f
 // M4: the card's facts as a key-value list, with the usage bars under it, and the encoders beside it. Every value is one
 // the server sent; a missing one drops its row.
 function WorkerFacts({ w, reload, jobById }: { w: Worker; reload: () => void; jobById: Record<string, JobItem> }) {
-  const [t] = words(w), l = w.live, gpu = l.gpu[0]?.utilPercent ?? null, bars = usageBars(l.cpuPercent, gpu);
+  // the Graphics card bar: see workerBars (M5a item 7, decision b)
+  const [t] = words(w), l = w.live, gpu = l.gpu[0]?.utilPercent ?? null, bars = workerBars(l.cpuPercent, w.gpus, l.gpu);
   return <div className="wbody">
     <div className="wleft">
       <dl className="kv">
@@ -431,7 +432,7 @@ export function WorkerPage({ id }: { id: string }) {
       <PageHead icon="i-worker" crumbs={[["Workers", "/workers"]]} title={w.name} after={<span className={"pill " + cls}><Icon id={icon} />{t}</span>}>
         <StartStop w={w} onDone={(m) => (setSaid(m), d.reload())} />
       </PageHead>
-      <p className="sm muted" style={{ marginTop: -8 }}>{[w.host, w.os, w.arch, w.appVersion, w.kind === "local" ? "built in" : ""].filter(Boolean).join(" · ")}</p>
+      <p className="sm muted" style={{ marginTop: -8 }}>{[w.host, OS_NAMES[w.os ?? ""], w.arch, w.appVersion, w.kind === "local" ? "built in" : ""].filter(Boolean).join(" · ")}</p>
       <div className="tabs" role="tablist">{TABS.map(([k, l]) => <button key={k} role="tab" type="button" aria-selected={tab === k} onClick={() => navigate("/workers/" + encodeURIComponent(id) + (k === "overview" ? "" : "?tab=" + k))}>{l}</button>)}</div>
       <p className="muted" role="status">{said}</p>
       {tab === "overview" && <>
