@@ -373,6 +373,16 @@ td .tnc{max-width:230px}
 .where>summary{cursor:pointer;color:var(--accent);font-size:var(--fs-sm);width:max-content}
 .where dl{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:4px 12px;margin:6px 0 0}.where dd{margin:0;min-width:0;overflow-wrap:anywhere}.where dt{font-weight:600}
 .where p{margin:6px 0 0}
+/* M5g fix 1 (design signin-plain, signin-wrong): an open centred column; the spacing is the design's. A wrong token marks the field and its message sits under it */
+.signin{max-width:408px;margin:0 auto;padding-top:76px}
+.signin form.stack{gap:0}
+.signin .field{margin-top:21px}
+.signin .row{margin-top:16px}
+.signin .where{margin-top:24px}
+.signin .btn.primary{width:100%}
+.signin .where>summary{text-decoration:underline}
+.signin .input[aria-invalid="true"]{border-color:var(--error-text)}
+@media (max-width:479px){.signin{margin-inline:calc(16px - var(--page-pad));padding-top:68px}.signin .field{margin-top:16px}} /* the page gutter is 16px here, whatever --page-pad is */
 
 /* native controls (review 1) */
 input.switch{appearance:none;-webkit-appearance:none;position:relative;display:inline-block;width:38px;height:22px;border-radius:11px;background:var(--surface);border:1px solid var(--border-strong);flex:none;margin:0;cursor:pointer;vertical-align:middle}
