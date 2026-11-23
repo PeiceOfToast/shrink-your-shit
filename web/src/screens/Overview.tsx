@@ -13,7 +13,7 @@ import { listWorkflows } from "../workflowApi";
 import { listLibrariesV2 } from "../libraryApi";
 import { convertedLine } from "../convertedLine";
 import { getStartedSteps, nextStep, showGetStarted } from "../getStarted";
-import { runFields } from "../jobCards";
+import { runFields, startedAt } from "../jobCards";
 const HEALTH_HIDDEN = "syp-health-dismissed"; // the failed checks the Dismiss was for
 import { onLive } from "../live";
 import { LoadFailed, PageHead } from "../PageHead";
@@ -277,6 +277,7 @@ export function Overview() {
                 <div className="lmain">
                   <div className="lname"><Link className="ttl" to={"/jobs?tab=running&job=" + encodeURIComponent(a.jobId)}>{a.name}</Link><span className="lchev" aria-hidden="true">›</span></div>
                   <div className="chips">{a.library && <span className="mchip"><Icon id="i-folder" />{a.library.name}</span>}{lib?.workflowName && <span className="mchip"><Icon id="i-workflow" />{lib.workflowName}</span>}<span className="mchip"><Icon id="i-worker" />{w ?? "This computer"}</span></div>
+                  {startedAt(rj?.progress?.elapsedS, new Date()) && <span className="muted sm">started {clock(startedAt(rj?.progress?.elapsedS, new Date())!)}</span>}
                   <div className="rfields">
                     <div className="rf"><span className="muted sm">Step</span><span className="rfv">{f.step}</span></div>
                     <div className="rf"><span className="muted sm">Speed</span><span className="rfv">{f.speed}</span></div>

@@ -26,3 +26,8 @@ export function runFields(p: Progress): { step: string; fps: string; speed: stri
 export function runningFor(elapsedS: number): string {
   return "running " + (elapsedS < 60 ? "under a minute" : Math.floor(elapsedS / 60) + " min");
 }
+
+// The converting card's start time: now minus the running list's elapsed seconds (the screen formats it). Null when the worker sent no elapsed time.
+export function startedAt(elapsedS: number | null | undefined, now: Date): Date | null {
+  return elapsedS == null ? null : new Date(now.getTime() - elapsedS * 1000);
+}
