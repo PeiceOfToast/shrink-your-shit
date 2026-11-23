@@ -382,7 +382,7 @@ td .tnc{max-width:230px}
 .signin .btn.primary{width:100%}
 .signin .where>summary{text-decoration:underline}
 .signin .input[aria-invalid="true"]{border-color:var(--error-text)}
-@media (max-width:479px){.signin{margin-inline:calc(16px - var(--page-pad));padding-top:68px}} /* the page gutter is 16px here, whatever --page-pad is */
+@media (max-width:479px){.signin{margin-inline:calc(16px - var(--page-pad));padding-top:68px}.signin .field{margin-top:16px}} /* the page gutter is 16px here, whatever --page-pad is */
 
 /* native controls (review 1) */
 input.switch{appearance:none;-webkit-appearance:none;position:relative;display:inline-block;width:38px;height:22px;border-radius:11px;background:var(--surface);border:1px solid var(--border-strong);flex:none;margin:0;cursor:pointer;vertical-align:middle}
