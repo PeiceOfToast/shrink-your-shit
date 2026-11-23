@@ -210,7 +210,7 @@ function StepWorker({ libraryId }: { libraryId: string }) {
         {error && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{error}</span></p>}
         {ws.error && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{ws.error.message}</span></p>}
         <div className="row">{ws.data && !w ? <button className="btn primary" type="button" disabled={busy} onClick={() => finish(false)}>Finish setup</button> : <>
-          <button className="btn primary" type="button" disabled={busy} onClick={() => finish(true)}><Icon id="i-play" />Start the worker</button>
+          <button className="btn primary" type="button" disabled={busy || !w} onClick={() => finish(true)}><Icon id="i-play" />Start the worker</button>
           <button className="btn" type="button" disabled={busy} onClick={() => finish(false)}>Not yet</button></>}</div>
         <p className="muted sm">{w
           ? "Start the worker begins converting this library. Not yet finishes setup; nothing converts until you press Start on Workers."
