@@ -211,7 +211,7 @@ function StepWorker({ libraryId }: { libraryId: string }) {
           <button className="btn" type="button" disabled={busy} onClick={() => finish(false)}>Not yet</button></div>
         <p className="muted sm">{w
           ? "Start the worker begins converting this library. Not yet finishes setup; nothing converts until you press Start on Workers."
-          : "There is no worker on this computer, so nothing converts yet. Not yet finishes setup; add a worker on Workers."}</p>
+          : ws.data ? "There is no worker on this computer, so nothing converts yet. Not yet finishes setup; add a worker on Workers." : null /* nothing while the workers list loads */}</p>
       </div>
     </section>
   );

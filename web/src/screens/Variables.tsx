@@ -197,7 +197,7 @@ function VarLine({ r, issue, asking, onEdit, onAsk, onRemove, onKeep }: {
         desc={<>
           <span style={{ display: "inline-flex", flexWrap: "wrap", gap: 6, maxWidth: "100%" }}>{chip(kindName(r.type))}{chip(shownValue(r))}</span>
           {r.description.trim() && <span style={{ display: "block" }}>{r.description}</span>}</>}>
-        <div className="rowflush" style={{ gap: 8 }}>
+        <div className="row" style={{ gap: 8 }}>
           <button id={`${r.key}-edit`} className="btn sm" type="button" onClick={onEdit} aria-label={`Edit ${label}`}>Edit</button>
           <button className="btn sm ghost" type="button" onClick={onAsk} aria-label={`Remove ${label}`}>Remove</button>
         </div>
