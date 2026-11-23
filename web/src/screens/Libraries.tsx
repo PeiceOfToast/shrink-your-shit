@@ -14,6 +14,7 @@ import { onLive } from "../live";
 import { getPublishedDoc, getWorkflow, listWorkflows as listWorkflowDocs } from "../workflowApi";
 import { bytes, count, duration, lastScan, plural } from "../format";
 import { allShownSelected, doneShare, filterCounts, inFilter, keepShown, needsAttention, selectShown, type LibFilter } from "../libraryList";
+import { filesHead, folderNeedsPass, saveEnabled } from "../libraryForm";
 import { useData } from "../useData";
 import { closeMenuToSummary, menuEscape, useCloseOnOutside } from "../menuFocus";
 import type { FirstFiles, FolderReport, LibraryItem } from "../types/v1";
@@ -267,7 +268,7 @@ export function FolderField({ f, free, warn }: { f: ReturnType<typeof useFolder>
         onChange={(e) => f.setPath(e.target.value)} onBlur={f.now} />
         <Browse value={f.path} onPick={(p) => f.setPath(p)} /></div>
       <div id="lib-path-check" className="stack" style={{ gap: 4 }}>
-        {!f.checked ? <span className="hint">The folder is checked as you type.</span>
+        {!f.checked ? <span className="hint">Pick the folder that holds the videos. Sub-folders are included.</span>
           : !r ? <span className="hint">Checking the folder…</span>
           : failed(r) ? <span className="st bad" role="alert"><Icon id="i-alert" /><span>{r.error.message}</span></span>
           : r.blockers.length ? r.blockers.map((b) => <span key={b.code} className="st bad" role="alert"><Icon id="i-alert" /><span>{b.message}</span></span>)
@@ -278,11 +279,11 @@ export function FolderField({ f, free, warn }: { f: ReturnType<typeof useFolder>
   );
 }
 // scanned: the library has had its first scan (pass 5 #3). Before it, and in first run, the panel asks whether the folder is right.
-export function FirstFive({ f, scanned = false }: { f: ReturnType<typeof useFolder>; scanned?: boolean }) {
+export function FirstFive({ f, scanned = false, compact = false }: { f: ReturnType<typeof useFolder>; scanned?: boolean; compact?: boolean }) {
   const r = f.first;
   return (
-    <section className="card" aria-labelledby="first-h">
-      <div className="hd"><h2 id="first-h">{scanned ? "Files in this folder" : "Is this the right folder?"}</h2></div>
+    <section className="card" aria-labelledby="first-h" style={compact ? { alignSelf: "start" } : undefined}>
+      <div className="hd"><h2 id="first-h">{scanned ? "Files in this folder" : "Is this the right folder?"}{r && !failed(r) && filesHead(r.items.length, r.total) && <span className="muted sm"> — {filesHead(r.items.length, r.total)}</span>}</h2></div>
       <div className="bd stack" aria-live="polite">
         {!f.ok ? <p className="muted">Give a folder that passes the check, and its first 5 videos show here.</p>
           : !r ? <p className="muted">Looking for videos in <span className="mono">{f.checked}</span>…</p>
@@ -314,7 +315,7 @@ export function WorkflowField({ value, onChange, workflows, self, none, makeNew 
   return (
     <div className="field"><label htmlFor="lib-wf">Workflow</label>
       {workflows.length === 0 && !none ? <span>No workflows yet. <Link to="/workflows">Make one in Workflows</Link>, then come back.</span> : <>
-        <div className="row" style={{ gap: 8 }}>
+        <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
           <select id="lib-wf" className="input" value={value} onChange={(e) => onChange(e.target.value)} aria-describedby="lib-wf-hint" style={{ flex: 1 }}>
             {!value && <option value="">Choose a workflow</option>}
             {makeNew && <option value="new">Make one for me</option>}
@@ -347,6 +348,7 @@ function Form({ l, v, workflows, reload, taken }: { l: LibraryItem | null; v: Li
   const moved = !!l && f.checked !== l.path;
   const prioChanged = !!v && priority !== v.priority;
   const changed = !l || name !== l.name || moved || pick !== cur || prioChanged;
+  const needsPass = folderNeedsPass(!l, moved), folderBad = !!f.report && (failed(f.report) || f.report.blockers.length > 0);
   const save = async () => {
     setSaid(""); setError(""); setBusy(true);
     try {
@@ -361,7 +363,7 @@ function Form({ l, v, workflows, reload, taken }: { l: LibraryItem | null; v: Li
   const scan = async () => { if (l && (await act(() => scanLibrary(l.id), setError))) reload(); };
   return (
     <div className="stack">
-      <PageHead icon="i-library" crumbs={[["Libraries", "/libraries"]]} title={l ? l.name : "Add library"} help={l ? undefined : "A folder to watch for videos, and the workflow its files go through."}>
+      <PageHead icon="i-library" crumbs={[["Libraries", "/libraries"]]} title={l ? l.name : "Add a library"} help={l ? undefined : "A folder to watch for videos, and the workflow its files go through."}>
         {v && <Status l={v} folder={false} />}
         {v && v.enabled && <button className="btn" type="button" onClick={() => pauseResume([v], false, setNote).then(reload)}><Icon id="i-pause" />Pause</button>}
         {v && paused(v) && <button className="btn" type="button" onClick={() => pauseResume([v], true, setNote).then(reload)}><Icon id="i-play" />Resume</button>}
@@ -380,31 +382,34 @@ function Form({ l, v, workflows, reload, taken }: { l: LibraryItem | null; v: Li
       </nav>}
       {tab === "discovery" ? <Discovery every={v?.discovery.scanEverySeconds} /> : tab === "output" ? (v ? (v.status === "no_workflow" ? <NoWorkflowOutput /> : <Output v={v} reload={reload} />) : <div className="empty">Loading…</div>) :
       <div className="grid cols2">
+        <div className="stack" style={{ alignSelf: "start" }}>
         <section className="card" aria-labelledby="gen-h">
           <div className="hd"><h2 id="gen-h">Library</h2></div>
           <form className="bd stack" onSubmit={(e) => (e.preventDefault(), save())}>
+            <div className={folderBad ? "fieldbad" : undefined}><FolderField f={f} free={l && !moved ? l.freeBytes : undefined} warn={v && !v.writable && !moved ? v.unwritableMessage || "Can't write to this folder." : undefined} /></div>
             <div className="field"><label htmlFor="lib-name">Name</label>
-              <input id="lib-name" className="input" required value={name} onChange={(e) => (setName(e.target.value), setTyped(true))} placeholder="Movies" /></div>
-            <FolderField f={f} free={l && !moved ? l.freeBytes : undefined} warn={v && !v.writable && !moved ? v.unwritableMessage || "Can't write to this folder." : undefined} />
-            <div className="field"><span className="lab">File type</span><span>Video</span></div>
+              <input id="lib-name" className="input" required value={name} onChange={(e) => (setName(e.target.value), setTyped(true))} placeholder={l ? "Movies" : "Taken from the folder"} /></div>
+            {l && <div className="field"><span className="lab">File type</span><span>Video</span></div>}
             <WorkflowField value={pick} onChange={setWf} workflows={workflows} self={l?.name} none={!l || noWfNow} makeNew={!l && noUsable} />
             {v && <div className="field"><label htmlFor="lib-prio">Priority</label>
-              <select id="lib-prio" className="input" value={priority} onChange={(e) => setPrio(Number(e.target.value))} aria-describedby="lib-prio-h">
+              <select id="lib-prio" className="input" value={priority} onChange={(e) => setPrio(Number(e.target.value))} style={{ width: "auto" }}>
                 {PRIORITIES.map(([n, w]) => <option key={n} value={n}>{w}</option>)}
                 {!PRIORITIES.some(([n]) => n === priority) && <option value={priority}>{priorityWord(priority)}</option>}
               </select>
-              <span className="hint" id="lib-prio-h">High: this library's files are converted before other libraries'. Low: after them. A single file set to First or Last in Jobs still goes first or last.</span></div>}
+              </div>}
             <Problem m={error} />
             <p className="muted" role="status">{said}</p>
             <div className="row" style={{ gap: 8 }}>
-              <button className="btn primary" type="submit" disabled={busy || !changed || !name.trim() || !pick || ((!l || moved) && !f.ok)}>{l ? "Save" : "Add library"}</button>
-              <Link className="btn" to="/libraries">Cancel</Link>
+              <button className="btn primary" type="submit" disabled={!saveEnabled({ busy, changed, name, pick, needsPass, folderOk: f.ok })} aria-describedby={!l && !f.ok ? "lib-add-hint" : undefined}>{l ? "Save" : "Add library"}</button>
+              <Link className="btn ghost" to="/libraries">Cancel</Link>
             </div>
+            {!l && !f.ok && <span className="hint" id="lib-add-hint">Add library is enabled once the folder passes its check.</span>}
           </form>
         </section>
         {l && v && <LibraryVars v={v} reload={reload} />}
-        <FirstFive f={f} scanned={!!v?.scan.lastScanAt && f.checked === l?.path} />
-        {l && v && <RemoveSection l={l} v={v} />}
+        </div>
+        <FirstFive f={f} scanned={!!v?.scan.lastScanAt && f.checked === l?.path} compact={!l} />
+        {l && v && <div style={{ gridColumn: "1 / -1" }}><RemoveSection l={l} v={v} /></div>}
       </div>}
     </div>
   );
