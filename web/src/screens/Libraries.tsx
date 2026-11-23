@@ -322,7 +322,7 @@ export function WorkflowField({ value, onChange, workflows, self, none, makeNew 
             {none && <option value="0">No workflow yet</option>}
             {workflows.map((w) => <option key={w.id} value={w.id} disabled={!w.usable}>{w.name}{w.usable ? "" : " (not published yet)"}</option>)}
           </select>
-          {value && value !== "0" && value !== "new" && <Link className="btn sm ghost" to={"/workflows/" + value + "?view=simple"}>Edit this workflow</Link>}
+          {value && value !== "0" && value !== "new" && <Link to={"/workflows/" + value + "?view=simple"}>Edit this workflow</Link>}
         </div>
         <span id="lib-wf-hint" className="hint">{hint}</span>
         {workflows.length === 0 && !makeNew && <span className="hint">No workflows yet. <Link to="/workflows">Make one in Workflows</Link>.</span>}
@@ -392,7 +392,7 @@ function Form({ l, v, workflows, reload, taken }: { l: LibraryItem | null; v: Li
             {l && <div className="field"><span className="lab">File type</span><span>Video</span></div>}
             <WorkflowField value={pick} onChange={setWf} workflows={workflows} self={l?.name} none={!l || noWfNow} makeNew={!l && noUsable} />
             {v && <div className="field"><label htmlFor="lib-prio">Priority</label>
-              <select id="lib-prio" className="input" value={priority} onChange={(e) => setPrio(Number(e.target.value))} style={{ width: "auto" }}>
+              <select id="lib-prio" className="input" value={priority} onChange={(e) => setPrio(Number(e.target.value))} style={{ width: "auto", alignSelf: "flex-start" }}>
                 {PRIORITIES.map(([n, w]) => <option key={n} value={n}>{w}</option>)}
                 {!PRIORITIES.some(([n]) => n === priority) && <option value={priority}>{priorityWord(priority)}</option>}
               </select>
