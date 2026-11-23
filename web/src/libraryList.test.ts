@@ -1,7 +1,7 @@
 // M3a: the Libraries list's filter rule and progress share. Node runs these (npm test).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { allShownSelected, doneShare, filterCounts, inFilter, needsAttention, selectShown } from "./libraryList.ts";
+import { allShownSelected, doneShare, filterCounts, inFilter, keepShown, needsAttention, selectShown } from "./libraryList.ts";
 import type { Library } from "./types/v2.ts";
 
 const counts = { files: 0, waiting: 0, running: 0, completed: 0, skipped: 0, failed: 0 };
@@ -95,4 +95,13 @@ test("Select all acts on the shown libraries only: a hidden selection is kept, n
   assert.deepEqual(selectShown(["h"], [a, b], true), ["h", "a", "b"]); // the hidden one stays as it was
   assert.deepEqual(selectShown(["h", "a", "b"], [a, b], false), ["h"]); // clearing leaves the hidden one selected
   assert.deepEqual(selectShown(["a"], [a, hidden], true), ["a", "h"]); // a shown one already selected is not doubled
+});
+
+test("a filter or search change drops the hidden libraries from the selection (the intersection with what is shown)", () => {
+  const a = lib({ id: "a" }), b = lib({ id: "b" }), c = lib({ id: "c" });
+  assert.deepEqual(keepShown(["a", "b"], [a, b, c]), ["a", "b"]); // all still shown: nothing dropped
+  assert.deepEqual(keepShown(["a", "b"], [b, c]), ["b"]); // a is now hidden: dropped
+  assert.deepEqual(keepShown(["a", "b"], []), []); // nothing shown: the selection is empty
+  assert.deepEqual(keepShown([], [a, b]), []);
+  assert.deepEqual(keepShown(["b", "a"], [a, b]), ["b", "a"]); // order of the selection is kept
 });

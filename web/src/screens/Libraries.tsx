@@ -13,7 +13,7 @@ import { Browse } from "../FolderPicker";
 import { onLive } from "../live";
 import { getPublishedDoc, getWorkflow, listWorkflows as listWorkflowDocs } from "../workflowApi";
 import { bytes, clock, count, duration, plural } from "../format";
-import { allShownSelected, doneShare, filterCounts, inFilter, needsAttention, selectShown, type LibFilter } from "../libraryList";
+import { allShownSelected, doneShare, filterCounts, inFilter, keepShown, needsAttention, selectShown, type LibFilter } from "../libraryList";
 import { useData } from "../useData";
 import type { FirstFiles, FolderReport, LibraryItem } from "../types/v1";
 import type { Library, Variable } from "../types/v2";
@@ -91,7 +91,11 @@ export function Libraries() {
   useEffect(() => onLive((t) => { if (t === "library.changed") libs.reload(); }), []); // eslint-disable-line react-hooks/exhaustive-deps -- #150: at once
   const [sel, setSel] = useState<string[]>([]), [said, setSaid] = useState(flash.said), [q, setQ] = useState(""), [selecting, setSelecting] = useState(false), [filter, setFilter] = useState<LibFilter>("all");
   useEffect(() => { flash.said = ""; }, []);
-  const all = libs.data ?? [], counts = filterCounts(all), items = all.filter((l) => inFilter(l, filter) && (!q || (l.name + " " + l.paths.join(" ")).toLowerCase().includes(q.toLowerCase())));
+  const all = libs.data ?? [], counts = filterCounts(all);
+  const shownBy = (f: LibFilter, query: string) => all.filter((l) => inFilter(l, f) && (!query || (l.name + " " + l.paths.join(" ")).toLowerCase().includes(query.toLowerCase())));
+  const items = shownBy(filter, q);
+  // a filter or search change drops the libraries no longer shown from the selection, so "N selected" and the bulk actions match the screen
+  const narrow = (f: LibFilter, query: string) => setSel((s) => keepShown(s, shownBy(f, query)));
   // counts are shown only once the list has loaded without error; the empty state has no filters or search at all
   const counted = !!libs.data && !libs.error, empty = libs.loaded && !libs.error && all.length === 0;
   // bulk actions act on the libraries on screen only (the filter and the search)
@@ -128,13 +132,13 @@ export function Libraries() {
       {/* one toolbar: the filter buttons with their counts on the left, the search on the right; while selecting, All and the bulk actions (on phones they sit under "...") */}
       {!empty && <div className="ltools" role="toolbar" aria-label="Libraries">
         <div className="seg" role="group" aria-label="Show libraries">
-          {FILTERS.map(([k, t]) => <button key={k} type="button" aria-pressed={filter === k} onClick={() => setFilter(k)}>{counted ? t + " · " + count(counts[k]) : t}</button>)}
+          {FILTERS.map(([k, t]) => <button key={k} type="button" aria-pressed={filter === k} onClick={() => (setFilter(k), narrow(k, q))}>{counted ? t + " · " + count(counts[k]) : t}</button>)}
         </div>
         {selecting && <label className="hit selall"><input type="checkbox" aria-label="Select all shown libraries" disabled={items.length === 0} checked={allShownSelected(items, sel)} onChange={(e) => setSel(selectShown(sel, items, e.target.checked))} /><span className="sm">All</span></label>}
         {selecting && <span className="desk">{actions}</span>}
         {selecting && <details className="menu phone"><summary className="btn sm icon ghost" aria-label="More actions"><Icon id="i-more" /></summary><div className="pop" role="menu">{actions}</div></details>}
         {picked.length > 0 && <span className="muted sm">{picked.length} selected</span>}
-        <input className="input find" type="search" placeholder="Filter libraries" aria-label="Filter libraries" value={q} onChange={(e) => setQ(e.target.value)} />
+        <input className="input find" type="search" placeholder="Filter libraries" aria-label="Filter libraries" value={q} onChange={(e) => (setQ(e.target.value), narrow(filter, e.target.value))} />
       </div>}
       <p className="muted" role="status">{said}</p>
       {!libs.loaded ? <LibSkeleton /> : libs.error && !libs.data ? <LoadFailed error={libs.error} reload={libs.reload} /> : all.length === 0 ? <Empty icon="i-library" text="No libraries yet. A library is a folder that is watched for videos."><Link className="btn primary" to="/libraries/new"><Icon id="i-plus" />Add library</Link></Empty>
@@ -178,7 +182,7 @@ function LibCard({ l, tag, selecting, checked, onToggle }: { l: Library; tag: st
         <div className="lname"><Link className="ttl" to={"/libraries/" + l.id}>{l.name}</Link><span className="lchev" aria-hidden="true">›</span></div>
         <div className="chips">
           <span className="mchip mono" title={l.paths.join(", ")}>{l.paths.join(", ")}</span>
-          {noWf(l) ? <span className="mchip warnchip">No workflow · assign one to start it</span> : <Link className="mchip wf" to={"/workflows/" + l.workflowId} title={tag || undefined}><Icon id="i-workflow" />{l.workflowName}{tag && " · " + shortTag(tag)}</Link>}
+          {noWf(l) ? <span className="mchip warnchip">No workflow · assign one to start it</span> : <Link className="mchip wf" to={"/workflows/" + l.workflowId} title={l.workflowName + (tag ? " · " + tag : "")}><Icon id="i-workflow" /><span className="cut">{l.workflowName}{tag && " · " + shortTag(tag)}</span></Link>}
           <span className="mchip">{plural(l.counts.files, "file", "files")}</span>
           <span className="mchip">{shareWait(l) ? "Waiting for " + shareName(l) + " to connect · " : ""}{count(l.counts.waiting)} waiting{paused(l) ? ", not converting" : ""}</span>
           <span className="mchip">{l.scan.lastScanAt ? "Scanned " + lastScan(l.scan.lastScanAt) : "Not scanned yet"}</span>
