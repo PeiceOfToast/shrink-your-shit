@@ -135,16 +135,17 @@ function Languages({ codes, setCodes, say }: { codes: string[]; setCodes: Dispat
   };
   const pick = (l: [string, string, string?]) => add(l[1]);
   return (
-    <SettingRow title="Your languages" desc={<>Audio and subtitles in these languages are kept when a workflow says "Keep only my languages". Tracks with no language set are always kept. "Save as separate .srt files" saves subtitles in these languages as files.</>}>
+    <SettingRow title="Your languages" descId="langs-h" desc={<>Audio and subtitles in these languages are kept when a workflow says "Keep only my languages". Tracks with no language set are always kept. "Save as separate .srt files" saves subtitles in these languages as files.</>}>
       <div className="langs">
         {codes.length ? <ul className="chips" aria-label="Your languages" style={{ listStyle: "none", padding: 0, margin: 0, flexWrap: "wrap" }}>{codes.map((c) => (
           <li key={c} className="mchip">{name(c)} <button className="btn sm icon ghost" type="button" aria-label={"Remove " + name(c)} onClick={() => (setCodes(codes.filter((x) => x !== c)), say(name(c) + " removed. Press Save to keep it."))}><Icon id="i-x" /></button></li>))}</ul>
           : <p className="muted" style={{ margin: 0 }}>None yet.</p>}
         {adding ? (
-          <div className="row" style={{ gap: 8, position: "relative", flex: "1 1 100%" }} onBlur={(e) => !e.currentTarget.contains(e.relatedTarget as Node) && (setOpen(false), setAt(-1))}>
+          // Escape closes the box from anywhere in it (the field, a list pick, the Add button)
+          <div className="row" style={{ gap: 8, position: "relative", flex: "1 1 100%" }} onKeyDown={(e) => { if (e.key === "Escape") (e.preventDefault(), close()); }} onBlur={(e) => !e.currentTarget.contains(e.relatedTarget as Node) && (setOpen(false), setAt(-1))}>
             {/* an own list, not a datalist: the browser's datalist popup is its own chrome and opened off the screen
                 (review item B); .lang-opts (shell.css) is left-anchored under the field and never wider than the screen */}
-            <input ref={box} id="lang-add" className="input" aria-label="Add a language" autoComplete="off" role="combobox" aria-expanded={open} aria-controls="lang-opts" aria-autocomplete="list" aria-activedescendant={at >= 0 ? "lang-o" + at : undefined} value={typed}
+            <input ref={box} id="lang-add" className="input" aria-label="Add a language" autoComplete="off" role="combobox" aria-expanded={open} aria-controls="lang-opts" aria-autocomplete="list" aria-describedby="langs-h" aria-activedescendant={at >= 0 ? "lang-o" + at : undefined} value={typed}
               onChange={(e) => (setTyped(e.target.value), setAt(-1), setOpen(true))}
               onFocus={() => setOpen(true)} onClick={() => setOpen(true)}
               onKeyDown={(e) => {
@@ -152,7 +153,6 @@ function Languages({ codes, setCodes, say }: { codes: string[]; setCodes: Dispat
                 if (e.key === "ArrowDown" && hits.length) return (e.preventDefault(), setOpen(true), setAt((a) => Math.min(a + 1, hits.length - 1)));
                 if (e.key === "ArrowUp" && hits.length) return (e.preventDefault(), setAt((a) => Math.max(a - 1, -1)));
                 if (e.key === "Enter") return (e.preventDefault(), at >= 0 ? pick(hits[at]) : add());
-                if (e.key === "Escape") return (e.preventDefault(), close());
               }} style={{ flex: 1, minWidth: 0, width: 200, maxWidth: "100%" }} />
             <button className="btn" type="button" onClick={() => add()}><Icon id="i-plus" />Add</button>
             {open && !!hits.length && <div className="pop lang-opts" id="lang-opts" role="listbox" aria-label="Languages">{hits.map((l, i) =>
@@ -217,28 +217,36 @@ export function SafetySettings() {
     <div className="stack">
       <PageHead icon="i-settings" title="Settings" />
       <SettingsTabs at="safety" />
-      {!st.data ? <div className="empty">{st.error?.message ?? "Loading…"}</div> : (
+      {!st.data ? <div className="empty">{st.error?.message ?? "Loading…"}</div> : <>
         <section className="card" aria-labelledby="keep-h"><div className="hd"><h2 id="keep-h">Keeping originals</h2></div>
-          <div className="bd stack">
-            <div className="field"><label htmlFor="keep-days">Keep originals for (days)</label>
-              <input id="keep-days" className="input" type="number" inputMode="numeric" min={0} max={365} step={1} value={now} onChange={(e) => setDays(e.target.value)} aria-describedby="keep-h2" style={{ maxWidth: 140 }} />
-              <span className="hint" id="keep-h2">0 means the original is deleted right after the new file has been checked.</span></div>
-            <p className={bad ? "st bad" : "muted"} role="status">{said}</p>
-            <div className="row"><button className="btn primary" type="button" disabled={days == null || Number(days) === st.data.keepOriginalsDays} onClick={save}>Save</button></div>
-            {st.data.trashPath && <p><strong>Where originals are kept:</strong> {st.data.trashPath}</p>}
-            <p id="purge-h" aria-live="polite">{!t ? (tr.error?.message ?? "") : t.files ? <><strong>Kept originals:</strong> {bytes(t.bytes)} · {plural(t.files, "file", "files")}.{t.nextDeleteAt && " The next ones go on " + day(t.nextDeleteAt) + "."}</> : "No originals are being kept right now."}</p>
-            {t && <div className="stack" style={{ gap: 6 }}>
-              <div className="row"><button ref={purgeBtn} className="btn" type="button" disabled={!t.files || purging} aria-describedby={t.files ? undefined : "purge-h"} onClick={() => (setGone(null), setPurgeSaid(""), setAsk(true))}>
-                {t.files ? `Empty trash now: ${plural(t.files, "file", "files")}, ${bytes(t.bytes)}` : "Empty trash now"}</button></div>
-              {purgeSaid && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{purgeSaid}</span></p>}
-              {gone && <div aria-live="polite" className="stack" style={{ gap: 6 }}>
-                <p ref={freed} tabIndex={-1} className={gone.deletedFiles ? "st ok" : "st warn"} style={{ margin: 0 }}><Icon id={gone.deletedFiles ? "i-check-c" : "i-alert"} /><span>{gone.deletedFiles ? `Freed ${bytes(gone.freedBytes)} (${plural(gone.deletedFiles, "file", "files")}).` : "Nothing was deleted."}</span></p>
-                {gone.skipped.map((s, i) => <p key={i} className="st warn" style={{ margin: 0 }}><Icon id="i-alert" /><span>{`${s.library} was skipped. ${s.reason}`}</span></p>)}
-              </div>}
+          <div className="bd stack" style={{ padding: 0, gap: 0 }}>
+            <SettingRow title={<label htmlFor="keep-days">Keep originals for (days)</label>} descId="keep-h2" desc="0 means the original is deleted right after the new file has been checked.">
+              <input id="keep-days" className="input" type="number" inputMode="numeric" min={0} max={365} step={1} value={now} onChange={(e) => setDays(e.target.value)} aria-describedby="keep-h2" style={{ width: 140, maxWidth: "100%" }} />
+            </SettingRow>
+            {st.data.trashPath && <SettingRow title="Where originals are kept" desc="Next to each file, in a folder of their own.">
+              <span className="mono">.syp-trash</span>
+            </SettingRow>}
+            <SettingRow title="Kept right now" descId="purge-h" desc={<span aria-live="polite">{!t ? (tr.error?.message ?? "") : t.files ? <><strong>Kept originals:</strong> {bytes(t.bytes)} · {plural(t.files, "file", "files")}.{t.nextDeleteAt && " The next ones go on " + day(t.nextDeleteAt) + "."}</> : "No originals are being kept right now."}</span>}>
+              {t && <button ref={purgeBtn} className="btn" type="button" disabled={!t.files || purging} aria-describedby={t.files ? undefined : "purge-h"} onClick={() => (setGone(null), setPurgeSaid(""), setAsk(true))}>
+                {t.files ? `Empty trash now: ${plural(t.files, "file", "files")}, ${bytes(t.bytes)}` : "Empty trash now"}</button>}
+            </SettingRow>
+            {purgeSaid && <p className="st bad" role="alert" style={{ margin: "0 16px 12px" }}><Icon id="i-alert" /><span>{purgeSaid}</span></p>}
+            {gone && <div aria-live="polite" className="stack" style={{ gap: 6, padding: "0 16px 12px" }}>
+              <p ref={freed} tabIndex={-1} className={gone.deletedFiles ? "st ok" : "st warn"} style={{ margin: 0 }}><Icon id={gone.deletedFiles ? "i-check-c" : "i-alert"} /><span>{gone.deletedFiles ? `Freed ${bytes(gone.freedBytes)} (${plural(gone.deletedFiles, "file", "files")}).` : "Nothing was deleted."}</span></p>
+              {gone.skipped.map((s, i) => <p key={i} className="st warn" style={{ margin: 0 }}><Icon id="i-alert" /><span>{`${s.library} was skipped. ${s.reason}`}</span></p>)}
             </div>}
           </div>
-        </section>)}
-      {st.data && <Commands settings={st} />}
+        </section>
+        <Commands settings={st} />
+        {/* one Save for this tab: it saves the days only; Empty trash now and the switch above apply at once */}
+        <div className="stack" style={{ gap: 8 }}>
+          <p className={bad ? "st bad" : "muted"} role="status" style={{ margin: 0 }}>{said}</p>
+          <div className="row" style={{ justifyContent: "flex-start", flexWrap: "wrap", gap: 12 }}>
+            <button className="btn primary" type="button" disabled={days == null || Number(days) === st.data.keepOriginalsDays} onClick={save}>Save</button>
+            <span className="muted">Saves the number of days only. Empty trash now applies at once.</span>
+          </div>
+        </div>
+      </>}
       {ask && t && <Confirm title="Empty trash now?" body={`This deletes ${plural(t.files, "original file", "original files")} (${bytes(t.bytes)}), kept in case you need them back. It can't be undone.`}
         yes={purging ? "Deleting…" : "Delete " + plural(t.files, "file", "files")} no="Cancel" danger busy={purging} onYes={purge} onNo={() => (setAsk(false), purgeBtn.current?.focus())} />}
     </div>);
@@ -252,12 +260,12 @@ function Commands({ settings }: { settings: ReturnType<typeof useData<FirstRunSe
   const set = async (v: boolean) => { setBusy(true); setSaid(""); const r = await act(patchSettings({ workflowsMayRunCommands: v }), setSaid); setBusy(false); if (r) settings.reload(); };
   return (
     <section className="card" aria-labelledby="cmd-h"><div className="hd"><h2 id="cmd-h">Workflows and programs</h2></div>
-      <div className="bd stack">
-        <label className="row nw"><input id="cmd-sw" type="checkbox" role="switch" className="switch" checked={on} disabled={busy} aria-describedby="cmd-hint" onChange={(e) => set(e.target.checked)} />
-          <span><strong>Workflows may run commands</strong></span></label>
-        <span className="hint" id="cmd-hint">A workflow's "Run a command" step starts a program of yours after a file is saved, with the file's path and variables as arguments. The program runs as this app's user, with everything it can reach, so this stays off until you turn it on.</span>
-        {!on && <div className="note"><Icon id="i-shield" /><span>Off: a workflow with a "Run a command" step can't be published, and a published one's step says it can't run.</span></div>}
-        {said && <p className="st bad" role="alert" style={{ margin: 0 }}><Icon id="i-alert" /><span>{said}</span></p>}
+      <div className="bd stack" style={{ padding: 0, gap: 0 }}>
+        <SettingRow title={<label htmlFor="cmd-sw">Workflows may run commands</label>} descId="cmd-hint" desc={`A workflow's "Run a command" step starts a program of yours after a file is saved, with the file's path and variables as arguments. The program runs as this app's user, with everything it can reach, so this stays off until you turn it on.`}>
+          <input id="cmd-sw" type="checkbox" role="switch" className="switch" checked={on} disabled={busy} aria-describedby="cmd-hint" onChange={(e) => set(e.target.checked)} />
+        </SettingRow>
+        {!on && <div className="note" style={{ margin: "0 16px 12px" }}><Icon id="i-shield" /><span>Off: a workflow with a "Run a command" step can't be published, and a published one's step says it can't run.</span></div>}
+        {said && <p className="st bad" role="alert" style={{ margin: "0 16px 12px" }}><Icon id="i-alert" /><span>{said}</span></p>}
       </div></section>);
 }
 

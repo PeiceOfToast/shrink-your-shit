@@ -5,6 +5,7 @@ import { ACCENTS, DEFAULTS, DENSITIES, MOTIONS, TEXT_SIZES, THEMES, keep, previe
 import { MOCK } from "./api";
 import { Link, onLeave } from "./router";
 import { sharesSupported } from "./sharesApi";
+import { SettingRow } from "./SettingRow";
 
 // What each page will hold (spec 4-9). Until its step lands it says so and offers nothing that looks like it works.
 const WHAT: Record<string, string> = {
@@ -48,18 +49,32 @@ function Choice<T extends string | number>({ legend, name, value, options, onPic
   legend: string; name: string; value: T; options: [T, string, string?][]; onPick: (v: T) => void;
 }) {
   return (
-    <fieldset className="field choice prefs">
-      <legend className="lab">{legend}</legend>
-      <div className="row">
-        {options.map(([v, label, swatch]) => (
-          <label key={String(v)} className="radio">
-            <input type="radio" name={name} checked={v === value} onChange={() => onPick(v)} />
-            {swatch && <span className="swatch" style={{ background: swatch }} aria-hidden="true" />}
-            <span>{label}</span>
-          </label>
-        ))}
+    <SettingRow title={<span id={name + "-h"}>{legend}</span>}>
+      <div className="choice prefs" role="radiogroup" aria-labelledby={name + "-h"}>
+        <div className="row">
+          {options.map(([v, label, swatch]) => (
+            <label key={String(v)} className="radio">
+              <input type="radio" name={name} checked={v === value} onChange={() => onPick(v)} />
+              {swatch && <span className="swatch" style={{ background: swatch }} aria-hidden="true" />}
+              <span>{label}</span>
+            </label>
+          ))}
+        </div>
       </div>
-    </fieldset>
+    </SettingRow>
+  );
+}
+
+// A segmented choice (the design's .seg): one button per option, the chosen one pressed.
+function Seg<T extends string | number>({ legend, name, value, options, onPick }: {
+  legend: string; name: string; value: T; options: [T, string][]; onPick: (v: T) => void;
+}) {
+  return (
+    <SettingRow title={<span id={name + "-h"}>{legend}</span>}>
+      <div className="seg" role="group" aria-labelledby={name + "-h"}>
+        {options.map(([v, label]) => <button key={String(v)} type="button" aria-pressed={v === value} onClick={() => onPick(v)}>{label}</button>)}
+      </div>
+    </SettingRow>
   );
 }
 
@@ -76,7 +91,7 @@ export function SettingsTabs({ at }: { at: "general" | "shares" | "appearance" |
   useEffect(() => { const n = nav.current, a = n?.querySelector<HTMLElement>("[aria-current=page]"); if (n && a) n.scrollLeft += a.getBoundingClientRect().left - n.getBoundingClientRect().left - (n.clientWidth - a.offsetWidth) / 2; }, [at, shares]);
   return (
     <nav className="tabs" ref={nav} aria-label="Settings sections">
-      {tab("general", "General")}{shares && tab("shares", "Network shares")}{tab("appearance", "Appearance")}{tab("processing", "Processing")}{tab("safety", "Safety")}{tab("connections", "Connections")}{tab("notifications", "Notifications")}{tab("variables", "Variables")}{tab("backup", "Backup")}{tab("health", "Health")}{tab("about", "About")}
+      {tab("general", "General")}{tab("appearance", "Appearance")}{tab("processing", "Processing")}{tab("safety", "Safety")}{tab("connections", "Connections")}{tab("notifications", "Notifications")}{shares && tab("shares", "Network shares")}{tab("variables", "Variables")}{tab("backup", "Backup")}{tab("health", "Health")}{tab("about", "About")}
     </nav>);
 }
 
@@ -111,19 +126,22 @@ export function AppearanceSettings() {
       <PageHead icon="i-settings" title="Settings" />
       <SettingsTabs at="appearance" />
       <div className="card">{/* clean pass 2 (7.1): the tab names the panel, so no second "Appearance" heading */}
-        <div className="bd stack">
+        <div className="bd stack" style={{ padding: 0, gap: 0 }}>
           <Choice legend="Theme" name="theme" value={draft.theme} options={THEMES.map(([v, l]) => [v, l])} onPick={set("theme")} />
           <Choice legend="Accent" name="accent" value={draft.accent} options={ACCENTS} onPick={set("accent")} />
-          <Choice legend="Density" name="density" value={draft.density} options={DENSITIES} onPick={set("density")} />
-          <Choice legend="Text size" name="textSize" value={draft.textSize} options={TEXT_SIZES} onPick={set("textSize")} />
-          <Choice legend="Motion" name="motion" value={draft.motion} options={MOTIONS} onPick={set("motion")} />
-          <p className="muted sm">Kept in this browser. Another browser or computer keeps its own.</p>
-          <div className="row">
-            <button className="btn primary" type="button" onClick={() => (keep(draft), setSaid(dirty ? "Saved." : "Nothing was changed."))}>Save</button>
-            {dirty && <button className="btn" type="button" onClick={() => (setDraft(saved), setSaid("Changes undone."))}>Undo changes</button>}
-            <button className="btn ghost" type="button" onClick={() => (setDraft(DEFAULTS), setSaid("Defaults shown. Press Save to keep them."))}>Restore defaults</button>
-            <span className="muted" role="status">{said}</span>
-          </div>
+          <Seg legend="Density" name="density" value={draft.density} options={DENSITIES} onPick={set("density")} />
+          <Seg legend="Text size" name="textSize" value={draft.textSize} options={TEXT_SIZES} onPick={set("textSize")} />
+          <Seg legend="Motion" name="motion" value={draft.motion} options={MOTIONS} onPick={set("motion")} />
+        </div>
+      </div>
+      {/* one Save for this tab, left-aligned; the note says only what is true here */}
+      <div className="stack" style={{ gap: 8 }}>
+        <p className="muted" role="status" style={{ margin: 0 }}>{said}</p>
+        <div className="row" style={{ justifyContent: "flex-start", flexWrap: "wrap", gap: 12 }}>
+          <button className="btn primary" type="button" onClick={() => (keep(draft), setSaid(dirty ? "Saved." : "Nothing was changed."))}>Save</button>
+          {dirty && <button className="btn" type="button" onClick={() => (setDraft(saved), setSaid("Changes undone."))}>Undo changes</button>}
+          <button className="btn ghost" type="button" onClick={() => (setDraft(DEFAULTS), setSaid("Defaults shown. Press Save to keep them."))}>Restore defaults</button>
+          <span className="muted">Kept in this browser. Another browser or computer keeps its own.</span>
         </div>
       </div>
     </div>
