@@ -25,12 +25,12 @@ async function act<T>(p: Promise<Answer<T>>, say: (m: string) => void): Promise<
 // "failed" uses the error text colour; "skipped" comes after it, muted (lead 18:53Z). On a card it is a chip; its text is cut
 // with an ellipsis and the full line is in title.
 function Runs({ r }: { r: Workflow["lastRun"] }) {
-  if (!r.at) return <span className="mchip"><span className="cut">Never ran</span></span>;
+  if (!r.at) return <span className="mchip"><span className="cut">never ran</span></span>;
   const min = Math.max(0, Math.round((Date.now() - new Date(r.at).getTime()) / 60000));
   const when = min < 1 ? "just now" : min < 60 ? `${min} min ago` : min < 1440 ? `${Math.round(min / 60)} h ago` : plural(Math.round(min / 1440), "day", "days") + " ago";
   const done = r.completed > 0 ? `${count(r.completed)} done` : "", failed = r.failed > 0 ? `${count(r.failed)} failed` : "", skipped = r.skipped > 0 ? `${count(r.skipped)} skipped` : "";
-  const line = "Ran " + when + (done || failed || skipped ? " · past 7 days: " : "") + [done, failed, skipped].filter(Boolean).join(", ");
-  return (<span className="mchip" title={line}><span className="cut">Ran {when}{(done || failed || skipped) && " · past 7 days: "}{done}{done && (failed || skipped) && ", "}{failed && <span style={{ color: "var(--error-text)" }}>{failed}</span>}{failed && skipped && ", "}{skipped}</span></span>);
+  const line = "ran " + when + (done || failed || skipped ? " · past 7 days: " : "") + [done, failed, skipped].filter(Boolean).join(", ");
+  return (<span className="mchip" title={line}><span className="cut">ran {when}{(done || failed || skipped) && " · past 7 days: "}{done}{done && (failed || skipped) && ", "}{failed && <span style={{ color: "var(--error-text)" }}>{failed}</span>}{failed && skipped && ", "}{skipped}</span></span>);
 }
 
 function RowMenu({ w, onSaid, reload }: { w: Workflow; onSaid: (s: string) => void; reload: () => void }) {
@@ -48,6 +48,7 @@ function RowMenu({ w, onSaid, reload }: { w: Workflow; onSaid: (s: string) => vo
     <details className="menu" ref={ref} onBlur={(e) => e.relatedTarget instanceof Node && !e.currentTarget.contains(e.relatedTarget) && close()}>
       <summary className="btn sm icon ghost" aria-label={"More for " + w.name}><Icon id="i-more" /></summary>
       <div className="pop" role="menu">
+        <button type="button" className="it" role="menuitem" onClick={async () => { close(); if (await act(patchWorkflow(w.id, { favourite: !w.favourite }), onSaid)) reload(); }}><Icon id="i-star" />{w.favourite ? "Remove from favourites" : "Add to favourites"}</button>
         <button type="button" className="it" role="menuitem" onClick={async () => { close(); if (await act(duplicateWorkflow(w.id), onSaid)) (onSaid(w.name + " duplicated."), reload()); }}><Icon id="i-copy" />Duplicate</button>
         <button type="button" className="it" role="menuitem" aria-disabled={used ? true : undefined} aria-describedby={used ? "used-" + w.id : undefined}
           onClick={async () => { if (used) return; close(); if (!window.confirm("Delete the workflow " + w.name + "? This can't be undone.")) return;
@@ -136,26 +137,23 @@ function WfCard({ w, hasTags, setSaid, reload }: { w: Workflow; hasTags: boolean
       <span className="ltile" aria-hidden="true"><Icon id="i-workflow" /></span>
       <div className="lmain">
         <div className="lname">
-          <button className="btn sm icon ghost star" type="button" aria-pressed={w.favourite} aria-label={"Favourite: " + w.name} style={w.favourite ? { color: "var(--warning-text)" } : undefined}
-            onClick={async () => { if (await act(patchWorkflow(w.id, { favourite: !w.favourite }), setSaid)) reload(); }}><Icon id="i-star" /></button>
           <Link className="ttl" to={"/workflows/" + w.id} title={w.name}>{w.name}</Link>
           {w.status === "draft" && <span className="mchip">draft</span>}
-          <span className="lchev" aria-hidden="true">›</span>
         </div>
         {w.description && <span className="sub cut" title={w.description}>{w.description}</span>}
         <div className="chips">
           <span className="mchip" title={usedText}><Icon id="i-folder" /><span className="cut">{usedText}</span></span>
           {w.version != null && <span className="mchip" title={"v" + w.version + (w.draftDiffers ? " · draft changes" : "")}><span className="cut">{"v" + w.version + (w.draftDiffers ? " · draft changes" : "")}</span></span>}
           <Runs r={w.lastRun} />
-          {hasTags && w.tags.map((t) => <span className="mchip" key={t}>{t}</span>)}
+          {hasTags && w.tags.map((t) => <span className="mchip" key={t} title={t}><span className="cut">{t}</span></span>)}
         </div>
       </div>
+      <span className="lchev" aria-hidden="true">›</span>
       <div className="lside">
         <div className="wfact">
-          {problems ? <span className={"pill " + (w.validation.errors ? "bad" : "warn")}><Icon id="i-alert" />{plural(problems, "problem", "problems")}</span>
-            : <span className="pill"><Icon id="i-check-c" />OK</span>}
-          {w.status === "draft" ? <span className="muted" aria-label="Not published yet">-</span>
-            : <label className="hit"><input type="checkbox" role="switch" className="switch" aria-label={"Enabled: " + w.name} checked={w.status === "enabled"} onChange={async (e) => { if (await act(patchWorkflow(w.id, { status: e.target.checked ? "enabled" : "disabled" }), setSaid)) reload(); }} /></label>}
+          {problems ? <span className="pill warn"><Icon id="i-alert" />{plural(problems, "problem", "problems")}</span>
+            : <span className="pill ok"><Icon id="i-check-c" />OK</span>}
+          {w.status !== "draft" && <label className="hit"><input type="checkbox" role="switch" className="switch" aria-label={"Enabled: " + w.name} checked={w.status === "enabled"} onChange={async (e) => { if (await act(patchWorkflow(w.id, { status: e.target.checked ? "enabled" : "disabled" }), setSaid)) reload(); }} /></label>}
           <RowMenu w={w} onSaid={setSaid} reload={reload} />
         </div>
         {w.favourite && <div className="lnote"><span>★ favourite</span></div>}
@@ -231,7 +229,7 @@ export function Workflows() {
           <div className="seg" role="group" aria-label="Show workflows">
             {WF_FILTERS.map(([k, t]) => <button key={k} type="button" aria-pressed={filter === k} onClick={() => setFilter(k)}>{counted ? t + " · " + count(counts[k]) : t}</button>)}
           </div>
-          {hasTags && <select className="input sm" aria-label="Tag" value={activeTag} onChange={(e) => setTag(e.target.value)}>
+          {hasTags && <select className="input sm tagsel" aria-label="Tag" value={activeTag} onChange={(e) => setTag(e.target.value)}>
             <option value="">Tag: any</option>{tags.map((t) => <option key={t} value={t}>{t}</option>)}
           </select>}
           <input className="input find" type="search" placeholder="Search workflows" aria-label="Search workflows" value={q} onChange={(e) => setQ(e.target.value)} />

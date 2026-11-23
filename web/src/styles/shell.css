@@ -990,7 +990,9 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 .ltools .seg button{font-size:var(--fs-sm)}
 /* Workflows cards (M3b): the ⋯ menu pops out of the card, so it is not clipped; the star, switch and menu sit above the stretched name link; long text is cut with an ellipsis (the full text is in title) */
 .lcard.wfcard{overflow:visible}
-.wfcard .star{position:relative;z-index:1;flex:none;width:28px;min-width:28px;height:28px;min-height:28px;padding:0;border-color:transparent;background:none}
+.wfcard .lname{display:flex;align-items:baseline;gap:8px;min-width:0}
+.wfcard .lname .ttl{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ltools .tagsel{min-width:0;max-width:100%;flex:1 1 auto}
 .wfcard .lside .menu,.wfcard .lside .hit{position:relative;z-index:1}
 .wfcard .wfact{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
 .wfcard .cut{display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
