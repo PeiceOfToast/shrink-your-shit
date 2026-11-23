@@ -963,3 +963,23 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 .edbar form.row{gap:6px}
 @media (max-width:900px){.editor.stackpage .edframe.stackframe{overflow:visible}}
 .gpi small{font-size:12.5px}.gpi .tt{font-size:12.5px}
+/* M3a: the Libraries list as cards (design libraries-list). A card: tile, name and chips, status and a second line on the right, the done bar on the bottom edge. */
+.lcards{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.lcard{position:relative;display:flex;align-items:center;gap:12px;padding:12px 16px 14px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);min-width:0;overflow:hidden}
+.lcard.sel{background:color-mix(in srgb,var(--accent) 10%,var(--surface))}
+.lcard .lcheck{flex:none}
+.lcard .lmain{flex:1 1 auto;min-width:0;display:grid;gap:6px}
+.lcard .lname{display:block}
+.lcard .chips{margin-top:0}
+.lcard .mchip .ic{width:12px;height:12px;margin-right:4px}
+.lcard .mchip.mono{font-family:var(--font-mono,ui-monospace,monospace)}
+.lside{flex:none;display:flex;flex-direction:column;align-items:flex-end;gap:4px;text-align:right;max-width:50%}
+.lnote{display:flex;flex-direction:column;align-items:flex-end;gap:2px;font-size:var(--fs-sm);color:var(--text-2)}
+.lbar{position:absolute;left:0;right:0;bottom:0;height:3px;background:var(--raised)}
+.lbar>i{display:block;height:100%;background:var(--success)}
+@media (max-width:640px){
+  .lcard{flex-wrap:wrap;row-gap:8px;padding:12px 12px 14px}
+  .lcard .lmain{flex:1 1 0;min-width:0}
+  .lside{flex:0 0 100%;flex-direction:row;flex-wrap:wrap;align-items:center;justify-content:space-between;text-align:left;max-width:none;padding-left:52px}
+  .lnote{flex-direction:row;flex-wrap:wrap;align-items:center;column-gap:10px}
+}

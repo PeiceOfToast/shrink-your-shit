@@ -14,6 +14,7 @@ import { Browse } from "../FolderPicker";
 import { onLive } from "../live";
 import { getPublishedDoc, getWorkflow, listWorkflows as listWorkflowDocs } from "../workflowApi";
 import { bytes, clock, count, duration, plural } from "../format";
+import { doneShare, filterCounts, inFilter, needsAttention, type LibFilter } from "../libraryList";
 import { useData } from "../useData";
 import type { FirstFiles, FolderReport, LibraryItem } from "../types/v1";
 import type { Library, Variable } from "../types/v2";
@@ -82,14 +83,16 @@ const shortTag = (t: string) => t.split(" · ").slice(0, 2).join(" · ");
 // the line the Libraries list shows once after a library was removed (G1: "Movies removed. Nothing in ... was changed.")
 const flash = { said: "" };
 
+const FILTERS: [LibFilter, string][] = [["all", "All"], ["watching", "Watching"], ["attention", "Needs attention"], ["paused", "Paused"]];
+
 export function Libraries() {
   const libs = useData(listLibrariesV2, [], 3000);
   // user item 3 (design 7.1): each row shows its workflow's summary in full ("Standard · Balanced · ..."), from the workflows list
   const docs = useData(listWorkflowDocs, [], 10000), tag = (l: Library) => { const t = docs.data?.find((w) => w.id === l.workflowId)?.summaryTag ?? ""; return t.trim() === l.workflowName.trim() ? "" : t; }; // review 628ebc3 P2: a workflow named by its summary (the default) shows it once
   useEffect(() => onLive((t) => { if (t === "library.changed") libs.reload(); }), []); // eslint-disable-line react-hooks/exhaustive-deps -- #150: at once
-  const [sel, setSel] = useState<string[]>([]), [said, setSaid] = useState(flash.said), [q, setQ] = useState(""), [selecting, setSelecting] = useState(false);
+  const [sel, setSel] = useState<string[]>([]), [said, setSaid] = useState(flash.said), [q, setQ] = useState(""), [selecting, setSelecting] = useState(false), [filter, setFilter] = useState<LibFilter>("all");
   useEffect(() => { flash.said = ""; }, []);
-  const all = libs.data ?? [], items = all.filter((l) => !q || (l.name + " " + l.paths.join(" ")).toLowerCase().includes(q.toLowerCase()));
+  const all = libs.data ?? [], counts = filterCounts(all), items = all.filter((l) => inFilter(l, filter) && (!q || (l.name + " " + l.paths.join(" ")).toLowerCase().includes(q.toLowerCase())));
   const picked = all.filter((l) => sel.includes(l.id)), none = picked.length === 0;
   const scan = async () => {
     setSaid("");
@@ -115,13 +118,16 @@ export function Libraries() {
   </>;
   return (
     <div className="stack">
-      <PageHead icon="i-library" title="Libraries" sub="The folders that are watched for videos.">
+      <PageHead icon="i-library" title="Libraries" sub="Folders that are watched for videos. Each one uses a workflow.">
         <button className="btn sm ghost" type="button" aria-pressed={selecting} onClick={() => (setSelecting(!selecting), setSel([]))}>{selecting ? "Done" : "Select"}</button>
         <Link className="btn sm primary" to="/libraries/new"><Icon id="i-plus" />Add library</Link>
       </PageHead>
       <Problem m={libs.data ? libs.error?.message : undefined} />
-      {/* one toolbar: while selecting, All and the bulk actions (on phones they sit under "...") ; filter on the right */}
+      {/* one toolbar: the filter buttons with their counts on the left, the search on the right; while selecting, All and the bulk actions (on phones they sit under "...") */}
       <div className="ltools" role="toolbar" aria-label="Libraries">
+        <div className="seg" role="group" aria-label="Show libraries">
+          {FILTERS.map(([k, t]) => <button key={k} type="button" aria-pressed={filter === k} onClick={() => setFilter(k)}>{t} · {count(counts[k])}</button>)}
+        </div>
         {selecting && <label className="hit selall"><input type="checkbox" aria-label="Select all libraries" checked={sel.length === all.length} onChange={(e) => setSel(e.target.checked ? all.map((l) => l.id) : [])} /><span className="sm">All</span></label>}
         {selecting && <span className="desk">{actions}</span>}
         {selecting && <details className="menu phone"><summary className="btn sm icon ghost" aria-label="More actions"><Icon id="i-more" /></summary><div className="pop" role="menu">{actions}</div></details>}
@@ -131,29 +137,44 @@ export function Libraries() {
       <p className="muted" role="status">{said}</p>
       {!libs.loaded ? <Skeleton rows={4} /> : libs.error && !libs.data ? <LoadFailed error={libs.error} reload={libs.reload} /> : all.length === 0 ? <Empty icon="i-library" text="No libraries yet. A library is a folder that is watched for videos."><Link className="btn primary" to="/libraries/new"><Icon id="i-plus" />Add library</Link></Empty>
         : items.length === 0 ? <div className="empty">No library matches.</div> : (
-        // No table header (U3, C1): a 40 px tile, the name and its folder, one chip line of facts, and one status pill.
-        <div className={"list rows" + (selecting ? " selecting" : "")}><table className="tbl">
-          <tbody>{items.map((l) => (
-            <tr key={l.id} className={sel.includes(l.id) ? "sel" : undefined}>
-              <td className="selc"><label className="hit"><input type="checkbox" aria-label={"Select " + l.name} checked={sel.includes(l.id)} onChange={(e) => setSel(e.target.checked ? [...sel, l.id] : sel.filter((x) => x !== l.id))} /></label></td>
-              <td className="tile"><span className="ltile" aria-hidden="true"><Icon id="i-library" /></span></td>
-              <td className="idc">
-                <div className="lname"><Link className="ttl" to={"/libraries/" + l.id}>{l.name}</Link><span className="lpath mono" title={l.paths.join(", ")}>{l.paths.join(", ")}</span></div>
-                <div className="chips">
-                  {noWf(l) ? <span className="mchip warnchip">No workflow · assign one to start it</span> : <Link className="mchip over" to={"/workflows/" + l.workflowId}>{l.workflowName}</Link>}
-                  {tag(l) && <span className="mchip" title={tag(l)}>{shortTag(tag(l))}</span>}
-                  <span className="mchip">{priorityWord(l.priority)} priority</span>
-                  <span className="mchip">{shareWait(l) ? "Waiting for " + shareName(l) + " to connect · " : ""}{count(l.counts.waiting)} waiting{paused(l) ? ", not converting" : ""}</span>
-                  <span className="mchip">{l.scan.lastScanAt ? "Scanned " + lastScan(l.scan.lastScanAt) : "Not scanned yet"}</span>
-                  <span className="mchip">{plural(l.counts.files, "file", "files")}</span>
-                  {l.counts.failed > 0 && <Link className="mchip errchip over" to={"/jobs?tab=failed&libraryId=" + encodeURIComponent(l.id)}>{count(l.counts.failed)} failed</Link>}
-                </div>
-              </td>
-              <td className="stc"><Status l={l} /></td>
-            </tr>))}
-          </tbody>
-        </table></div>)}
+        <ul className={"lcards" + (selecting ? " selecting" : "")} aria-label="Libraries">
+          {items.map((l) => <LibCard key={l.id} l={l} tag={tag(l)} selecting={selecting} checked={sel.includes(l.id)} onToggle={(on) => setSel(on ? [...sel, l.id] : sel.filter((x) => x !== l.id))} />)}
+        </ul>)}
     </div>
+  );
+}
+
+// One library as a card (design libraries-list): tile, name, a chip line of facts; on the right the status pill and a
+// second line; a thin bar along the bottom edge: the done share (none with no files).
+function LibCard({ l, tag, selecting, checked, onToggle }: { l: Library; tag: string; selecting: boolean; checked: boolean; onToggle: (on: boolean) => void }) {
+  const share = doneShare(l.counts), pct = share === null ? null : Math.round(share * 100);
+  return (
+    <li className={"lcard" + (checked ? " sel" : "")}>
+      {selecting && <label className="hit lcheck"><input type="checkbox" aria-label={"Select " + l.name} checked={checked} onChange={(e) => onToggle(e.target.checked)} /></label>}
+      <span className="ltile" aria-hidden="true"><Icon id="i-library" /></span>
+      <div className="lmain">
+        <div className="lname"><Link className="ttl" to={"/libraries/" + l.id}>{l.name}</Link></div>
+        <div className="chips">
+          <span className="mchip mono" title={l.paths.join(", ")}>{l.paths.join(", ")}</span>
+          {noWf(l) ? <span className="mchip warnchip">No workflow · assign one to start it</span> : <Link className="mchip over" to={"/workflows/" + l.workflowId}>{l.workflowName}</Link>}
+          {tag && <span className="mchip" title={tag}>{shortTag(tag)}</span>}
+          <span className="mchip">{plural(l.counts.files, "file", "files")}</span>
+          <span className="mchip">{shareWait(l) ? "Waiting for " + shareName(l) + " to connect · " : ""}{count(l.counts.waiting)} waiting{paused(l) ? ", not converting" : ""}</span>
+          <span className="mchip">{l.scan.lastScanAt ? "Scanned " + lastScan(l.scan.lastScanAt) : "Not scanned yet"}</span>
+          {l.bytes.freed > 0 && <span className="mchip"><Icon id="i-check-c" />{bytes(l.bytes.freed)} saved</span>}
+        </div>
+      </div>
+      <div className="lside">
+        <Status l={l} />
+        <div className="lnote">
+          {l.counts.failed > 0 && <Link className="over" to={"/jobs?tab=failed&libraryId=" + encodeURIComponent(l.id)}>{count(l.counts.failed)} failed</Link>}
+          {!l.writable && <Link to="/settings/health">How to fix it</Link>}
+          {l.priority !== 0 && <span>{priorityWord(l.priority)} priority</span>}
+          {l.enabled && !needsAttention(l) && l.counts.files > 0 && l.counts.waiting === 0 && l.counts.running === 0 && <span>Everything done</span>}
+        </div>
+      </div>
+      {pct !== null && <div className="lbar" role="progressbar" aria-label={l.name + ": " + pct + "% done"} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}><i style={{ width: pct + "%" }} /></div>}
+    </li>
   );
 }
 
