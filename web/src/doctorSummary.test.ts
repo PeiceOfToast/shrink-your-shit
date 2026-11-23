@@ -30,14 +30,16 @@ test("a library whose checks are all ok becomes one row, joined from the server'
   assert.equal(rows[0].detail, "Movies: readable and writable, enough free space, no hard-linked files.");
 });
 
-test("a failing check keeps its own row, and the other libraries still join", () => {
+test("a failing check keeps its own row under the joined ok row, in every library", () => {
   const rows = libraryRows([
     lib("library:1:access", "ok", "Movies: readable and writable."),
     lib("library:1:space", "bad", "Movies: 1 GB free; the largest video here needs 4 GB."),
     lib("library:2:access", "ok", "Kids: readable and writable."),
     lib("library:2:space", "ok", "Kids: enough free space."),
   ]);
-  assert.deepEqual(rows.map((r) => r.id), ["library:1:access", "library:1:space", "library:2:ok"]);
+  assert.deepEqual(rows.map((r) => r.id), ["library:1:ok", "library:1:space", "library:2:ok"]);
+  assert.equal(rows[0].detail, "Movies: readable and writable.");
+  assert.equal(rows[1].status, "bad");
   assert.equal(rows[2].detail, "Kids: readable and writable, enough free space.");
 });
 

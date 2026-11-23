@@ -9,8 +9,9 @@ export function healthSummary(checks: { status: string }[]): { tone: HealthTone;
   return { tone: fails ? "bad" : "warn", text: parts.join(", ") + "." };
 }
 
-// Libraries: a library whose checks are all ok becomes one row, joined from the server's own ok details
-// ("<name>: readable and writable." and so on). If the names don't line up, every check keeps its own row.
+// Libraries: a library's ok checks always become one row, joined from the server's own ok details
+// ("<name>: readable and writable." and so on). A failing or warning check keeps its own row, after the joined one,
+// with its Fix. If the names don't line up, the ok checks keep one row each.
 type Check = { id: string; label: string; status: "ok" | "warn" | "bad" | "absent"; detail: string; hint: string | null };
 const libOf = (c: Check) => c.id.split(":").slice(0, 2).join(":");
 export function libraryRows(cs: Check[]): Check[] {
@@ -21,10 +22,13 @@ export function libraryRows(cs: Check[]): Check[] {
     if (done.has(lib)) continue;
     done.add(lib);
     const mine = cs.filter((x) => libOf(x) === lib);
-    const name = mine[0].detail.slice(0, Math.max(0, mine[0].detail.indexOf(": ")));
-    if (mine.length < 2 || !mine.every((x) => x.status === "ok" && x.detail.startsWith(name + ": "))) { out.push(...mine); continue; }
-    const clauses = mine.map((x) => x.detail.slice(name.length + 2).replace(/\.$/, "")).join(", ");
-    out.push({ id: lib + ":ok", label: mine[0].label, status: "ok", detail: name + ": " + clauses + ".", hint: null });
+    const oks = mine.filter((x) => x.status === "ok"), rest = mine.filter((x) => x.status !== "ok");
+    const name = oks.length ? oks[0].detail.slice(0, Math.max(0, oks[0].detail.indexOf(": "))) : "";
+    if (oks.length && oks.every((x) => x.detail.startsWith(name + ": "))) {
+      const clauses = oks.map((x) => x.detail.slice(name.length + 2).replace(/\.$/, "")).join(", ");
+      out.push({ id: lib + ":ok", label: oks[0].label, status: "ok", detail: name + ": " + clauses + ".", hint: null });
+    } else out.push(...oks); // one ok check, or names that don't line up: one row per check
+    out.push(...rest); // a warning or failure keeps its own row, with its Fix
   }
   return out;
 }
