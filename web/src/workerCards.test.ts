@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { encoderChip, formatsChip, graphicsLine, systemLine, usageBars, workerBars } from "./workerCards.ts";
+import { encoderChip, formatsChip, graphicsChips, graphicsLine, systemLine, usageBars, workerBars } from "./workerCards.ts";
 
 test("graphicsLine: a named card with memory", () => {
   assert.equal(graphicsLine([{ model: "NVIDIA", vram: "8.0 GB" }]), "NVIDIA · 8.0 GB");
@@ -60,4 +60,17 @@ test("workerBars: a number above 0 shows the bar with no card listed (M5a fix 1)
 test("workerBars: no number, no Graphics bar, even with a card listed", () => {
   assert.deepEqual(workerBars(30, [{}], [{ utilPercent: null }]), [{ label: "Processor", pct: 30 }]);
   assert.deepEqual(workerBars(30, [], []), [{ label: "Processor", pct: 30 }]);
+});
+
+test("graphicsChips: no vendor found gives one none-found chip", () => {
+  const none = [{ text: "Graphics card · none found", tone: "muted" }];
+  assert.deepEqual(graphicsChips([{ name: "NVIDIA", lit: false, primary: false }, { name: "AMD", lit: false, primary: false }]), none);
+  assert.deepEqual(graphicsChips([]), none);
+});
+
+test("graphicsChips: a found vendor gives its chip and no none-found chip", () => {
+  assert.deepEqual(graphicsChips([{ name: "NVIDIA", lit: true, primary: true }, { name: "AMD", lit: false, primary: false }]),
+    [{ text: "NVIDIA · works · used first", tone: "accent" }]);
+  assert.deepEqual(graphicsChips([{ name: "NVIDIA", lit: true, primary: false }, { name: "AMD", lit: true, primary: false }]),
+    [{ text: "NVIDIA · works", tone: "ok" }, { text: "AMD · works", tone: "ok" }]);
 });

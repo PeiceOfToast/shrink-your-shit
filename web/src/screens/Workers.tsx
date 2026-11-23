@@ -19,7 +19,7 @@ import { allWorkers, allowJoin, denyJoin, dismissJoin, newPairing, type Pairing,
 import type { Capability, JoinRequest, Worker } from "../types/v2";
 import type { JobItem } from "../types/jobs";
 import { FileName } from "../FileName";
-import { OS_NAMES, encoderChip, formatsChip, graphicsLine, systemLine, workerBars } from "../workerCards";
+import { OS_NAMES, encoderChip, formatsChip, graphicsChips, graphicsLine, systemLine, workerBars } from "../workerCards";
 import { runFields } from "../jobCards";
 
 // review 61dc891 P2-1: only what the server reports (a remote worker may send no OS or host): no guess, no stray dot
@@ -312,8 +312,20 @@ function MiniJob({ j }: { j: JobItem }) {
 
 // M4: the encoders as chips (what passed, which one is used first) and the one control that changes it, behind
 // "Change encoder" so the choice is not on the card's face. The same EncoderCards as before, same API call.
-function EncoderChips({ w, reload }: { w: Worker; reload: () => void }) {
+export function EncoderChips({ w, reload, wizard = false }: { w: Worker; reload: () => void; wizard?: boolean }) {
   const [open, setOpen] = useState(false), cs = cards(w);
+  if (wizard) { // M5f fix 2 (design start-step3): Processor, its codec chip, the graphics chips, then Change encoder as a link
+    const cpu = cs.find((c) => !c.gpu)!, p = encoderChip(cpu.name, cpu.lit, cpu.lit && cpu.primary), fmts = cpu.lit ? formatsChip(cpu.formats) : "";
+    return <div>
+      <ul className="ech">
+        <li><span className={"chip-enc " + p.tone}>{p.text}</span></li>
+        {fmts && <li><span className="chip-enc ok">{fmts}</span></li>}
+        {graphicsChips(cs.filter((c) => c.gpu)).map((g) => <li key={g.text}><span className={"chip-enc " + g.tone}>{g.text}</span></li>)}
+        <li><button className="linkbtn enc-change" type="button" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "Done" : "Change encoder"}</button></li>
+      </ul>
+      {open && <EncoderCards w={w} reload={reload} />}
+    </div>;
+  }
   return <div>
     <div className="ec-hd"><h4 className="sm muted ec-h">Encoders</h4>
       <button className="btn sm ghost" type="button" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "Done" : "Change encoder"}</button></div>

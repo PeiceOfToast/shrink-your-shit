@@ -1072,6 +1072,27 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 .mjob-bar{position:absolute;left:0;right:0;bottom:0;height:3px;background:var(--raised)}
 .mjob-bar i{display:block;height:100%;background:var(--accent)}
 @media (max-width:479px){.mjob{grid-template-columns:auto minmax(0,1fr)}.mjob .pill{grid-column:2;justify-self:start}}
+/* First run (Start.tsx): the step row, and the finished-step cards centred */
+.steps.first-run{display:flex;flex-wrap:wrap;justify-content:center;gap:8px 28px;list-style:none;margin:0;padding:0}
+.steps.first-run li{display:flex;align-items:center;gap:8px;font-size:var(--fs-sm,13px);color:var(--text-2)}
+.steps.first-run li.current{color:var(--text);font-weight:600}
+.steps.first-run li.done{color:var(--success-text)}
+.steps.first-run .dot{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;border:1px solid var(--border-strong);font-size:12px}
+.steps.first-run li.current .dot{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.steps.first-run li.done .dot{border-color:var(--success-text);color:var(--success-text)}
+.done-card{text-align:center}
+/* M5f fix 2 (design start-step1..3): the step row is a full-width line of three steps, no box; each step's top rule shows its state */
+.steps.first-run{display:flex;justify-content:stretch;gap:12px;width:100%;border:0;background:none;padding:0;margin:0}
+.steps.first-run li{flex:1 1 0;min-width:0;justify-content:center;flex-wrap:wrap;text-align:center;border-top:2px solid var(--border);padding-top:10px}
+.steps.first-run li.done{border-top-color:var(--success-text)}
+.steps.first-run li.current{border-top-color:var(--accent)}
+/* M5f fix 3: narrow screens let each step take its own width, so 1 and 2 share a line and 3 wraps (design start-step1-390) */
+@media (max-width:479px){.steps.first-run li{flex:0 1 auto}}
+.done-card a.muted,.done-card .linkbtn{color:var(--text-2);text-decoration:none;font-size:var(--fs-sm)}
+.done-card a.muted:hover,.done-card .linkbtn:hover{text-decoration:underline}
+.linkbtn.enc-change{font-size:var(--fs-sm);color:var(--text-2);text-decoration:none}
+.linkbtn.enc-change:hover{text-decoration:underline}
+.radio.top{align-items:flex-start;padding-top:10px}
 
 /* M5d fix 2: the log rows open with a chevron; the header's saving stays on one line; the File card stacks at phones;
    the back arrow is for narrow widths only; the failed check card is a title-bar card, not a note with a red edge */

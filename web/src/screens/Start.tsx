@@ -8,7 +8,7 @@ import { PageHead } from "../PageHead";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "../Icon";
 import { SignedOut, failed, type Answer } from "../api";
-import { addLibrary, checkFolder, getSettings, listLibraries, listWorkers, listWorkflows, patchSettings, scanLibrary, shrunk, startSimpleWorkflow, startWorker } from "../libraryApi";
+import { addLibrary, checkFolder, getSettings, listLibraries, listWorkflows, patchSettings, scanLibrary, shrunk, startSimpleWorkflow } from "../libraryApi";
 import { Link, navigate } from "../router";
 import { useData } from "../useData";
 import type { FirstRunSettings } from "../types/v1";
@@ -16,6 +16,11 @@ import { FirstFive, FolderField, suggestName, useFolder } from "./Libraries";
 import { Browse } from "../FolderPicker";
 import { START_SIMPLE } from "./Workflows";
 import { Enroll, WorkerHome, useSetup } from "./Enroll";
+import { EncoderChips } from "./Workers";
+import { workerAction, workersPage } from "../workersApi";
+import { bytes } from "../format";
+import { systemLine } from "../workerCards";
+import { stepStates, videoSuffix } from "../startSteps";
 
 type Kept = NonNullable<FirstRunSettings["firstRunLibrary"]>;
 // Runs one request; its error message goes to `onError`. False when it failed (or the user is signed out).
@@ -33,19 +38,19 @@ export function Start() {
   const s = st.data!, lib = libs.data?.[0], kept = s.firstRunLibrary;
   const wfName = lib && (wfs.data?.find((w) => w.id === lib.flowId)?.name ?? lib.settingLabel);
   const refresh = () => (st.reload(), libs.reload(), wfs.reload());
-  const step = editing || (!lib && !kept) ? 1 : !lib ? 2 : 3, done = step - 1;
+  const step = editing || (!lib && !kept) ? 1 : !lib ? 2 : 3;
   if (s.firstRunDone) return (
     <div className="stack"><PageHead title="Set up Shrink Your Shit" />
       <div className="card"><div className="bd"><p>Setup is done. <Link to="/">Go to the Dashboard</Link>.</p></div></div></div>);
   return (
     <div className="stack" style={{ maxWidth: 880 }}>
-      <PageHead title="Set up Shrink Your Shit"><span className="muted">{done} of 3 done</span></PageHead>
-      <p className="muted">Three short steps. Each is saved as you go. Nothing converts until you start a worker. To see whether this computer is ready first, <Link to="/settings/health">run the health checks</Link>.</p>
-      <div className="bar" role="progressbar" aria-label="Setup" aria-valuemin={0} aria-valuemax={3} aria-valuenow={done}><i style={{ width: (100 * done) / 3 + "%" }} /></div>
+      <PageHead title="Set up Shrink Your Shit" />
+      <p className="muted">Three short steps. Each is saved as you go. Nothing converts until you start a worker.</p>
+      <Steps current={step} />
       {error && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{error}</span></p>}
-      {step > 1 && <Done n={1} what="Library" text={lib ? lib.name + " · " + lib.path : kept!.name + " · " + kept!.path}
-        change={lib ? <Link to={"/libraries/" + lib.id}>Change</Link> : <button className="btn sm ghost" type="button" onClick={() => setEditing(true)}>Change</button>} />}
-      {step > 2 && <Done n={2} what="Workflow" text={(wfName ?? "") + " (Start Simple)"} change={lib && <Link to={"/workflows/" + lib.flowId}>Change</Link>} />}
+      {step > 1 && <Done n={1} what={lib ? lib.name : kept!.name} text={lib ? lib.path + videoSuffix(lib.status.videos) : kept!.path}
+        change={lib ? <Link className="muted" to={"/libraries/" + lib.id}>Change</Link> : <button className="linkbtn muted" type="button" onClick={() => setEditing(true)}>Change</button>} />}
+      {step > 2 && <Done n={2} what={wfName ?? ""} text={lib!.settingLabel} change={lib && <Link className="muted" to={"/workflows/" + lib.flowId}>Change</Link>} />}
       {step === 1 && <StepLibrary taken={(libs.data ?? []).map((x) => x.name)} kept={kept} onDone={async (v) => { setError(""); if (await ok(patchSettings({ firstRunLibrary: v, firstRunStep: 2 }), setError)) (setEditing(false), refresh()); }} />}
       {step === 2 && <StepWorkflow kept={kept!} onDone={async () => { await ok(patchSettings({ firstRunStep: 3 }), setError); refresh(); }} />}
       {step < 2 && <Later n={2} name="Create a workflow" />}
@@ -54,8 +59,29 @@ export function Start() {
   );
 }
 
+// The three steps as a row (design start-step1..3); the steps before the one in front show a check.
+const STEP_NAMES = ["Add a library", "Create a workflow", "Your worker"];
+function Steps({ current }: { current: number }) {
+  return (
+    <ol className="steps first-run" aria-label="Setup steps">
+      {stepStates(current).map((st, i) => (
+        <li key={i} className={st} aria-current={st === "current" ? "step" : undefined}>
+          <span className="dot">{st === "done" ? <Icon id="i-check-c" /> : i + 1}</span><span>{STEP_NAMES[i]}</span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+// A finished step, centred as the design has it: "Done: n · name", its detail, and Change in the same place on each card.
 function Done({ n, what, text, change }: { n: number; what: string; text: string; change?: ReactNode }) {
-  return <section className="card"><div className="bd row" style={{ gap: 8 }}><span className="st ok"><Icon id="i-check-c" /><span>Done: {n} · {what}</span></span><span>{text}</span><span className="sp" />{change}</div></section>;
+  return (
+    <section className="card done-card"><div className="bd stack" style={{ alignItems: "center", gap: 4 }}>
+      <span className="st ok"><Icon id="i-check-c" /><span>Done: {n} · {what}</span></span>
+      <span className="muted">{text}</span>
+      {change && <span className="sm">{change}</span>}
+    </div></section>
+  );
 }
 function Later({ n, name }: { n: number; name: string }) {
   return <section className="card" aria-disabled="true"><div className="hd"><h2 className="muted">{n} · {name}</h2></div></section>;
@@ -127,21 +153,21 @@ function StepWorkflow({ kept, onDone }: { kept: Kept; onDone: () => void }) {
     <section className="card" aria-labelledby="s2-h">
       <div className="hd"><h2 id="s2-h">2 · Create a workflow</h2></div>
       <form className="bd stack" onSubmit={(e) => (e.preventDefault(), save())}>
-        <p className="muted">What happens to each video in {kept.name}.</p>
+        <p className="muted">What happens to each file. Start simple; you can change every step later.</p>
         <div className="field"><label htmlFor="s2-name">Name</label><input id="s2-name" className="input" value={name} onChange={(e) => setName(e.target.value)} /></div>
         <fieldset className="stack choice" style={{ border: 0, padding: 0, margin: 0 }}>
           <legend className="lab">How to start</legend>
-          <div className="radio"><input type="radio" id="s2-simple" name="how" checked readOnly />
+          <div className="radio top"><input type="radio" id="s2-simple" name="how" checked readOnly />
             <div style={{ minWidth: 0, flex: 1 }}><label htmlFor="s2-simple">Start Simple: Shrink videos</label>
               <div className="hint" style={{ fontSize: "var(--fs)" }}>{START_SIMPLE}</div></div></div>
         </fieldset>
         <fieldset className="stack choice" style={{ border: 0, padding: 0, margin: 0 }}>
           <legend className="lab">Where new files go</legend>
-          <div className="radio"><input type="radio" id="s2-next" name="where" checked={!one} onChange={() => setOne(false)} />
+          <div className="radio top"><input type="radio" id="s2-next" name="where" checked={!one} onChange={() => setOne(false)} />
             <div style={{ minWidth: 0, flex: 1 }}><label htmlFor="s2-next">Next to each library</label>
               <div className="hint">{NEXT_HINT}</div>
               {!one && <div className="mono sm" style={{ overflowWrap: "anywhere" }}>{kept.path} → {shrunk(kept.path)}</div>}</div></div>
-          <div className="radio"><input type="radio" id="s2-one" name="where" checked={one} onChange={() => setOne(true)} />
+          <div className="radio top"><input type="radio" id="s2-one" name="where" checked={one} onChange={() => setOne(true)} />
             <div style={{ minWidth: 0, flex: 1 }}><label htmlFor="s2-one">One folder for all</label>
               <div className="hint">{ONE_HINT}</div></div></div>
           {one && noNext && <p className="st warn" role="note"><Icon id="i-alert" /><span>{nextLine(kept.path, noNext)}</span></p>}
@@ -152,21 +178,22 @@ function StepWorkflow({ kept, onDone }: { kept: Kept; onDone: () => void }) {
           <span className="hint">Your originals stay where they are. You can change this and every other choice later.</span>
         </fieldset>
         {error && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{error}</span></p>}
-        <div className="row"><button className="btn primary" type="submit" disabled={busy}>{busy ? "Saving…" : "Save and use it"}</button></div>
+        <div className="row" style={{ gap: 8 }}><button className="btn primary" type="submit" disabled={busy}>{busy ? "Saving…" : "Save and use it"}</button>
+          <span className="sm muted">You can open it on the Workflows page any time.</span></div>
       </form>
     </section>
   );
 }
 
 function StepWorker({ libraryId }: { libraryId: string }) {
-  const ws = useData(listWorkers, []);
+  const ws = useData(workersPage, []);
   const [error, setError] = useState(""), [busy, setBusy] = useState(false);
-  const w = ws.data?.find((x) => x.id === "this") ?? ws.data?.[0];
+  const w = ws.data?.items.find((x) => x.kind === "local") ?? ws.data?.items[0];
   const finish = async (start: boolean) => {
     setError(""); setBusy(true);
     try {
       if (!(await ok(scanLibrary(libraryId), setError))) return; // both buttons scan (reading only), as v1's first run
-      if (start && w && !(await ok(startWorker(w.id), setError))) return;
+      if (start && w && !(await ok(workerAction(w.id, "start"), setError))) return;
       if (await ok(patchSettings({ firstRunDone: true, firstRunStep: 4 }), setError)) navigate("/");
     } finally { setBusy(false); }
   };
@@ -174,11 +201,10 @@ function StepWorker({ libraryId }: { libraryId: string }) {
     <section className="card" aria-labelledby="s3-h">
       <div className="hd"><h2 id="s3-h">3 · Your worker</h2></div>
       <div className="bd stack">
-        <p>{w ? w.name : "This computer"} is already set up as a worker. Nothing to do.</p>
+        <p>{w ? "This computer is set up as a worker. Here is what it found." : "This computer is set up as a worker. Nothing to do."}</p>
         {w && <dl className="kv">
-          <dt>Computer</dt><dd>{w.host}</dd>
-          <dt>Files at once</dt><dd>{w.filesAtOnce}</dd>
-          <dt>Graphics card</dt><dd>{w.gpu.found ? (w.gpu.vendor ? w.gpu.vendor.toUpperCase() + " found" : "Found") + ", not used for converting yet" : "None found. That is fine: the processor converts."}</dd>
+          <dt>System</dt><dd>{systemLine(w.host, w.os, w.arch, w.live.memTotalBytes ? bytes(w.live.memTotalBytes) : "") || "—"}</dd>
+          <dt>Encoders</dt><dd><EncoderChips w={w} reload={ws.reload} wizard /></dd>
         </dl>}
         {error && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{error}</span></p>}
         <div className="row"><button className="btn primary" type="button" disabled={busy} onClick={() => finish(true)}><Icon id="i-play" />Start the worker</button>
