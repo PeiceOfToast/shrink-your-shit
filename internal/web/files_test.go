@@ -72,7 +72,7 @@ func TestFilesView(t *testing.T) {
 	if f, _ := p["flow"].(map[string]any); f == nil || f["name"] != "Movies" {
 		t.Errorf("flow %v", p["flow"])
 	}
-	if _, items := get("show=failed"); len(items) != 1 || items[0]["title"] != "Converting did not finish" || items[0]["attempts"] != 1.0 {
+	if _, items := get("show=failed"); len(items) != 1 || items[0]["title"] != "Converting did not finish" || items[0]["attempts"] != 1.0 || items[0]["finishedAt"] == "" || items[0]["finishedAt"] == nil { // when it failed
 		t.Errorf("failed %v", items)
 	}
 	if _, items := get("show=unprocessed"); len(items) != 1 || items[0]["status"] != "waiting" || items[0]["codec"] != nil || items[0]["folder"] != "Season 1" {
