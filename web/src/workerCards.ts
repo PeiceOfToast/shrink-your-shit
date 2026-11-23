@@ -26,10 +26,11 @@ export function usageBars(cpuPercent: number | null | undefined, gpuPercent: num
   return out;
 }
 
-// The usage bars from the live reading: the Graphics card bar follows the first GPU's utilisation, whether or not the
-// server lists a card (the card list stays empty until V4), so a value the server sent always shows.
-export function workerBars(cpuPercent: number | null | undefined, liveGpu: { utilPercent: number | null }[]): { label: string; pct: number }[] {
-  return usageBars(cpuPercent, liveGpu[0]?.utilPercent ?? null);
+// The usage bars from the live reading. The Graphics card bar needs a number, and it shows when the worker lists a card
+// (w.gpus, empty until V4) or the reading is above 0. A 0 with no listed card is no GPU reading, so no bar.
+export function workerBars(cpuPercent: number | null | undefined, listedGpus: unknown[], liveGpu: { utilPercent: number | null }[]): { label: string; pct: number }[] {
+  const util = liveGpu[0]?.utilPercent ?? null;
+  return usageBars(cpuPercent, util != null && (listedGpus.length > 0 || util > 0) ? util : null);
 }
 
 // One encoder type's chip: "Processor · works · used first" (accent), "Processor · works" (green), "NVIDIA · not found" (muted).

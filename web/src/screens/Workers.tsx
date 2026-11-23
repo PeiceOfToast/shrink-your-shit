@@ -339,8 +339,8 @@ function Live({ w }: { w: Worker }) { // the detail page's live line: only the f
 // M4: the card's facts as a key-value list, with the usage bars under it, and the encoders beside it. Every value is one
 // the server sent; a missing one drops its row.
 function WorkerFacts({ w, reload, jobById }: { w: Worker; reload: () => void; jobById: Record<string, JobItem> }) {
-  // the Graphics card bar shows when the live reading has a value (M5a item 7); the card list is not required (empty until V4)
-  const [t] = words(w), l = w.live, gpu = l.gpu[0]?.utilPercent ?? null, bars = workerBars(l.cpuPercent, l.gpu);
+  // the Graphics card bar: see workerBars (M5a item 7, decision b)
+  const [t] = words(w), l = w.live, gpu = l.gpu[0]?.utilPercent ?? null, bars = workerBars(l.cpuPercent, w.gpus, l.gpu);
   return <div className="wbody">
     <div className="wleft">
       <dl className="kv">

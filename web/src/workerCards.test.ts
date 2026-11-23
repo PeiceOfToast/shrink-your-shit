@@ -45,12 +45,19 @@ test("formatsChip: only formats that passed; empty when none", () => {
   assert.equal(formatsChip([["H.264", false]]), "");
 });
 
-test("workerBars: the Graphics card bar shows from the live reading, with no card listed (M5a fix 1)", () => {
-  assert.deepEqual(workerBars(30, [{ utilPercent: 40 }]), [{ label: "Processor", pct: 30 }, { label: "Graphics card", pct: 40 }]);
-  assert.deepEqual(workerBars(null, [{ utilPercent: 0 }]), [{ label: "Graphics card", pct: 0 }]);
+test("workerBars: a 0 with no listed card is no GPU reading, so no Graphics bar", () => {
+  assert.deepEqual(workerBars(30, [], [{ utilPercent: 0 }]), [{ label: "Processor", pct: 30 }]);
 });
 
-test("workerBars: no GPU reading, no Graphics bar", () => {
-  assert.deepEqual(workerBars(30, [{ utilPercent: null }]), [{ label: "Processor", pct: 30 }]);
-  assert.deepEqual(workerBars(30, []), [{ label: "Processor", pct: 30 }]);
+test("workerBars: a 0 on a listed card is a reading, so the bar shows", () => {
+  assert.deepEqual(workerBars(30, [{}], [{ utilPercent: 0 }]), [{ label: "Processor", pct: 30 }, { label: "Graphics card", pct: 0 }]);
+});
+
+test("workerBars: a number above 0 shows the bar with no card listed (M5a fix 1)", () => {
+  assert.deepEqual(workerBars(30, [], [{ utilPercent: 40 }]), [{ label: "Processor", pct: 30 }, { label: "Graphics card", pct: 40 }]);
+});
+
+test("workerBars: no number, no Graphics bar, even with a card listed", () => {
+  assert.deepEqual(workerBars(30, [{}], [{ utilPercent: null }]), [{ label: "Processor", pct: 30 }]);
+  assert.deepEqual(workerBars(30, [], []), [{ label: "Processor", pct: 30 }]);
 });
