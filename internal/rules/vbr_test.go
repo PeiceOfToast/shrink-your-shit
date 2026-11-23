@@ -195,3 +195,28 @@ func TestPeakLimitBindsAndAverageIsMax(t *testing.T) {
 		}
 	}
 }
+
+// Queue row (VP9 VBR cap, s16): a VBR max must reach ffmpeg as a ceiling. VP9 carries it as -b:v beside -crf
+// (constrained quality); H.264 carries it as -maxrate, with -bufsize a fifth of the max (see vbrBufsizeKbps).
+func TestVBRMaxReachesFFmpegAsACeiling(t *testing.T) {
+	SetAvailableFormats(map[string]bool{"libx264": true, "libvpx-vp9": true})
+	defer SetAvailableFormats(nil)
+	s := DefaultSelectors(1)
+	s.Format, s.FileType, s.Audio, s.Resolution, s.Speed = "vp9", "webm", "stereo_opus", "720", "slower"
+	s.RateControl, s.VBRMaxKbps = "vbr", 4000
+	if err := s.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	vp9 := strings.Join(s.Template().Compile(h264(1280, 720, 8000)).FFmpegArgs("in.mkv", "out.webm"), " ")
+	if !strings.Contains(vp9, "-crf:v:0 33 -b:v 3200k") || strings.Contains(vp9, "-maxrate") {
+		t.Errorf("VP9 VBR max 4000: want -crf with -b:v 3200k as the cap, no -maxrate: %s", vp9)
+	}
+	s.Format, s.FileType, s.Speed = "h264", "mkv", "normal"
+	if err := s.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	h := strings.Join(s.Template().Compile(h264(1280, 720, 8000)).FFmpegArgs("in.mkv", "out.mkv"), " ")
+	if !strings.Contains(h, "-maxrate:v:0 3200k -bufsize:v:0 800k") || strings.Contains(h, " -b:v:0 ") {
+		t.Errorf("H.264 VBR max 4000: want -maxrate 3200k and -bufsize 800k, no -b:v: %s", h)
+	}
+}
