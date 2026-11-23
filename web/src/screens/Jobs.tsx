@@ -207,13 +207,13 @@ export function Jobs() {
       </div>}
       {/* parity 11-19 #2 (G4): pick a library here too; it sets the same ?libraryId= as "See its jobs", and the chip above stays.
           One joined button per library (aria-pressed on the chosen one); hidden on the empty state and while loading or on error.
-          Its own row under the tabs (design jobs-running): the filter left, the search right. */}
+          An id no library has shows the chip only, with no button row. Its own row under the tabs (design jobs-running): the filter left, the search right. */}
       <div className="lfilt">
         <span className="filt">{tab === "completed" && <span className="seg" role="group" aria-label="Original file">
           <button type="button" aria-pressed={!kept && !left} onClick={() => navigate(query("completed", library, ""))}>All</button>
           <button type="button" aria-pressed={kept} onClick={() => navigate(query("completed", library, kept ? "" : "kept"))}>{TRASH_WORDS}</button>
           <button type="button" aria-pressed={left} onClick={() => navigate(query("completed", library, left ? "" : "left"))}>{LEFT_WORDS}</button></span>}
-        {!!page.data && !page.error && !!libs.data && libs.data.length > 1 && (items.length > 0 || !!library) && <span className="seg" role="group" aria-label="Library">
+        {!!page.data && !page.error && !!libs.data && libs.data.length > 1 && (library ? libs.data.some((l) => l.id === library) : items.length > 0) && <span className="seg" role="group" aria-label="Library">
           <button type="button" aria-pressed={!library} onClick={() => navigate(query(tab, ""))}>All libraries</button>
           {libs.data.map((l) => <button key={l.id} type="button" aria-pressed={library === l.id} onClick={() => navigate(query(tab, l.id))}>{l.name}</button>)}
         </span>}</span>
