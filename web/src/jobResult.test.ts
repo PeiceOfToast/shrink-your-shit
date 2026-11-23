@@ -48,6 +48,7 @@ test("the codec reads the same on both sides: H.264, not H264", () => {
 
 test("workerLabel: the built-in worker is This computer, another worker keeps its name, none is a dash", () => {
   assert.equal(workerLabel("builtin"), "This computer");
+  assert.equal(workerLabel("builtin-2"), "This computer");
   assert.equal(workerLabel("nas-1"), "nas-1");
   assert.equal(workerLabel(null), "—");
   assert.equal(workerLabel(undefined), "—");

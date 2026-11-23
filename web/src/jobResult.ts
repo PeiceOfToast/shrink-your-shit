@@ -26,7 +26,8 @@ export const codecName = (codec: string): string => codec.toUpperCase().replace(
 export const newFileVideo = (line: string): string => line.split(",")[0].replace(/^\w+/, codecName);
 
 // The worker as the drawer says it: the built-in worker is "This computer" (the Workers screen's wording); a job with no worker shows a dash.
-export const workerLabel = (w: string | null | undefined): string => (!w ? "—" : w === "builtin" ? "This computer" : w);
+// The built-in pool's id starts "builtin" (builtin, builtin-2, ...; the server's workerName rule in internal/web/system.go:104).
+export const workerLabel = (w: string | null | undefined): string => (!w ? "—" : w.startsWith("builtin") ? "This computer" : w);
 
 // The Workflow line's rule: a rule is named only when the job's own workflow decided it (step N of its workflow, <name>).
 export const ruleName = (jobWorkflow: { id: string } | null | undefined, name: string | null | undefined): string | null => (jobWorkflow && name ? name : null);

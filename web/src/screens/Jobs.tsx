@@ -238,7 +238,7 @@ export function Jobs() {
               {j.folder !== "." && <span className="mchip">{j.folder}</span>}
               {j.pin && <span className="mchip prio">{j.pin === "first" ? "First" : "Last"}</span>}
               {tab === "waiting" && (j.position != null ? <span className="mchip">Place {j.position} in the queue</span> : <span className="mchip">Not taken now</span>)}
-              {j.worker && <span className="mchip">{j.worker === "builtin" ? "This computer" : j.worker}</span>}
+              {j.worker && <span className="mchip">{workerLabel(j.worker)}</span>}
             </div>);
             return (
             <li key={j.id} className={"lcard" + (checked ? " sel" : "")}>
