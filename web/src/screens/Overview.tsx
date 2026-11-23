@@ -248,7 +248,7 @@ export function Overview() {
         <ul className="lcards gs" aria-label="Get started">
           <li className="lcard"><span className="ltile" aria-hidden="true"><Icon id="i-library" /></span>
             <div className="lmain"><div className="lname"><span className="ttl">Add your first library</span></div><span className="muted sm">The folder with your videos. Nothing is converted by looking.</span></div>
-            <div className="lside">{side(0, "/libraries/new", "Set up", steps[1], 2)}</div></li>
+            <div className="lside">{side(0, "/libraries/new", "Set up")}</div></li>
           <li className="lcard"><span className="ltile" aria-hidden="true"><Icon id="i-workflow" /></span>
             <div className="lmain"><div className="lname"><span className="ttl">Publish a workflow</span></div><span className="muted sm">"Shrink videos": HEVC, balanced quality, same resolution. A library needs one published.</span></div>
             <div className="lside">{side(1, "/workflows", "Open workflows")}</div></li>

@@ -327,13 +327,10 @@ function EncoderChips({ w, reload }: { w: Worker; reload: () => void }) {
 
 // the graphics cards with their memory as text (the helper takes text, so it stays free of imports)
 const gpuRows = (w: Worker) => w.gpus.map((g) => ({ model: g.model, vram: g.vramBytes ? bytes(g.vramBytes) : "" }));
-// a stopped or offline worker's readings are not its live load: CPU and GPU show — (QA 11-23: a paused worker showed a CPU %)
-const measuring = (w: Worker) => w.status !== "paused" && w.status !== "offline";
 function Live({ w }: { w: Worker }) { // the detail page's live line: only the figures the server sends; the graphics card's name is on its own row
-  const l = w.live, out: string[] = [], on = measuring(w);
-  if (on && l.cpuPercent != null) out.push("CPU " + Math.round(l.cpuPercent) + "%");
+  const l = w.live, out: string[] = [];
+  if (l.cpuPercent != null) out.push("CPU " + Math.round(l.cpuPercent) + "%");
   if (l.memUsedBytes != null && l.memTotalBytes) out.push("Memory " + bytes(l.memUsedBytes) + " of " + bytes(l.memTotalBytes));
-  if (!on) return <p className="sm">{[...out, "CPU —", "GPU —"].join(" · ")}</p>;
   const g = l.gpu[0]?.utilPercent; // workshop #443: one entry, the busiest GPU; [] when unreadable or remote
   if (!out.length && g == null) return null; // a GPU reading shows even before the first CPU reading (review #444)
   return <p className="sm">{out.length > 0 && out.join(" · ") + " · "}GPU {g == null ? <NoGpu /> : <GpuPct n={g} />}</p>;
@@ -343,7 +340,7 @@ function Live({ w }: { w: Worker }) { // the detail page's live line: only the f
 // the server sent; a missing one drops its row.
 function WorkerFacts({ w, reload, jobById }: { w: Worker; reload: () => void; jobById: Record<string, JobItem> }) {
   // the Graphics card bar: see workerBars (M5a item 7, decision b)
-  const [t] = words(w), l = w.live, on = measuring(w), gpu = on ? l.gpu[0]?.utilPercent ?? null : null, bars = workerBars(on ? l.cpuPercent : null, w.gpus, on ? l.gpu : []);
+  const [t] = words(w), l = w.live, gpu = l.gpu[0]?.utilPercent ?? null, bars = workerBars(l.cpuPercent, w.gpus, l.gpu);
   return <div className="wbody">
     <div className="wleft">
       <dl className="kv">

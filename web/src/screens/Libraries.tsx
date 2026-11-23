@@ -314,7 +314,7 @@ export function FirstFive({ f, scanned = false }: { f: ReturnType<typeof useFold
 export function WorkflowField({ value, onChange, workflows, self, none }: { value: string; onChange: (id: string) => void; workflows?: WorkflowChoice[]; self?: string; none?: boolean }) {
   if (!workflows) return <div className="field"><span className="lab">Workflow</span><span className="muted">Loading…</span></div>;
   const others = (workflows.find((w) => w.id === value)?.usedBy ?? []).filter((n) => n !== self);
-  const hint = value === "0" ? "The library won't start until you assign a workflow." : !workflows.some((w) => w.usable) ? "Publish a workflow before a library can use it." : others.length ? "Used by " + names(others) + "." : "No other library uses it.";
+  const hint = value === "0" ? "Saved with no workflow, so it won't scan or convert until you assign one." :!workflows.some((w) => w.usable) ? "Publish a workflow before a library can use it." : others.length ? "Used by " + names(others) + "." : "No other library uses it.";
   return (
     <div className="field"><label htmlFor="lib-wf">Workflow</label>
       {workflows.length === 0 && !none ? <span>No workflows yet. <Link to="/workflows">Make one in Workflows</Link>, then come back.</span> : <>
@@ -345,7 +345,7 @@ function Form({ l, v, workflows, reload, taken }: { l: LibraryItem | null; v: Li
   const [error, setError] = useState(""), [said, setSaid] = useState(""), [busy, setBusy] = useState(false);
   const noWfNow = v?.status === "no_workflow"; // a library with no workflow yet: its select shows "No workflow yet" until one is chosen
   const cur = l ? (noWfNow ? "0" : l.flowId) : "";
-  const pick = wf || (!l && workflows?.find((w) => w.usable)?.id) || (noWfNow ? "0" : "") || ""; // a new library starts on the first usable one
+  const pick = wf || (!l && workflows && (workflows.find((w) => w.usable)?.id ?? "0")) || (noWfNow ? "0" : "") || ""; // a new library starts on the first usable one, or on "No workflow yet" when none is usable
   const moved = !!l && f.checked !== l.path;
   const prioChanged = !!v && priority !== v.priority;
   const changed = !l || name !== l.name || moved || pick !== cur || prioChanged;
