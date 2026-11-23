@@ -6,8 +6,9 @@ import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "../Icon";
 import { MOCK, SignedOut, failed, type Answer } from "../api";
 import { bytes, clock, clockS, count, elapsed, plural, stepTime } from "../format";
-import { type LogLine, type LogProbe, convertDoneAgain, fileJobs, findSkip, getJob, getJobLog, jobAction, listJobs, listKept, restoreKept, type JobLog, type LogMove, type LogStep, type LogVariable } from "../jobsApi";
+import { type LogLine, type LogProbe, convertDoneAgain, fileJobs, findInTab, getJob, getJobLog, jobAction, listJobs, listKept, restoreKept, type JobLog, type LogMove, type LogStep, type LogVariable } from "../jobsApi";
 import { getWorkflow } from "../workflowApi";
+import { tabForState } from "../jobTab";
 import { stoppedTitle, whyHeading } from "../jobResult";
 import { getHealth, getSettings } from "../libraryApi";
 import { onLive } from "../live";
@@ -17,7 +18,7 @@ import { Empty, LoadFailed, PageHead } from "../PageHead";
 import { Link, navigate, useSearch } from "../router";
 import { listWorkers, noWorker } from "../workersApi";
 import { useData } from "../useData";
-import { afterHeader, queuedLine } from "../jobResult";
+import { afterHeader, fileFacts, newFileVideo, queuedLine, ruleName, savedPercent, videoDetail, workerLabel } from "../jobResult";
 import type { Failure, JobAction, JobDetail, JobItem, JobProgressEvent, JobState, Probe, Tab, Pin } from "../types/jobs";
 import { stepLabel } from "../stepLabel";
 import { closeMenuToSummary, menuEscape, useCloseOnOutside } from "../menuFocus";
@@ -237,7 +238,7 @@ export function Jobs() {
               {j.folder !== "." && <span className="mchip">{j.folder}</span>}
               {j.pin && <span className="mchip prio">{j.pin === "first" ? "First" : "Last"}</span>}
               {tab === "waiting" && (j.position != null ? <span className="mchip">Place {j.position} in the queue</span> : <span className="mchip">Not taken now</span>)}
-              {j.worker && <span className="mchip">{j.worker === "builtin" ? "This computer" : j.worker}</span>}
+              {j.worker && <span className="mchip">{workerLabel(j.worker)}</span>}
             </div>);
             return (
             <li key={j.id} className={"lcard" + (checked ? " sel" : "")}>
@@ -311,8 +312,8 @@ const Driver = ({ ls }: { ls: string[] }) => ls.length > 0 ? <details><summary c
 function CheckFound({ lines, reason, code }: { lines: string[]; reason: string; code: string }) {
   const f = readFound(lines), title = code === "workflow_stopped" ? whyHeading(code, false) : "What the check found";
   return (
-    <section className="note" role="region" aria-label={title} style={{ display: "block" }}>
-      <h3><Icon id="i-info" /> {title}</h3>
+    <section role="region" aria-label={title}>
+      <h3>{title}</h3>
       {reason && <p>{reason.charAt(0).toUpperCase() + reason.slice(1)}</p>}
       <FoundRows rows={f.rows} />
       {copyBox("What ffmpeg said", f.errors)}
@@ -321,13 +322,13 @@ function CheckFound({ lines, reason, code }: { lines: string[]; reason: string; 
 }
 
 function WhyFailed({ id, msg, code, worker, f, found = [] }: { id: string; msg: string; code: string; worker: string | null; f: Failure; found?: string[] }) {
-  const fd = readFound(found), ff = fd.errors.length ? fd.errors : f.keyLines; // V6c: one ffmpeg box
+  const fd = readFound(found), ff = fd.errors.length ? fd.errors : f.keyLines ?? []; // V6c: one ffmpeg box
   const t = stepTime(f.afterMs), box = useRef<HTMLElement>(null), ver = useData(getHealth, []).data?.version;
   // Copy summary: the plain text a bug report needs (V6b item 5): the job, its worker and the app version, then the box
   const copy = () => navigator.clipboard?.writeText("Job " + id + " · " + (worker ?? "no worker") + " · Shrink Your Shit " + (ver ?? "") + "\n" + (box.current?.innerText ?? "")).catch(() => {});
   return (
-    <section ref={box} className="note" role="region" aria-label={whyHeading(code, true)} style={{ display: "block", borderLeft: "3px solid var(--error)" }}>
-      <h3><Icon id="i-alert" /> {whyHeading(code, true)} <span className="pill bad">Failed</span></h3>
+    <section ref={box} className="jd-check" role="region" aria-label={code === "workflow_stopped" ? whyHeading(code, true) : "What the check found"}>
+      <h3>{code === "workflow_stopped" ? whyHeading(code, true) : "What the check found"} <span className="pill bad">Failed</span></h3>
       <p style={{ fontSize: "var(--fs-lg)" }}>{msg}</p>
       <p className="sm muted mono">{code}</p>
       <p className="sm">In step {f.stepIndex + 1} of {f.stepCount}, <a href={"#job-step-" + (f.stepIndex + 1)}>{stepLabel(f.step, found)}</a>, after {t}{f.mediaTime ? " (at " + f.mediaTime + " in the video)" : ""}.</p>
@@ -453,7 +454,7 @@ function StepLog({ d, id, worker, failedIdx, kept, hasResult }: { d: { loaded: b
     const s = l.start!;
     const startHits = q ? countIn([...(errOnly ? [] : [s.reason, s.workflow?.name, worker]), ...(errOnly ? startL.filter(nonInfo) : startL).map((y) => y.text)].filter(Boolean).join("\n").toLowerCase(), q) : 0;
     raw.push({ key: "start", title: "Start", head: <>{when && <span className="sm muted">{clock(when)}</span>}{lvlPills(startL)}</>, hits: startHits, dflt: false, show: (!errOnly || startL.some(nonInfo)) && (!q || startHits > 0),
-      body: errOnly ? linesBlock(startL.filter(nonInfo), id) : <>{s.reason && <p className="sm">{s.reason}</p>}{worker && <p className="sm">Worker: {worker}</p>}{s.workflow?.name && <p className="sm">Workflow: {s.workflow.name}{s.workflow.revision != null && ", revision " + s.workflow.revision}</p>}{s.appVersion && <p className="sm">App version {s.appVersion}</p>}{linesBlock(startL, id)}</> });
+      body: errOnly ? linesBlock(startL.filter(nonInfo), id) : <>{s.reason && <p className="sm">{s.reason}</p>}{worker && <p className="sm">Worker: {workerLabel(worker)}</p>}{s.workflow?.name && <p className="sm">Workflow: {s.workflow.name}{s.workflow.revision != null && ", revision " + s.workflow.revision}</p>}{s.appVersion && <p className="sm">App version {s.appVersion}</p>}{linesBlock(startL, id)}</> });
     raw.push({ key: "variables", title: "Variables", head: changed.length ? <span className="sm muted">{changed.length} changed</span> : null,
       hits: q ? countIn(vars.map((v) => [v.name, v.start, v.end].join(" ")).join("\n").toLowerCase(), q) : 0, dflt: false, show: !errOnly,
       body: vars.length === 0 ? <p className="sm muted">No variables were set for this job.</p> : <>
@@ -518,7 +519,7 @@ function StepLog({ d, id, worker, failedIdx, kept, hasResult }: { d: { loaded: b
       <p className="sm">Time taken: {stepTime(s.tookMs)}</p>
       {(s.passes != null || s.bytesWritten != null) && <p className="sm">{[s.passes != null && plural1(s.passes, "ffmpeg pass", "ffmpeg passes"), s.bytesWritten != null && bytes(s.bytesWritten) + " written"].filter(Boolean).join(" · ")}</p>}
       {s.slowestStep != null && <p className="sm">Slowest step: {stepLabel(s.slowestStep.name)} ({stepTime(s.slowestStep.tookMs)})</p>}
-      {worker && <p className="sm">Worker: {worker}</p>}
+      {worker && <p className="sm">Worker: {workerLabel(worker)}</p>}
       {(WORD[l.final ?? ""] ?? l.final) && <p className="sm">Result: {WORD[l.final ?? ""] ?? l.final}</p>}
       {hasResult && <p className="sm"><a href="#job-result" onClick={(e) => { e.preventDefault(); document.getElementById("job-result")?.scrollIntoView({ block: "start" }); }}>Before and after: see Result</a></p>}{linesBlock(summL, id)}</> });
   }
@@ -586,7 +587,7 @@ function JobLog({ id, name }: { id: string; name: string }) {
 const fmtV = (p: Probe | null | undefined) => {
   if (!p) return null;
   const v = p.streams?.find((s) => s.type === "video"), a = p.streams?.filter((s) => s.type === "audio") ?? [];
-  return { video: [p.videoCodec?.toUpperCase().replace("H264", "H.264"), v?.Height ? v.Height + "p" : ""].filter(Boolean).join(" · ") || "—",
+  return { video: videoDetail(p.videoCodec, v) ?? "—",
     audio: a.map((x) => x.codec.toUpperCase() + (x.channelLayout ? " " + x.channelLayout : "")).join(", ") || "None",
     bitrate: p.bitrateKbps ? count(p.bitrateKbps) + " kbps" : "—", size: p.sizeBytes ? bytes(p.sizeBytes) : "—" };
 };
@@ -595,24 +596,43 @@ const fmtV = (p: Probe | null | undefined) => {
 function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; onClose: () => void; onChanged: () => void }) {
   const scan = id.startsWith("skip-"); // a file a scan left out: no job behind it, only its row (key() opens a job when there is one)
   const d = useData(() => (scan ? Promise.resolve(null as unknown as JobDetail) : getJob(id)), [id]);
-  const [said, setSaid] = useState(""), box = useRef<HTMLElement>(null);
+  const [said, setSaid] = useState(""), box = useRef<HTMLDivElement>(null);
   useEffect(() => onLive((type, data) => { if (type === "job.state" && (data as { jobId?: string })?.jobId === id) d.reload(); }), [id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // M5d fix 5: the Escape listener is set up once per job, so it reads the latest onClose here (a bare ?job= link
+  // moves the URL to the job's tab after mount; a closure from mount would close to the wrong tab).
+  const close = useRef(onClose);
+  useEffect(() => { close.current = onClose; });
   useEffect(() => {
     box.current?.focus();
-    const esc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && close.current();
     document.addEventListener("keydown", esc);
     return () => { document.removeEventListener("keydown", esc); (document.querySelector('[data-job="' + CSS.escape(id) + '"]') as HTMLElement | null)?.focus(); };
   }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
   // review c610d24 P3: the actions follow the job's own state, not the tab it was opened from. A skipped job opened
   // without its row (another tab in the URL) finds its row in the Skipped list: Convert again needs its skip-N id.
-  const ended = d.data && (d.data.state === "skipped" || d.data.state === "cancelled");
-  // review a8f85e0 P3: the list holds the first 200 skips only; a job beyond them is looked for page by page (findSkip)
-  const skips = useData(async () => {
-    if (row || !ended) return null;
-    const first = await listJobs("skipped", "");
-    return failed(first) || first.items.some((x) => x.jobId === id) ? first : findSkip(id);
-  }, [id, !!row, !!ended]);
-  const own = row ?? skips.data?.items.find((x) => x.jobId === id);
+  // M5d: a job opened by a bare ?job= link has no row in the page it loaded. Its row is looked up in the list tab for
+  // its state (from the detail), so the saving line, the Size row and the failure reason show. The first page first.
+  // A skip-N file has no job, so its detail is not found: its id says it is a skip.
+  const dState = d.data?.state ?? (id.startsWith("skip-") ? "skipped" : undefined);
+  // M5d fix 1: the list behind a bare ?job= link shows the job's own tab, and the URL says so (replace: no Back step).
+  // Only when the state is known and the drawer opened without its row; a tab the user picks afterwards stays.
+  const search = useSearch();
+  useEffect(() => {
+    const t = tabForState(dState);
+    if (row || !t) return;
+    const s = new URLSearchParams(search);
+    if (s.get("tab") === t) return;
+    s.set("tab", t);
+    if (t !== "completed") { s.delete("kept"); s.delete("left"); }
+    navigate("/jobs?" + s.toString(), true);
+  }, [dState, !!row]); // eslint-disable-line react-hooks/exhaustive-deps
+  const more = useData(async () => {
+    const t = tabForState(dState);
+    if (row || !t) return null;
+    const first = await listJobs(t, "");
+    return failed(first) || first.items.some((x) => (x.jobId ?? x.id) === id) ? first : findInTab(t, id);
+  }, [id, !!row, dState]);
+  const own = row ?? (more.data && !failed(more.data) ? more.data.items : []).find((x) => (x.jobId ?? x.id) === id);
   // E: this file's other jobs, newest first (not this job); left out when there are none
   const filePath = own?.path ?? "", fj = useData(() => (filePath ? fileJobs(filePath) : Promise.resolve([] as JobItem[])), [filePath]).data;
   const others = !fj || failed(fj) ? [] : fj.filter((x) => (x.jobId ?? x.id) !== id);
@@ -638,7 +658,7 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
   const keptWords = (n: number) => (n > 0 ? "In the trash for " + plural(n, "more day", "more days") + ", then deleted" : "In the trash, deleted today");
   const saving = own?.beforeBytes != null && own.afterBytes != null ? own.beforeBytes - own.afterBytes : 0; // the Size row's figure, as bytes
   const freeNote = saving > 0 ? " Removing the original frees " + bytes(saving) + "." : "";
-  const keptLine = kept && <>{keptWords(Math.max(0, Math.ceil((new Date(kept.deleteOn).getTime() - Date.now()) / 864e5)))} · <button ref={backBtn} className="linkbtn" type="button" aria-expanded={back} onClick={() => setBack(!back)}>Get original back</button></>;
+  const keptLine = kept && keptWords(Math.max(0, Math.ceil((new Date(kept.deleteOn).getTime() - Date.now()) / 864e5)));
   // #163: a Done job converts again when the server says so (never decided here); the confirm names the workflow's
   // CURRENT version, which is what runs. Design's two variants (replace vs output-first, the keep days) need the job's
   // policy from the server: until then one sentence that holds for both.
@@ -657,39 +677,67 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
   // one fetch of the log for the step list and What the check found; fetched again when the job stops running
   const log = useData(() => (scan || active ? Promise.resolve(null as unknown as JobLog) : getJobLog(id)), [id, scan, active]);
   // the Result table also takes the log's subtitles and length (contract v2 summary before/after); a row shows only with data
-  const sumS = log.data?.summary, subsRow = !!(sumS?.before?.subtitles || sumS?.after?.subtitles), lenRow = sumS?.before?.durationSec != null || sumS?.after?.durationSec != null;
-  const showResult = !!(before || after || subsRow || lenRow), lenText = (x?: { durationSec?: number }) => (x?.durationSec != null ? elapsed(x.durationSec) : "—");
+  const sumS = log.data?.summary;
+  const lenText = (x?: { durationSec?: number }) => (x?.durationSec != null ? elapsed(x.durationSec) : "—");
   const found = (log.data?.steps ?? []).filter((st) => (st.found?.length ?? 0) > 0);
+  // Subtitles and Length: the summary's values when the server sends them, else the check's "New file:" / "Original:" line; a row shows only when a side has a value
+  const foundRows = readFound(found.flatMap((st) => st.found!)).rows;
+  const newFacts = fileFacts(foundRows.find(([k]) => k === "New file")?.[1]), origFacts = fileFacts(foundRows.find(([k]) => k === "Original")?.[1]);
+  const subsNew = sumS?.after?.subtitles ?? newFacts?.subtitles, subsOld = sumS?.before?.subtitles ?? origFacts?.subtitles;
+  const lenNew = sumS?.after?.durationSec != null ? lenText(sumS.after) : j?.metadata?.after?.durationSec != null ? lenText(j.metadata.after) : newFacts?.length;
+  const lenOld = sumS?.before?.durationSec != null ? lenText(sumS.before) : j?.metadata?.before?.durationSec != null ? lenText(j.metadata.before) : origFacts?.length;
+  const subsRow = subsNew != null || subsOld != null, lenRow = lenNew != null || lenOld != null;
   const kept0 = !!state && keptOrig({ state, reason: j?.reason ?? own?.reason, newFileRefused: j?.newFileRefused ?? own?.newFileRefused });
-  // U10: the header's size delta, the list row's wording; a failed or skipped job has none, nor a restored original
-  const delta = state === "completed" && own?.originalState !== "restored" ? saved(own?.beforeBytes, own?.afterBytes) : "";
+  // A done job's New file line (the check's codec, size and fps) reads in the Video row, as the design has it: "HEVC 1280x720 25.000 fps 8-bit"
+  const newFile = readFound(found.flatMap((st) => st.found!)).rows.find(([k]) => k === "New file")?.[1];
+  const videoNew = state === "completed" && newFile ? newFileVideo(newFile) : after?.video ?? "—";
+  const encNew = readFound(found.flatMap((st) => st.found!)).rows.find(([k]) => k === "Encoder")?.[1];
+  // design 11: the Result card only when the new file has values (a failed job with only its original has none)
+  const showResult = !!(after || sumS?.after?.subtitles || sumS?.after?.durationSec != null || (state === "completed" && newFile));
+  // U10: the header's size delta, the list row's wording; a failed or skipped job has none, nor a restored original.
+  // M5d: the design's line is the percentage big and green, the sizes muted beside it (done 1).
+  const delta = state === "completed" && own?.originalState !== "restored" && own?.beforeBytes && own.afterBytes != null ? { pct: savedPercent(own.beforeBytes, own.afterBytes), sizes: bytes(own.beforeBytes) + " → " + bytes(own.afterBytes) } : null;
   return (
     <div className="drawer-wrap" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <aside className="drawer jobd" ref={box} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="jd-h">
+      <div className="drawer jobd" ref={box} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="jd-h" onKeyDown={(e) => {
+        // aria-modal: Tab wraps inside the drawer (same rule as FolderPicker). Collapsed <details> summaries count; their bodies,
+        // hidden or disabled elements do not (checkVisibility: getClientRects still counts a closed details' body). M5d fix 5.
+        if (e.key !== "Tab") return;
+        const f = [...box.current!.querySelectorAll<HTMLElement>("button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, [tabindex=\"0\"]")].filter((el) => el.checkVisibility()), i = f.indexOf(document.activeElement as HTMLElement), last = f.length - 1;
+        if (e.shiftKey ? i <= 0 : i === -1 || i === last) { e.preventDefault(); (e.shiftKey ? f[last] : f[0])?.focus(); }
+      }}>
         <div className={"hd" + (state === "failed" && !kept0 ? " failed" : "")}>
-          <button className="btn icon ghost" type="button" aria-label="Close" onClick={onClose}><Icon id="i-chev-l" /></button>
+          <button className="btn icon ghost jd-back" type="button" aria-label="Close" onClick={onClose}><Icon id="i-chev-l" /></button>
           {own && <span className="ltile codec">{tileOf(own)}</span>}
           <div className="sp">
             <h2 id="jd-h" className="clamp2" title={name}><FileName n={name} /></h2>
-            {delta && <p className="jd-delta">{delta}</p>}
-            {/* the header pill matches the list row: a kept-original job reads "Original kept" (review 572) */}
-            {state && <span style={{ alignSelf: "flex-start" }}><Pill j={{ state, retryAt: j?.retryAt ?? own?.retryAt, subState: own?.subState, reason: j?.reason ?? own?.reason, warning: j?.warning }} /></span>}
+            {delta && <p className="jd-delta"><span className={"jd-pct" + (delta.pct < 0 ? " bigger" : "")}>{delta.pct >= 0 ? delta.pct + "% smaller" : -delta.pct + "% bigger"}</span> <span className="muted sm">{delta.sizes}</span></p>}
+            {state === "failed" && reason && <p className="sm" style={{ color: "var(--error-text)", margin: 0 }}>{cap(reason)}</p>}
+            {state === "skipped" && <p className="sm muted">Left out when its library was scanned</p>}
           </div>
-          {/* SCREENS V6b header: Retry, Cancel or Stop, and the job ID to copy (the body keeps the rest) */}
-          <div className="row nw" style={{ gap: 6, flexWrap: "wrap" }}>
+          {/* SCREENS V6b header: Retry, Cancel or Stop, the job ID to copy under the pill (the body keeps the rest) */}
+          <div className="row nw" style={{ gap: 6, flexWrap: "wrap", alignItems: "flex-start" }}>
             {active && <button className="btn sm" type="button" onClick={() => run("cancel")}><Icon id="i-stop" />{state === "queued" || state === "retry_wait" ? "Cancel" : "Stop"}</button>}
-            <button className="btn sm ghost" type="button" title="Copy the job ID" onClick={() => navigator.clipboard?.writeText(id).then(() => setSaid("Job ID " + id + " copied."), () => setSaid("Job ID: " + id))}><Icon id="i-copy" />ID {id}</button>
+            <div style={{ display: "grid", justifyItems: "end", gap: 6 }}>
+              {/* the header pill matches the list row: a kept-original job reads "Original kept" (review 572) */}
+              {state && <Pill j={{ state, retryAt: j?.retryAt ?? own?.retryAt, subState: own?.subState, reason: j?.reason ?? own?.reason, warning: j?.warning }} />}
+              <button className="btn sm ghost" type="button" title="Copy the job ID" onClick={() => navigator.clipboard?.writeText(id).then(() => setSaid("Job ID " + id + " copied."), () => setSaid("Job ID: " + id))}><Icon id="i-copy" />ID {id}</button>
+            </div>
           </div>
         </div>
         <div className="bd">
-          {kept0 && <p style={{ margin: 0 }}>{WORD.kept}</p>}
+          {kept && <div className="row" style={{ gap: 8, alignItems: "baseline", flexWrap: "wrap" }}><button ref={backBtn} className="linkbtn" type="button" aria-expanded={back} onClick={() => setBack(!back)}>Get original back</button>{done && ca && !ca.possible && ca.reason && <span className="muted sm">{ca.reason.message}</span>}</div>}
+          {/* M5d failed 2: a failed job whose original is untouched gets the shield card (design), above the buttons */}
+          {kept0 && (state === "failed"
+            ? <div className="jd-shield" role="note"><Icon id="i-shield" /><div><strong>The original is untouched.</strong><p className="sm muted" style={{ margin: "2px 0 0" }}>{j?.failure?.hint ?? "The new file was thrown away."}</p></div></div>
+            : <p style={{ margin: 0 }}>{WORD.kept}</p>)}
           {(done && ca?.possible) || (state === "skipped" || state === "cancelled" || state === "failed" || state === "retry_wait") ? <div className="row">
-            {(state === "failed" || state === "retry_wait") && <button className="btn sm" type="button" onClick={() => run("retry")}><Icon id="i-refresh" />{state === "retry_wait" ? "Try now" : "Retry"}</button>}
+            {(state === "failed" || state === "retry_wait") && <button className={"btn sm" + (state === "failed" ? " primary" : "")} type="button" onClick={() => run("retry")}><Icon id="i-refresh" />{state === "retry_wait" ? "Try now" : "Retry"}</button>}
             {done && ca?.possible && <button className="btn sm" type="button" aria-expanded={again} onClick={() => setAgain(!again)}><Icon id="i-arrow-r" />Convert again</button>}
             {(state === "skipped" || state === "cancelled") && (!j?.removed || !!own?.id.startsWith("skip-")) && <button className="btn sm" type="button" onClick={() => run("requeue")}><Icon id="i-arrow-r" />Convert again</button>}
             <span className="sp" />
           </div> : null}
-          {done && ca && !ca.possible && ca.reason && <p className="muted sm">{ca.reason.message}</p>}
+          {done && ca && !ca.possible && ca.reason && !kept && <p className="muted sm">{ca.reason.message}</p>}
           {again && <div role="alertdialog" aria-label="Convert again?" style={{ padding: 12, border: "1px solid var(--border-strong)", borderRadius: "var(--radius)", background: "var(--raised)" }} onKeyDown={(e) => e.key === "Escape" && (e.stopPropagation(), setAgain(false))}>
             <p style={{ margin: "0 0 8px" }}>Convert {name} again{wf.data && !failed(wf.data) ? " with " + wf.data.name + (wf.data.version ? " v" + wf.data.version : "") : ""}? It starts from the original, never from the new file. The earlier new file is replaced once the new one passes its check.</p>
             <div className="row"><button className="btn sm primary" type="button" autoFocus onClick={runAgain}>Convert again</button><button className="btn sm ghost" type="button" onClick={() => setAgain(false)}>Cancel</button></div></div>}
@@ -700,23 +748,31 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
           {done && j?.warning && <div className="note warn"><Icon id="i-alert" /><div style={{ display: "grid", gap: 6 }}>{warnLines(j).map((w, i) => <div key={i}>{w}</div>)}</div></div>}
           {j?.removed && j.reason?.code === "removed" ? <div className="note"><Icon id="i-info" /><div>Its library was removed, so this file won't be converted.</div></div>
             : j?.failure ? <WhyFailed id={id} msg={reason} code={j.reason?.code ?? ""} worker={j.worker ?? null} f={j.failure} found={found.flatMap((st) => st.found!)} />
-            : found.length ? <CheckFound lines={found.flatMap((st) => st.found!)} reason={reason} code={j?.reason?.code ?? ""} />
-            : reason && <section><h3>{whyHeading(j?.reason?.code ?? "", false)}</h3><p>{reason}</p></section>}
+            : found.length ? (state === "completed" ? null : <CheckFound lines={found.flatMap((st) => st.found!)} reason={reason} code={j?.reason?.code ?? ""} />)
+            : reason && <section><h3>{whyHeading(j?.reason?.code ?? "", false)}</h3><p>{reason}</p>{ruleName(j?.workflow, rule?.name) && rule && <p className="sm">The rule is <a className="linkbtn" href={"/workflows/" + encodeURIComponent(rule.id)} onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); navigate("/workflows/" + encodeURIComponent(rule.id)); }}}>{rule.name}</a>.</p>}</section>}
           <section><h3>File</h3><dl className="kv">
             {(own?.path ?? j?.file?.path) && <><dt>Source</dt><dd className="mono sm">{slashWrap(own?.path ?? j?.file?.path ?? "")}</dd></>} {/* review 54ff228: no '-' when the server doesn't keep the path (a removed library's job) */}
             {(j?.library || own) && <><dt>Library</dt><dd>{j?.library?.name ?? own?.library}</dd></>}
-            {own?.state === "completed" && <>{own.originalState !== "restored" && <><dt>Size</dt><dd>{saved(own.beforeBytes, own.afterBytes)}</dd>{(own.afterBytes ?? 0) > (own.beforeBytes ?? 0) && <><dt /><dd className="muted sm">Used because it passed every check, even though it is bigger.</dd></>}</>} {/* review 66edc3d P3: after a restore the file is the original again: no saving */}
+            {own?.state === "completed" && <> {/* review 66edc3d P3: after a restore the file is the original again: no saving */}
               <dt>Original</dt><dd>{kept ? keptLine : own.originalState === "kept" ? keptWords(own.keptDaysLeft ?? 0) : own.originalState === "restored" ? "Put back in place. The smaller version was deleted." : own.originalState === "deleted" ? "Deleted. The new file replaced it." : own.originalState === "left_in_place" ? "Left where it was. The new file is in another folder." + freeNote : own.originalState === "kept_beside" ? "Kept next to the new file, in the same folder." + freeNote : "Left in place"}</dd></>}
             {!own && kept && <><dt>Original</dt><dd>{keptLine}</dd></>}
+            {(j?.workflow || rule) && <><dt>Workflow</dt><dd>{rule ? <a className="linkbtn" href={"/workflows/" + encodeURIComponent(rule.id)} onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); navigate("/workflows/" + encodeURIComponent(rule.id)); }}}>{rule.name}</a> : own?.flow?.name ?? "Its library's workflow"}{j?.workflow && " · v" + j.workflow.version}{queuedLine(j?.workflow) && <span className="sm muted"> · {queuedLine(j?.workflow)}</span>}</dd></>}
+            {(j?.worker ?? own?.worker) && <><dt>Worker</dt><dd>{workerLabel(j?.worker ?? own?.worker)}</dd></>}
+            {skip && before?.video && <><dt>Video</dt><dd>{[before.video, before.size, elapsed(j?.metadata?.before?.durationSec ?? 0)].filter(Boolean).join(" · ")}</dd></>}
           </dl>
+          {own?.state === "completed" && own.originalState !== "restored" && (own.afterBytes ?? 0) > (own.beforeBytes ?? 0) && <p className="sm muted">Used because it passed every check, even though it is bigger.</p>}
           {others.length > 0 && <p className="sm" style={{ marginTop: 8 }}>This file's other jobs: {others.map((x, i) => <span key={x.jobId ?? x.id}>{i > 0 && " · "}<a className="linkbtn" href={"/jobs?tab=" + tabOf(x.state) + "&job=" + encodeURIComponent(x.jobId ?? x.id)} onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); navigate("/jobs?tab=" + tabOf(x.state) + "&job=" + encodeURIComponent(x.jobId ?? x.id)); }}}>{WORD[x.state] ?? x.state} {x.finishedAt ? new Date(x.finishedAt).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : ""}</a></span>)}</p>}
         </section>
           {back && kept && <div role="alertdialog" aria-label="Get the original back?" style={{ padding: 12, border: "1px solid var(--border-strong)", borderRadius: "var(--radius)", background: "var(--raised)" }}
             onKeyDown={(e) => e.key === "Escape" && (e.stopPropagation(), closeBack())}>
             <p style={{ margin: "0 0 8px" }}><strong>Get the original of “{name}” back?</strong> The original ({bytes(kept.originalBytes)}) goes back in place and the smaller version{kept.newPath && kept.newPath.split(/[\\/]/).pop() !== name ? ", " + kept.newPath.split(/[\\/]/).pop() + "," : ""} is deleted. This file won't be converted again unless you press Convert again.</p>
             <div className="row"><button className="btn primary" type="button" autoFocus onClick={getBack}>Get original back</button><button className="btn ghost" type="button" onClick={closeBack}>Cancel</button></div></div>}
-          {/* G7: a skipped file links to the workflow whose rule skipped it (a scan's skip has no job: its library's workflow) */}
-          {(j?.workflow || rule) && <section><h3>Workflow</h3><p>{rule ? <a className="linkbtn" href={"/workflows/" + encodeURIComponent(rule.id)} onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); navigate("/workflows/" + encodeURIComponent(rule.id)); }}}>Change rule in {rule.name}</a> : own?.flow?.name ?? "Its library's workflow"}{j?.workflow && " · v" + j.workflow.version}</p>{queuedLine(j?.workflow) && <p className="sm muted">{queuedLine(j?.workflow)}</p>}</section>}
+          {/* #148: before is the original; null for an older job that replaced a file of the same name: said so, never blank */}
+          {showResult && <section id="job-result"><h3>{state === "completed" ? "What the check found" : "Result"}</h3><table className="tbl kvt"><thead><tr><th><span className="sr-only">Measure</span></th><th>{state === "completed" ? "Original" : "Before"}</th><th>{kept0 ? afterHeader(kept0) : "New file"}</th></tr></thead><tbody>
+            <tr><th>Video</th>{before ? <td>{before.video}</td> : <td rowSpan={4 + (subsRow ? 1 : 0) + (lenRow ? 1 : 0)} className="muted">Not recorded for this job</td>}<td>{videoNew}</td></tr>
+            <tr><th>Audio</th>{before && <td>{before.audio}</td>}<td>{after?.audio ?? "—"}</td></tr>
+            <tr><th>Bitrate</th>{before && <td>{before.bitrate}</td>}<td>{after?.bitrate ?? "—"}</td></tr>
+            <tr><th>Size</th>{before && <td>{before.size}</td>}<td>{after?.size ?? "—"}</td></tr>{subsRow && <tr><th>Subtitles</th>{before && <td>{subsOld ?? "—"}</td>}<td>{subsNew ?? "—"}</td></tr>}{lenRow && <tr><th>Length</th>{before && <td>{lenOld ?? "—"}</td>}<td>{lenNew ?? "—"}</td></tr>}{state === "completed" && encNew && <tr><th>Encoder</th><td>—</td><td>{encNew}</td></tr>}</tbody></table></section>}
           {!scan && <section><h3>Timeline</h3>
             {!j ? <p className="muted">Loading…</p> : !j.steps.length && !j.events.length ? <p className="muted">No step history for jobs from before the update.</p> : <>
               {j.steps.length > 0 && <ol className="tline">{j.steps.map((s, i) => <li key={i} className={s.ok ? "" : SOFT.includes(s.step) ? "warn" : "bad"}><Icon id={s.ok ? "i-check-c" : SOFT.includes(s.step) ? "i-alert" : "i-x-c"} /><span className="sp">{cap(s.words)}</span><span className="muted sm nowrap">{clock(s.at)}</span></li>)}</ol>}
@@ -725,18 +781,12 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
           </section>}
           {/* review db7b1f1 P2: the scan sentence only for a file a scan left out; a cancelled file whose job the server
               doesn't send yet claims nothing about scans or steps */}
-          {scan && <section><h3>Timeline</h3><p className="muted">{state === "cancelled" ? "Cancelled." : "This file was left out when its library was scanned, so it has no job and no steps."}</p></section>}
+          {scan && <section><h3>Timeline</h3><p>{state === "cancelled" ? "Cancelled." : "This file was left out when its library was scanned, so it has no job and no steps."}</p></section>}
           {!scan && (active ? <JobLog id={id} name={name} /> : <StepLog d={log} id={id} worker={j?.worker ?? null} failedIdx={j?.failure?.stepIndex ?? null} kept={kept0} hasResult={showResult} />)}
-          {/* #148: before is the original; null for an older job that replaced a file of the same name: said so, never blank */}
-          {showResult && <section id="job-result"><h3>Result</h3><table className="tbl kvt"><thead><tr><th /><th>Before</th><th>{afterHeader(kept0)}</th></tr></thead><tbody>
-            <tr><th>Video</th>{before ? <td>{before.video}</td> : <td rowSpan={4 + (subsRow ? 1 : 0) + (lenRow ? 1 : 0)} className="muted">Not recorded for this job</td>}<td>{after?.video ?? "—"}</td></tr>
-            <tr><th>Audio</th>{before && <td>{before.audio}</td>}<td>{after?.audio ?? "—"}</td></tr>
-            <tr><th>Bitrate</th>{before && <td>{before.bitrate}</td>}<td>{after?.bitrate ?? "—"}</td></tr>
-            <tr><th>Size</th>{before && <td>{before.size}</td>}<td>{after?.size ?? "—"}</td></tr>{subsRow && <tr><th>Subtitles</th>{before && <td>{sumS?.before?.subtitles ?? "—"}</td>}<td>{sumS?.after?.subtitles ?? "—"}</td></tr>}{lenRow && <tr><th>Length</th>{before && <td>{lenText(sumS?.before)}</td>}<td>{lenText(sumS?.after)}</td></tr>}</tbody></table></section>}
           {/* a done job's .srt files saved beside the new file: one line, then each name; no field, no line */}
           {state === "completed" && !!j?.subtitleFiles?.length && <section><h3>Subtitles saved as files</h3>{j.subtitleFiles.map((n) => <div key={n} style={{ overflowWrap: "anywhere" }}><code>{n}</code></div>)}</section>}
         </div>
-      </aside>
+      </div>
     </div>
   );
 }
