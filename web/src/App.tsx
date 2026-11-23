@@ -48,7 +48,8 @@ export function App() {
   const su = useData(getSetup, []), joined = su.data?.role === "worker" && (!su.data.join || su.data.join.state === "allowed");
   useEffect(() => { document.title = title + " · Shrink Your Shit"; }, [title]);
   // Until the first run is done, every page goes to it (IA.md; parity G8), except sign-in and the About/Health pages. Upgrades from v1 have it done.
-  const open = (p: string) => p === "/start" || p === "/signin" || p === "/settings/about" || p === "/settings/health";
+  // M5f fix 3: the Change links on the wizard's done cards open a library or a workflow page; those two pages are let through too.
+  const open = (p: string) => p === "/start" || p === "/signin" || p === "/settings/about" || p === "/settings/health" || /^\/(libraries|workflows)\/[^/]+$/.test(p);
   useEffect(() => {
     if (MOCK || firstRunDone || open(path)) return;
     Promise.all([getSettings(), getSetup()]).then(([r, s]) => { // a joined worker stays on its own page

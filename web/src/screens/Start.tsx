@@ -8,7 +8,7 @@ import { PageHead } from "../PageHead";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "../Icon";
 import { SignedOut, failed, type Answer } from "../api";
-import { addLibrary, checkFolder, getSettings, listLibraries, listWorkflows, patchSettings, scanLibrary, shrunk, startSimpleWorkflow, startWorker } from "../libraryApi";
+import { addLibrary, checkFolder, getSettings, listLibraries, listWorkflows, patchSettings, scanLibrary, shrunk, startSimpleWorkflow } from "../libraryApi";
 import { Link, navigate } from "../router";
 import { useData } from "../useData";
 import type { FirstRunSettings } from "../types/v1";
@@ -17,7 +17,7 @@ import { Browse } from "../FolderPicker";
 import { START_SIMPLE } from "./Workflows";
 import { Enroll, WorkerHome, useSetup } from "./Enroll";
 import { EncoderChips } from "./Workers";
-import { workersPage } from "../workersApi";
+import { workerAction, workersPage } from "../workersApi";
 import { bytes } from "../format";
 import { systemLine } from "../workerCards";
 import { stepStates, videoSuffix } from "../startSteps";
@@ -188,12 +188,12 @@ function StepWorkflow({ kept, onDone }: { kept: Kept; onDone: () => void }) {
 function StepWorker({ libraryId }: { libraryId: string }) {
   const ws = useData(workersPage, []);
   const [error, setError] = useState(""), [busy, setBusy] = useState(false);
-  const w = ws.data?.items.find((x) => x.id === "this") ?? ws.data?.items[0];
+  const w = ws.data?.items.find((x) => x.kind === "local") ?? ws.data?.items[0];
   const finish = async (start: boolean) => {
     setError(""); setBusy(true);
     try {
       if (!(await ok(scanLibrary(libraryId), setError))) return; // both buttons scan (reading only), as v1's first run
-      if (start && w && !(await ok(startWorker(w.id), setError))) return;
+      if (start && w && !(await ok(workerAction(w.id, "start"), setError))) return;
       if (await ok(patchSettings({ firstRunDone: true, firstRunStep: 4 }), setError)) navigate("/");
     } finally { setBusy(false); }
   };
