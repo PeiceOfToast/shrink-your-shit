@@ -180,7 +180,7 @@ export function Jobs() {
         {!firstRun && <>
           {(selecting || sel.length > 0) && <label className="hit selall"><input type="checkbox" aria-label="Select all files" checked={items.length > 0 && sel.length === items.length} onChange={(e) => setSel(e.target.checked ? items.map((j) => j.id) : [])} /><span className="sm">All</span></label>}
           {(selecting || sel.length > 0) && <span className="desk">{actions}</span>}
-          {selecting && <details className="menu phone" onKeyDown={menuEscape}><summary className="btn sm icon ghost" aria-label="More actions"><Icon id="i-more" /></summary><div className="pop" role="menu" onClick={(e) => closeMenuToSummary(e.currentTarget)}>{actions}</div></details>}
+          {selecting && <details className="menu phone" onKeyDown={menuEscape}><summary className="btn sm icon ghost" aria-label="More actions"><Icon id="i-more" /></summary><div className="pop" role="menu" onClick={(e) => { if ((e.target as Element).closest("button")) closeMenuToSummary(e.currentTarget); }}>{actions}</div></details>}
         </>}
         {sel.length > 0 && <span className="muted sm">{sel.length} selected</span>}
         {/* parity 11-19 #2 (G4): pick a library here too; it sets the same ?libraryId= as "See its jobs", and the chip above stays */}

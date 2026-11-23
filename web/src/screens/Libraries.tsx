@@ -139,7 +139,7 @@ export function Libraries() {
         </div>
         {selecting && <label className="hit selall"><input type="checkbox" aria-label="Select all shown libraries" disabled={items.length === 0} checked={allShownSelected(items, sel)} onChange={(e) => setSel(selectShown(sel, items, e.target.checked))} /><span className="sm">All</span></label>}
         {selecting && <span className="desk">{actions}</span>}
-        {selecting && <details className="menu phone" onKeyDown={menuEscape}><summary className="btn sm icon ghost" aria-label="More actions"><Icon id="i-more" /></summary><div className="pop" role="menu" onClick={(e) => closeMenuToSummary(e.currentTarget)}>{actions}</div></details>}
+        {selecting && <details className="menu phone" onKeyDown={menuEscape}><summary className="btn sm icon ghost" aria-label="More actions"><Icon id="i-more" /></summary><div className="pop" role="menu" onClick={(e) => { if ((e.target as Element).closest("button")) closeMenuToSummary(e.currentTarget); }}>{actions}</div></details>}
         {picked.length > 0 && <span className="muted sm">{picked.length} selected</span>}
         <input className="input find" type="search" placeholder="Filter libraries" aria-label="Filter libraries" value={q} onChange={(e) => setQ(e.target.value)} />
       </div>}

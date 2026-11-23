@@ -20,8 +20,7 @@ export function menuEscape(e: KeyboardEvent<HTMLDetailsElement>) {
 // One document listener for every ⋯ menu (fix 1): Escape closes an open menu even when focus is not inside it, which
 // is the case after a mouse click in Safari and Firefox on macOS (they don't focus the summary). It stops the event
 // there, so a drawer or dialog behind the menu stays open; with no menu open it does nothing. It listens in the capture
-// phase, so it runs before a drawer's own Escape handler (a drawer open at page load, e.g. /jobs?job=…, would otherwise
-// close first and leave the menu open).
+// phase, so a drawer open at page load, e.g. /jobs?job=…, does not also close behind the menu.
 export function installMenuEscape(): () => void {
   const esc = (e: globalThis.KeyboardEvent) => {
     if (e.key !== "Escape") return;
