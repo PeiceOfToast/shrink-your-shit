@@ -503,6 +503,9 @@ var nfsRule = regexp.MustCompile(`^(?:[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0
 // it at a fake map.
 var uidMapFile = "/proc/self/uid_map"
 
+// gidMapFile is the group counterpart of uidMapFile.
+var gidMapFile = "/proc/self/gid_map"
+
 // inUserNamespace reports whether the process is in a user namespace (for example Docker inside a
 // Proxmox LXC), which stops the kernel allowing NFS and SMB mounts. The map is the whole host range
 // ("0 0 4294967295") outside one. An unreadable map counts as not in one.
@@ -788,14 +791,52 @@ func domainOpt(domain string) string {
 
 // manualMountCommand is the sudo mount for share sh at target, the same whether the target is the
 // app's own folder or a host folder that a container is given.
-func manualMountCommand(sh jobs.Share, mntAddr, target string) string {
+// hostOwner is the owner of the host mount: this container's user as the Proxmox host numbers it. The container's
+// uid and gid map to other numbers there, and "syp" usually is not a user on the host. A map that cannot be read
+// gives placeholders and a line saying how to work them out.
+func hostOwner() (owner, note string) {
+	uid, uok := hostID(uidMapFile, os.Getuid())
+	gid, gok := hostID(gidMapFile, os.Getgid())
+	if uok && gok {
+		return fmt.Sprintf("uid=%d,gid=%d", uid, gid), ""
+	}
+	return "uid=<host uid>,gid=<host gid>",
+		"# Replace <host uid> and <host gid>: each is the outside number in this container's uid_map and gid_map line, plus your id minus its inside number.\n"
+}
+
+// hostID maps id through a kernel id map (lines of "inside outside count") to the number the host gives it.
+func hostID(mapPath string, id int) (int, bool) {
+	b, err := os.ReadFile(mapPath)
+	if err != nil {
+		return 0, false
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+		f := strings.Fields(line)
+		if len(f) != 3 {
+			continue
+		}
+		inside, e1 := strconv.Atoi(f[0])
+		outside, e2 := strconv.Atoi(f[1])
+		count, e3 := strconv.Atoi(f[2])
+		if e1 != nil || e2 != nil || e3 != nil {
+			continue
+		}
+		if id >= inside && id < inside+count {
+			return outside + (id - inside), true
+		}
+	}
+	return 0, false
+}
+
+// owner is the uid=,gid= pair the files get: syp for the app's own mount, the host's numbers for a host mount.
+func manualMountCommand(sh jobs.Share, mntAddr, target, owner string) string {
 	if sh.Type == "smb" {
 		var opts string
 		if sh.Guest {
-			opts = "guest,vers=3.1.1,soft,nosuid,nodev,noexec,uid=syp,gid=syp,file_mode=0660,dir_mode=0770"
+			opts = "guest,vers=3.1.1,soft,nosuid,nodev,noexec," + owner + ",file_mode=0660,dir_mode=0770"
 		} else {
 			user, dom := helper.SplitDomain(sh.Username)
-			opts = "username=" + user + domainOpt(dom) + ",vers=3.1.1,soft,nosuid,nodev,noexec,uid=syp,gid=syp,file_mode=0660,dir_mode=0770"
+			opts = "username=" + user + domainOpt(dom) + ",vers=3.1.1,soft,nosuid,nodev,noexec," + owner + ",file_mode=0660,dir_mode=0770"
 		}
 		return "sudo mount -t cifs " + shellQuote(mntAddr) + " " + shellQuote(target) + " -o " + shellQuote(opts)
 	}
@@ -813,20 +854,24 @@ func setupForMode(store *jobs.Store, sh jobs.Share) any {
 			// container gets that folder. Same mount command, run on the host; the options stay in one place.
 			vol := sanitiseName(sh.Name, sh.ID)
 			host := "/mnt/" + vol
+			var owner, ownerNote string
+			if sh.Type == "smb" { // an NFS mount takes no owner option
+				owner, ownerNote = hostOwner()
+			}
 			return map[string]any{
 				"kind": "command",
 				"text": "# This container runs in a user namespace (for example an unprivileged Proxmox LXC), so it can't mount network shares here.\n" +
-					"# On the Proxmox host, mount the share into a host folder:\n" +
-					"sudo mkdir -p " + shellQuote(host) + " && " + manualMountCommand(sh, mntAddr, host) + "\n" +
-					"# Pass that folder into the container, then restart the container:\n" +
-					"pct set <id> -mp0 " + host + ",mp=" + host + "\n" +
+					"# On the Proxmox host, mount the share into a host folder:\n" + ownerNote +
+					"sudo mkdir -p " + host + " && " + manualMountCommand(sh, mntAddr, host, owner) + "\n" +
+					"# Pass that folder into the container where the app looks for the share, then restart the container:\n" +
+					"pct set <id> -mp0 " + host + ",mp=" + mountPointFor(sh) + "\n" +
 					"pct restart <id>",
 				"removeText": "On the Proxmox host: sudo umount " + host + ", then pct set <id> -delete mp0 and restart the container.",
 			}
 		}
 		return map[string]any{
 			"kind":       "command",
-			"text":       "sudo mkdir -p " + shellQuote(mpt) + " && " + manualMountCommand(sh, mntAddr, mpt),
+			"text":       "sudo mkdir -p " + shellQuote(mpt) + " && " + manualMountCommand(sh, mntAddr, mpt, "uid=syp,gid=syp"),
 			"removeText": "sudo umount " + shellQuote(mpt),
 		}
 	case "docker":

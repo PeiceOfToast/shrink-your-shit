@@ -1,6 +1,7 @@
 package web
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -20,7 +21,8 @@ func TestManualSetupInAUserNamespaceMountsOnTheHost(t *testing.T) {
 	if _, err := os.Stat("/.dockerenv"); err == nil {
 		t.Skip("this machine is a container, so manual mode is not reachable here")
 	}
-	writeUIDMap(t, "         0       1000          1\n")
+	writeUIDMap(t, "         0     100000      65536\n")
+	writeGIDMap(t, "         0     100000      65536\n")
 	t.Setenv("container", "")
 	saved := helper.HelperSocket
 	defer func() { helper.HelperSocket = saved }()
@@ -34,13 +36,14 @@ func TestManualSetupInAUserNamespaceMountsOnTheHost(t *testing.T) {
 	if setup["kind"] != "command" {
 		t.Errorf("kind: %v", setup["kind"])
 	}
-	for _, want := range []string{"sudo mount -t cifs", "/mnt/media", "pct set <id> -mp0 /mnt/media,mp=/mnt/media", "pct restart <id>", "user namespace"} {
+	owner := fmt.Sprintf("uid=%d,gid=%d", 100000+os.Getuid(), 100000+os.Getgid())
+	for _, want := range []string{"sudo mount -t cifs", "/mnt/media", "pct set <id> -mp0 /mnt/media,mp=" + mountPointFor(sh), "pct restart <id>", "user namespace", owner} {
 		if !strings.Contains(text, want) {
 			t.Errorf("manual userns text missing %q:\n%s", want, text)
 		}
 	}
-	if !strings.Contains(text, "guest,vers=3.1.1,soft,nosuid,nodev,noexec,uid=syp,gid=syp,file_mode=0660,dir_mode=0770") {
-		t.Errorf("mount options changed:\n%s", text)
+	if strings.Contains(text, "uid=syp") || strings.Contains(text, "<host") {
+		t.Errorf("the host mount must use the host's numbers:\n%s", text)
 	}
 	if rm, _ := setup["removeText"].(string); !strings.Contains(rm, "umount /mnt/media") || !strings.Contains(rm, "pct set") {
 		t.Errorf("removeText: %q", rm)
@@ -68,5 +71,41 @@ func TestManualSetupOutsideAUserNamespaceMountsHere(t *testing.T) {
 	text, _ := setup["text"].(string)
 	if !strings.HasPrefix(text, "sudo mkdir -p ") || !strings.Contains(text, "sudo mount -t cifs") || strings.Contains(text, "pct set") {
 		t.Errorf("manual text: %s", text)
+	}
+}
+
+// writeGIDMap points gidMapFile at a fake map; the test restores it when it ends.
+func writeGIDMap(t *testing.T, content string) {
+	t.Helper()
+	saved := gidMapFile
+	t.Cleanup(func() { gidMapFile = saved })
+	p := filepath.Join(t.TempDir(), "gid_map")
+	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gidMapFile = p
+}
+
+// With no readable map the host mount gets placeholders and a line saying how to work them out.
+func TestManualUserNamespaceWithoutAMapGivesPlaceholders(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the user-namespace check is Linux only")
+	}
+	if _, err := os.Stat("/.dockerenv"); err == nil {
+		t.Skip("this machine is a container, so manual mode is not reachable here")
+	}
+	writeUIDMap(t, "")
+	writeGIDMap(t, "")
+	t.Setenv("container", "")
+	saved := helper.HelperSocket
+	defer func() { helper.HelperSocket = saved }()
+	helper.HelperSocket = filepath.Join(t.TempDir(), "absent.sock")
+	setup, ok := setupForMode(nil, jobs.Share{Type: "smb", Address: `\\nas\media`, Name: "Media", Guest: true}).(map[string]any)
+	if !ok {
+		t.Fatal("no setup text in manual mode")
+	}
+	text, _ := setup["text"].(string)
+	if !strings.Contains(text, "uid=<host uid>,gid=<host gid>") || !strings.Contains(text, "Replace <host uid> and <host gid>") {
+		t.Errorf("placeholders and the how-to line are missing:\n%s", text)
 	}
 }
