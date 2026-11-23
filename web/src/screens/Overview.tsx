@@ -13,7 +13,7 @@ import { listWorkflows } from "../workflowApi";
 import { listLibrariesV2 } from "../libraryApi";
 import { lastScan } from "./Libraries";
 import { convertedLine } from "../convertedLine";
-import { getStartedSteps, nextStep, showGetStarted } from "../getStarted";
+import { getStartedSteps, showGetStarted } from "../getStarted";
 import { runFields } from "../jobCards";
 const HEALTH_HIDDEN = "syp-health-dismissed"; // the failed checks the Dismiss was for
 import { onLive } from "../live";
@@ -184,8 +184,9 @@ export function Overview() {
     tot.waiting > 0 && <Link to="/jobs?tab=completed&kept=1">{bytes(tot.waiting) + " waiting in the trash"}</Link>, tot.kept > 0 && <Link to="/jobs?tab=completed&left=1">{bytes(tot.kept) + " in originals left in place"}</Link>]
     .filter(Boolean).map((p, i) => <Fragment key={i}>{i > 0 && " · "}{p}</Fragment>);
   // Get started's three ticks from data this page already has: a library, a workflow, a worker on
-  const wfCount = wf.data && !failed(wf.data) ? wf.data.length : 0, steps = getStartedSteps(v.libraries.length, wfCount, on), next = nextStep(steps);
-  const side = (i: number, to: string, label: string) => steps[i] ? <span className="pill ok">Done</span> : next === i ? <Link className="btn sm primary" to={to}>{label}</Link> : <span className="muted sm">after step {i}</span>;
+  const wfCount = wf.data && !failed(wf.data) ? wf.data.length : 0, steps = getStartedSteps(v.libraries.length, wfCount, on);
+  // a step's button is live once its prerequisite is done: a library needs a published workflow (step 2), so step 1 waits for it
+  const side = (i: number, to: string, label: string, ready = true, after = 0) => steps[i] ? <span className="pill ok">Done</span> : ready ? <Link className="btn sm primary" to={to}>{label}</Link> : <span className="muted sm">after step {after}</span>;
   const workerOf = (id: string) => rows.find((w) => w.jobs.some((j) => j.jobId === id))?.name;
   // the sections below wait for Get started (design empty-1): Converting now, Libraries, Workers and Last 30 days hide while it shows
   const starting = showGetStarted(steps, h.filesConverted);
@@ -247,9 +248,9 @@ export function Overview() {
         <ul className="lcards gs" aria-label="Get started">
           <li className="lcard"><span className="ltile" aria-hidden="true"><Icon id="i-library" /></span>
             <div className="lmain"><div className="lname"><span className="ttl">Add your first library</span></div><span className="muted sm">The folder with your videos. Nothing is converted by looking.</span></div>
-            <div className="lside">{side(0, "/libraries/new", "Set up")}</div></li>
+            <div className="lside">{side(0, "/libraries/new", "Set up", steps[1], 2)}</div></li>
           <li className="lcard"><span className="ltile" aria-hidden="true"><Icon id="i-workflow" /></span>
-            <div className="lmain"><div className="lname"><span className="ttl">A workflow is made for you</span></div><span className="muted sm">"Shrink videos": HEVC, balanced quality, same resolution. Change it any time.</span></div>
+            <div className="lmain"><div className="lname"><span className="ttl">Publish a workflow</span></div><span className="muted sm">"Shrink videos": HEVC, balanced quality, same resolution. A library needs one published.</span></div>
             <div className="lside">{side(1, "/workflows", "Open workflows")}</div></li>
           <li className="lcard"><span className="ltile" aria-hidden="true"><Icon id="i-worker" /></span>
             <div className="lmain"><div className="lname"><span className="ttl">Start the worker on this computer</span></div><span className="muted sm">Nothing converts until a worker is on.</span></div>
@@ -337,7 +338,7 @@ export function Overview() {
                 <td className="nm"><b>{w.name}</b> <span className={"pill " + cls}>{t}</span> <Link className="btn icon ghost gear" to={"/workers/" + encodeURIComponent(w.id) + "?tab=limits"} aria-label={"Settings for " + w.name} title="Settings"><Icon id="i-gear" /></Link></td>
                 <td className="num" data-l="Speed">{js.map((j) => [j.fps != null && Math.round(j.fps) + " fps", j.speed != null && j.speed.toFixed(1) + "× realtime"].filter(Boolean).join(" · ")).filter(Boolean).join(", ") || (js.length ? js.map((j) => j.stage).find(Boolean) ?? "—" : "")}</td>
                 <td className="num" data-l="Slots">{sl.used} of {sl.total}</td>
-                {load && <td className="num" data-l="CPU · GPU">{w.status === "paused" ? "—" : w.cpuPercent == null && w.gpuPercent == null ? "Not measured yet" : <>{w.cpuPercent == null ? "—" : Math.round(w.cpuPercent) + "%"} · {w.gpuPercent == null ? <NoGpu /> : <GpuPct n={w.gpuPercent} />}</>}</td>}
+                {load && <td className="num" data-l="CPU · GPU">{w.status === "paused" || w.status === "offline" ? "—" : w.cpuPercent == null && w.gpuPercent == null ? "Not measured yet" : <>{w.cpuPercent == null ? "—" : Math.round(w.cpuPercent) + "%"} · {w.gpuPercent == null ? <NoGpu /> : <GpuPct n={w.gpuPercent} />}</>}</td>}
               </tr>; })}</tbody></table>)}
       </section>
 

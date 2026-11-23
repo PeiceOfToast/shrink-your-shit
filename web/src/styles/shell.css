@@ -970,6 +970,7 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 /* item 10 (fix 2b): the name is a flex row at every width, so the title (a flex item) can take an ellipsis before the pill */
 .lcard .lname{display:flex;align-items:baseline;gap:8px;min-width:0}
 .lcard .lname .ttl{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lcard .lnote .over{display:inline-flex;align-items:center;min-height:24px} /* axe 2.5.8: the "N failed" link is at least 24 px tall */
 .lcards.gs .lcard .lname .ttl{overflow:visible;text-overflow:clip;white-space:normal} /* Get started: the step titles wrap at 390, never ellipsis */
 .lcard .chips{margin-top:0;display:flex;max-width:100%;min-width:0}
 .lcard .chips .mchip{max-width:100%}
