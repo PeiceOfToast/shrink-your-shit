@@ -8,7 +8,7 @@ import { Icon } from "../Icon";
 import { PageHead } from "../PageHead";
 import { SignedOut, failed } from "../api";
 import { getDoctor } from "../doctorApi";
-import { healthSummary } from "../doctorSummary";
+import { healthSummary, type HealthTone } from "../doctorSummary";
 import { clock } from "../format";
 import { SettingsTabs } from "../pages";
 import type { Doctor, DoctorCheck } from "../types/doctor";
@@ -19,7 +19,7 @@ const STATUS: Record<DoctorCheck["status"], { word: string; icon: string; tone: 
   ok: { word: "OK", icon: "i-check-c", tone: "ok" },
   warn: { word: "Warning", icon: "i-alert", tone: "warn" },
   bad: { word: "Fail", icon: "i-x-c", tone: "bad" },
-  absent: { word: "Not present", icon: "i-minus", tone: "wait" },
+  absent: { word: "Not present", icon: "i-info", tone: "wait" },
 };
 const GROUPS: [string, (id: string) => boolean][] = [
   ["Tools", (id) => ["ffmpeg", "ffprobe", "x265", "ssim"].includes(id)],
@@ -27,6 +27,7 @@ const GROUPS: [string, (id: string) => boolean][] = [
   ["Data folder", (id) => id === "data"],
   ["Libraries", (id) => id === "libraries" || id.startsWith("library:")],
 ];
+const TONE_TEXT: Record<HealthTone, string> = { ok: "var(--success-text)", warn: "var(--warning-text)", bad: "var(--error-text)" };
 const group = (id: string) => GROUPS.find(([, f]) => f(id))?.[0] ?? "Other";
 
 function Check({ c }: { c: DoctorCheck }) {
@@ -70,10 +71,10 @@ export function HealthSettings() {
               <section className={"note " + sum.tone} aria-labelledby="hs-h" style={{ alignItems: "flex-start" }}>
                 <Icon id={icon} />
                 <div className="sp stack" style={{ gap: 8 }}>
-                  <h2 id="hs-h" style={{ margin: 0, fontSize: "1.125rem" }}>{sum.text}</h2>
+                  <h2 id="hs-h" style={{ margin: 0, fontSize: "1.125rem", color: TONE_TEXT[sum.tone] }}>{sum.text}</h2>
                   <p className="muted" style={{ margin: 0 }}>Conversions use {d.encoder.hardware ? "" : "the "}{d.encoder.label}. Checked at {clock(d.ranAt)}. {d.encodersTestedAt ? "Encoders tested at " + clock(d.encodersTestedAt) + "." : "Encoders not tested yet."} Version {d.version}.</p>
                   <div className="row" style={{ gap: 8 }}>
-                    <button className="btn sm primary" type="button" aria-disabled={!!busy} onClick={() => { if (!busy) run(false); }}>{busy === "check" ? "Checking…" : "Check again"}</button>
+                    <button className="btn sm" type="button" aria-disabled={!!busy} onClick={() => { if (!busy) run(false); }}>{busy === "check" ? "Checking…" : "Check again"}</button>
                     <button className="btn sm ghost" type="button" aria-disabled={!!busy} onClick={() => { if (!busy) run(true); }}>{busy === "test" ? "Testing encoders…" : "Test encoders again"}</button>
                   </div>
                   <p className="muted" role="status" style={{ margin: 0 }}>{busy === "test" && "Testing encoders… This takes up to 15 seconds."}</p>
