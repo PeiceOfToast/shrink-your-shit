@@ -1059,3 +1059,12 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 .mjob-bar{position:absolute;left:0;right:0;bottom:0;height:3px;background:var(--raised)}
 .mjob-bar i{display:block;height:100%;background:var(--accent)}
 @media (max-width:479px){.mjob{grid-template-columns:auto minmax(0,1fr)}.mjob .pill{grid-column:2;justify-self:start}}
+/* First run (Start.tsx): the step row, and the finished-step cards centred */
+.steps{display:flex;flex-wrap:wrap;justify-content:center;gap:8px 28px;list-style:none;margin:0;padding:0}
+.steps li{display:flex;align-items:center;gap:8px;font-size:var(--fs-sm,13px);color:var(--text-2)}
+.steps li.current{color:var(--text);font-weight:600}
+.steps li.done{color:var(--success-text)}
+.steps .dot{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;border:1px solid var(--border-strong);font-size:12px}
+.steps li.current .dot{background:var(--accent);border-color:var(--accent);color:#fff}
+.steps li.done .dot{border-color:var(--success-text);color:var(--success-text)}
+.done-card{text-align:center}

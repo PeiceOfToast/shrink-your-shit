@@ -312,7 +312,7 @@ function MiniJob({ j }: { j: JobItem }) {
 
 // M4: the encoders as chips (what passed, which one is used first) and the one control that changes it, behind
 // "Change encoder" so the choice is not on the card's face. The same EncoderCards as before, same API call.
-function EncoderChips({ w, reload }: { w: Worker; reload: () => void }) {
+export function EncoderChips({ w, reload }: { w: Worker; reload: () => void }) {
   const [open, setOpen] = useState(false), cs = cards(w);
   return <div>
     <div className="ec-hd"><h4 className="sm muted ec-h">Encoders</h4>
