@@ -608,7 +608,8 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
   // without its row (another tab in the URL) finds its row in the Skipped list: Convert again needs its skip-N id.
   // M5d: a job opened by a bare ?job= link has no row in the page it loaded. Its row is looked up in the list tab for
   // its state (from the detail), so the saving line, the Size row and the failure reason show. The first page first.
-  const dState = d.data?.state;
+  // A skip-N file has no job, so its detail is not found: its id says it is a skip.
+  const dState = d.data?.state ?? (id.startsWith("skip-") ? "skipped" : undefined);
   // M5d fix 1: the list behind a bare ?job= link shows the job's own tab, and the URL says so (replace: no Back step).
   // Only when the state is known and the drawer opened without its row; a tab the user picks afterwards stays.
   const search = useSearch();
@@ -625,9 +626,9 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
     const t = tabForState(dState);
     if (row || !t) return null;
     const first = await listJobs(t, "");
-    return failed(first) || first.items.some((x) => x.jobId === id) ? first : findInTab(t, id);
+    return failed(first) || first.items.some((x) => (x.jobId ?? x.id) === id) ? first : findInTab(t, id);
   }, [id, !!row, dState]);
-  const own = row ?? (more.data && !failed(more.data) ? more.data.items : []).find((x) => x.jobId === id);
+  const own = row ?? (more.data && !failed(more.data) ? more.data.items : []).find((x) => (x.jobId ?? x.id) === id);
   // E: this file's other jobs, newest first (not this job); left out when there are none
   const filePath = own?.path ?? "", fj = useData(() => (filePath ? fileJobs(filePath) : Promise.resolve([] as JobItem[])), [filePath]).data;
   const others = !fj || failed(fj) ? [] : fj.filter((x) => (x.jobId ?? x.id) !== id);

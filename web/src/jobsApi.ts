@@ -23,7 +23,7 @@ export async function findInTab(tab: Tab, jobId: string): Promise<Answer<JobsPag
   if (MOCK) return listJobs(tab, "");
   for (let at = 0; ; at += 500) {
     const r = await call<JobsPage>("GET", "/api/v2/jobs?tab=" + tab + "&limit=500&offset=" + at);
-    if (failed(r) || r.items.some((x) => x.jobId === jobId) || !r.items.length || at + r.items.length >= r.total) return r;
+    if (failed(r) || r.items.some((x) => (x.jobId ?? x.id) === jobId) || !r.items.length || at + r.items.length >= r.total) return r;
   }
 }
 // E: the job's log by step (GET /log, a finished job's full record; /log/stream stays for running jobs)
