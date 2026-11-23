@@ -223,11 +223,12 @@ export function SafetySettings() {
             <SettingRow title={<label htmlFor="keep-days">Keep originals for (days)</label>} descId="keep-h2" desc="0 means the original is deleted right after the new file has been checked.">
               <div className="row nw" style={{ gap: 8 }}>
                 <input id="keep-days" className="input" type="number" inputMode="numeric" min={0} max={365} step={1} value={now} onChange={(e) => setDays(e.target.value)} aria-describedby="keep-h2" style={{ width: 140, maxWidth: "100%" }} />
-                <span className="muted">days</span>
+                <span className="muted" aria-hidden="true">days</span>
               </div>
             </SettingRow>
+            {/* the server's trashPath is a sentence ("... in a folder called .syp-trash"); the folder name is taken from it */}
             {st.data.trashPath && <SettingRow title="Where originals are kept" desc="Next to each file, in a folder of their own.">
-              <span className="mono">.syp-trash</span>
+              <span className="mono">{st.data.trashPath.match(/called (\S+)/)?.[1] ?? st.data.trashPath}</span>
             </SettingRow>}
             <SettingRow title="Kept right now" descId="purge-h" desc={<span aria-live="polite">{!t ? (tr.error?.message ?? "") : t.files ? <><strong>Kept originals:</strong> {bytes(t.bytes)} · {plural(t.files, "file", "files")}.{t.nextDeleteAt && " The next ones go on " + day(t.nextDeleteAt) + "."}</> : "No originals are being kept right now."}</span>}>
               {t && <button ref={purgeBtn} className="btn" type="button" disabled={!t.files || purging} aria-describedby={t.files ? undefined : "purge-h"} onClick={() => (setGone(null), setPurgeSaid(""), setAsk(true))}>
