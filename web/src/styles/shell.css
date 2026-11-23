@@ -622,7 +622,7 @@ label.chk{cursor:pointer}
 .drawer.jobd .jd-pct{color:var(--success-text)}
 .drawer.jobd .jd-pct.bigger{color:var(--text)}
 /* M5d: the drawer's sections are bordered cards with a title bar (File, What the check found, Timeline, Log); a note keeps its own frame */
-.drawer.jobd .bd>section:not(.note){border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);overflow:hidden;padding:0 0 14px}
+.drawer.jobd .bd>section:not(.note){flex:none;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);overflow:hidden;padding:0 0 14px}
 .drawer.jobd .bd>section:not(.note)>h3{margin:0 0 12px;padding:10px 16px;border-bottom:1px solid var(--border);background:var(--raised)}
 .drawer.jobd .bd>section:not(.note)>:not(h3){margin-left:16px;margin-right:16px}
 .drawer.jobd .bd>section:not(.note)>.kv{margin-right:16px}
