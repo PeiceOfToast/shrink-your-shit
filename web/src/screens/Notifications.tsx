@@ -5,7 +5,7 @@ import { Icon } from "../Icon";
 import { failed, type Answer } from "../api";
 import { PageHead } from "../PageHead";
 import { SettingsTabs } from "../pages";
-import { SettingRow } from "../SettingRow";
+import { SettingRow, ValueChip } from "../SettingRow";
 import { useData } from "../useData";
 import { clock } from "../format";
 import { addTarget, getNotifications, patchNotifications, patchTarget, removeTarget, testNotification } from "../notificationsApi";
@@ -121,7 +121,9 @@ function TargetForm({ t, reload, onDone, onCancel }: { t?: NotifyTarget; reload:
     </form>);
 }
 
-function TargetItem({ t, reload, said }: { t: NotifyTarget; reload: () => void; said: (s: string) => void }) {
+// One place as a row of the Where to send card; the card body has no padding of its own, so the row's padding is the only
+// indent (it used to add a second 16px inside the card, so the row sat off the card's other content).
+function TargetItem({ t, first, reload, said }: { t: NotifyTarget; first: boolean; reload: () => void; said: (s: string) => void }) {
   const [editing, setEditing] = useState(false), [confirm, setConfirm] = useState(false), [testing, setTesting] = useState(false);
   const [note, setNote] = useState<{ tone: Tone; text: string } | null>(null), [msg, setMsg] = useState("");
   const test = async () => {
@@ -138,8 +140,8 @@ function TargetItem({ t, reload, said }: { t: NotifyTarget; reload: () => void; 
     setConfirm(false); said(t.name + " removed. Nothing is sent there any more."); reload();
   };
   return (
-    <div className="stack" style={{ gap: 6, padding: "10px 0", borderBottom: "1px solid var(--border)" }}>
-      <SettingRow title={<>{t.name} <span className="muted">{kindName(t.kind)}</span></>} desc={<><Status t={t} /><br /><span className="hint">{sends(t.events)}</span></>}>
+    <div style={first ? undefined : { borderTop: "1px solid var(--border)" }}>
+      <SettingRow title={<>{t.name} <ValueChip>{kindName(t.kind)}</ValueChip></>} desc={<><Status t={t} /><span className="hint" style={{ display: "block" }}>{sends(t.events)}</span></>}>
         {!editing && !confirm && (
           <>
             <button className="btn sm" type="button" onClick={test} disabled={testing}>{testing ? "Sending…" : "Send a test"}</button>
@@ -147,23 +149,28 @@ function TargetItem({ t, reload, said }: { t: NotifyTarget; reload: () => void; 
             <button className="btn sm ghost" type="button" onClick={() => { setConfirm(true); setNote(null); }} aria-label={"Remove " + t.name}>Remove</button>
           </>)}
       </SettingRow>
-      {note && <NoteLine tone={note.tone} text={note.text} />}
-      {confirm && (
-        <div className="row" role="group" aria-label={"Remove " + t.name} style={{ gap: 8 }}>
-          <span>Remove {t.name}? Nothing is sent there any more.</span>
-          <button className="btn sm danger" type="button" onClick={remove}>Remove</button>
-          <button className="btn sm ghost" type="button" onClick={() => setConfirm(false)}>Cancel</button>
-          {msg && <span className="st bad"><Icon id="i-alert" />{msg}</span>}
-        </div>)}
-      {editing && <TargetForm t={t} reload={reload} onCancel={() => setEditing(false)} onDone={(text) => { setEditing(false); said(text); reload(); }} />}
+      {(note || confirm || editing) && <div className="stack" style={{ padding: "0 var(--pad) 12px" }}>
+        {note && <NoteLine tone={note.tone} text={note.text} />}
+        {confirm && (
+          <div className="row" role="group" aria-label={"Remove " + t.name} style={{ gap: 8 }}>
+            <span>Remove {t.name}? Nothing is sent there any more.</span>
+            <button className="btn sm danger" type="button" onClick={remove}>Remove</button>
+            <button className="btn sm ghost" type="button" onClick={() => setConfirm(false)}>Cancel</button>
+            {msg && <span className="st bad"><Icon id="i-alert" />{msg}</span>}
+          </div>)}
+        {editing && <TargetForm t={t} reload={reload} onCancel={() => setEditing(false)} onDone={(text) => { setEditing(false); said(text); reload(); }} />}
+      </div>}
     </div>);
 }
 
 function AddPlace({ reload, said }: { reload: () => void; said: (s: string) => void }) {
   const [open, setOpen] = useState(false);
-  return open
-    ? <TargetForm reload={reload} onCancel={() => setOpen(false)} onDone={(text) => { setOpen(false); said(text); reload(); }} />
-    : <p style={{ margin: 0 }}><button className="btn" type="button" onClick={() => setOpen(true)}><Icon id="i-plus" />Add a place to send</button></p>;
+  return (
+    <div style={{ padding: "12px var(--pad)" }}>
+      {open
+        ? <TargetForm reload={reload} onCancel={() => setOpen(false)} onDone={(text) => { setOpen(false); said(text); reload(); }} />
+        : <button className="btn" type="button" onClick={() => setOpen(true)}><Icon id="i-plus" />Add a place to send</button>}
+    </div>);
 }
 
 function SummaryCard({ s, reload, said }: { s: NotifySummary; reload: () => void; said: (m: string) => void }) {
@@ -177,25 +184,20 @@ function SummaryCard({ s, reload, said }: { s: NotifySummary; reload: () => void
     if (failed(r)) { setError(r.error.message); return; }
     said("Summary saved."); reload();
   };
+  // its own Save: the summary goes through its own settings call, apart from the links
   return (
-    <form className="bd stack" onSubmit={save}>
-      <div className="row" style={{ alignItems: "flex-end", gap: 12, flexWrap: "wrap" }}>
-        <div className="field" style={{ flex: "1 1 280px", minWidth: 0 }}>
-          <label htmlFor="n-sum">Send the summary</label>
-          <select id="n-sum" className="input sumsel" value={mode} onChange={(e) => setMode(e.target.value as NotifySummaryMode)}>
-            {MODES.map((m) => <option key={m.v} value={m.v}>{m.label}</option>)}
-          </select>
-        </div>
-        {timed && (
-          <div className="field">
-            <label htmlFor="n-at">At</label>
-            <input id="n-at" className="input mono" type="time" value={at} onChange={(e) => setAt(e.target.value)} style={{ maxWidth: 120 }} />
-          </div>)}
+    <form className="bd" style={{ padding: 0 }} onSubmit={save}>
+      <SettingRow title={<label htmlFor="n-sum">Send the summary</label>}
+        desc={<><span style={{ display: "block" }}>It goes to the places with "The summary" on{mode === "drained" ? ", at most once an hour" : ""}.</span><span style={{ display: "block" }}>Example: "Shrink Your Shit: 42 files done, 3.1 GB freed, 2 failed, 1 needs you."</span></>}>
+        <select id="n-sum" className="input sumsel" style={{ maxWidth: 280 }} value={mode} onChange={(e) => setMode(e.target.value as NotifySummaryMode)}>
+          {MODES.map((m) => <option key={m.v} value={m.v}>{m.label}</option>)}
+        </select>
+        {timed && <input id="n-at" className="input mono" type="time" aria-label="At" value={at} onChange={(e) => setAt(e.target.value)} style={{ maxWidth: 120 }} />}
+      </SettingRow>
+      <div style={{ padding: "0 var(--pad) 12px", display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end" }}>
+        {error && <p className="st bad" role="alert" style={{ margin: 0, alignSelf: "stretch" }}><Icon id="i-alert" /><span>{error}</span></p>}
         <button className="btn" type="submit" disabled={busy}>{busy ? "Saving…" : "Save"}</button>
       </div>
-      <p className="hint" style={{ margin: 0 }}>It goes to the places with "The summary" on{mode === "drained" ? ", at most once an hour" : ""}.</p>
-      <p className="hint" style={{ margin: 0 }}>Example: "Shrink Your Shit: 42 files done, 3.1 GB freed, 2 failed, 1 needs you."</p>
-      {error && <p className="st bad" role="alert" style={{ margin: 0 }}><Icon id="i-alert" /><span>{error}</span></p>}
     </form>);
 }
 
@@ -211,14 +213,15 @@ function LinksCard({ linkBase, reload, said }: { linkBase: string | null; reload
     said("Link saved."); reload();
   };
   return (
-    <form className="bd stack" onSubmit={save}>
-      <div className="field">
-        <label htmlFor="n-base">Links in messages open</label>
+    <form className="bd" style={{ padding: 0 }} onSubmit={save}>
+      <SettingRow title={<label htmlFor="n-base">Links in messages open</label>}
+        desc="Filled from this browser's address. Leave it empty and messages have no links.">
         <input id="n-base" className="input mono" style={{ maxWidth: 320 }} type="url" inputMode="url" autoComplete="off" spellCheck={false} value={v} onChange={(e) => setV(e.target.value)} />
-        <span className="hint">Filled from this browser's address. Leave it empty and messages have no links.</span>
+      </SettingRow>
+      <div style={{ padding: "0 var(--pad) 12px", display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end" }}>
+        {error && <p className="st bad" role="alert" style={{ margin: 0, alignSelf: "stretch" }}><Icon id="i-alert" /><span>{error}</span></p>}
+        <button className="btn" type="submit" disabled={busy}>{busy ? "Saving…" : "Save"}</button>
       </div>
-      <p style={{ margin: 0 }}><button className="btn" type="submit" disabled={busy}>{busy ? "Saving…" : "Save"}</button></p>
-      {error && <p className="st bad" role="alert" style={{ margin: 0 }}><Icon id="i-alert" /><span>{error}</span></p>}
     </form>);
 }
 
@@ -238,9 +241,9 @@ export function NotificationsSettings() {
               <>
                 <section className="card" aria-labelledby="h-where">
                   <div className="hd"><h2 id="h-where">Where to send</h2></div>
-                  <div className="bd stack">
-                    {!d.data.targets.length && <p className="muted" style={{ margin: 0 }}>No places yet.</p>}
-                    {d.data.targets.map((t) => <TargetItem key={t.id} t={t} reload={d.reload} said={setSaid} />)}
+                  <div className="bd" style={{ padding: 0 }}>
+                    {!d.data.targets.length && <p className="muted" style={{ margin: 0, padding: "12px var(--pad)" }}>No places yet.</p>}
+                    {d.data.targets.map((t, i) => <TargetItem key={t.id} t={t} first={i === 0} reload={d.reload} said={setSaid} />)}
                     <AddPlace reload={d.reload} said={setSaid} />
                   </div>
                 </section>

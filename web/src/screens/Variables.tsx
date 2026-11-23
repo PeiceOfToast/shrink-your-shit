@@ -5,6 +5,7 @@ import { Icon } from "../Icon";
 import { failed, type Answer } from "../api";
 import { PageHead } from "../PageHead";
 import { SettingsTabs } from "../pages";
+import { SettingRow, ValueChip } from "../SettingRow";
 import { useData } from "../useData";
 import { getWorkflowVars, saveWorkflowVars, type VarIssue, type VarKind, type VarSave, type WorkflowVar } from "../workflowVarsApi";
 
@@ -151,32 +152,34 @@ function VariablesCard({ items, reload, said }: { items: WorkflowVar[]; reload: 
   return (
     <section className="card" aria-labelledby="h-vars">
       <div className="hd"><h2 id="h-vars">Variables</h2></div>
-      <div className="bd stack">
-        {rows.length === 0 && <p className="muted" style={{ margin: 0 }}>No variables yet. A variable is a named value that every workflow can use. A step uses one by writing its name in double braces, like {"{{output_dir}}"}, and gets the value when a job starts.</p>}
-        <ul className="stack" style={{ listStyle: "none", margin: 0, padding: 0 }}>
-          {rows.map((r) => (
-            <li key={r.key}>
+      <div className="bd" style={{ padding: 0 }}>
+        {rows.length === 0 && <p className="muted" style={{ margin: 0, padding: "12px var(--pad)" }}>No variables yet. A variable is a named value that every workflow can use. A step uses one by writing its name in double braces, like {"{{output_dir}}"}, and gets the value when a job starts.</p>}
+        <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+          {rows.map((r, i) => (
+            <li key={r.key} style={i ? { borderTop: "1px solid var(--border)" } : undefined}>
               {edit?.key === r.key
-                ? <VarForm r={r} issues={issues} onChange={(p) => touch(r.key, p)} onKind={(t) => changeKind(r, t)} onDone={() => done(r.key)} onCancel={cancelEdit} />
+                ? <div style={{ padding: "12px var(--pad)" }}><VarForm r={r} issues={issues} onChange={(p) => touch(r.key, p)} onKind={(t) => changeKind(r, t)} onDone={() => done(r.key)} onCancel={cancelEdit} /></div>
                 : <VarLine r={r} issue={issues[r.key]} asking={asking === r.key} onEdit={() => editRow(r)} onAsk={() => setAsking(r.key)} onRemove={() => remove(r.key)} onKeep={() => { setAsking(null); setFocusId(`${r.key}-edit`); }} />}
             </li>))}
         </ul>
-        <div className="row" style={{ gap: 8 }}>
-          <button id="add-var" className="btn" type="button" onClick={addRow} disabled={busy}>Add a variable</button>
-        </div>
-        <span className="hint">A library's own value wins, then the workflow's, then this one.</span>
-        {loose && <p className="st bad" role="alert" style={{ margin: 0 }}><Icon id="i-alert" /><span>{loose}</span></p>}
-        {phase
-          ? <div className="stack" role="group" aria-label="Confirm the save">
-            <p role="status" style={{ margin: 0 }}>This change affects {plural(phase.workflows.length, "workflow", "workflows")} and {plural(phase.libraries, "library", "libraries")}.</p>
-            <div className="row" style={{ gap: 8 }}>
-              <button className="btn primary" type="button" disabled={busy} onClick={() => send(false)}>{busy ? "Saving…" : "Save"}</button>
-              <button className="btn ghost" type="button" disabled={busy} onClick={() => setPhase(null)}>Cancel</button>
-            </div>
+        <div className="stack" style={{ padding: "12px var(--pad)" }}>
+          <div className="row" style={{ gap: 8 }}>
+            <button id="add-var" className="btn" type="button" onClick={addRow} disabled={busy}>Add a variable</button>
           </div>
-          : <div className="row" style={{ gap: 8 }}>
-            <button className="btn primary" type="button" disabled={busy || !dirty} onClick={() => send(true)}>{busy ? "Checking…" : "Save"}</button>
-          </div>}
+          <span className="hint">A library's own value wins, then the workflow's, then this one.</span>
+          {loose && <p className="st bad" role="alert" style={{ margin: 0 }}><Icon id="i-alert" /><span>{loose}</span></p>}
+          {phase
+            ? <div className="stack" role="group" aria-label="Confirm the save">
+              <p role="status" style={{ margin: 0 }}>This change affects {plural(phase.workflows.length, "workflow", "workflows")} and {plural(phase.libraries, "library", "libraries")}.</p>
+              <div className="row" style={{ gap: 8 }}>
+                <button className="btn primary" type="button" disabled={busy} onClick={() => send(false)}>{busy ? "Saving…" : "Save"}</button>
+                <button className="btn ghost" type="button" disabled={busy} onClick={() => setPhase(null)}>Cancel</button>
+              </div>
+            </div>
+            : <div className="row" style={{ gap: 8 }}>
+              <button className="btn primary" type="button" disabled={busy || !dirty} onClick={() => send(true)}>{busy ? "Checking…" : "Save"}</button>
+            </div>}
+        </div>
       </div>
     </section>
   );
@@ -186,25 +189,26 @@ function VarLine({ r, issue, asking, onEdit, onAsk, onRemove, onKeep }: {
   r: Row; issue?: { msg: string }; asking: boolean; onEdit: () => void; onAsk: () => void; onRemove: () => void; onKeep: () => void;
 }) {
   const label = braces(r.name);
+  // the value and kind are chips (a long path wraps inside its chip); the description is the muted line under them
+  const chip = (text: string) => <ValueChip><span style={{ whiteSpace: "normal", overflowWrap: "anywhere" }}>{text}</span></ValueChip>;
   return (
-    <div className="stack" style={{ gap: 4 }}>
-      <div className="setrow" style={{ padding: "10px 0" }}>
-        <div className="txt">
-          <div className="ttl mono">{label}</div>
-          <p className="muted sub">{kindName(r.type)} · {shownValue(r)}{r.description.trim() ? " · " + r.description : ""}</p>
-        </div>
-        <div className="ctl">
-          <button id={`${r.key}-edit`} className="btn sm ghost" type="button" onClick={onEdit} aria-label={`Edit ${label}`}>Edit</button>
-          <button className="btn sm ghost" type="button" onClick={onAsk} aria-label={`Remove ${label}`}>Remove</button>
-        </div>
-      </div>
-      {issue && <p className="st bad" role="alert" style={{ margin: 0 }}><Icon id="i-alert" /><span>{issue.msg}</span></p>}
-      {asking && (
-        <div className="row" role="group" aria-label={`Remove ${label}`} style={{ gap: 8, flexWrap: "wrap" }}>
-          <span>Remove {label}? It goes when you Save.</span>
-          <button className="btn sm" type="button" onClick={onRemove}>Remove it</button>
-          <button className="btn sm ghost" type="button" onClick={onKeep}>Keep it</button>
-        </div>)}
+    <div>
+      <SettingRow title={<span className="mono">{label}</span>}
+        desc={<>
+          <span style={{ display: "inline-flex", flexWrap: "wrap", gap: 6, maxWidth: "100%" }}>{chip(kindName(r.type))}{chip(shownValue(r))}</span>
+          {r.description.trim() && <span style={{ display: "block" }}>{r.description}</span>}</>}>
+        <button id={`${r.key}-edit`} className="btn sm ghost" type="button" onClick={onEdit} aria-label={`Edit ${label}`}>Edit</button>
+        <button className="btn sm ghost" type="button" onClick={onAsk} aria-label={`Remove ${label}`}>Remove</button>
+      </SettingRow>
+      {(issue || asking) && <div className="stack" style={{ padding: "0 var(--pad) 12px" }}>
+        {issue && <p className="st bad" role="alert" style={{ margin: 0 }}><Icon id="i-alert" /><span>{issue.msg}</span></p>}
+        {asking && (
+          <div className="row" role="group" aria-label={`Remove ${label}`} style={{ gap: 8, flexWrap: "wrap" }}>
+            <span>Remove {label}? It goes when you Save.</span>
+            <button className="btn sm" type="button" onClick={onRemove}>Remove it</button>
+            <button className="btn sm ghost" type="button" onClick={onKeep}>Keep it</button>
+          </div>)}
+      </div>}
     </div>);
 }
 
