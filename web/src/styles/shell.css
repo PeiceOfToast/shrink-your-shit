@@ -1065,6 +1065,16 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 .steps li.current{color:var(--text);font-weight:600}
 .steps li.done{color:var(--success-text)}
 .steps .dot{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;border:1px solid var(--border-strong);font-size:12px}
-.steps li.current .dot{background:var(--accent);border-color:var(--accent);color:#fff}
+.steps li.current .dot{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
 .steps li.done .dot{border-color:var(--success-text);color:var(--success-text)}
 .done-card{text-align:center}
+/* M5f fix 2 (design start-step1..3): the step row is a full-width line of three steps, no box; each step's top rule shows its state */
+.steps.first-run{display:flex;justify-content:stretch;gap:12px;width:100%;border:0;background:none;padding:0;margin:0}
+.steps.first-run li{flex:1 1 0;min-width:0;justify-content:center;flex-wrap:wrap;text-align:center;border-top:2px solid var(--border);padding-top:10px}
+.steps.first-run li.done{border-top-color:var(--success-text)}
+.steps.first-run li.current{border-top-color:var(--accent)}
+.done-card a.muted,.done-card .linkbtn{text-decoration:none;font-size:var(--fs-sm)}
+.done-card a.muted:hover,.done-card .linkbtn:hover{text-decoration:underline}
+.linkbtn.enc-change{font-size:var(--fs-sm);color:var(--text-2);text-decoration:none}
+.linkbtn.enc-change:hover{text-decoration:underline}
+.radio.top{align-items:flex-start;padding-top:10px}

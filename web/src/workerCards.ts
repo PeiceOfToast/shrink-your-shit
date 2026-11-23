@@ -44,3 +44,9 @@ export function encoderChip(name: string, lit: boolean, primary: boolean): { tex
 export function formatsChip(formats: [string, boolean][]): string {
   return formats.filter(([, on]) => on).map(([f]) => f).join(" · ");
 }
+
+// M5f fix 2: the wizard's graphics chips. A vendor found gets its chip; when none is found, one "none found" chip stands for them all.
+export function graphicsChips(gpus: { name: string; lit: boolean; primary: boolean }[]): { text: string; tone: "accent" | "ok" | "muted" }[] {
+  const found = gpus.filter((g) => g.lit);
+  return found.length ? found.map((g) => encoderChip(g.name, true, g.primary)) : [{ text: "Graphics card · none found", tone: "muted" }];
+}

@@ -45,11 +45,11 @@ export function Start() {
   return (
     <div className="stack" style={{ maxWidth: 880 }}>
       <PageHead title="Set up Shrink Your Shit" />
-      <p className="muted" style={{ textAlign: "center" }}>Three short steps. Each is saved as you go. Nothing converts until you start a worker.</p>
+      <p className="muted">Three short steps. Each is saved as you go. Nothing converts until you start a worker.</p>
       <Steps current={step} />
       {error && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{error}</span></p>}
       {step > 1 && <Done n={1} what={lib ? lib.name : kept!.name} text={lib ? lib.path + videoSuffix(lib.status.videos) : kept!.path}
-        change={lib ? <Link className="muted" to={"/libraries/" + lib.id}>Change</Link> : <button className="btn sm ghost" type="button" onClick={() => setEditing(true)}>Change</button>} />}
+        change={lib ? <Link className="muted" to={"/libraries/" + lib.id}>Change</Link> : <button className="linkbtn muted" type="button" onClick={() => setEditing(true)}>Change</button>} />}
       {step > 2 && <Done n={2} what={wfName ?? ""} text={lib!.settingLabel} change={lib && <Link className="muted" to={"/workflows/" + lib.flowId}>Change</Link>} />}
       {step === 1 && <StepLibrary taken={(libs.data ?? []).map((x) => x.name)} kept={kept} onDone={async (v) => { setError(""); if (await ok(patchSettings({ firstRunLibrary: v, firstRunStep: 2 }), setError)) (setEditing(false), refresh()); }} />}
       {step === 2 && <StepWorkflow kept={kept!} onDone={async () => { await ok(patchSettings({ firstRunStep: 3 }), setError); refresh(); }} />}
@@ -63,7 +63,7 @@ export function Start() {
 const STEP_NAMES = ["Add a library", "Create a workflow", "Your worker"];
 function Steps({ current }: { current: number }) {
   return (
-    <ol className="steps" aria-label="Setup steps">
+    <ol className="steps first-run" aria-label="Setup steps">
       {stepStates(current).map((st, i) => (
         <li key={i} className={st} aria-current={st === "current" ? "step" : undefined}>
           <span className="dot">{st === "done" ? <Icon id="i-check-c" /> : i + 1}</span><span>{STEP_NAMES[i]}</span>
@@ -157,17 +157,17 @@ function StepWorkflow({ kept, onDone }: { kept: Kept; onDone: () => void }) {
         <div className="field"><label htmlFor="s2-name">Name</label><input id="s2-name" className="input" value={name} onChange={(e) => setName(e.target.value)} /></div>
         <fieldset className="stack choice" style={{ border: 0, padding: 0, margin: 0 }}>
           <legend className="lab">How to start</legend>
-          <div className="radio"><input type="radio" id="s2-simple" name="how" checked readOnly />
+          <div className="radio top"><input type="radio" id="s2-simple" name="how" checked readOnly />
             <div style={{ minWidth: 0, flex: 1 }}><label htmlFor="s2-simple">Start Simple: Shrink videos</label>
               <div className="hint" style={{ fontSize: "var(--fs)" }}>{START_SIMPLE}</div></div></div>
         </fieldset>
         <fieldset className="stack choice" style={{ border: 0, padding: 0, margin: 0 }}>
           <legend className="lab">Where new files go</legend>
-          <div className="radio"><input type="radio" id="s2-next" name="where" checked={!one} onChange={() => setOne(false)} />
+          <div className="radio top"><input type="radio" id="s2-next" name="where" checked={!one} onChange={() => setOne(false)} />
             <div style={{ minWidth: 0, flex: 1 }}><label htmlFor="s2-next">Next to each library</label>
               <div className="hint">{NEXT_HINT}</div>
               {!one && <div className="mono sm" style={{ overflowWrap: "anywhere" }}>{kept.path} → {shrunk(kept.path)}</div>}</div></div>
-          <div className="radio"><input type="radio" id="s2-one" name="where" checked={one} onChange={() => setOne(true)} />
+          <div className="radio top"><input type="radio" id="s2-one" name="where" checked={one} onChange={() => setOne(true)} />
             <div style={{ minWidth: 0, flex: 1 }}><label htmlFor="s2-one">One folder for all</label>
               <div className="hint">{ONE_HINT}</div></div></div>
           {one && noNext && <p className="st warn" role="note"><Icon id="i-alert" /><span>{nextLine(kept.path, noNext)}</span></p>}
@@ -204,7 +204,7 @@ function StepWorker({ libraryId }: { libraryId: string }) {
         <p>{w ? "This computer is set up as a worker. Here is what it found." : "This computer is set up as a worker. Nothing to do."}</p>
         {w && <dl className="kv">
           <dt>System</dt><dd>{systemLine(w.host, w.os, w.arch, w.live.memTotalBytes ? bytes(w.live.memTotalBytes) : "") || "—"}</dd>
-          <dt>Encoders</dt><dd><EncoderChips w={w} reload={ws.reload} titled={false} /></dd>
+          <dt>Encoders</dt><dd><EncoderChips w={w} reload={ws.reload} wizard /></dd>
         </dl>}
         {error && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{error}</span></p>}
         <div className="row"><button className="btn primary" type="button" disabled={busy} onClick={() => finish(true)}><Icon id="i-play" />Start the worker</button>
