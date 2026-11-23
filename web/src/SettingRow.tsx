@@ -4,9 +4,10 @@
 import type { ReactNode } from "react";
 
 // descId names the description, so a control can point aria-describedby at it.
-export function SettingRow({ title, desc, descId, children }: { title: ReactNode; desc?: ReactNode; descId?: string; children?: ReactNode }) {
+// wide gives the controls the width they need (a row of four Accent choices), so they stay on one line.
+export function SettingRow({ title, desc, descId, wide, children }: { title: ReactNode; desc?: ReactNode; descId?: string; wide?: boolean; children?: ReactNode }) {
   return (
-    <div className="setrow">
+    <div className={wide ? "setrow wide" : "setrow"}>
       <div className="txt"><div className="ttl">{title}</div>{desc && <p className="muted sub" id={descId}>{desc}</p>}</div>
       {children && <div className="ctl">{children}</div>}
     </div>);

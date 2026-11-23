@@ -49,7 +49,7 @@ function Choice<T extends string | number>({ legend, name, value, options, desc,
   legend: string; name: string; value: T; options: [T, string, string?][]; desc?: string; onPick: (v: T) => void;
 }) {
   return (
-    <SettingRow title={<span id={name + "-h"}>{legend}</span>} desc={desc} descId={name + "-d"}>
+    <SettingRow wide title={<span id={name + "-h"}>{legend}</span>} desc={desc} descId={name + "-d"}>
       <div className="choice prefs" role="radiogroup" aria-labelledby={name + "-h"} aria-describedby={desc ? name + "-d" : undefined}>
         <div className="row">
           {options.map(([v, label, swatch]) => (
@@ -125,7 +125,8 @@ export function AppearanceSettings() {
     <div className="stack">
       <PageHead icon="i-settings" title="Settings" />
       <SettingsTabs at="appearance" />
-      <div className="card">{/* clean pass 2 (7.1): the tab names the panel, so no second "Appearance" heading */}
+      <div className="card">
+        <div className="hd"><h2>Appearance</h2></div>
         <div className="bd stack" style={{ padding: 0, gap: 0 }}>
           {/* descriptions say only what the app does now (checked in tokens.css, shell.css, prefs.ts) */}
           <Choice legend="Theme" name="theme" value={draft.theme} desc="Dark is the default." options={THEMES.map(([v, l]) => [v, l])} onPick={set("theme")} />

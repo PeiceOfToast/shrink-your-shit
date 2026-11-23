@@ -155,7 +155,8 @@ textarea.input{min-height:72px;font-family:var(--mono);font-size:var(--fs-sm)}
 .setrow .sub{margin:2px 0 0}
 .setrow .ctl{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;align-items:center;min-width:0}
 .setrow .langs{flex:1 1 280px;min-width:0;display:flex;flex-direction:row;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:8px}
-@media (max-width:640px){.setrow{grid-template-columns:minmax(0,1fr)}.setrow .ctl,.setrow .langs{justify-content:flex-start}}
+.setrow.wide{grid-template-columns:minmax(0,1fr) auto}
+@media (max-width:640px){.setrow,.setrow.wide{grid-template-columns:minmax(0,1fr)}.setrow .ctl,.setrow .langs{justify-content:flex-start}}
 .card>.bd{padding:var(--pad)}
 .grid{display:grid;gap:var(--gap)}
 .cols2{grid-template-columns:repeat(2,minmax(0,1fr))}
