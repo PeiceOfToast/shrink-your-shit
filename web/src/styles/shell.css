@@ -970,7 +970,9 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 .lcard .lcheck{flex:none}
 .lcard .lmain{flex:1 1 auto;min-width:0;display:grid;gap:6px}
 .lcard .lname{display:block}
-.lcard .chips{margin-top:0}
+.lcard .chips{margin-top:0;display:flex;max-width:100%;min-width:0}
+.lcard .chips .mchip{max-width:100%}
+.lcard .mchip.mono{display:inline-block;overflow:hidden;text-overflow:ellipsis;line-height:var(--chip-h);vertical-align:middle}
 .lcard .mchip .ic{width:12px;height:12px;margin-right:4px}
 .lcard .mchip.mono{font-family:var(--font-mono,ui-monospace,monospace)}
 .lside{flex:none;display:flex;flex-direction:column;align-items:flex-end;gap:4px;text-align:right;max-width:50%}

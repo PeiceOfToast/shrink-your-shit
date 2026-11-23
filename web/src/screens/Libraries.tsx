@@ -183,6 +183,7 @@ function LibCard({ l, tag, selecting, checked, onToggle }: { l: Library; tag: st
           <span className="mchip">{shareWait(l) ? "Waiting for " + shareName(l) + " to connect · " : ""}{count(l.counts.waiting)} waiting{paused(l) ? ", not converting" : ""}</span>
           <span className="mchip">{l.scan.lastScanAt ? "Scanned " + lastScan(l.scan.lastScanAt) : "Not scanned yet"}</span>
           {l.bytes.freed > 0 && <span className="mchip"><Icon id="i-check-c" />{bytes(l.bytes.freed)} saved</span>}
+          {l.bytes.waitingToFree > 0 && <span className="mchip"><Icon id="i-trash" />{bytes(l.bytes.waitingToFree)} in the trash</span>}
         </div>
       </div>
       <div className="lside">
