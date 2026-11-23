@@ -1008,4 +1008,6 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
   .lchev{display:inline;margin-left:auto;font-size:20px;line-height:1;color:var(--text-2)}
   /* fix 2: at 390 the actions row wraps below the name, so the › is centred on the whole card, not on the first row */
   .wfcard .lchev{position:absolute;right:12px;top:50%;transform:translateY(-50%);margin:0;pointer-events:none}
+  /* fix 3: reserve room on the right for the absolutely placed ›, so the tag chip and the favourite note end before it */
+  .lcard.wfcard{padding-right:40px}
 }
