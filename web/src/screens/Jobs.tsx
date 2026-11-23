@@ -680,7 +680,8 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
   const foundRows = readFound(found.flatMap((st) => st.found!)).rows;
   const newFacts = fileFacts(foundRows.find(([k]) => k === "New file")?.[1]), origFacts = fileFacts(foundRows.find(([k]) => k === "Original")?.[1]);
   const subsNew = sumS?.after?.subtitles ?? newFacts?.subtitles, subsOld = sumS?.before?.subtitles ?? origFacts?.subtitles;
-  const lenNew = sumS?.after?.durationSec != null ? lenText(sumS.after) : newFacts?.length, lenOld = sumS?.before?.durationSec != null ? lenText(sumS.before) : origFacts?.length;
+  const lenNew = sumS?.after?.durationSec != null ? lenText(sumS.after) : j?.metadata?.after?.durationSec != null ? lenText(j.metadata.after) : newFacts?.length;
+  const lenOld = sumS?.before?.durationSec != null ? lenText(sumS.before) : j?.metadata?.before?.durationSec != null ? lenText(j.metadata.before) : origFacts?.length;
   const subsRow = subsNew != null || subsOld != null, lenRow = lenNew != null || lenOld != null;
   const kept0 = !!state && keptOrig({ state, reason: j?.reason ?? own?.reason, newFileRefused: j?.newFileRefused ?? own?.newFileRefused });
   // A done job's New file line (the check's codec, size and fps) reads in the Video row, as the design has it: "HEVC 1280x720 25.000 fps 8-bit"
