@@ -58,7 +58,7 @@ const reasonText = (j: JobItem) => j.reason?.message ?? j.detail ?? ""; // #130:
 const saved = (b?: number, a?: number) => {
   if (!b || a == null) return "";
   const pct = Math.round((100 * (b - a)) / b);
-  return bytes(b) + " → " + bytes(a) + ", " + (pct >= 0 ? pct + "% smaller" : -pct + "% bigger");
+  return bytes(b) + " → " + bytes(a) + " · " + (pct >= 0 ? pct + "% smaller" : -pct + "% bigger");
 };
 // U10: a path wraps after each slash (or backslash), so a long one breaks between folders, not in the middle of a name
 const slashWrap = (p: string) => { const parts = p.replace(/[\\/]/g, (m) => m + "\u0000").split("\u0000"); if (parts[parts.length - 1] === "") parts.pop(); return parts.map((s, i) => <Fragment key={i}>{s}{i < parts.length - 1 && <wbr />}</Fragment>); };
@@ -76,7 +76,9 @@ function Detail({ j }: { j: JobItem }) {
   return <>{reasonText(j)}</>;
 }
 // U4 (C1): the tile names the codec and resolution the file has; with one missing it shows the other, with neither the file icon
-const tileOf = (j: JobItem) => j.codec || j.resolution ? <>{j.codec && <b>{j.codec}</b>}{j.resolution && <span>{j.resolution}</span>}</> : <Icon id="i-file" />;
+// The tile shows the height ("640×360" -> "360p"), so every tile is the same width; an odd size still gives its height.
+const heightP = (r: string) => { const m = /(\d+)\s*[×x]\s*(\d+)/.exec(r); return m ? m[2] + "p" : r; };
+const tileOf = (j: JobItem) => j.codec || j.resolution ? <>{j.codec && <b>{j.codec}</b>}{j.resolution && <span>{heightP(j.resolution)}</span>}</> : <Icon id="i-file" />;
 
 const RUNS: JobState[] = ["preparing", "running", "validating", "committing"]; // live progress only for a running row
 // The drawer opens by job: a skipped row with a job behind it (#149: a workflow's skip after it failed, or one the user
@@ -187,7 +189,8 @@ export function Jobs() {
       {off && <p className="st warn" role="status"><Icon id="i-alert" /><span>{off === "offline"
         ? <>No worker is connected. <Link to="/workers">See Workers.</Link></>
         : <>No worker is running. <Link to="/workers">Turn workers on.</Link></>}</span></p>}
-      {library && <div className="row" style={{ gap: 6 }}><span className="mchip">Library: {libs.data?.find((l) => l.id === library)?.name ?? library}
+      {/* one library filter: the pressed button in the filter row says which library; the chip is only for an id the list lacks (so it can still be cleared) */}
+      {library && !libs.data?.some((l) => l.id === library) && <div className="row" style={{ gap: 6 }}><span className="mchip">Library: {library}
         <button className="btn sm icon ghost" type="button" aria-label="Clear the library filter" onClick={() => navigate(query(tab, ""))}><Icon id="i-x" /></button></span></div>}
       {kept && <div className="row" style={{ gap: 6 }}><span className="mchip">{TRASH_WORDS}
         <button className="btn sm icon ghost" type="button" aria-label="Clear the original-in-the-trash filter" onClick={() => navigate(query(tab, library, ""))}><Icon id="i-x" /></button></span></div>}
@@ -207,9 +210,10 @@ export function Jobs() {
           Its own row under the tabs (design jobs-running): the filter left, the search right. */}
       <div className="lfilt">
         <span className="filt">{tab === "completed" && <span className="seg" role="group" aria-label="Original file">
+          <button type="button" aria-pressed={!kept && !left} onClick={() => navigate(query("completed", library, ""))}>All</button>
           <button type="button" aria-pressed={kept} onClick={() => navigate(query("completed", library, kept ? "" : "kept"))}>{TRASH_WORDS}</button>
           <button type="button" aria-pressed={left} onClick={() => navigate(query("completed", library, left ? "" : "left"))}>{LEFT_WORDS}</button></span>}
-        {!!current && !!libs.data && libs.data.length > 1 && items.length > 0 && <span className="seg" role="group" aria-label="Library">
+        {!!current && !!libs.data && libs.data.length > 1 && (items.length > 0 || !!library) && <span className="seg" role="group" aria-label="Library">
           <button type="button" aria-pressed={!library} onClick={() => navigate(query(tab, ""))}>All libraries</button>
           {libs.data.map((l) => <button key={l.id} type="button" aria-pressed={library === l.id} onClick={() => navigate(query(tab, l.id))}>{l.name}</button>)}
         </span>}</span>
@@ -247,7 +251,7 @@ export function Jobs() {
                 </div>}
               </div>
               <div className="lside">
-                <span className={"sm nowrap" + (gain ? " gain" : "")}>{j.state === "completed" ? saved(j.beforeBytes, j.afterBytes) : bytes(j.bytes)}</span>
+                <span className={(j.state === "completed" ? "saved nowrap" : "sm nowrap") + (gain ? " gain" : "")}>{j.state === "completed" ? saved(j.beforeBytes, j.afterBytes) : bytes(j.bytes)}</span>
                 <Pill j={j} pct={pct} />
                 {tab === "completed" && j.finishedAt && <span className="lnote">Finished {clock(j.finishedAt)}</span>}
               </div>
