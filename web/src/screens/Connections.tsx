@@ -5,6 +5,7 @@ import { Icon } from "../Icon";
 import { failed, type Answer } from "../api";
 import { LoadFailed, PageHead } from "../PageHead";
 import { SettingsTabs } from "../pages";
+import { SettingRow, ValueChip } from "../SettingRow";
 import { useData } from "../useData";
 import { clock } from "../format";
 import { addIntegration, listIntegrations, patchIntegration, removeIntegration, testIntegration } from "../connectionsApi";
@@ -122,7 +123,9 @@ function Form({ kind, it, onDone, onCancel, onTested }: { kind: IntegrationKind;
     </form>);
 }
 
-function AppCard({ kind, it, reload, said }: { kind: IntegrationKind; it?: Integration; reload: () => void; said: (m: string) => void }) {
+// One app as a row of the Media apps card: name and hint on the left (the URL as a chip once set), status and actions on
+// the right. Its confirm and form open underneath, inside the card.
+function AppRow({ kind, it, first, reload, said }: { kind: IntegrationKind; it?: Integration; first: boolean; reload: () => void; said: (m: string) => void }) {
   const app = APP[kind].name, [open, setOpen] = useState(false), [confirm, setConfirm] = useState(false), [msg, setMsg] = useState(""), [saved, setSaved] = useState<{ tone: Tone; text: string } | null>(null);
   const remove = async () => {
     const r = await removeIntegration(it!.id);
@@ -130,30 +133,27 @@ function AppCard({ kind, it, reload, said }: { kind: IntegrationKind; it?: Integ
     setConfirm(false); said(app + " removed. Files won't be refreshed there any more."); reload();
   };
   return (
-    <section className="card" aria-labelledby={"h-" + kind}>
-      <div className="hd">
-        <h2 id={"h-" + kind}>{app}</h2>
-        <Status it={it} />
-        <span className="sp" />
+    <div style={first ? undefined : { borderTop: "1px solid var(--border)" }}>
+      <SettingRow title={app} desc={<>{APP[kind].does}{it && <> <ValueChip><span style={{ whiteSpace: "normal", overflowWrap: "anywhere" }}>{it.url}</span></ValueChip></>}</>}>
+        <div className="stline"><Status it={it} /></div>
         {!open && !confirm && (it
-          ? <span className="row nw" style={{ gap: 6 }}><button className="btn sm" type="button" onClick={() => { setOpen(true); setSaved(null); }} aria-label={"Edit " + app}>Edit</button>
-            <button className="btn sm ghost" type="button" onClick={() => { setConfirm(true); setSaved(null); }} aria-label={"Remove " + app}>Remove</button></span>
+          ? <div className="row" style={{ gap: 8 }}>
+            <button className="btn sm" type="button" onClick={() => { setOpen(true); setSaved(null); }} aria-label={"Edit " + app}>Edit</button>
+            <button className="btn sm ghost" type="button" onClick={() => { setConfirm(true); setSaved(null); }} aria-label={"Remove " + app}>Remove</button></div>
           : <button className="btn primary sm" type="button" onClick={() => { setOpen(true); setSaved(null); }} aria-label={"Connect " + app}>Connect</button>)}
+      </SettingRow>
+      {/* the live region stays mounted so a screen reader announces the text when it arrives */}
+      <div role="status" style={saved || confirm || open ? { padding: "0 var(--pad) 12px" } : undefined}>
+        {saved && <Result tone={saved.tone} text={saved.text} />}
       </div>
-      <div className="bd stack">
-        <div>{/* the live region stays mounted so a screen reader announces the text when it arrives */}
-          <div role="status">{saved && <div style={{ marginBottom: "var(--gap)" }}><Result tone={saved.tone} text={saved.text} /></div>}</div>
-          <p className="muted" style={{ margin: 0 }}>{APP[kind].does}{it && <> <span className="mono">{it.url}</span></>}</p>
-        </div>
-        {confirm && <div className="row" role="group" aria-label={"Remove " + app} style={{ gap: 8 }}>
-          <span>Remove {app}? It won't be told about converted files.</span>
-          <button className="btn sm danger" type="button" onClick={remove}>Remove</button>
-          <button className="btn sm ghost" type="button" onClick={() => setConfirm(false)}>Cancel</button>
-          {msg && <span className="st bad"><Icon id="i-alert" />{msg}</span>}
-        </div>}
-        {open && <Form kind={kind} it={it} onTested={reload} onCancel={() => setOpen(false)} onDone={(m) => { setOpen(false); setSaved(m); said(""); reload(); }} />}
-      </div>
-    </section>);
+      {confirm && <div className="row" role="group" aria-label={"Remove " + app} style={{ gap: 8, padding: "0 var(--pad) 12px" }}>
+        <span>Remove {app}? It won't be told about converted files.</span>
+        <button className="btn sm danger" type="button" onClick={remove}>Remove</button>
+        <button className="btn sm ghost" type="button" onClick={() => setConfirm(false)}>Cancel</button>
+        {msg && <span className="st bad"><Icon id="i-alert" />{msg}</span>}
+      </div>}
+      {open && <div style={{ padding: "0 var(--pad) 12px" }}><Form kind={kind} it={it} onTested={reload} onCancel={() => setOpen(false)} onDone={(m) => { setOpen(false); setSaved(m); said(""); reload(); }} /></div>}
+    </div>);
 }
 
 export function ConnectionsSettings() {
@@ -168,7 +168,13 @@ export function ConnectionsSettings() {
       {notHere ? <p className="muted">This server can't connect to media apps yet.</p>
         : d.error && !d.data ? <LoadFailed error={d.error} reload={d.reload} />
           : !d.data ? <div className="empty">Loading…</div>
-            : <>{KINDS.map((k) => <AppCard key={k} kind={k} it={d.data!.find((x) => x.kind === k)} reload={d.reload} said={setSaid} />)}
+            : <>
+              <section className="card" aria-labelledby="h-media">
+                <div className="hd"><h2 id="h-media">Media apps</h2></div>
+                <div className="bd" style={{ padding: 0 }}>
+                  {KINDS.map((k, i) => <AppRow key={k} kind={k} first={i === 0} it={d.data!.find((x) => x.kind === k)} reload={d.reload} said={setSaid} />)}
+                </div>
+              </section>
               {/* contract "Plex / Jellyfin": said once on the screen */}
               <p className="hint" style={{ margin: 0 }}>Changing a file's container (.mp4 to .mkv) can reset its watched state in Jellyfin, and sometimes in Plex.</p></>}
     </div>);

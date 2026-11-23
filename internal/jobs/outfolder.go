@@ -64,14 +64,18 @@ func NextToLibrary(name, lib string) (string, *FolderProblem) {
 }
 
 // writable reports whether a file can be made in dir (a test file, removed at once).
-func writable(dir string) bool {
+func writable(dir string) bool { return WritableDir(dir) == nil }
+
+// WritableDir makes a test file in dir and removes it, so a caller can tell a person why dir can't be written to:
+// the error names the system's own reason. nil means a file can be made there.
+func WritableDir(dir string) error {
 	f, err := os.CreateTemp(dir, ".syp-check-*")
 	if err != nil {
-		return false
+		return err
 	}
+	name := f.Name()
 	f.Close()
-	os.Remove(f.Name())
-	return true
+	return os.Remove(name)
 }
 
 // OutputFolder is library id's folder for new files with "Next to each library": its override folder,

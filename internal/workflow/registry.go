@@ -268,6 +268,9 @@ func Definitions() []StepDefinition {
 						"If the graphics card fails, stop the job at once and say why, with no step down to another way or the processor. The file is not tried again by itself."}), "next", "If the hardware fails", "segmented"),
 				"cpuQuality": map[string]any{"type": "integer", "minimum": 0, "maximum": 5, "default": 0, "title": "CPU quality",
 					"description": "0: the same as Quality. 1 to 5: the processor's own quality, on the same scale."},
+				// F4: the black bars are cut only when a sample of the file agrees on them; off, the picture is kept as it is.
+				"removeBlackBars": typedRef(map[string]any{"type": "boolean", "default": false, "title": "Remove black bars",
+					"description": "Cuts the black bars around the picture when a sample of the file agrees on where they are. Off: the picture is left as it is."}),
 			}, []string{"quality", "format", "resolution", "maxBitrate", "speed"})}),
 		def(StepDefinition{Type: TypeAudio, RunsAs: RunsPlan, Category: "audio", Name: "Audio", Icon: "audio", TypeLabel: "Audio",
 			Description: "Which sound tracks the new file has.", Inputs: []Port{in}, Outputs: []Port{success}, RunsWith: encodeSegment,
@@ -276,6 +279,9 @@ func Definitions() []StepDefinition {
 				"onlyMyLanguages": typedRef(map[string]any{"type": "boolean", "default": true, "title": "Only my languages",
 					// design's words (02:38Z), true to planAudio: with none matching, a stereo choice keeps the main track only
 					"description": "Keeps only tracks in your languages (Settings > General). Tracks with no language set are always kept. If none match, a stereo choice keeps the main track; the other choices keep all tracks."}),
+				// F5: only the tracks this step converts or adds are measured, and a copied track is never touched.
+				"evenLoudness": typedRef(map[string]any{"type": "boolean", "default": false, "title": "Even out loudness",
+					"description": "Measures the sound of each converted track and evens it out to the same level. A track that is kept as it is is never changed."}),
 			}, []string{"audio", "onlyMyLanguages"})}),
 		def(StepDefinition{Type: TypeSubtitles, RunsAs: RunsPlan, Category: "subtitles", Name: "Subtitles", Icon: "subtitles", TypeLabel: "Subtitles",
 			Description: "Which subtitles the new file keeps.", Inputs: []Port{in}, Outputs: []Port{success}, RunsWith: encodeSegment,

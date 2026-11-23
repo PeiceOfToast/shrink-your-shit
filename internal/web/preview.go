@@ -184,7 +184,11 @@ func previewTemplate(w http.ResponseWriter, store *jobs.Store, l jobs.Library, s
 		t.Languages = strings.Join(store.Languages(), ",")
 		return t, true
 	}
-	sel, err := readSelectors(s, store.Languages())
+	var kept *rules.Selectors // the stored rate control, hardware and keep-if-bigger: a save keeps them, so a preview checks them
+	if f, err := store.GetFlow(l.FlowID); err == nil {
+		kept = f.Template.Selectors
+	}
+	sel, err := readSelectors(s, store.Languages(), kept)
 	var se *rules.SelectorError
 	if errors.As(err, &se) {
 		code := se.Code

@@ -268,6 +268,71 @@ func TestSelectorsSaveAndReadBack(t *testing.T) {
 	}
 }
 
+// F5: even loudness can be asked for from the Settings page too: the save keeps the choice, the setting reads it
+// back, the setting's choices sent back as the page sends them are accepted, and off is off.
+func TestEvenLoudnessIsSettable(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	l, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	path := fmt.Sprintf("/api/libraries/%d/setting", l.ID)
+	if code, body := post(t, srv, "PUT", path, `{"quality":2,"evenLoudness":true,"fileType":"keep"}`); code != 200 || !strings.Contains(body, `"evenLoudness":true`) {
+		t.Fatalf("save: %d %s", code, body)
+	}
+	if f, _ := st.GetFlow(l.FlowID); f.Template.Selectors == nil || !f.Template.Selectors.EvenLoudness {
+		t.Errorf("the flow does not ask to even out the loudness: %+v", f.Template.Selectors)
+	}
+	if _, view, _ := do(t, nil, srv, call{method: "GET", path: path}); !strings.Contains(view, `"evenLoudness":true`) {
+		t.Errorf("the setting does not show the choice: %s", view)
+	}
+	echo := `{"kind":"selectors","quality":2,"speed":"normal","format":"hevc","resolution":"keep","maxBitrate":"none",` +
+		`"audio":"as_is","onlyMyLanguages":false,"subtitles":"keep_all","fileType":"keep",` +
+		`"afterConverting":"replace","ignore":[],"includeDolbyVision":false,"evenLoudness":true}`
+	if code, body := post(t, srv, "PUT", path, echo); code != 200 {
+		t.Fatalf("the setting sent back: %d %s", code, body)
+	}
+	if f, _ := st.GetFlow(l.FlowID); f.Template.Selectors == nil || !f.Template.Selectors.EvenLoudness {
+		t.Errorf("the echo lost the choice: %+v", f.Template.Selectors)
+	}
+	if code, body := post(t, srv, "PUT", path, `{"quality":2,"evenLoudness":false,"fileType":"keep"}`); code != 200 || strings.Contains(body, "evenLoudness") {
+		t.Fatalf("off: %d %s", code, body)
+	}
+	if f, _ := st.GetFlow(l.FlowID); f.Template.Selectors == nil || f.Template.Selectors.EvenLoudness {
+		t.Errorf("the choice is off: %+v", f.Template.Selectors)
+	}
+}
+
+// F4: the black bars can be asked for from the Settings page too: the save keeps the choice, the setting
+// reads it back, the setting's own answer sent back unchanged is accepted, and off is off.
+func TestRemoveBlackBarsIsSettable(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	l, _ := st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	path := fmt.Sprintf("/api/libraries/%d/setting", l.ID)
+	if code, body := post(t, srv, "PUT", path, `{"quality":2,"removeBlackBars":true,"fileType":"keep"}`); code != 200 || !strings.Contains(body, `"removeBlackBars":true`) {
+		t.Fatalf("save: %d %s", code, body)
+	}
+	if f, _ := st.GetFlow(l.FlowID); f.Template.Selectors == nil || !f.Template.Selectors.RemoveBlackBars {
+		t.Errorf("the flow does not ask for the bars to be cut: %+v", f.Template.Selectors)
+	}
+	if _, view, _ := do(t, nil, srv, call{method: "GET", path: path}); !strings.Contains(view, `"removeBlackBars":true`) {
+		t.Errorf("the setting does not show the choice: %s", view)
+	}
+	// the setting's choices, sent back as the page sends them: the new key is a choice, not an unknown one
+	echo := `{"kind":"selectors","quality":2,"speed":"normal","format":"hevc","resolution":"keep","maxBitrate":"none",` +
+		`"audio":"as_is","onlyMyLanguages":false,"subtitles":"keep_all","fileType":"keep",` +
+		`"afterConverting":"replace","ignore":[],"includeDolbyVision":false,"removeBlackBars":true}`
+	if code, body := post(t, srv, "PUT", path, echo); code != 200 {
+		t.Fatalf("the setting sent back: %d %s", code, body)
+	}
+	if f, _ := st.GetFlow(l.FlowID); f.Template.Selectors == nil || !f.Template.Selectors.RemoveBlackBars {
+		t.Errorf("the echo lost the choice: %+v", f.Template.Selectors)
+	}
+	if code, body := post(t, srv, "PUT", path, `{"quality":2,"removeBlackBars":false,"fileType":"keep"}`); code != 200 || strings.Contains(body, "removeBlackBars") {
+		t.Fatalf("off: %d %s", code, body)
+	}
+	if f, _ := st.GetFlow(l.FlowID); f.Template.Selectors == nil || f.Template.Selectors.RemoveBlackBars {
+		t.Errorf("the choice is off: %+v", f.Template.Selectors)
+	}
+}
+
 func listLibraries(t *testing.T, srv *httptest.Server) []map[string]any {
 	t.Helper()
 	_, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/libraries"})

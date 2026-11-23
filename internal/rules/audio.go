@@ -35,6 +35,9 @@ type TrackOp struct {
 	// Title: the name the track has in players ("Stereo (AAC)"), on the tracks the plan makes (converted or
 	// added). Left out of the fingerprint (Snapshot.Fingerprint): a name is not a setting.
 	Title string `json:"title,omitempty"`
+	// Loudness: the track's measured loudness, set by the worker when the Plan evens out loudness (F5). Left out
+	// of the fingerprint (Snapshot.Fingerprint): a measurement is not a setting.
+	Loudness *Loudness `json:"loudness,omitempty"`
 }
 
 // trackTitle names an audio track made with codec (ffprobe's name) and channels: the layout, then the codec in

@@ -142,14 +142,14 @@ func toolChecks(t Tools) []DoctorCheck {
 		out = append(out, DoctorCheck{ID: "ffprobe", Label: "ffprobe", Status: "bad", Detail: "ffprobe is not found.", Hint: hint(fix)})
 	}
 	if t.X265 {
-		out = append(out, DoctorCheck{ID: "x265", Label: "HEVC encoder (libx265)", Status: "ok", Detail: "This ffmpeg has the x265 encoder."})
+		out = append(out, DoctorCheck{ID: "x265", Label: "HEVC encoder (libx265)", Status: "ok", Detail: "This ffmpeg has the HEVC encoder (x265)."})
 	} else {
-		out = append(out, DoctorCheck{ID: "x265", Label: "HEVC encoder (libx265)", Status: "bad", Detail: "This ffmpeg has no x265 encoder.", Hint: hint(fix)})
+		out = append(out, DoctorCheck{ID: "x265", Label: "HEVC encoder (libx265)", Status: "bad", Detail: "This ffmpeg has no HEVC encoder (x265).", Hint: hint(fix)})
 	}
 	if t.SSIM {
-		out = append(out, DoctorCheck{ID: "ssim", Label: "Picture check (ssim)", Status: "ok", Detail: "This ffmpeg has the ssim filter."})
+		out = append(out, DoctorCheck{ID: "ssim", Label: "Picture check (ssim)", Status: "ok", Detail: "This ffmpeg has the picture-check filter (ssim)."})
 	} else {
-		out = append(out, DoctorCheck{ID: "ssim", Label: "Picture check (ssim)", Status: "bad", Detail: "This ffmpeg has no ssim filter, which the safety check needs.", Hint: hint(fix)})
+		out = append(out, DoctorCheck{ID: "ssim", Label: "Picture check (ssim)", Status: "bad", Detail: "This ffmpeg has no picture-check filter (ssim), which the safety check needs.", Hint: hint(fix)})
 	}
 	return out
 }
@@ -185,6 +185,7 @@ func encoderChecks(in APIInput, probes map[string]Probe, inUse string) []DoctorC
 			status := "warn"
 			if device == "missing" { // no card here: nothing to fix, so it isn't a warning
 				status = "absent"
+				detail += " That is fine."
 			}
 			out = append(out, DoctorCheck{ID: id, Label: label, Status: status, Detail: detail})
 		}
@@ -231,6 +232,7 @@ func (c *Checker) libraryChecks(ctx context.Context, l Library) []DoctorCheck {
 	}
 	var extra []DoctorCheck
 	rank := map[string]int{"ok": 0, "warn": 1, "bad": 2}
+	where := l.Name + " (" + l.Path + ")" // the access and folder rows name the folder, so the person can find it
 	add := func(issues []Issue, bad bool) {
 		for _, is := range issues {
 			if is.Code == "no_converter" || is.Code == "no_hw_encoder" { // reported by the tool checks
@@ -246,7 +248,7 @@ func (c *Checker) libraryChecks(ctx context.Context, l Library) []DoctorCheck {
 			key := map[string]string{"read_only": "access", "unreadable": "access", "system_folder": "access",
 				"low_space": "space", "hardlinks": "hardlinks"}[is.Code]
 			if key == "" {
-				h := "Fix the folder, then check again on the Libraries page."
+				h := "Change the folder on the Libraries page, then press Check again."
 				if is.Code == "orphaned_originals" {
 					h = "Move them back or delete them, then press Check again."
 				}
@@ -254,7 +256,7 @@ func (c *Checker) libraryChecks(ctx context.Context, l Library) []DoctorCheck {
 					h = "Delete them when you no longer need them, then press Check again."
 				}
 				extra = append(extra, DoctorCheck{ID: prefix + ":" + is.Code, Label: "Library: " + l.Name, Status: status,
-					Detail: l.Name + ": " + is.Message, Hint: hint(h)})
+					Detail: where + ": " + is.Message, Hint: hint(h)})
 				continue
 			}
 			s := slots[key]
@@ -264,7 +266,14 @@ func (c *Checker) libraryChecks(ctx context.Context, l Library) []DoctorCheck {
 			if s.detail != "" {
 				s.detail += " "
 			}
-			s.detail += l.Name + ": " + is.Message
+			if key == "access" {
+				s.detail += where + ": " + is.Message
+				if is.Code == "unreadable" { // the app cannot read the folder at all: say read access, not just write
+					s.hint = "Check that " + l.Path + " exists, and give the app's user read and write access to it."
+				}
+			} else {
+				s.detail += l.Name + ": " + is.Message
+			}
 		}
 	}
 	add(r.Blockers, true)

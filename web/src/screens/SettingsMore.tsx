@@ -3,9 +3,10 @@
 // when asked for, never kept by the page; a new one; Sign out, only when the server needs a token). Safety: how long
 // replaced originals are kept, where, and what the trash holds now (its whole size lives here, not beside Space saved:
 // design 05:34Z). Not here: log retention (no setting on the server).
-import { useEffect, useId, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type Dispatch, type MouseEvent, type ReactNode, type SetStateAction } from "react";
 import { Icon } from "../Icon";
 import { PageHead } from "../PageHead";
+import { SettingRow, ValueChip } from "../SettingRow";
 import { SignedOut, failed, type Answer } from "../api";
 import { bytes, plural } from "../format";
 import { cancelUpdate, checkUpdate, getConverting, getHealth, getUpdate, installUpdate, purgeTrash, rollbackUpdate, type UpdateNotice, getSettings, getToken, getTrash, patchSettings, rotateToken, signOut } from "../libraryApi";
@@ -29,12 +30,31 @@ export function GeneralSettings() {
     <div className="stack">
       <PageHead icon="i-settings" title="Settings" />
       <SettingsTabs at="general" />
-      {!st.data ? <div className="empty">{st.error?.message ?? "Loading…"}</div> : <>
-        <ThisComputer />
-        <Languages start={st.data.languages ?? []} saved={st.reload} />
-        <Access auth={!!st.data.authRequired} />
-      </>}
+      {!st.data ? <div className="empty">{st.error?.message ?? "Loading…"}</div> : <General start={st.data.languages ?? []} auth={!!st.data.authRequired} saved={st.reload} />}
     </div>);
+}
+
+// The page's one Save (the design): it saves the languages; the rows above only change what is on the page until then.
+function General({ start, auth, saved }: { start: string[]; auth: boolean; saved: () => void }) {
+  const [codes, setCodes] = useState(start), [said, setSaid] = useState(""), [bad, setBad] = useState(false);
+  const save = async () => { setBad(false); if (await act(patchSettings({ languages: codes }), (m) => (setBad(true), setSaid(m)))) (setSaid("Saved."), saved()); };
+  const dirty = JSON.stringify(codes) !== JSON.stringify(start);
+  return (<>
+    <section className="card" aria-labelledby="pc-h"><div className="hd"><h2 id="pc-h">This computer</h2></div>
+      <div className="bd stack" style={{ padding: 0, gap: 0 }}>
+        <ThisComputer />
+        <Languages codes={codes} setCodes={setCodes} say={(m, isBad) => (setSaid(m), setBad(!!isBad))} />
+      </div></section>
+    <section className="card" aria-labelledby="acc-h"><div className="hd"><h2 id="acc-h">Access</h2></div>
+      <div className="bd stack" style={{ padding: 0, gap: 0 }}><Access auth={auth} /></div></section>
+    <div className="stack" style={{ gap: 8 }}>
+      <p className={bad ? "st bad" : "muted"} role="status" style={{ margin: 0 }}>{said}</p>
+      <div className="row" style={{ justifyContent: "flex-start", flexWrap: "wrap", gap: 12 }}>
+        <button className="btn primary" type="button" disabled={!dirty} onClick={save}>Save</button>
+        <span className="muted">Languages are saved when you press Save.</span>
+      </div>
+    </div>
+  </>);
 }
 
 // This computer (ONE-COMMAND-SETUP.md section 11): main server or a worker, and Change... with a confirm. Server to
@@ -56,20 +76,18 @@ function ThisComputer() {
       : <>{n ? plural(n, "job is", "jobs are") : "Jobs are"} converting now. Stop {n === 1 ? "it" : "them"} on <Link to="/jobs">Jobs</Link> first, or wait.</>);
     btn.current?.focus();
   };
-  return (
-    <section className="card" aria-labelledby="pc-h"><div className="hd"><h2 id="pc-h">This computer</h2></div>
-      <div className="bd stack">
-        <div className="row"><strong>{s.role === "server" ? "Main server" : worker ? "Worker for " + name : "Not chosen yet"}</strong>
-          <button ref={btn} className="btn" type="button" onClick={() => (s.role === "unset" ? navigate("/start") : (setErr(null), setAsk(true)))}>Change…</button></div>
-        {s.role === "server" && <p className="muted" style={{ margin: 0 }}>Keeps your libraries and this web page.</p>}
-        {err && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{err}</span></p>}
-      </div>
-      {ask && (worker
-        ? <Confirm title={"Stop being a worker for " + name + "?"} body={name + " stops sending jobs here. This computer becomes its own server and starts setup."}
-            yes="Make it a server" no="Keep as worker" busy={busy} onYes={go} onNo={() => (setAsk(false), btn.current?.focus())} />
-        : <Confirm title="Make this computer a worker?" body="Its libraries and workflows stop running here. Nothing is deleted. Switch back in Settings to use them again."
-            yes="Make it a worker" no="Keep as server" busy={busy} onYes={go} onNo={() => (setAsk(false), btn.current?.focus())} />)}
-    </section>);
+  return (<>
+    <SettingRow title="Role" desc={s.role === "server" ? "Keeps your libraries and this web page." : undefined}>
+      <ValueChip>{s.role === "server" ? "Main server" : worker ? "Worker for " + name : "Not chosen yet"}</ValueChip>
+      <button ref={btn} className="btn" type="button" onClick={() => (s.role === "unset" ? navigate("/start") : (setErr(null), setAsk(true)))}>Change…</button>
+    </SettingRow>
+    {err && <p className="st bad" role="alert" style={{ margin: "0 16px 12px" }}><Icon id="i-alert" /><span>{err}</span></p>}
+    {ask && (worker
+      ? <Confirm title={"Stop being a worker for " + name + "?"} body={name + " stops sending jobs here. This computer becomes its own server and starts setup."}
+          yes="Make it a server" no="Keep as worker" busy={busy} onYes={go} onNo={() => (setAsk(false), btn.current?.focus())} />
+      : <Confirm title="Make this computer a worker?" body="Its libraries and workflows stop running here. Nothing is deleted. Switch back in Settings to use them again."
+          yes="Make it a worker" no="Keep as server" busy={busy} onYes={go} onNo={() => (setAsk(false), btn.current?.focus())} />)}
+  </>);
 }
 
 // A small modal confirm (the folder picker's dialog look): focus starts on the title, Tab stays inside, Escape keeps.
@@ -94,54 +112,60 @@ function Confirm({ title, body, yes, no, busy, danger, onYes, onNo }: { title: s
 
 // "Your languages": one list for the whole install, shown by name, saved as ISO 639-2 codes (/languages.json:
 // [code, name, name in the language]); added by typing a name and picking it.
-function Languages({ start, saved }: { start: string[]; saved: () => void }) {
-  const [codes, setCodes] = useState(start), [list, setList] = useState<[string, string, string?][]>([]), [typed, setTyped] = useState(""), [said, setSaid] = useState(""), [bad, setBad] = useState(false), [open, setOpen] = useState(false), [at, setAt] = useState(-1);
+// The codes and the one Save live in General; this row reports what it did through say().
+function Languages({ codes, setCodes, say }: { codes: string[]; setCodes: Dispatch<SetStateAction<string[]>>; say: (m: string, bad?: boolean) => void }) {
+  const [list, setList] = useState<[string, string, string?][]>([]), [typed, setTyped] = useState(""), [open, setOpen] = useState(false), [at, setAt] = useState(-1), [adding, setAdding] = useState(false);
+  const addBtn = useRef<HTMLButtonElement>(null), box = useRef<HTMLInputElement>(null), backToAdd = useRef(false);
   useEffect(() => { fetch("/languages.json").then((r) => r.json()).then(setList, () => {}); }, []);
+  // the box takes focus when it opens; closing it (Enter, a pick, Add, Escape) puts focus back on "+ Add"
+  useEffect(() => {
+    if (adding) return box.current?.focus();
+    if (backToAdd.current) { backToAdd.current = false; addBtn.current?.focus(); }
+  }, [adding]);
   const name = (c: string) => list.find((l) => l[0] === c)?.[1] ?? c;
   const q = typed.trim().toLowerCase();
   const hits = q ? list.filter((l) => [l[1], l[2] ?? "", l[0]].some((s) => s.toLowerCase().includes(q))) : list;
+  const close = () => (setAdding(false), setOpen(false), setAt(-1), setTyped(""), (backToAdd.current = true));
   const add = (raw = typed) => {
     const t = raw.trim().toLowerCase(); if (!t) return;
     const hit = list.find((l) => l[1].toLowerCase() === t || (l[2] ?? "").toLowerCase() === t || l[0] === t);
-    if (!hit) return (setBad(true), setSaid("No language called " + raw.trim() + ". Pick one from the list."));
+    if (!hit) return say("No language called " + raw.trim() + ". Pick one from the list.", true);
     setCodes((cs) => (cs.includes(hit[0]) ? cs : [...cs, hit[0]]));
-    setTyped(""); setBad(false); setSaid(hit[1] + " added. Press Save to keep it.");
+    close(); say(hit[1] + " added. Press Save to keep it.");
   };
-  const pick = (l: [string, string, string?]) => (setOpen(false), setAt(-1), add(l[1]));
-  const save = async () => { setBad(false); if (await act(patchSettings({ languages: codes }), (m) => (setBad(true), setSaid(m)))) (setSaid("Saved."), saved()); };
-  const dirty = JSON.stringify(codes) !== JSON.stringify(start);
+  const pick = (l: [string, string, string?]) => add(l[1]);
   return (
-    <section className="card" aria-labelledby="lang-h"><div className="hd"><h2 id="lang-h">Your languages</h2></div>
-      <div className="bd stack">
+    <SettingRow title="Your languages" descId="langs-h" desc={<>Audio and subtitles in these languages are kept when a workflow says "Keep only my languages". Tracks with no language set are always kept. "Save as separate .srt files" saves subtitles in these languages as files.</>}>
+      <div className="langs">
         {codes.length ? <ul className="chips" aria-label="Your languages" style={{ listStyle: "none", padding: 0, margin: 0, flexWrap: "wrap" }}>{codes.map((c) => (
-          <li key={c} className="mchip">{name(c)} <button className="btn sm icon ghost" type="button" aria-label={"Remove " + name(c)} onClick={() => (setCodes(codes.filter((x) => x !== c)), setSaid(name(c) + " removed. Press Save to keep it."))}><Icon id="i-x" /></button></li>))}</ul>
-          : <p className="muted">None chosen yet.</p>}
-        <div className="field"><label htmlFor="lang-add">Add a language</label>
-          {/* an own list, not a datalist: the browser's datalist popup is its own chrome and opened off the screen
-              (review item B); .lang-opts (shell.css) is left-anchored under the field and never wider than the screen */}
-          <div className="row" style={{ gap: 8, position: "relative" }} onBlur={(e) => !e.currentTarget.contains(e.relatedTarget as Node) && (setOpen(false), setAt(-1))}>
-            <input id="lang-add" className="input" autoComplete="off" role="combobox" aria-expanded={open} aria-controls="lang-opts" aria-autocomplete="list" aria-activedescendant={at >= 0 ? "lang-o" + at : undefined} aria-describedby="lang-h2" value={typed}
+          <li key={c} className="mchip">{name(c)} <button className="btn sm icon ghost" type="button" aria-label={"Remove " + name(c)} onClick={() => (setCodes(codes.filter((x) => x !== c)), say(name(c) + " removed. Press Save to keep it."))}><Icon id="i-x" /></button></li>))}</ul>
+          : <p className="muted" style={{ margin: 0 }}>None yet.</p>}
+        {adding ? (
+          // Escape closes the box from anywhere in it (the field, a list pick, the Add button)
+          <div className="row" style={{ gap: 8, position: "relative", flex: "1 1 100%" }} onKeyDown={(e) => { if (e.key === "Escape") (e.preventDefault(), close()); }} onBlur={(e) => !e.currentTarget.contains(e.relatedTarget as Node) && (setOpen(false), setAt(-1))}>
+            {/* an own list, not a datalist: the browser's datalist popup is its own chrome and opened off the screen
+                (review item B); .lang-opts (shell.css) is left-anchored under the field and never wider than the screen */}
+            <input ref={box} id="lang-add" className="input" aria-label="Add a language" autoComplete="off" role="combobox" aria-expanded={open} aria-controls="lang-opts" aria-autocomplete="list" aria-describedby="langs-h" aria-activedescendant={at >= 0 ? "lang-o" + at : undefined} value={typed}
               onChange={(e) => (setTyped(e.target.value), setAt(-1), setOpen(true))}
               onFocus={() => setOpen(true)} onClick={() => setOpen(true)}
               onKeyDown={(e) => {
                 // a pick from the list adds at once, as the old page did; typed text waits for Add or Enter
                 if (e.key === "ArrowDown" && hits.length) return (e.preventDefault(), setOpen(true), setAt((a) => Math.min(a + 1, hits.length - 1)));
                 if (e.key === "ArrowUp" && hits.length) return (e.preventDefault(), setAt((a) => Math.max(a - 1, -1)));
-                if (e.key === "Enter") return (e.preventDefault(), at >= 0 ? pick(hits[at]) : (setOpen(false), add()));
-                if (e.key === "Escape") return (e.preventDefault(), setOpen(false), setAt(-1));
-              }} style={{ flex: 1, minWidth: 0 }} />
-            <button className="btn" type="button" onClick={() => add()}>Add</button>
+                if (e.key === "Enter") return (e.preventDefault(), at >= 0 ? pick(hits[at]) : add());
+              }} style={{ flex: 1, minWidth: 0, width: 200, maxWidth: "100%" }} />
+            <button className="btn" type="button" onClick={() => add()}><Icon id="i-plus" />Add</button>
             {open && !!hits.length && <div className="pop lang-opts" id="lang-opts" role="listbox" aria-label="Languages">{hits.map((l, i) =>
               <button key={l[0]} id={"lang-o" + i} type="button" role="option" aria-selected={at === i} className={"it" + (at === i ? " on" : "")}
                 onMouseDown={(e) => e.preventDefault()} onMouseEnter={() => setAt(i)} onClick={() => pick(l)}>
                 <span>{l[1]}</span>{l[2] && l[2] !== l[1] && <span className="muted">{l[2]}</span>}
               </button>)}</div>}
           </div>
-          <span className="hint" id="lang-h2">Audio and subtitles in these languages are kept by "Keep only my languages". "Save as separate .srt files" saves subtitles in these languages as files. Tracks with no language set are always kept.</span></div>
-        <p className={bad ? "st bad" : "muted"} role="status">{said}</p>
-        <div className="row"><button className="btn primary" type="button" disabled={!dirty} onClick={save}>Save</button></div>
+        ) : (
+          <div><button ref={addBtn} className="btn" type="button" onClick={() => setAdding(true)}><Icon id="i-plus" />Add</button></div>
+        )}
       </div>
-    </section>);
+    </SettingRow>);
 }
 
 // Access: the token only when asked for; a new one asks first; Sign out only when the server needs a token (IA).
@@ -150,22 +174,20 @@ function Access({ auth }: { auth: boolean }) {
   const show = async () => { if (tok) return setTok(null); const r = await act(getToken(), setSaid); if (r) setTok(r.token); };
   const make = async () => { setAsk(false); const r = await act(rotateToken(), setSaid); if (r) (setTok(r.token), setSaid("New token made. Use it to sign in on other devices.")); };
   const out = async () => { if (await act(signOut(), setSaid)) navigate("/signin"); };
-  return (
-    <section className="card" aria-labelledby="acc-h"><div className="hd"><h2 id="acc-h">Access</h2></div>
-      <div className="bd stack">
-        <div className="field"><label htmlFor="tok">Access token</label>
-          <div className="row" style={{ gap: 8 }}>
-            <input id="tok" className="input mono" readOnly value={tok ?? "••••••••••••"} aria-describedby="tok-h" style={{ flex: 1, minWidth: 0 }} />
-            <button className="btn" type="button" aria-controls="tok" onClick={show}>{tok ? "Hide" : "Show"}</button>
-            {tok && navigator.clipboard && <button className="btn" type="button" onClick={() => navigator.clipboard.writeText(tok).then(() => setSaid("Copied."), () => {})}>Copy</button>}
-            <button className="btn" type="button" onClick={() => setAsk(true)}>Make a new one</button></div>
-          <span className="hint" id="tok-h">{auth ? "" : "Not needed on this computer. "}Needed to open shrink-your-shit from another device.</span></div>
-        {ask && <div className="note" role="alertdialog" aria-labelledby="tok-ask"><Icon id="i-alert" /><div className="sp"><strong id="tok-ask">Make a new token?</strong> {auth ? "The old one stops working, so other devices must use the new one." : "This server doesn't ask for one now. Making one turns sign-in on for every browser and script, and they will need the token from then on."}</div>
-          <button className="btn sm primary" type="button" onClick={make}>Make it</button><button className="btn sm ghost" type="button" onClick={() => setAsk(false)}>Cancel</button></div>}
-        <p className="muted" role="status">{said}</p>
-        {auth && <div className="row"><button className="btn" type="button" onClick={out}>Sign out of this browser</button></div>}
-      </div>
-    </section>);
+  return (<>
+    <SettingRow title={<label htmlFor="tok">Access token</label>} desc={<span id="tok-h">{auth ? "" : "Not needed on this computer. "}Needed to open the app from another device.</span>}>
+      <input id="tok" className="input mono" readOnly value={tok ?? "••••••••••••"} aria-describedby="tok-h" style={{ width: 200, maxWidth: "100%", minWidth: 0 }} />
+      <button className="btn" type="button" aria-controls="tok" onClick={show}>{tok ? "Hide" : "Show"}</button>
+      {tok && navigator.clipboard && <button className="btn" type="button" onClick={() => navigator.clipboard.writeText(tok).then(() => setSaid("Copied."), () => {})}>Copy</button>}
+      <button className="btn" type="button" onClick={() => setAsk(true)}>Make a new one</button>
+    </SettingRow>
+    {ask && <div className="note" role="alertdialog" aria-labelledby="tok-ask" style={{ margin: "0 16px 12px" }}><Icon id="i-alert" /><div className="sp"><strong id="tok-ask">Make a new token?</strong> {auth ? "The old one stops working, so other devices must use the new one." : "This server doesn't ask for one now. Making one turns sign-in on for every browser and script, and they will need the token from then on."}</div>
+      <button className="btn sm primary" type="button" onClick={make}>Make it</button><button className="btn sm ghost" type="button" onClick={() => setAsk(false)}>Cancel</button></div>}
+    <p className="muted" role="status" style={{ margin: said ? "0 16px 12px" : 0 }}>{said || null}</p>
+    {auth && <SettingRow title="Sign out of this browser" desc="Only shown when the server needs the token.">
+      <button className="btn" type="button" aria-label="Sign out of this browser" onClick={out}>Sign out</button>
+    </SettingRow>}
+  </>);
 }
 
 export function SafetySettings() {
@@ -195,28 +217,40 @@ export function SafetySettings() {
     <div className="stack">
       <PageHead icon="i-settings" title="Settings" />
       <SettingsTabs at="safety" />
-      {!st.data ? <div className="empty">{st.error?.message ?? "Loading…"}</div> : (
+      {!st.data ? <div className="empty">{st.error?.message ?? "Loading…"}</div> : <>
         <section className="card" aria-labelledby="keep-h"><div className="hd"><h2 id="keep-h">Keeping originals</h2></div>
-          <div className="bd stack">
-            <div className="field"><label htmlFor="keep-days">Keep originals for (days)</label>
-              <input id="keep-days" className="input" type="number" inputMode="numeric" min={0} max={365} step={1} value={now} onChange={(e) => setDays(e.target.value)} aria-describedby="keep-h2" style={{ maxWidth: 140 }} />
-              <span className="hint" id="keep-h2">0 means the original is deleted right after the new file has been checked.</span></div>
-            <p className={bad ? "st bad" : "muted"} role="status">{said}</p>
-            <div className="row"><button className="btn primary" type="button" disabled={days == null || Number(days) === st.data.keepOriginalsDays} onClick={save}>Save</button></div>
-            {st.data.trashPath && <p><strong>Where originals are kept:</strong> {st.data.trashPath}</p>}
-            <p id="purge-h" aria-live="polite">{!t ? (tr.error?.message ?? "") : t.files ? <><strong>Kept originals:</strong> {bytes(t.bytes)} · {plural(t.files, "file", "files")}.{t.nextDeleteAt && " The next ones go on " + day(t.nextDeleteAt) + "."}</> : "No originals are being kept right now."}</p>
-            {t && <div className="stack" style={{ gap: 6 }}>
-              <div className="row"><button ref={purgeBtn} className="btn" type="button" disabled={!t.files || purging} aria-describedby={t.files ? undefined : "purge-h"} onClick={() => (setGone(null), setPurgeSaid(""), setAsk(true))}>
-                {t.files ? `Empty trash now: ${plural(t.files, "file", "files")}, ${bytes(t.bytes)}` : "Empty trash now"}</button></div>
-              {purgeSaid && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{purgeSaid}</span></p>}
-              {gone && <div aria-live="polite" className="stack" style={{ gap: 6 }}>
-                <p ref={freed} tabIndex={-1} className={gone.deletedFiles ? "st ok" : "st warn"} style={{ margin: 0 }}><Icon id={gone.deletedFiles ? "i-check-c" : "i-alert"} /><span>{gone.deletedFiles ? `Freed ${bytes(gone.freedBytes)} (${plural(gone.deletedFiles, "file", "files")}).` : "Nothing was deleted."}</span></p>
-                {gone.skipped.map((s, i) => <p key={i} className="st warn" style={{ margin: 0 }}><Icon id="i-alert" /><span>{`${s.library} was skipped. ${s.reason}`}</span></p>)}
-              </div>}
+          <div className="bd stack" style={{ padding: 0, gap: 0 }}>
+            <SettingRow title={<label id="keep-days-l" htmlFor="keep-days">Keep originals for</label>} descId="keep-h2" desc="0 means the original is deleted right after the new file has been checked.">
+              <div className="row nw" style={{ gap: 8 }}>
+                <input id="keep-days" className="input" type="number" inputMode="numeric" min={0} max={365} step={1} value={now} onChange={(e) => setDays(e.target.value)} aria-labelledby="keep-days-l keep-days-u" aria-describedby="keep-h2" style={{ width: 140, maxWidth: "100%" }} />
+                <span id="keep-days-u" className="muted">days</span>
+              </div>
+            </SettingRow>
+            {/* the server's trashPath is a sentence ("... in a folder called .syp-trash"); the folder name is taken from it */}
+            {st.data.trashPath && <SettingRow title="Where originals are kept" desc="Next to each file, in a folder of their own.">
+              <span className="mono">{st.data.trashPath.match(/called (\S+)/)?.[1] ?? st.data.trashPath}</span>
+            </SettingRow>}
+            <SettingRow title="Kept right now" descId="purge-h" desc={<span aria-live="polite">{!t ? (tr.error?.message ?? "") : t.files ? <><strong>Kept originals:</strong> {bytes(t.bytes)} · {plural(t.files, "file", "files")}.{t.nextDeleteAt && " The next ones go on " + day(t.nextDeleteAt) + "."}</> : "No originals are being kept right now."}</span>}>
+              {t && <button ref={purgeBtn} className="btn" type="button" disabled={!t.files || purging} aria-describedby={t.files ? undefined : "purge-h"} onClick={() => (setGone(null), setPurgeSaid(""), setAsk(true))}>
+                {t.files ? `Empty trash now: ${plural(t.files, "file", "files")}, ${bytes(t.bytes)}` : "Empty trash now"}</button>}
+            </SettingRow>
+            {purgeSaid && <p className="st bad" role="alert" style={{ margin: "0 16px 12px" }}><Icon id="i-alert" /><span>{purgeSaid}</span></p>}
+            {gone && <div aria-live="polite" className="stack" style={{ gap: 6, padding: "0 16px 12px" }}>
+              <p ref={freed} tabIndex={-1} className={gone.deletedFiles ? "st ok" : "st warn"} style={{ margin: 0 }}><Icon id={gone.deletedFiles ? "i-check-c" : "i-alert"} /><span>{gone.deletedFiles ? `Freed ${bytes(gone.freedBytes)} (${plural(gone.deletedFiles, "file", "files")}).` : "Nothing was deleted."}</span></p>
+              {gone.skipped.map((s, i) => <p key={i} className="st warn" style={{ margin: 0 }}><Icon id="i-alert" /><span>{`${s.library} was skipped. ${s.reason}`}</span></p>)}
             </div>}
           </div>
-        </section>)}
-      {st.data && <Commands settings={st} />}
+        </section>
+        <Commands settings={st} />
+        {/* one Save for this tab: it saves the days only; Empty trash now and the switch above apply at once */}
+        <div className="stack" style={{ gap: 8 }}>
+          <p className={bad ? "st bad" : "muted"} role="status" style={{ margin: 0 }}>{said}</p>
+          <div className="row" style={{ justifyContent: "flex-start", flexWrap: "wrap", gap: 12 }}>
+            <button className="btn primary" type="button" disabled={days == null || Number(days) === st.data.keepOriginalsDays} onClick={save}>Save</button>
+            <span className="muted">Saves the number of days only. Empty trash now applies at once.</span>
+          </div>
+        </div>
+      </>}
       {ask && t && <Confirm title="Empty trash now?" body={`This deletes ${plural(t.files, "original file", "original files")} (${bytes(t.bytes)}), kept in case you need them back. It can't be undone.`}
         yes={purging ? "Deleting…" : "Delete " + plural(t.files, "file", "files")} no="Cancel" danger busy={purging} onYes={purge} onNo={() => (setAsk(false), purgeBtn.current?.focus())} />}
     </div>);
@@ -230,19 +264,20 @@ function Commands({ settings }: { settings: ReturnType<typeof useData<FirstRunSe
   const set = async (v: boolean) => { setBusy(true); setSaid(""); const r = await act(patchSettings({ workflowsMayRunCommands: v }), setSaid); setBusy(false); if (r) settings.reload(); };
   return (
     <section className="card" aria-labelledby="cmd-h"><div className="hd"><h2 id="cmd-h">Workflows and programs</h2></div>
-      <div className="bd stack">
-        <label className="row nw"><input id="cmd-sw" type="checkbox" role="switch" className="switch" checked={on} disabled={busy} aria-describedby="cmd-hint" onChange={(e) => set(e.target.checked)} />
-          <span><strong>Workflows may run commands</strong></span></label>
-        <span className="hint" id="cmd-hint">A workflow's "Run a command" step starts a program of yours after a file is saved, with the file's path and variables as arguments. The program runs as this app's user, with everything it can reach, so this stays off until you turn it on.</span>
-        {!on && <div className="note"><Icon id="i-shield" /><span>Off: a workflow with a "Run a command" step can't be published, and a published one's step says it can't run.</span></div>}
-        {said && <p className="st bad" role="alert" style={{ margin: 0 }}><Icon id="i-alert" /><span>{said}</span></p>}
+      <div className="bd stack" style={{ padding: 0, gap: 0 }}>
+        <SettingRow title={<label htmlFor="cmd-sw">Workflows may run commands</label>} descId="cmd-hint" desc={`A workflow's "Run a command" step starts a program of yours after a file is saved, with the file's path and variables as arguments. The program runs as this app's user, with everything it can reach, so this stays off until you turn it on.`}>
+          <input id="cmd-sw" type="checkbox" role="switch" className="switch" checked={on} disabled={busy} aria-describedby="cmd-hint" onChange={(e) => set(e.target.checked)} />
+          <span>{on ? "On" : "Off"}</span>
+        </SettingRow>
+        {!on && <div className="note" style={{ margin: "0 16px 12px" }}><Icon id="i-shield" /><span>Off: a workflow with a "Run a command" step can't be published, and a published one's step says it can't run.</span></div>}
+        {said && <p className="st bad" role="alert" style={{ margin: "0 16px 12px" }}><Icon id="i-alert" /><span>{said}</span></p>}
       </div></section>);
 }
 
-// Updates (SCREENS:293, About block): the #324 switch, off until the person turns it on, and the version line.
+// Updates (SCREENS:293, About block): the #324 switch, off until the person turns it on, and when it last checked.
 const SENT = "Once a day it asks GitHub which stable release is newest. GitHub sees this app's version and your IP address, as with any web request. Nothing about your files or settings is sent. Checking installs nothing.";
 const at = (t: string) => `${day(t)}, ${new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
-function Updates({ version }: { version?: string }) {
+function Updates() {
   const st = useData(getSettings, []), u = useData(getUpdate, []), [busy, setBusy] = useState(false), [said, setSaid] = useState("");
   const on = !!st.data?.checkForUpdates, d = u.data, sw = useRef<HTMLInputElement>(null);
   const set = async (v: boolean) => { setBusy(true); setSaid(""); const r = await act(patchSettings({ checkForUpdates: v }), setSaid); setBusy(false); if (r) { st.reload(); u.reload(); } };
@@ -250,14 +285,16 @@ function Updates({ version }: { version?: string }) {
   const toSwitch = (e: MouseEvent) => { e.preventDefault(); sw.current?.scrollIntoView({ block: "center" }); sw.current?.focus(); };
   return (
     <section className="card" aria-labelledby="upd-h"><div className="hd"><h2 id="upd-h">Updates</h2></div>
-      <div className="bd stack">
-        <label className="row nw"><input ref={sw} id="upd-sw" type="checkbox" role="switch" className="switch" checked={on} disabled={!st.data || busy} aria-describedby="upd-hint" onChange={(e) => set(e.target.checked)} />
-          <span><strong>Check for updates</strong></span></label>
-        <span className="hint" id="upd-hint">{SENT}</span>
+      <div className="bd stack" style={{ padding: 0, gap: 0 }}>
+        <SettingRow title={<label htmlFor="upd-sw">Check for updates</label>} descId="upd-hint" desc={SENT}>
+          <input ref={sw} id="upd-sw" type="checkbox" role="switch" className="switch" checked={on} disabled={!st.data || busy} aria-describedby="upd-hint" onChange={(e) => set(e.target.checked)} />
+          <span>{on ? "On" : "Off"}</span>
+        </SettingRow>
+        <div className="stack" style={{ padding: "0 var(--pad) 12px" }}>
         <div className="note"><Icon id="i-shield" /><span>The update check is the only thing Shrink Your Shit sends over the internet without you setting it up.</span></div>
-        {!d ? (version || u.error) && <p role="status" style={{ margin: 0 }}>{version && <span>Shrink Your Shit {version}. </span>}{u.error && <span className="muted">{u.error.message}</span>}</p>
+        {!d ? u.error && <p role="status" style={{ margin: 0 }}><span className="muted">{u.error.message}</span></p>
           : <div className="row" style={{ alignItems: "baseline" }}>
-          <p role="status" style={{ margin: 0 }}><span>Shrink Your Shit {d.current || version}. </span>
+          <p role="status" style={{ margin: 0 }}>
             {!d.enabled ? <span className="muted">Update checks are off. <a href="#upd-sw" onClick={toSwitch}>Turn them on</a></span>
               : d.available && d.latest ? <><span className="pill warn"><Icon id="i-download" />Version {d.latest} is available</span>{d.url && <> <a href={d.url} target="_blank" rel="noopener">What's new</a></>}</>
                 : d.error && d.checkedAt ? <span className="st warn"><Icon id="i-alert" /><span>Couldn't check for updates at {at(d.checkedAt)}.</span></span>
@@ -266,6 +303,7 @@ function Updates({ version }: { version?: string }) {
         </div>}
         {said && <p className="st bad" role="alert" style={{ margin: 0 }}><Icon id="i-alert" /><span>{said}</span></p>}
         {d && <Install d={d} reload={u.reload} check={now} />}
+        </div>
       </div></section>);
 }
 
@@ -371,13 +409,13 @@ export function AboutSettings() {
     <div className="stack">
       <PageHead icon="i-settings" title="Settings" />
       <SettingsTabs at="about" />
+      <section className="card" aria-labelledby="about-h"><div className="hd"><h2 id="about-h">About</h2></div>
+        <div className="bd" style={{ padding: 0 }}>
+          <SettingRow title="Version">{h.data?.version && <ValueChip>{h.data.version}</ValueChip>}</SettingRow>
+          <SettingRow title="Licence" desc={<>Shrink Your Shit is free software under the GNU Affero General Public License, version 3. <a href="/licenses.md" target="_blank" rel="noopener">The licences of the parts this interface is built with</a> (React, React Flow and others).</>} />
+        </div></section>
+      <Updates />
       <section className="card" aria-labelledby="log-h"><div className="hd"><h2 id="log-h">Recent log lines</h2></div>
         <div className="bd"><pre className="mono sm" tabIndex={0} role="region" aria-labelledby="log-h" style={{ overflow: "auto", maxHeight: "16rem", margin: 0, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{h.data ? (h.data.logsTail.length ? h.data.logsTail.join("\n") : "Nothing has been logged yet.") : ""}</pre></div></section>
-      <Updates version={h.data?.version} />
-      <section className="card" aria-labelledby="lic-h"><div className="hd"><h2 id="lic-h">Licences</h2></div>
-        <div className="bd stack">
-          <p>Shrink Your Shit is free software under the GNU Affero General Public License, version 3.</p>
-          <p><a href="/licenses.md" target="_blank" rel="noopener">The licences of the parts this interface is built with</a> (React, React Flow and others).</p>
-        </div></section>
     </div>);
 }

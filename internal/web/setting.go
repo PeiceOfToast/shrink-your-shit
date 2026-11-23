@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -51,7 +52,8 @@ func settingView(f jobs.Flow) map[string]any {
 // selectorFields are the Standard selectors (UI-API-CONTRACT.md addendum 2): any of them in a PUT body
 // makes it a selectors save.
 var selectorFields = map[string]bool{"speed": true, "format": true, "resolution": true, "maxbitrate": true, "audio": true,
-	"subtitles": true, "filetype": true, "afterconverting": true, "ignore": true, "includedolbyvision": true, "outputdir": true, "onlymylanguages": true}
+	"subtitles": true, "filetype": true, "afterconverting": true, "ignore": true, "includedolbyvision": true, "outputdir": true, "onlymylanguages": true, "evenloudness": true,
+	"removeblackbars": true}
 
 // readSelectors is a selectors body: what it leaves out is the quality's own value. A client's kind,
 // positions, available*, the removed order, the removed minSavingPct and skipSmall (always
@@ -59,12 +61,31 @@ var selectorFields = map[string]bool{"speed": true, "format": true, "resolution"
 // the current page keeps working.
 // settingEcho are the fields a setting answer carries that a client may send back unchanged: ignored.
 var settingEcho = map[string]bool{"kind": true, "positions": true, "order": true, "availableformats": true, "availableaudio": true,
-	"availablesubtitles": true, "availablefiletypes": true, "warnings": true, "sharedflowchoice": true, "fitsbasic": true, "becomes": true, "bitrateladder": true, "notes": true, "minsavingpct": true, "skipsmall": true, "skiphdr": true}
+	"availablesubtitles": true, "availablefiletypes": true, "warnings": true, "sharedflowchoice": true, "fitsbasic": true, "becomes": true, "bitrateladder": true, "notes": true, "minsavingpct": true, "skipsmall": true, "skiphdr": true, "editablehere": true, "reason": true,
+	"keepifbigger": true, "ratecontrol": true, "hardware": true}
+
+// unchangedFrom is the body without the fields whose values are the ones the setting shows now: a page that
+// saves back what GET showed has chosen none of those.
+func unchangedFrom(body map[string]json.RawMessage, view map[string]any) map[string]json.RawMessage {
+	b, _ := json.Marshal(view)
+	var shown map[string]any
+	json.Unmarshal(b, &shown)
+	out := map[string]json.RawMessage{}
+	for k, raw := range body {
+		var v any
+		json.Unmarshal(raw, &v)
+		if same, ok := shown[k]; ok && reflect.DeepEqual(same, v) {
+			continue
+		}
+		out[k] = raw
+	}
+	return out
+}
 
 // readSelectors reads a selectors body (see below); langs are the person's languages, needed for
 // "Keep only my languages".
-func readSelectors(body map[string]json.RawMessage, langs []string) (rules.Selectors, error) {
-	s, err := readSelectorsBody(body)
+func readSelectors(body map[string]json.RawMessage, langs []string, kept *rules.Selectors) (rules.Selectors, error) {
+	s, err := readSelectorsBody(body, kept)
 	if err != nil {
 		return s, err
 	}
@@ -74,7 +95,9 @@ func readSelectors(body map[string]json.RawMessage, langs []string) (rules.Selec
 	return s, nil
 }
 
-func readSelectorsBody(body map[string]json.RawMessage) (rules.Selectors, error) {
+// kept are the stored rate control, hardware and keep-if-bigger (nil: none). This page never sets them, and
+// changedEcho has refused a body that sends other values, so they are validated as they will be saved.
+func readSelectorsBody(body map[string]json.RawMessage, kept *rules.Selectors) (rules.Selectors, error) {
 	var q struct{ Quality int }
 	if b, err := json.Marshal(body); err != nil || json.Unmarshal(b, &q) != nil {
 		return rules.Selectors{}, &rules.SelectorError{Code: "invalid_json", Message: "The request body is not valid JSON."}
@@ -103,6 +126,9 @@ func readSelectorsBody(body map[string]json.RawMessage) (rules.Selectors, error)
 	s.MaxBitrate = rules.OldBitrateLevel(s.MaxBitrate)   // a page from before S6 sends Mbps: its nearest level, for one release
 	if !slices.Contains(rules.AvailableAudio, s.Audio) { // and 25b's audio values: design E's map, for one release
 		s.Audio, s.OnlyMyLanguages, _ = rules.StandardAudio(s.Audio, s.OnlyMyLanguages)
+	}
+	if kept != nil {
+		s.RateControl, s.Hardware, s.KeepIfBigger = kept.RateControl, kept.Hardware, kept.KeepIfBigger
 	}
 	return s, s.Validate()
 }
@@ -192,7 +218,26 @@ func settingRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 				cur = f.Template
 			}
 		}
-		if refusedHere(w, cur) {
+		var unchangedView map[string]any // a whole GET answer sent back with nothing changed: saves nothing
+		if l, err := store.GetLibrary(id); err == nil && len(body) > 0 {
+			if f, err := store.GetFlow(l.FlowID); err == nil {
+				rest := unchangedFrom(body, withWarnings(store, f))
+				_, whole := body["kind"] // a whole GET answer, sent back
+				if len(rest) == 0 && whole {
+					unchangedView = withWarnings(store, f)
+				} else if _, _, basic := readBasic(rest); len(rest) > 0 && basic && cur.Kind == rules.KindSlider {
+					if q, ok := body["quality"]; ok {
+						rest["quality"] = q // a slider save needs its position
+					}
+					body = rest // a Basic flow with one Basic choice changed: only that choice is saved
+				}
+			}
+		}
+		if refusedHere(w, cur) { // a flow this page can't edit keeps its 409, even for an echo
+			return
+		}
+		if unchangedView != nil {
+			writeJSON(w, unchangedView)
 			return
 		}
 		t, ok := settingTemplate(w, store, body, cur)
@@ -412,6 +457,10 @@ func settingTemplate(w http.ResponseWriter, store *jobs.Store, body map[string]j
 			return rules.Template{}, false
 		}
 	}
+	if changedEcho(body, cur.Selectors) { // this page cannot set these, Basic or Standard: a changed value is refused, not dropped
+		apiError(w, http.StatusConflict, "edit_in_new_ui", "Keep rate control, hardware and keep-if-bigger in the new workflow editor. Nothing was changed.")
+		return rules.Template{}, false
+	}
 	if q, audio, basic := readBasic(body); basic {
 		if _, ok := rules.SliderAt(q); !ok {
 			apiError(w, http.StatusBadRequest, "invalid_quality", "quality must be a slider position from 1 to 5. Nothing was changed.")
@@ -428,13 +477,17 @@ func settingTemplate(w http.ResponseWriter, store *jobs.Store, body map[string]j
 	}
 	for k := range body {
 		if selectorFields[strings.ToLower(k)] {
-			s, err := readSelectors(body, store.Languages())
+			s, err := readSelectors(body, store.Languages(), cur.Selectors)
 			var se *rules.SelectorError
 			if errors.As(err, &se) {
 				apiError(w, http.StatusBadRequest, se.Code, se.Message)
 				return rules.Template{}, false
 			}
-			return s.Template(), true
+			t := s.Template()
+			if cur.Kind == rules.KindSelectors && t.Kind == rules.KindSelectors {
+				t.StepOrder = cur.StepOrder // this page never adds, removes or reorders steps: a set order stays
+			}
+			return t, true
 		}
 	}
 	// neither Basic nor Standard: quality is not a number
@@ -571,4 +624,32 @@ func notEditableHere(t rules.Template) (code, message string) {
 		return "flow_read_only", readOnlyHere
 	}
 	return "", ""
+}
+
+// changedEcho reports whether a body changes one of the echoed fields this page cannot set. An echo of the stored value is fine.
+func changedEcho(body map[string]json.RawMessage, s *rules.Selectors) bool {
+	var cur rules.Selectors
+	if s != nil {
+		cur = *s
+	}
+	for k, v := range body {
+		var same bool
+		switch strings.ToLower(k) {
+		case "ratecontrol":
+			var x string
+			same = json.Unmarshal(v, &x) == nil && x == cur.RateControl
+		case "hardware":
+			var x string
+			same = json.Unmarshal(v, &x) == nil && x == cur.Hardware
+		case "keepifbigger":
+			var x bool
+			same = json.Unmarshal(v, &x) == nil && x == cur.KeepIfBigger
+		default:
+			continue
+		}
+		if !same {
+			return true
+		}
+	}
+	return false
 }

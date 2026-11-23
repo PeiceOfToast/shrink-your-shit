@@ -57,3 +57,21 @@ func TestConvertMeasuresItsOwnRun(t *testing.T) {
 		t.Errorf("a copy's report carries %v, want none", copied)
 	}
 }
+
+// A run that reads 0 seconds (the Windows clock can) still reports its figures: the time is floored, so the
+// speed is finite and positive and the encoder is kept. A real elapsed time gives the plain ratio.
+func TestMeasureSpeedKeepsAZeroElapsedRun(t *testing.T) {
+	got := measureSpeed(100, 0, 6000, "hevc_qsv")
+	if got.encoder != "hevc_qsv" || got.speed <= 0 || got.fps <= 0 {
+		t.Errorf("zero elapsed: %+v, want the encoder with a positive speed and fps", got)
+	}
+	if want := 100 / minEncodeSecs; got.speed != want {
+		t.Errorf("zero elapsed speed %v, want the floored %v", got.speed, want)
+	}
+	if got := measureSpeed(100, 50, 3000, "h264_qsv"); got.speed != 2 || got.fps != 60 {
+		t.Errorf("50 s: %+v, want speed 2 and 60 fps", got)
+	}
+	if got := measureSpeed(100, 50, -1, "h264_qsv"); got.fps != 0 {
+		t.Errorf("no frame count: fps %v, want 0", got.fps)
+	}
+}
