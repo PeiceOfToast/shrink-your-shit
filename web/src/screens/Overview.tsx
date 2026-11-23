@@ -4,12 +4,14 @@
 // moves the bars in place; a job, library or worker change refetches. Every number comes from the server.
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "../Icon";
-import { Skeleton } from "../Skeleton";
 import { MOCK, SignedOut, failed, type Answer } from "../api";
 import { bytes, clock, count, encoderName, plural } from "../format";
 import { getSummary, scanAllLibraries } from "../dashApi";
 import { getDoctor } from "../doctorApi";
 import { listJobs } from "../jobsApi";
+import { listWorkflows } from "../workflowApi";
+import { getStartedSteps, nextStep, showGetStarted } from "../getStarted";
+import { runFields } from "../jobCards";
 const HEALTH_HIDDEN = "syp-health-dismissed"; // the failed checks the Dismiss was for
 import { onLive } from "../live";
 import { LoadFailed, PageHead } from "../PageHead";
@@ -24,7 +26,6 @@ import type { JobProgressEvent } from "../types/jobs";
 const STATE: Record<string, [string, string]> = { busy: ["Converting", "run"], online: ["Ready", ""], draining: ["Finishing", "warn"], paused: ["Off", ""], offline: ["Offline", "bad"], stalled: ["Not responding", "bad"] };
 const slots = (w: O["workers"][number]) => w.slots.cpu ?? { used: w.slots.used ?? 0, total: w.slots.total ?? 0 };
 const pct = (n: number | null) => (n == null ? null : Math.max(0, Math.min(100, Math.round(n))));
-const left = (s: number | null) => (s == null ? "not known yet" : s < 90 ? "under 2 min" : "about " + (s < 5400 ? Math.round(s / 60) + " min" : Math.round(s / 3600) + " h"));
 const perGB = (s: number | null) => (s == null ? "not recorded" : s < 60 ? Math.round(s) + " s" : Math.floor(s / 60) + " min" + (Math.round(s % 60) ? " " + Math.round(s % 60) + " s" : ""));
 const dayName = (d: string) => new Date(d + "T12:00:00").toLocaleDateString(undefined, { day: "numeric", month: "short" }).replace(" ", "\u00a0"); // "Nov 20" never splits
 
@@ -113,15 +114,16 @@ export function Overview() {
   const o = useData(getOverview, [], 15000), sum = useData<{ last24h: { failed: number } }>(() => (MOCK ? Promise.resolve(summary(mockState())) : getSummary()), [], 30000);
   // the newest failed jobs for "Needs attention" (the list's own page; the 24 h count is the summary's)
   const fails = useData(() => listJobs("failed", "", "", 3), [], 30000);
-  const [live, setLive] = useState<Record<string, Partial<OverviewJob> & { stage?: string }>>({}), [said, setSaid] = useState("");
-  const reload = useRef(o.reload); reload.current = () => (o.reload(), wl.reload(), fails.reload());
+  const wf = useData(listWorkflows, [], 30000); // Get started's "a workflow exists" tick
+  const [live, setLive] = useState<Record<string, Partial<OverviewJob> & { stage?: string; bitrateKbps?: number | null }>>({}), [said, setSaid] = useState("");
+  const reload = useRef(o.reload); reload.current = () => (o.reload(), wl.reload(), fails.reload(), wf.reload());
   useEffect(() => {
     let t: ReturnType<typeof setTimeout> | undefined, clear = false;
     return onLive((type, data) => {
       // CT 124 flicker (manager row 11-18): within one step, a progress event's unknown (null) figure never hides one already known, and the
       // 5 s worker.heartbeat refreshes the figures without dropping the live progress; a job or library change does drop it.
       // A new step (e.g. "Checking the result") takes its figures as sent, nulls included, so the last converting speed and time left go
-      if (type === "job.progress") { const e = data as JobProgressEvent, p = { percent: e.progress.percent, fps: e.progress.fps, speed: e.progress.speed, etaS: e.progress.etaS, stage: e.progress.stage };
+      if (type === "job.progress") { const e = data as JobProgressEvent, p = { percent: e.progress.percent, fps: e.progress.fps, speed: e.progress.speed, etaS: e.progress.etaS, stage: e.progress.stage, bitrateKbps: e.progress.bitrateKbps };
         setLive((m) => { const newStep = p.stage != null && m[e.jobId]?.stage != null && p.stage !== m[e.jobId].stage;
           return { ...m, [e.jobId]: { ...m[e.jobId], ...(newStep ? p : Object.fromEntries(Object.entries(p).filter(([, x]) => x != null))) } }; }); return; }
       if (type === "job.state" || type === "library.changed" || type === "resync" || type.startsWith("processing.") || type.startsWith("worker.")) {
@@ -130,7 +132,23 @@ export function Overview() {
     });
   }, []);
   const act = async (p: Promise<Answer<unknown>>) => { try { const r = await p; setSaid(failed(r) ? r.error.message : ""); } catch (e) { if (!(e instanceof SignedOut)) throw e; } o.reload(); wl.reload(); };
-  if (!o.data) return <div className="stack ov"><PageHead icon="i-dashboard" title="Dashboard">{!o.error && <><span className="skel-ph skel-sw" aria-hidden="true" /><span className="skel-ph skel-btn" aria-hidden="true" /></>}</PageHead>{o.error ?<LoadFailed error={o.error} reload={o.reload} /> : <Skeleton tiles={3} rows={3} />}</div>;
+  // loading (design loading-1 to -3): the head's switch and Scan don't wait on the summary; each section keeps its real heading over card-shaped placeholders
+  if (!o.data) {
+    const lw = wl.data ?? [], ph = (k: number) => <li key={k} className="lcard lskel" aria-hidden="true"><span className="ltile skel-ph" /><div className="lmain"><div className="skel-b" /><div className="skel-b skel-w60" /></div></li>;
+    return <div className="stack ov">
+      <PageHead icon="i-dashboard" title="Dashboard">
+        {wl.data ? <WorkersSwitch n={lw.filter((w) => w.status === "busy" || w.status === "online").length} m={lw.length} busy={lw.some((w) => w.currentJobIds.length > 0)} finishing={lw.filter((w) => w.status === "draining").length} onSet={(a) => act(allWorkers(a))} /> : <span className="skel-ph skel-sw" aria-hidden="true" />}
+        <button className="btn sm ghost" type="button" onClick={() => (MOCK ? scanAll() : act(scanAllLibraries()))}><Icon id="i-refresh" />Scan all libraries</button>
+      </PageHead>
+      {o.error ? <LoadFailed error={o.error} reload={o.reload} /> : <>
+        <section className="tiles" aria-hidden="true">{[0, 1, 2].map((k) => <div key={k} className="tile"><div className="skel-b skel-w40" /><div className="skel-ph" style={{ width: "60%", height: 28 }} /></div>)}</section>
+        <section className="sec"><h2>Converting now</h2><ul className="lcards" aria-hidden="true">{ph(0)}</ul></section>
+        <section className="sec"><h2>Libraries</h2><ul className="lcards" aria-hidden="true">{[0, 1, 2].map(ph)}</ul></section>
+        <section className="sec"><h2>Workers</h2><div className="skel-b" aria-hidden="true" /></section>
+        <section className="sec"><h2>Last 30 days</h2><div className="skel-b" aria-hidden="true" /></section>
+      </>}
+    </div>;
+  }
   const v = o.data, h = v.headline, noLibs = v.libraries.length === 0, job = (j: OverviewJob) => ({ ...j, ...live[j.jobId] });
   // one row per worker of GET /api/v2/workers; its files' progress from the overview (or, for a worker the overview
   // doesn't list, from Converting now by job id)
@@ -154,6 +172,9 @@ export function Overview() {
   const freedPart = Math.max(0, tot.saved - tot.waiting - tot.kept), spaceNote = [freedPart > 0 ? bytes(freedPart) + " freed" : "nothing freed yet",
     tot.waiting > 0 && <Link to="/jobs?tab=completed&kept=1">{bytes(tot.waiting) + " waiting in the trash"}</Link>, tot.kept > 0 && <Link to="/jobs?tab=completed&left=1">{bytes(tot.kept) + " in originals left in place"}</Link>]
     .filter(Boolean).map((p, i) => <Fragment key={i}>{i > 0 && " · "}{p}</Fragment>);
+  // Get started's three ticks from data this page already has: a library, a workflow, a worker on
+  const wfCount = wf.data && !failed(wf.data) ? wf.data.length : 0, steps = getStartedSteps(v.libraries.length, wfCount, on), next = nextStep(steps);
+  const side = (i: number, to: string, label: string) => steps[i] ? <span className="pill ok">Done</span> : next === i ? <Link className="btn sm primary" to={to}>{label}</Link> : <span className="muted sm">after step {i}</span>;
   const workerOf = (id: string) => rows.find((w) => w.jobs.some((j) => j.jobId === id))?.name;
   // the two averages, shown under the charts and under the "start after two days" placeholders alike
   const hasAvg = v.averages.fileShrinkPercent != null || v.averages.secondsPerGB != null;
@@ -216,17 +237,18 @@ export function Overview() {
       </section>
 
       {/* empty install: the three steps to a first conversion (design empty-1); each step's line says what it waits for */}
-      {noLibs && <section className="sec" aria-labelledby="ov-g"><h2 id="ov-g">Get started</h2>
+      {/* Get started (design empty-1): the three steps ticked from real data; the section shows until all three are done, and the next step's button is live */}
+      {showGetStarted(steps) && <section className="sec" aria-labelledby="ov-g"><h2 id="ov-g">Get started</h2>
         <ul className="lcards" aria-label="Get started">
           <li className="lcard"><span className="ltile" aria-hidden="true"><Icon id="i-library" /></span>
             <div className="lmain"><div className="lname"><span className="ttl">Add your first library</span></div><span className="muted sm">The folder with your videos. Nothing is converted by looking.</span></div>
-            <div className="lside"><Link className="btn sm primary" to="/libraries/new">Set up</Link></div></li>
+            <div className="lside">{side(0, "/libraries/new", "Set up")}</div></li>
           <li className="lcard"><span className="ltile" aria-hidden="true"><Icon id="i-workflow" /></span>
             <div className="lmain"><div className="lname"><span className="ttl">A workflow is made for you</span></div><span className="muted sm">"Shrink videos": HEVC, balanced quality, same resolution. Change it any time.</span></div>
-            <div className="lside"><span className="muted sm">after step 1</span></div></li>
+            <div className="lside">{side(1, "/workflows", "Open workflows")}</div></li>
           <li className="lcard"><span className="ltile" aria-hidden="true"><Icon id="i-worker" /></span>
             <div className="lmain"><div className="lname"><span className="ttl">Start the worker on this computer</span></div><span className="muted sm">Nothing converts until a worker is on.</span></div>
-            <div className="lside"><span className="muted sm">after step 2</span></div></li>
+            <div className="lside">{side(2, "/workers", "Open Workers")}</div></li>
         </ul></section>}
 
       {/* design busy-1 / failures-1: failed jobs first, each with its reason in red; the list is the newest three */}
@@ -249,16 +271,18 @@ export function Overview() {
       <section className="sec" aria-labelledby="ov-j"><h2 id="ov-j">Converting now {rows.length > 0 && <span className="muted sm">{slotUsed} of {slotTotal} slots</span>} <Link className="more" to="/jobs?tab=running">All jobs</Link></h2>
         {!v.active.length ? <p className="muted">{on > 0 ? "Nothing is converting." : "Nothing is converting. Turn workers on to start."}</p> : (
           // design busy-1: the Jobs running card (the M4 mini card's grammar): tile, name, the Step / Speed / Time left fields, a status pill, a bar along the bottom
-          <ul className="lcards" aria-label="Converting now">{v.active.map((a0) => { const a = { ...a0, ...live[a0.jobId] }, p = pct(a.percent), w = workerOf(a.jobId);
+          <ul className="lcards" aria-label="Converting now">{v.active.map((a0) => { const a = { ...a0, ...live[a0.jobId] }, p = pct(a.percent), w = workerOf(a.jobId),
+                f = runFields({ stage: a.stage ?? "", percent: a.percent, workflowPercent: 0, elapsedS: 0, speed: a.speed ?? null, etaS: a.etaS, fps: a.fps ?? null, bitrateKbps: a.bitrateKbps ?? null });
               return <li key={a.jobId} className="lcard">
                 <span className="ltile codec" aria-hidden="true"><Icon id="i-file" /></span>
                 <div className="lmain">
                   <div className="lname"><Link className="ttl" to={"/jobs?tab=running&job=" + encodeURIComponent(a.jobId)}>{a.name}</Link><span className="lchev" aria-hidden="true">›</span></div>
                   <div className="chips">{a.library && <span className="mchip">{a.library.name}</span>}<span className="mchip">{w ?? "This computer"}</span></div>
                   <div className="rfields">
-                    <div className="rf"><span className="muted sm">Step</span><span className="rfv">{a.stage ?? "not known yet"}</span></div>
-                    <div className="rf"><span className="muted sm">Speed</span><span className="rfv">{a.speed != null ? Math.round(a.speed * 10) / 10 + "×" : "—"}</span></div>
-                    <div className="rf"><span className="muted sm">Time left</span><span className="rfv">{a.etaS != null ? left(a.etaS) : "—"}</span></div>
+                    <div className="rf"><span className="muted sm">Step</span><span className="rfv">{f.step}</span></div>
+                    <div className="rf"><span className="muted sm">Speed</span><span className="rfv">{f.speed}</span></div>
+                    <div className="rf"><span className="muted sm">Time left</span><span className="rfv">{f.timeLeft}</span></div>
+                    <div className="rf"><span className="muted sm">Bitrate</span><span className="rfv">{f.bitrate}</span></div>
                   </div>
                 </div>
                 <div className="lside">
@@ -307,7 +331,7 @@ export function Overview() {
                 <td className="nm"><b>{w.name}</b> <span className={"pill " + cls}>{t}</span> <Link className="btn icon ghost gear" to={"/workers/" + encodeURIComponent(w.id) + "?tab=limits"} aria-label={"Settings for " + w.name} title="Settings"><Icon id="i-gear" /></Link></td>
                 <td className="num" data-l="Speed">{js.map((j) => [j.fps != null && Math.round(j.fps) + " fps", j.speed != null && j.speed.toFixed(1) + "× realtime"].filter(Boolean).join(" · ")).filter(Boolean).join(", ") || (js.length ? js.map((j) => j.stage).find(Boolean) ?? "—" : "")}</td>
                 <td className="num" data-l="Slots">{sl.used} of {sl.total}</td>
-                {load && <td className="num" data-l="CPU · GPU">{w.cpuPercent == null && w.gpuPercent == null ? "Not measured yet" : <>{w.cpuPercent == null ? "—" : Math.round(w.cpuPercent) + "%"} · {w.gpuPercent == null ? <NoGpu /> : <GpuPct n={w.gpuPercent} />}</>}</td>}
+                {load && <td className="num" data-l="CPU · GPU">{w.status === "paused" ? "—" : w.cpuPercent == null && w.gpuPercent == null ? "Not measured yet" : <>{w.cpuPercent == null ? "—" : Math.round(w.cpuPercent) + "%"} · {w.gpuPercent == null ? <NoGpu /> : <GpuPct n={w.gpuPercent} />}</>}</td>}
               </tr>; })}</tbody></table>)}
       </section>
 
