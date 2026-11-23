@@ -179,7 +179,7 @@ func TestDoctorUnreadableLibraryIsBadAccess(t *testing.T) {
 	if access.Status != "bad" || !strings.HasPrefix(access.Detail, "Gone ("+gone+"): ") || access.Hint == nil {
 		t.Errorf("%+v", access)
 	}
-	if access.Hint != nil && *access.Hint != "Give the app's user read and write access to "+gone+"." {
+	if access.Hint != nil && *access.Hint != "Check that "+gone+" exists, and give the app's user read and write access to it." {
 		t.Errorf("unreadable hint should say read access and name the folder: %q", *access.Hint)
 	}
 }
@@ -342,6 +342,9 @@ func TestDoctorFolderHintSaysWhereToChange(t *testing.T) {
 
 // A folder the app can read but not write keeps the write wording, and names the folder in its detail.
 func TestDoctorReadOnlyLibraryKeepsWriteWording(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("needs a folder this user cannot write (POSIX, not root)")
+	}
 	dir := videosIn(t, 1000)
 	os.Chmod(dir, 0o555)
 	t.Cleanup(func() { os.Chmod(dir, 0o755) })
