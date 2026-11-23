@@ -65,14 +65,20 @@ function Choice<T extends string | number>({ legend, name, value, options, desc,
   );
 }
 
-// A segmented choice (the design's .seg): one button per option, the chosen one pressed.
+// A segmented choice (the design's .seg look): real radios, so the arrow keys move the choice and Tab takes one stop.
+// The input is hidden (.sr, still focusable); the label is the segment. .seg.radios is styled apart from .seg button.
 function Seg<T extends string | number>({ legend, name, value, options, desc, onPick }: {
   legend: string; name: string; value: T; options: [T, string][]; desc?: string; onPick: (v: T) => void;
 }) {
   return (
     <SettingRow title={<span id={name + "-h"}>{legend}</span>} desc={desc} descId={name + "-d"}>
-      <div className="seg" role="group" aria-labelledby={name + "-h"} aria-describedby={desc ? name + "-d" : undefined}>
-        {options.map(([v, label]) => <button key={String(v)} type="button" aria-pressed={v === value} onClick={() => onPick(v)}>{label}</button>)}
+      <div className="seg radios" role="radiogroup" aria-labelledby={name + "-h"} aria-describedby={desc ? name + "-d" : undefined}>
+        {options.map(([v, label]) => (
+          <label key={String(v)} className={v === value ? "on" : undefined}>
+            <input className="sr" type="radio" name={name} checked={v === value} onChange={() => onPick(v)} />
+            <span>{label}</span>
+          </label>
+        ))}
       </div>
     </SettingRow>
   );

@@ -124,6 +124,11 @@ textarea.input{min-height:72px;font-family:var(--mono);font-size:var(--fs-sm)}
 .seg button{min-height:34px;padding:0 12px;border:0;border-right:1px solid var(--border-strong);background:var(--surface);color:var(--text);font:inherit;cursor:pointer}
 .seg button:last-child{border-right:0}
 .seg button[aria-pressed=true]{background:var(--raised);font-weight:var(--fw-strong);box-shadow:inset 0 -3px 0 var(--accent)}
+/* Appearance's Seg: radios in the same look (M2b fix 5). Same metrics as .seg button; the ring shows on the segment, not the hidden radio */
+.seg.radios label{position:relative;display:inline-flex;align-items:center;min-height:34px;padding:0 12px;border-right:1px solid var(--border-strong);background:var(--surface);color:var(--text);cursor:pointer}
+.seg.radios label:last-child{border-right:0}
+.seg.radios label.on{background:var(--raised);font-weight:var(--fw-strong);box-shadow:inset 0 -3px 0 var(--accent)}
+.seg.radios label:has(input:focus-visible){outline:2px solid var(--focus);outline-offset:-2px}
 .chip{display:inline-flex;align-items:center;gap:6px;min-height:26px;padding:0 10px;border-radius:13px;border:1px solid var(--border-strong);background:var(--surface);font-size:var(--fs-sm);white-space:nowrap}
 .chip.sel{background:var(--raised);border-color:var(--accent)}
 .tag{display:inline-block;padding:0 8px;border-radius:4px;background:var(--raised);font-size:var(--fs-sm);color:var(--text-2)}
