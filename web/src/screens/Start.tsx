@@ -201,17 +201,20 @@ function StepWorker({ libraryId }: { libraryId: string }) {
     <section className="card" aria-labelledby="s3-h">
       <div className="hd"><h2 id="s3-h">3 · Your worker</h2></div>
       <div className="bd stack">
-        <p>{w ? "This computer is set up as a worker. Here is what it found." : "This computer is set up as a worker. Nothing to do."}</p>
+        {/* the top line says what the workers list shows: nothing while it loads, nothing on a failed load (the error line says so) */}
+        {(w || ws.data || !ws.error) && <p>{w ? "This computer is set up as a worker. Here is what it found." : ws.data ? "No worker was found on this computer." : "Looking for this computer's worker…"}</p>}
         {w && <dl className="kv">
           <dt>System</dt><dd>{systemLine(w.host, w.os, w.arch, w.live.memTotalBytes ? bytes(w.live.memTotalBytes) : "") || "—"}</dd>
           <dt>Encoders</dt><dd><EncoderChips w={w} reload={ws.reload} wizard /></dd>
         </dl>}
         {error && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{error}</span></p>}
-        <div className="row"><button className="btn primary" type="button" disabled={busy} onClick={() => finish(true)}><Icon id="i-play" />Start the worker</button>
-          <button className="btn" type="button" disabled={busy} onClick={() => finish(false)}>Not yet</button></div>
+        {ws.error && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{ws.error.message}</span></p>}
+        <div className="row">{ws.data && !w ? <button className="btn primary" type="button" disabled={busy} onClick={() => finish(false)}>Finish setup</button> : <>
+          <button className="btn primary" type="button" disabled={busy} onClick={() => finish(true)}><Icon id="i-play" />Start the worker</button>
+          <button className="btn" type="button" disabled={busy} onClick={() => finish(false)}>Not yet</button></>}</div>
         <p className="muted sm">{w
           ? "Start the worker begins converting this library. Not yet finishes setup; nothing converts until you press Start on Workers."
-          : ws.data ? "There is no worker on this computer, so nothing converts yet. Not yet finishes setup; add a worker on Workers." : null /* nothing while the workers list loads */}</p>
+          : ws.data ? "There is no worker on this computer, so nothing converts yet. Finish setup completes setup; add a worker on Workers." : null /* nothing while the workers list loads */}</p>
       </div>
     </section>
   );
