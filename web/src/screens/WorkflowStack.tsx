@@ -209,6 +209,17 @@ function convertField(k: string, s: JSONSchema, c: Record<string, unknown>, l: L
   return { ...s, enum: e, "x-enumLabels": named, description: (s.description as string) + perRow };
 }
 
+// Convert's graphics card words (design-direction-w7-f4-convert): the card's own, not the registry's labels
+const GC_CHOICES: [string, string, string][] = [
+  ["auto", "Automatic", "Uses the graphics card when it can convert the file, and the processor when it can't."],
+  ["only", "Graphics card only", "Never uses the processor. If the graphics card can't convert a file, its job fails and the original is kept."],
+  ["cpu", "Processor only", "Never uses the graphics card. Slower, but the same on every machine."]];
+const GC_FAIL: [string, string, string][] = [
+  ["next", "Try another way", "Steps down to the next way of converting the file, as before."],
+  ["fail", "Fail the job", "Stops at the first failure and says why. The file isn't tried again by itself."]];
+// index 0 is 'Same as Quality' (the default, saved as absent); 1 to 5 are the Quality names
+const CPU_Q = ["Same as Quality", "Smallest file", "Smaller", "Balanced", "Better quality", "Best quality"];
+
 export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unknown, more?: Record<string, unknown>) => void; issues: ValidationIssue[] }) {
   const { stepDef, libs, wf } = useReg(), def = stepDef(n.type)!, props = Object.fromEntries(Object.entries((def.configSchema.properties ?? {}) as Props).filter(([, s]) => !s.readOnly)) as Props, c = n.config;
   const lad = useData(getLadder, []).data;
@@ -250,6 +261,12 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
   // a problem on a More-options field opened it, the toggle wrote kind=selectors, the draft went dirty and the live problems hid)
   const byPage = useRef(false);
   useEffect(() => { if (moreBad && moreRef.current && !moreRef.current.open) { byPage.current = true; moreRef.current.open = true; } }, [moreBad, n.id]);
+  // Convert's 'Graphics card' block (design-direction-w7-f4-convert): open on load when a value isn't the default or a problem
+  // points at one of its fields. Opening or closing it writes nothing.
+  const gcRef = useRef<HTMLDetailsElement>(null);
+  const gcBad = ["hardware", "hardwareFail", "cpuQuality"].some((k) => bad(k).length > 0);
+  const gcOff = (c.hardware ?? "auto") !== "auto" || (c.hardwareFail ?? "next") !== "next" || Number(c.cpuQuality ?? 0) !== 0;
+  useEffect(() => { if (gcRef.current && (gcBad || gcOff) && !gcRef.current.open) gcRef.current.open = true; }, [gcBad, n.id]);
   const problem = (path: string) => issues.filter((i) => i.nodeId === n.id && i.configPath === path).map((i) => <span key={i.code} className="hint" style={{ color: "var(--error-text)" }}>{i.message}</span>);
   if (n.type === "video.convert") {
     // A-API-SHAPE + engine #211 + SCREENS V3 'Convert video, revised 11-13' (01:05Z): the slider (rateControl quality), or
@@ -302,6 +319,44 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
               {vbr && <span className="hint" id={n.id + "-mbv"}>Not used with VBR.</span>}{q && <span className="hint" id={n.id + "-mbq"}>Not used with Quality only.</span>}
               {!vbr && !q && lad && <p className="hint">Raised by {Math.round((lad.factors.fps60 - 1) * 100)}% for 60 fps files and by {Math.round((lad.factors.hdr - 1) * 100)}% for HDR. A file never gets more bitrate than it has now.</p>}</fieldset>
             {vbr && field("vbrMaxKbps")}
+          </div>
+        </details>
+        {/* Picture and Graphics card sit below More options, the same in both modes. They write with set, not put: put would switch the step to custom settings. A default is saved as absent. */}
+        <fieldset className="field choice" style={{ marginTop: 12 }}><legend className="lab">Picture</legend>
+          <div className="grid cols2">
+            <div style={{ gridColumn: "1 / -1" }} className={bad("removeBlackBars").length ? "fieldbad" : undefined} data-field="removeBlackBars">
+              <label className="row nw" htmlFor={n.id + "-bars"}><input id={n.id + "-bars"} type="checkbox" role="switch" className="switch" checked={c.removeBlackBars === true} aria-describedby={n.id + "-bars-1 " + n.id + "-bars-2"} onChange={(e) => set("removeBlackBars", e.target.checked || undefined)} /><span>Remove black bars</span></label>
+              <span className="hint" id={n.id + "-bars-1"} style={{ display: "block" }}>Cuts the black bars above and below (or beside) the picture, when samples from the whole video agree where they are. If they don't, the video is left as it is and the Log says why.</span>
+              <span className="hint" id={n.id + "-bars-2"} style={{ display: "block" }}>Not yet on remote workers: they leave the bars and say so in the Log.</span>
+              {bad("removeBlackBars").map((i, x) => <span key={x} className="hint" role="alert" style={{ color: "var(--error-text)" }}>{i.message}</span>)}
+            </div>
+          </div>
+        </fieldset>
+        <details ref={gcRef} style={{ marginTop: 12 }}><summary className="btn sm" style={{ display: "inline-flex" }}>Graphics card: {GC_CHOICES.find((x) => x[0] === String(c.hardware ?? "auto"))?.[1] ?? "Automatic"}</summary>
+          <div className="stack" style={{ marginTop: 12 }}>
+            <fieldset className={"field choice hwchoice" + (bad("hardware").length ? " fieldbad" : "")} data-field="hardware" aria-invalid={bad("hardware").length ? true : undefined} aria-describedby={n.id + "-hwh"}><legend className="lab">Graphics card</legend>
+              {/* one segmented row at 1440 with the chosen hint under it; at 390 stacked rows with each hint under its label (hwchoice CSS in shell.css) */}
+              <div className="seg radios hwseg">
+                {GC_CHOICES.map(([v, l, h]) => (
+                  <label key={v} className={String(c.hardware ?? "auto") === v ? "on" : undefined}><input type="radio" name={n.id + "-hw"} checked={String(c.hardware ?? "auto") === v} onChange={() => set("hardware", v === "auto" ? undefined : v)} />
+                    <span>{l}</span><span className="hint hwopt">{h}</span></label>))}
+              </div>
+              <span className="hint hwchosen" id={n.id + "-hwh"}>{GC_CHOICES.find((x) => x[0] === String(c.hardware ?? "auto"))?.[2]}</span>
+              {bad("hardware").map((i, x) => <span key={x} className="hint" role="alert" style={{ color: "var(--error-text)" }}>{i.message}</span>)}
+            </fieldset>
+            {String(c.hardware ?? "auto") !== "cpu" && <fieldset className={"field choice" + (bad("hardwareFail").length ? " fieldbad" : "")} data-field="hardwareFail"><legend className="lab">If the graphics card fails</legend>
+              <div className="row">{GC_FAIL.map(([v, l]) => (
+                <label key={v} className="radio"><input type="radio" name={n.id + "-hwfail"} checked={String(c.hardwareFail ?? "next") === v} onChange={() => set("hardwareFail", v === "next" ? undefined : v)} /><span>{l}</span></label>))}</div>
+              <span className="hint" aria-live="polite">{GC_FAIL.find((x) => x[0] === String(c.hardwareFail ?? "next"))?.[2]}</span>
+              {bad("hardwareFail").map((i, x) => <span key={x} className="hint" role="alert" style={{ color: "var(--error-text)" }}>{i.message}</span>)}
+            </fieldset>}
+            {String(c.hardware ?? "auto") !== "only" && (!sel || rc === "quality") && <div className={bad("cpuQuality").length ? "fieldbad" : undefined} data-field="cpuQuality">
+              <label htmlFor={n.id + "-cpuq"}>Quality on the processor</label>
+              <select id={n.id + "-cpuq"} className="input" value={String(Number(c.cpuQuality ?? 0))} onChange={(e) => set("cpuQuality", Number(e.target.value) || undefined)}>
+                {CPU_Q.map((l, i) => <option key={i} value={i}>{l}</option>)}</select>
+              <span className="hint">The processor and the graphics card can give different results at the same Quality. Pick a position here to set the processor's own.</span>
+              {bad("cpuQuality").map((i, x) => <span key={x} className="hint" role="alert" style={{ color: "var(--error-text)" }}>{i.message}</span>)}
+            </div>}
           </div>
         </details>
         {said && <p className="hint" role="status">{said}</p>}
