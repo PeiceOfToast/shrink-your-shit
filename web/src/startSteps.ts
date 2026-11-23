@@ -3,3 +3,6 @@
 export type StepState = "done" | "current" | "todo";
 
 export const stepStates = (current: number): StepState[] => [1, 2, 3].map((n) => (n < current ? "done" : n === current ? "current" : "todo"));
+
+// The library's Done line shows a count only once a scan has counted something; before that it is just the path.
+export const videoSuffix = (n: number): string => (n > 0 ? " · " + (n === 1 ? "1 video" : n + " videos") : "");

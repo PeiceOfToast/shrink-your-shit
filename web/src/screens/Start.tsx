@@ -18,9 +18,9 @@ import { START_SIMPLE } from "./Workflows";
 import { Enroll, WorkerHome, useSetup } from "./Enroll";
 import { EncoderChips } from "./Workers";
 import { workersPage } from "../workersApi";
-import { bytes, plural } from "../format";
+import { bytes } from "../format";
 import { systemLine } from "../workerCards";
-import { stepStates } from "../startSteps";
+import { stepStates, videoSuffix } from "../startSteps";
 
 type Kept = NonNullable<FirstRunSettings["firstRunLibrary"]>;
 // Runs one request; its error message goes to `onError`. False when it failed (or the user is signed out).
@@ -48,7 +48,7 @@ export function Start() {
       <p className="muted" style={{ textAlign: "center" }}>Three short steps. Each is saved as you go. Nothing converts until you start a worker.</p>
       <Steps current={step} />
       {error && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{error}</span></p>}
-      {step > 1 && <Done n={1} what={lib ? lib.name : kept!.name} text={lib ? lib.path + " · " + plural(lib.status.videos, "video", "videos") : kept!.path}
+      {step > 1 && <Done n={1} what={lib ? lib.name : kept!.name} text={lib ? lib.path + videoSuffix(lib.status.videos) : kept!.path}
         change={lib ? <Link className="muted" to={"/libraries/" + lib.id}>Change</Link> : <button className="btn sm ghost" type="button" onClick={() => setEditing(true)}>Change</button>} />}
       {step > 2 && <Done n={2} what={wfName ?? ""} text={lib!.settingLabel} change={lib && <Link className="muted" to={"/workflows/" + lib.flowId}>Change</Link>} />}
       {step === 1 && <StepLibrary taken={(libs.data ?? []).map((x) => x.name)} kept={kept} onDone={async (v) => { setError(""); if (await ok(patchSettings({ firstRunLibrary: v, firstRunStep: 2 }), setError)) (setEditing(false), refresh()); }} />}
@@ -204,7 +204,7 @@ function StepWorker({ libraryId }: { libraryId: string }) {
         <p>{w ? "This computer is set up as a worker. Here is what it found." : "This computer is set up as a worker. Nothing to do."}</p>
         {w && <dl className="kv">
           <dt>System</dt><dd>{systemLine(w.host, w.os, w.arch, w.live.memTotalBytes ? bytes(w.live.memTotalBytes) : "") || "—"}</dd>
-          <dt>Encoders</dt><dd><EncoderChips w={w} reload={ws.reload} /></dd>
+          <dt>Encoders</dt><dd><EncoderChips w={w} reload={ws.reload} titled={false} /></dd>
         </dl>}
         {error && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{error}</span></p>}
         <div className="row"><button className="btn primary" type="button" disabled={busy} onClick={() => finish(true)}><Icon id="i-play" />Start the worker</button>
