@@ -2972,11 +2972,17 @@ func encoderDetail(args []string) string {
 	}
 	quality := "none"
 	// -qp_i is AMF's intra quality (-rc cqp -qp_i <n> -qp_p <n>): without it an AMF job said "none".
+	matched := ""
 	for _, f := range []string{"-global_quality", "-crf", "-cq", "-qp", "-qp_i", "-b:v"} {
 		if v := argOf(f); v != "" {
 			quality = f + " " + v
+			matched = f
 			break
 		}
+	}
+	// VP9's constrained quality has -crf and the -b:v cap together: the quality is named above, so the cap is named too
+	if v := argOf("-b:v"); matched != "-b:v" && v != "" {
+		quality += ", -b:v " + v
 	}
 	// the cap and buffer, when the encode uses them (the plan's -maxrate:v/-bufsize:v), so the log shows the whole rate control
 	for _, f := range []string{"-maxrate", "-bufsize"} {
