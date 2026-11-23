@@ -6,7 +6,7 @@ import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode 
 import { Icon } from "../Icon";
 import { MOCK, SignedOut, failed, type Answer } from "../api";
 import { bytes, clock, count, encoderName, plural } from "../format";
-import { getSummary, scanAllLibraries } from "../dashApi";
+import { getSummary, scanAllLibraries, type RealSummary } from "../dashApi";
 import { getDoctor } from "../doctorApi";
 import { listJobs } from "../jobsApi";
 import { listWorkflows } from "../workflowApi";
@@ -114,14 +114,17 @@ export function Overview() {
   const [hidKey, setHidKey] = useState(() => { try { return localStorage.getItem(HEALTH_HIDDEN) ?? ""; } catch { return ""; } });
   const hideHealth = () => { setHidKey(failKey); try { localStorage.setItem(HEALTH_HIDDEN, failKey); } catch { /* hidden for this visit only */ }
     const h = document.querySelector<HTMLElement>(".pagehead h1"); if (h) { h.tabIndex = -1; h.focus(); } }; // the button goes away: focus the heading, as Workers does
-  const o = useData(getOverview, [], 15000), sum = useData<{ last24h: { failed: number } }>(() => (MOCK ? Promise.resolve(summary(mockState())) : getSummary()), [], 30000);
-  // the newest failed jobs for "Needs attention" (the list's own page; the 24 h count is the summary's)
-  const fails = useData(() => listJobs("failed", "", "", 3), [], 30000);
+  const o = useData(getOverview, [], 15000), sum = useData<Pick<RealSummary, "last24h" | "recentFailures">>(async () => {
+    if (!MOCK) return getSummary();
+    // ?mock=1: the sample summary's failures are sample jobs, not list rows; take the rows from the sample jobs list (the same shape as the real one)
+    const f = await listJobs("failed", "", "", 3);
+    return { ...summary(mockState()), recentFailures: failed(f) ? [] : f.items };
+  }, [], 30000);
   const wf = useData(listWorkflows, [], 30000); // Get started's "a workflow exists" tick
   const libs = useData(listLibrariesV2, [], 30000); // the workflow and scanned chips: the Libraries page's own data, joined by library id
   const running = useData(() => listJobs("running", "", "", 50), [], 15000); // codec and resolution for the converting cards (the running list), joined by job id
   const [live, setLive] = useState<Record<string, Partial<OverviewJob> & { stage?: string; bitrateKbps?: number | null }>>({}), [said, setSaid] = useState("");
-  const reload = useRef(o.reload); reload.current = () => (o.reload(), wl.reload(), fails.reload(), wf.reload(), libs.reload(), running.reload());
+  const reload = useRef(o.reload); reload.current = () => (o.reload(), wl.reload(), wf.reload(), libs.reload(), running.reload());
   useEffect(() => {
     let t: ReturnType<typeof setTimeout> | undefined, clear = false;
     return onLive((type, data) => {
@@ -167,7 +170,8 @@ export function Overview() {
     return { id: w.id, name: w.name, kind: ow?.kind ?? "remote", status: w.status, slots: w.slots, cpuPercent: ow?.cpuPercent ?? null, gpuPercent: ow?.gpuPercent ?? null, jobs: w.currentJobIds.map(jobInfo) }; }) : v.workers;
   const on = rows.filter((w) => w.status === "busy" || w.status === "online").length, fin = rows.filter((w) => w.status === "draining").length;
   const busy = rows.some((w) => w.jobs.length > 0), failed24 = sum.data && !failed(sum.data) ? sum.data.last24h.failed : null;
-  const failedRows = fails.data && !failed(fails.data) ? fails.data.items : [], stopped = rows.filter((w) => w.status === "paused").length;
+  // Needs attention: the summary's newest failures (the same rows as the jobs list, so the list's own fields)
+  const failedRows = sum.data && !failed(sum.data) ? sum.data.recentFailures.slice(0, 3) : [], s24 = sum.data && !failed(sum.data) ? sum.data.last24h : null, stopped = rows.filter((w) => w.status === "paused").length;
   const slotUsed = rows.reduce((a, w) => a + slots(w).used, 0), slotTotal = rows.reduce((a, w) => a + slots(w).total, 0);
   const rec = v.daily.filter((d) => d.recorded), first = rec[0]?.day, add = (f: (d: Day) => number) => rec.reduce((a, d) => a + f(d), 0);
   const tot = { done: add((d) => d.completed), skipped: add((d) => d.skipped), failed: add((d) => d.failed), freed: add((d) => d.freedBytes), saved: add((d) => d.savedBytes ?? 0), waiting: add((d) => d.waitingBytes ?? 0), kept: add((d) => d.couldFreeBytes ?? 0) };
@@ -187,7 +191,7 @@ export function Overview() {
   const starting = showGetStarted(steps, h.filesConverted);
   const libOf = new Map((libs.data && !failed(libs.data) ? libs.data : []).map((l) => [String(l.id), l] as const));
   const runOf = new Map((running.data && !failed(running.data) ? running.data.items : []).map((j) => [j.jobId ?? j.id, j] as const));
-  const cl = convertedLine(v.daily);
+  const perDay = convertedLine(v.daily);
   // the two averages, shown under the charts and under the "start after two days" placeholders alike
   const hasAvg = v.averages.fileShrinkPercent != null || v.averages.secondsPerGB != null;
   const avgLine = <><span>New files, on average <b>{v.averages.fileShrinkPercent == null ? "not recorded" : Math.round(v.averages.fileShrinkPercent) + "% smaller"}</b></span>
@@ -225,7 +229,7 @@ export function Overview() {
         <div className="tile">
           <span className="l">Files converted</span>
           <span className="v">{count(h.filesConverted)}</span>
-          <div className="d"><div>{cl ? <>{count(cl.perDay)} per day{cl.today && <> · today {count(cl.today.done)} done, {count(cl.today.skipped)} skipped</>}</> : "Charts start after two days of conversions."}</div></div>
+          <div className="d"><div>{perDay != null ? <>{count(perDay)} per day{s24 && <> · last 24 h {count(s24.completed)} done, {count(s24.skipped)} skipped</>}</> : "Charts start after two days of conversions."}</div></div>
           {rec.length >= 2 && <Spark label={"Files converted per day, last " + v.daily.length + " days"} color="var(--accent)" values={v.daily.map((d) => (d.recorded ? d.completed : null))} />}
         </div>
         <div className="tile rt-desk">
@@ -235,23 +239,12 @@ export function Overview() {
           <div className="d"><div>{count(h.filesWaiting)} waiting{failed24 != null && <> · <Link to="/jobs?tab=failed" className={failed24 > 0 ? "bad" : undefined}>{count(failed24)} failed in 24 h</Link></>}</div>
             {stopped > 0 && <div>{plural(stopped, "worker", "workers")} stopped</div>}</div>
         </div>
-        {/* U13: on a phone the third tile splits in two, so the tiles stay 2 x 2 (CSS shows these and hides "Right now") */}
-        <div className="tile rt-ph">
-          <span className="l">Converting now</span>
-          <span className="v">{count(v.active.length)} <small>now</small></span>
-          <div className="d"><div>{rows.length ? null : <Link to="/workers">No workers yet</Link>}</div></div>
-        </div>
-        <div className="tile rt-ph">
-          <span className="l">Workers on</span>
-          <span className="v">{on} <small>of {rows.length}</small></span>
-          <div className="d"><div>{rows.length ? null : <Link to="/workers">No workers yet</Link>}</div></div>
-        </div>
       </section>
 
       {/* empty install: the three steps to a first conversion (design empty-1); each step's line says what it waits for */}
       {/* Get started (design empty-1): the three steps ticked from real data; the section shows until all three are done, and the next step's button is live */}
       {starting && <section className="sec" aria-labelledby="ov-g"><h2 id="ov-g">Get started</h2>
-        <ul className="lcards" aria-label="Get started">
+        <ul className="lcards gs" aria-label="Get started">
           <li className="lcard"><span className="ltile" aria-hidden="true"><Icon id="i-library" /></span>
             <div className="lmain"><div className="lname"><span className="ttl">Add your first library</span></div><span className="muted sm">The folder with your videos. Nothing is converted by looking.</span></div>
             <div className="lside">{side(0, "/libraries/new", "Set up")}</div></li>
@@ -264,7 +257,7 @@ export function Overview() {
         </ul></section>}
 
       {/* design busy-1 / failures-1: failed jobs first, each with its reason in red; the list is the newest three */}
-      {failedRows.length > 0 && <section className="sec" aria-labelledby="ov-f"><h2 id="ov-f">Needs attention {failed24 != null && <span className="muted sm">{count(failed24)} failed in 24 h</span>} <Link className="more" to="/jobs?tab=failed">Failed jobs</Link></h2>
+      {failedRows.length > 0 && <section className="sec" aria-labelledby="ov-f"><h2 id="ov-f">Needs attention <Link className="more" to="/jobs?tab=failed">Failed jobs</Link></h2>
         <ul className="lcards" aria-label="Failed jobs">
           {failedRows.map((j) => <li key={j.id} className="lcard">
             <span className="ltile codec" aria-hidden="true">{j.codec ?? ""}{j.resolution && <><br />{j.resolution}</>}</span>
