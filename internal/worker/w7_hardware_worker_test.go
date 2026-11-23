@@ -48,7 +48,7 @@ func TestHardwareOnlyWithNoGraphicsEncoderFailsPlainly(t *testing.T) {
 	w := hardwareWorker(s, "only", "")
 	w.Encoder = func(string, bool, *rules.HDR) (string, string) { return "", "" }
 	w.RunOne(context.Background()) // a failed job returns its error; the status below is the check
-	if j := s.job(); j.Status != jobs.Failed || !strings.Contains(j.Error, "Hardware only: no graphics encoder") {
+	if j := s.job(); j.Status != jobs.Failed || !strings.Contains(j.Error, "Graphics card only: no graphics encoder") {
 		t.Fatalf("status %s, error %q", j.Status, j.Error)
 	}
 	if enc := encodeCalls(s); len(enc) != 0 {
@@ -63,7 +63,7 @@ func TestHardwareOnlyFailureFailsTheJob(t *testing.T) {
 	w := hardwareWorker(s, "only", "")
 	w.Encoder = func(string, bool, *rules.HDR) (string, string) { return "hevc_nvenc", "" }
 	w.RunOne(context.Background()) // a failed job returns its error; the status below is the check
-	if j := s.job(); j.Status != jobs.Failed || !strings.Contains(j.Error, "Hardware only: the graphics encoder failed") {
+	if j := s.job(); j.Status != jobs.Failed || !strings.Contains(j.Error, "Graphics card only: the graphics encoder failed") {
 		t.Fatalf("status %s, error %q", j.Status, j.Error)
 	}
 	enc := encodeCalls(s)

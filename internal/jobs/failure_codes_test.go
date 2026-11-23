@@ -377,3 +377,14 @@ func TestCheckFailedHintMatchesTheRefusal(t *testing.T) {
 		}
 	}
 }
+
+// W7 design words: a graphics-card-only stop keeps its stored sentence and gets a next step; killed gets both.
+func TestFailureWordsHardwareChoiceAndKilled(t *testing.T) {
+	f := FailureFacts{Stored: "Graphics card only: the graphics card failed, and the processor wasn't used."}
+	if msg, hint := FailureWords("hardware_choice", f); msg != f.Stored || !strings.Contains(hint, "set the Convert step's Graphics card to Automatic") {
+		t.Errorf("hardware_choice: %q / %q", msg, hint)
+	}
+	if msg, hint := FailureWords("killed", FailureFacts{}); msg != "The conversion was stopped by the system before it finished. The original is untouched." || !strings.Contains(hint, "short of memory") {
+		t.Errorf("killed: %q / %q", msg, hint)
+	}
+}
