@@ -806,7 +806,8 @@ func (s *Store) RenameFlow(id int64, name string) (Flow, error) {
 }
 
 // DuplicateFlow copies a flow as "<name> (copy)" (a clash adds " 2", " 3"...), used by no library. The copy
-// keeps the source's status: a copy of a switched-off workflow must not start out switched on.
+// keeps the source's status (a copy of a switched-off workflow must not start out switched on), description and
+// tags (tags drive the Workflows filter), but not its favourite star, which marks the one workflow you use.
 func (s *Store) DuplicateFlow(id int64) (Flow, error) {
 	f, err := s.GetFlow(id)
 	if err != nil {
@@ -823,7 +824,7 @@ func (s *Store) DuplicateFlow(id int64) (Flow, error) {
 	if err != nil {
 		return Flow{}, nameErr(err)
 	}
-	if _, err := s.db.Exec(`UPDATE flows SET status=(SELECT status FROM flows WHERE id=?) WHERE id=?`, id, nid); err != nil {
+	if _, err := s.db.Exec(`UPDATE flows SET (status, description, tags)=(SELECT status, description, tags FROM flows WHERE id=?) WHERE id=?`, id, nid); err != nil {
 		return Flow{}, err
 	}
 	return s.GetFlow(nid)
