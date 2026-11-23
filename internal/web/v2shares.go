@@ -786,33 +786,47 @@ func domainOpt(domain string) string {
 	return ",domain=" + domain
 }
 
+// manualMountCommand is the sudo mount for share sh at target, the same whether the target is the
+// app's own folder or a host folder that a container is given.
+func manualMountCommand(sh jobs.Share, mntAddr, target string) string {
+	if sh.Type == "smb" {
+		var opts string
+		if sh.Guest {
+			opts = "guest,vers=3.1.1,soft,nosuid,nodev,noexec,uid=syp,gid=syp,file_mode=0660,dir_mode=0770"
+		} else {
+			user, dom := helper.SplitDomain(sh.Username)
+			opts = "username=" + user + domainOpt(dom) + ",vers=3.1.1,soft,nosuid,nodev,noexec,uid=syp,gid=syp,file_mode=0660,dir_mode=0770"
+		}
+		return "sudo mount -t cifs " + shellQuote(mntAddr) + " " + shellQuote(target) + " -o " + shellQuote(opts)
+	}
+	return "sudo mount -t nfs " + shellQuote(mntAddr) + " " + shellQuote(target) + " -o " + shellQuote("soft,nosuid,nodev,noexec")
+}
+
 func setupForMode(store *jobs.Store, sh jobs.Share) any {
 	mode, _ := detectMode()
 	mpt := mountPointFor(sh)
 	mntAddr := mountAddress(sh.Type, sh.Address)
 	switch mode {
 	case "manual":
-		mkdir := "sudo mkdir -p " + shellQuote(mpt) + " && "
-		var opts string
-		if sh.Type == "smb" {
-			mountCmd := "sudo mount -t cifs " + shellQuote(mntAddr) + " " + shellQuote(mpt) + " -o "
-			if sh.Guest {
-				opts = "guest,vers=3.1.1,soft,nosuid,nodev,noexec,uid=syp,gid=syp,file_mode=0660,dir_mode=0770"
-			} else {
-				user, dom := helper.SplitDomain(sh.Username)
-				opts = "username=" + user + domainOpt(dom) + ",vers=3.1.1,soft,nosuid,nodev,noexec,uid=syp,gid=syp,file_mode=0660,dir_mode=0770"
-			}
+		if inUserNamespace() {
+			// An unprivileged container can't mount, so the host mounts the share into a folder and the
+			// container gets that folder. Same mount command, run on the host; the options stay in one place.
+			vol := sanitiseName(sh.Name, sh.ID)
+			host := "/mnt/" + vol
 			return map[string]any{
-				"kind":       "command",
-				"text":       mkdir + mountCmd + shellQuote(opts),
-				"removeText": "sudo umount " + shellQuote(mpt),
+				"kind": "command",
+				"text": "# This container runs in a user namespace (for example an unprivileged Proxmox LXC), so it can't mount network shares here.\n" +
+					"# On the Proxmox host, mount the share into a host folder:\n" +
+					"sudo mkdir -p " + shellQuote(host) + " && " + manualMountCommand(sh, mntAddr, host) + "\n" +
+					"# Pass that folder into the container, then restart the container:\n" +
+					"pct set <id> -mp0 " + host + ",mp=" + host + "\n" +
+					"pct restart <id>",
+				"removeText": "On the Proxmox host: sudo umount " + host + ", then pct set <id> -delete mp0 and restart the container.",
 			}
 		}
-		// NFS
-		opts = "soft,nosuid,nodev,noexec"
 		return map[string]any{
 			"kind":       "command",
-			"text":       mkdir + "sudo mount -t nfs " + shellQuote(mntAddr) + " " + shellQuote(mpt) + " -o " + shellQuote(opts),
+			"text":       "sudo mkdir -p " + shellQuote(mpt) + " && " + manualMountCommand(sh, mntAddr, mpt),
 			"removeText": "sudo umount " + shellQuote(mpt),
 		}
 	case "docker":
