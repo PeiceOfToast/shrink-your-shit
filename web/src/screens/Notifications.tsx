@@ -145,7 +145,7 @@ function TargetItem({ t, first, reload, said }: { t: NotifyTarget; first: boolea
         {!editing && !confirm && (
           <>
             <button className="btn sm" type="button" onClick={test} disabled={testing}>{testing ? "Sending…" : "Send a test"}</button>
-            <button className="btn sm ghost" type="button" onClick={() => { setEditing(true); setNote(null); }} aria-label={"Edit " + t.name}>Edit</button>
+            <button className="btn sm" type="button" onClick={() => { setEditing(true); setNote(null); }} aria-label={"Edit " + t.name}>Edit</button>
             <button className="btn sm ghost" type="button" onClick={() => { setConfirm(true); setNote(null); }} aria-label={"Remove " + t.name}>Remove</button>
           </>)}
       </SettingRow>

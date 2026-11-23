@@ -4,6 +4,7 @@
 // (W11's handle, behind a flag) and the graph's keyboard moves, Test run (V5), History, Export, Open graph (V4).
 import { Component, Fragment, createContext, useContext, useEffect, useRef, useState, type FormEvent, type ReactNode, type RefObject } from "react";
 import { Icon } from "../Icon";
+import { PageHead } from "../PageHead";
 import { SignedOut, failed, type Answer } from "../api";
 import { afterOnly, beforeSave, deleteNode, groupOf, insertAfter, insertAfterSave, insertQuestion, isQuestion, moveNode, newNode, order, otherwiseOf, setOtherwise, type Otherwise } from "../stepEdits"; // the steps in running order: a property of the document, not data
 import { useData } from "../useData";
@@ -519,7 +520,7 @@ async function act<T>(p: Promise<Answer<T>>, say: (m: string) => void): Promise<
 function StackPage({ id }: { id: string }) {
   const meta = useData(() => getWorkflow(id), [id]), defs = useData(stepDefinitions, []), draft = useData(() => getDraft(id), [id]);
   const problem = meta.error ?? defs.error ?? draft.error;
-  if (meta.error?.code === "not_found" || (meta.loaded && !meta.data)) return <div className="card"><div className="bd">There is no such workflow. It may have been deleted.</div></div>;
+  if (meta.error?.code === "not_found" || (meta.loaded && !meta.data)) return <div className="stack"><PageHead icon="i-workflow" crumbs={[["Workflows", "/workflows"]]} title="Workflow not found" /><div className="card"><div className="bd">There is no such workflow. It may have been deleted.</div></div></div>;
   if (!meta.data || !defs.data || !draft.data) return <div className="empty">{problem?.message ?? "Loading…"}</div>;
   return <Editor id={id} w={meta.data} defs={defs.data} first={draft.data} reloadMeta={meta.reload} />;
 }

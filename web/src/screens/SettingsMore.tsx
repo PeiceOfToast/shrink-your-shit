@@ -138,7 +138,7 @@ function Languages({ codes, setCodes, say }: { codes: string[]; setCodes: Dispat
     <SettingRow title="Your languages" descId="langs-h" desc={<>Audio and subtitles in these languages are kept when a workflow says "Keep only my languages". Tracks with no language set are always kept. "Save as separate .srt files" saves subtitles in these languages as files.</>}>
       <div className="langs">
         {codes.length ? <ul className="chips" aria-label="Your languages" style={{ listStyle: "none", padding: 0, margin: 0, flexWrap: "wrap" }}>{codes.map((c) => (
-          <li key={c} className="mchip">{name(c)} <button className="btn sm icon ghost" type="button" aria-label={"Remove " + name(c)} onClick={() => (setCodes(codes.filter((x) => x !== c)), say(name(c) + " removed. Press Save to keep it."))}><Icon id="i-x" /></button></li>))}</ul>
+          <li key={c} className="mchip removable">{name(c)}<button className="btn sm icon ghost" type="button" aria-label={"Remove " + name(c)} onClick={() => (setCodes(codes.filter((x) => x !== c)), say(name(c) + " removed. Press Save to keep it."))}><Icon id="i-x" /></button></li>))}</ul>
           : <p className="muted" style={{ margin: 0 }}>None yet.</p>}
         {adding ? (
           // Escape closes the box from anywhere in it (the field, a list pick, the Add button)

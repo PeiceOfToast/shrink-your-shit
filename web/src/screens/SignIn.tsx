@@ -29,7 +29,7 @@ export function SignIn() {
             <button className="btn sm icon ghost" type="button" aria-controls="token" aria-pressed={shown} aria-label="Show the token" title="Show the token" onClick={() => setShown(!shown)}><Icon id="i-eye" /></button></div>
           {error && <p id="token-error" className="st bad" role="alert"><Icon id="i-alert" /><span>{error}</span></p>}
         </div>
-        <div className="row"><button className="btn primary wide" type="submit" disabled={busy || !token.trim()}>Sign in</button></div>
+        <div className="row"><button className="btn primary" type="submit" disabled={busy || !token.trim()}>Sign in</button></div>
         <details className="where" open><summary>Where do I find it?</summary>
           <p className="hint">It is in the sign-in link the server printed when it started (the part after ?token=). Or see it again on the computer that runs the app:</p>
           <dl className="hint">
