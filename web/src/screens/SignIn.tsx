@@ -25,20 +25,20 @@ export function SignIn() {
       <form className="stack" onSubmit={(e) => (e.preventDefault(), go())}>
         <div className="field"><label htmlFor="token">Access token</label>
           {/* parity 11-19 #3: Show/Hide in the field, and where to find the token (README "Signing in") */}
-          <div className="pw"><input id="token" className="input mono" type={shown ? "text" : "password"} autoComplete="current-password" spellCheck={false} value={token} aria-invalid={error ? "true" : undefined} aria-describedby="token-hint" onChange={(e) => (setToken(e.target.value), setError(""))} />
+          <div className="pw"><input id="token" className="input mono" type={shown ? "text" : "password"} autoComplete="current-password" spellCheck={false} value={token} aria-invalid={error ? "true" : undefined} aria-describedby={error ? "token-error" : undefined} onChange={(e) => (setToken(e.target.value), setError(""))} />
             <button className="btn sm icon ghost" type="button" aria-controls="token" aria-pressed={shown} aria-label="Show the token" title="Show the token" onClick={() => setShown(!shown)}><Icon id="i-eye" /></button></div>
-          {error && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{error}</span></p>}
-          <span id="token-hint" className="hint">It is in the sign-in link the server printed when it started.</span>
+          {error && <p id="token-error" className="st bad" role="alert"><Icon id="i-alert" /><span>{error}</span></p>}
         </div>
         <div className="row"><button className="btn primary wide" type="submit" disabled={busy || !token.trim()}>Sign in</button></div>
         <details className="where" open><summary>Where do I find it?</summary>
-          <p className="hint">On the computer that runs shrink-your-shit:</p>
+          <p className="hint">It is in the sign-in link the server printed when it started (the part after ?token=). Or see it again on the computer that runs the app:</p>
           <dl className="hint">
-              <dt>Docker</dt><dd><code>docker exec &lt;container name&gt; shrink-your-shit token</code></dd>
-              <dt>Linux</dt><dd><code>sudo shrink-your-shit token</code></dd>
-              <dt>macOS</dt><dd><code>shrink-your-shit token</code></dd>
-              <dt>Windows</dt><dd>Open shrink-your-shit from the Start menu, then Settings, Access token, Show.</dd>
-            </dl></details>
+            <dt>Linux</dt><dd><code>sudo shrink-your-shit token</code></dd>
+            <dt>Mac</dt><dd><code>shrink-your-shit token</code> in Terminal</dd>
+            <dt>Windows</dt><dd>Open shrink-your-shit from the Start menu, then Settings, Access token, Show.</dd>
+            <dt>Docker</dt><dd><code>docker exec &lt;container name&gt; shrink-your-shit token</code></dd>
+          </dl>
+        </details>
       </form>
     </div>
   );
