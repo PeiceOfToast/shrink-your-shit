@@ -1069,3 +1069,14 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 .mjob-bar{position:absolute;left:0;right:0;bottom:0;height:3px;background:var(--raised)}
 .mjob-bar i{display:block;height:100%;background:var(--accent)}
 @media (max-width:479px){.mjob{grid-template-columns:auto minmax(0,1fr)}.mjob .pill{grid-column:2;justify-self:start}}
+
+/* M5d fix 2: the log rows open with a chevron; the header's saving stays on one line; the File card stacks at phones;
+   the back arrow is for narrow widths only; the failed check card is a title-bar card, not a note with a red edge */
+details.stepd > summary { list-style: none; cursor: pointer; }
+details.stepd > summary::-webkit-details-marker { display: none; }
+details.stepd > summary::before { content: "▸"; display: inline-block; width: 1em; color: var(--muted); transition: transform .15s; }
+details.stepd[open] > summary::before { transform: rotate(90deg); }
+.jd-pct { white-space: nowrap; }
+.drawer.jobd .jd-check { display: block; border-top: 1px solid var(--border); padding: 12px 0; }
+@media (min-width: 1100px) { .drawer.jobd .jd-back { display: none; } }
+@media (max-width: 640px) { .drawer.jobd .kv { grid-template-columns: minmax(0, 1fr); } }

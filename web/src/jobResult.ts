@@ -21,3 +21,23 @@ export const stoppedTitle = (message: string): string =>
 
 // A done job's New file line ("hevc 1280x720 25.000 fps 8-bit, 0 audio, …") as the Video row's value: the codec in capitals, then the rest up to the first comma.
 export const newFileVideo = (line: string): string => line.split(",")[0].replace(/^\w+/, (w) => w.toUpperCase());
+
+// The worker as the drawer says it: the built-in worker is "This computer" (the Workers screen's wording); a job with no worker shows a dash.
+export const workerLabel = (w: string | null | undefined): string => (!w ? "—" : w === "builtin" ? "This computer" : w);
+
+// The Workflow line's rule: a rule is named only when the job's own workflow decided it (step N of its workflow, <name>).
+export const ruleName = (jobWorkflow: { id: string } | null | undefined, name: string | null | undefined): string | null => (jobWorkflow && name ? name : null);
+
+// A video stream as one line, the same on both sides of the Result table: "H.264 1280x720 25.000 fps 8-bit".
+// The fields are the scan's stream fields (types/jobs.ts Probe.streams); a missing one is left out, not guessed.
+export const videoDetail = (codec: string | undefined, s: { Width?: number; Height?: number; frameRate?: number; bitDepth?: number } | undefined): string | null => {
+  if (!s && !codec) return null;
+  const c = codec ? codec.toUpperCase().replace("H264", "H.264") : "";
+  const size = s?.Width && s?.Height ? s.Width + "x" + s.Height : "";
+  const fps = s?.frameRate ? s.frameRate.toFixed(3) + " fps" : "";
+  const depth = s?.bitDepth ? s.bitDepth + "-bit" : "";
+  return [c, size, fps, depth].filter(Boolean).join(" ") || null;
+};
+
+// Rounding for the header's size change: the percentage as a whole number, the sizes as the list row shows them.
+export const savedPercent = (beforeBytes: number, afterBytes: number): number => Math.round((100 * (beforeBytes - afterBytes)) / beforeBytes);
