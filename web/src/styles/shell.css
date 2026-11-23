@@ -984,6 +984,8 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 .lcard a.mchip,.lcard .lnote a,.lcard .lside a,.lcard .hit{position:relative;z-index:1}
 .lcard .lname .ttl{color:var(--text);font-weight:var(--fw-strong);text-decoration:none}
 .lcard a.mchip.wf{text-decoration:none}
+.lcard .mchip.wf{min-width:0;max-width:100%;overflow:hidden}
+.lcard .mchip.wf .cut{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lchev{display:none}
 .lskel .lmain .skel-b{margin:0;height:14px}
 .lskel .skel-pill{height:22px}
