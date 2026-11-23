@@ -151,3 +151,11 @@ func pixFmt10(fam string) string {
 	}
 	return "p010le"
 }
+
+// Scale is the family's scale filter for a height on the device, "" when the family sets none.
+func (p EncoderProfile) Scale(h int, tenBit bool) string {
+	if p.scale == nil {
+		return ""
+	}
+	return p.scale(h, tenBit)
+}
