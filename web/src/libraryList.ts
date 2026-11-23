@@ -48,7 +48,7 @@ export function selectShown(sel: string[], shown: Library[], on: boolean): strin
 }
 
 // When the filter or the search changes, the selection keeps only the libraries still shown (the intersection).
-export function keepShown(sel: string[], shown: Library[]): string[] {
+export function keepShown<T extends { id: string }>(sel: string[], shown: T[]): string[] {
   const ids = new Set(shown.map((l) => l.id));
   return sel.filter((id) => ids.has(id));
 }
