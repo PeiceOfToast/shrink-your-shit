@@ -12,6 +12,7 @@ import { importLines, type ReportLine } from "../importReport";
 import { shownWorkflows, wfFilterCounts, type WfFilter } from "../workflowList";
 import { Link, navigate, useSearch } from "../router";
 import type { Workflow } from "../types/v2";
+import { closeMenuToSummary, menuEscape } from "../menuFocus";
 
 // design review rule 4: "same resolution", and that originals stay. Also first run's step 2.
 export const START_SIMPLE = "A list of steps with plain choices. HEVC, same resolution, stereo audio in your languages, MKV. Saves new files in a separate folder. Your originals stay where they are; no space is freed until you remove them.";
@@ -38,20 +39,18 @@ function RowMenu({ w, onSaid, reload }: { w: Workflow; onSaid: (s: string) => vo
   const close = () => ref.current?.removeAttribute("open");
   useEffect(() => {
     const outside = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && close();
-    const esc = (e: KeyboardEvent) => e.key === "Escape" && ref.current?.open && (close(), ref.current.querySelector("summary")?.focus());
     document.addEventListener("mousedown", outside);
-    document.addEventListener("keydown", esc);
-    return () => (document.removeEventListener("mousedown", outside), document.removeEventListener("keydown", esc));
+    return () => document.removeEventListener("mousedown", outside);
   }, []);
   const used = w.libraries.map((l) => l.name).join(", ");
   return (
-    <details className="menu" ref={ref} onBlur={(e) => e.relatedTarget instanceof Node && !e.currentTarget.contains(e.relatedTarget) && close()}>
+    <details className="menu" ref={ref} onKeyDown={menuEscape} onBlur={(e) => e.relatedTarget instanceof Node && !e.currentTarget.contains(e.relatedTarget) && close()}>
       <summary className="btn sm icon ghost" aria-label={"More for " + w.name}><Icon id="i-more" /></summary>
       <div className="pop" role="menu">
-        <button type="button" className="it" role="menuitem" onClick={async () => { close(); if (await act(patchWorkflow(w.id, { favourite: !w.favourite }), onSaid)) reload(); }}><Icon id="i-star" />{w.favourite ? "Remove from favourites" : "Add to favourites"}</button>
-        <button type="button" className="it" role="menuitem" onClick={async () => { close(); if (await act(duplicateWorkflow(w.id), onSaid)) (onSaid(w.name + " duplicated."), reload()); }}><Icon id="i-copy" />Duplicate</button>
+        <button type="button" className="it" role="menuitem" onClick={async (e) => { closeMenuToSummary(e.currentTarget); if (await act(patchWorkflow(w.id, { favourite: !w.favourite }), onSaid)) reload(); }}><Icon id="i-star" />{w.favourite ? "Remove from favourites" : "Add to favourites"}</button>
+        <button type="button" className="it" role="menuitem" onClick={async (e) => { closeMenuToSummary(e.currentTarget); if (await act(duplicateWorkflow(w.id), onSaid)) (onSaid(w.name + " duplicated."), reload()); }}><Icon id="i-copy" />Duplicate</button>
         <button type="button" className="it" role="menuitem" aria-disabled={used ? true : undefined} aria-describedby={used ? "used-" + w.id : undefined}
-          onClick={async () => { if (used) return; close(); if (!window.confirm("Delete the workflow " + w.name + "? This can't be undone.")) return;
+          onClick={async (e) => { if (used) return; closeMenuToSummary(e.currentTarget); if (!window.confirm("Delete the workflow " + w.name + "? This can't be undone.")) return;
             // The server answers 204 with no body (null), which act() can't tell apart from a failure.
             let r; try { r = await deleteWorkflow(w.id); } catch { return; }
             if (failed(r)) onSaid(r.error.message); else { onSaid(w.name + " deleted."); reload(); } }}>
@@ -126,8 +125,8 @@ function WfSkeleton() {
 
 // One workflow as a card (design workflows-list): tile, name (a stretched link opens the whole card), a draft chip, the
 // description on one muted line, then the chip row: used by, version, last runs, tags. On the right: the status pill, the
-// Enabled switch and the menu; "★ favourite" under them. The star sits at the name. Only the name link is under the card;
-// the star, switch, menu and chips sit above it.
+// Enabled switch and the menu; a "★ favourite" note under them. Only the name link is under the card;
+// the switch, menu and chips sit above it.
 function WfCard({ w, hasTags, setSaid, reload }: { w: Workflow; hasTags: boolean; setSaid: (s: string) => void; reload: () => void }) {
   const problems = w.validation.errors + w.validation.warnings;
   const used = w.libraries.map((l) => l.name).join(", ");
