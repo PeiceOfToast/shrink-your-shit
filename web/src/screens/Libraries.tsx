@@ -317,14 +317,14 @@ export function WorkflowField({ value, onChange, workflows, self, none, makeNew 
         <div className="row" style={{ gap: 8 }}>
           <select id="lib-wf" className="input" value={value} onChange={(e) => onChange(e.target.value)} aria-describedby="lib-wf-hint" style={{ flex: 1 }}>
             {!value && <option value="">Choose a workflow</option>}
-            {makeNew && <option value="new">Make one for me (Shrink videos)</option>}
+            {makeNew && <option value="new">Make one for me</option>}
             {none && <option value="0">No workflow yet</option>}
             {workflows.map((w) => <option key={w.id} value={w.id} disabled={!w.usable}>{w.name}{w.usable ? "" : " (not published yet)"}</option>)}
           </select>
           {value && value !== "0" && value !== "new" && <Link className="btn sm ghost" to={"/workflows/" + value + "?view=simple"}>Edit this workflow</Link>}
         </div>
         <span id="lib-wf-hint" className="hint">{hint}</span>
-        {workflows.length === 0 && <span className="hint">No workflows yet. <Link to="/workflows">Make one in Workflows</Link>.</span>}
+        {workflows.length === 0 && !makeNew && <span className="hint">No workflows yet. <Link to="/workflows">Make one in Workflows</Link>.</span>}
       </>}
     </div>
   );

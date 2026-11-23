@@ -242,7 +242,7 @@ export function Overview() {
             <div className="lside">{side(0, "/libraries/new", "Set up", nextStep(steps) === 0)}</div></li>
           {/* step 2 is made by step 1 (Add library makes the workflow): no button of its own */}
           <li className="lcard"><span className="ltile" aria-hidden="true"><Icon id="i-workflow" /></span>
-            <div className="lmain"><div className="lname"><span className="ttl">A workflow is made for you</span></div><span className="muted sm">"Shrink videos": HEVC, balanced quality, same resolution. Change it any time.</span></div>
+            <div className="lmain"><div className="lname"><span className="ttl">A workflow is made for you</span></div><span className="muted sm">Named after your library: HEVC, Balanced quality, same resolution. Change it any time.</span></div>
             <div className="lside">{steps[1] ? <span className="pill ok">Done</span> : <span className="muted sm">after step 1</span>}</div></li>
           <li className="lcard"><span className="ltile" aria-hidden="true"><Icon id="i-worker" /></span>
             <div className="lmain"><div className="lname"><span className="ttl">Start the worker on this computer</span></div><span className="muted sm">Nothing converts until a worker is on.</span></div>
