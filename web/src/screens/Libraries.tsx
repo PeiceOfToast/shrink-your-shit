@@ -169,7 +169,7 @@ function LibSkeleton() {
 // card (a stretched link, see shell.css); in select mode the card is the checkbox's and the name is a plain link.
 function LibCard({ l, tag, selecting, checked, onToggle }: { l: Library; tag: string; selecting: boolean; checked: boolean; onToggle: (on: boolean) => void }) {
   const share = doneShare(l.counts), pct = share === null ? null : Math.round(share * 100);
-  const fixable = !l.writable || l.status === "path_missing" || l.status === "not_readable"; // Health lists the library's folder check
+  const fixable = l.status === "path_missing" || l.status === "not_readable"; // Health lists the library's folder check (writable is true for these, so not keyed on it)
   return (
     <li className={"lcard" + (checked ? " sel" : "")}>
       {selecting && <label className="hit lcheck"><input type="checkbox" aria-label={"Select " + l.name} checked={checked} onChange={(e) => onToggle(e.target.checked)} /></label>}
