@@ -6,8 +6,9 @@ export function getStartedSteps(libraries: number, workflows: number, workersOn:
   return [libraries > 0, workflows > 0, workersOn > 0];
 }
 
-// the section shows until all three steps are done
-export const showGetStarted = (s: Steps): boolean => !s.every(Boolean);
+// the section shows until all three steps are done, and only until a file has been converted (an established install whose
+// workers are paused has converted files, so it doesn't see it)
+export const showGetStarted = (s: Steps, converted: number): boolean => converted === 0 && !s.every(Boolean);
 
 // the step whose button is live: the first one not done (0-based), or null when all three are done
 export function nextStep(s: Steps): number | null {

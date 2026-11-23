@@ -19,7 +19,7 @@ import { closeMenuToSummary, menuEscape, useCloseOnOutside } from "../menuFocus"
 import type { FirstFiles, FolderReport, LibraryItem } from "../types/v1";
 import type { Library, Variable } from "../types/v2";
 
-function lastScan(t: string | null): string {
+export function lastScan(t: string | null): string {
   if (!t) return "Not yet";
   const d = new Date(t), day = (x: Date) => x.toDateString(), y = new Date(Date.now() - 864e5);
   return day(d) === day(new Date()) ? clock(d) + " today" : day(d) === day(y) ? "Yesterday " + clock(d) : d.toLocaleDateString([], { day: "numeric", month: "short" }) + " " + clock(d);

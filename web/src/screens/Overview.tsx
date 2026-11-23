@@ -10,6 +10,9 @@ import { getSummary, scanAllLibraries } from "../dashApi";
 import { getDoctor } from "../doctorApi";
 import { listJobs } from "../jobsApi";
 import { listWorkflows } from "../workflowApi";
+import { listLibrariesV2 } from "../libraryApi";
+import { lastScan } from "./Libraries";
+import { convertedLine } from "../convertedLine";
 import { getStartedSteps, nextStep, showGetStarted } from "../getStarted";
 import { runFields } from "../jobCards";
 const HEALTH_HIDDEN = "syp-health-dismissed"; // the failed checks the Dismiss was for
@@ -115,8 +118,10 @@ export function Overview() {
   // the newest failed jobs for "Needs attention" (the list's own page; the 24 h count is the summary's)
   const fails = useData(() => listJobs("failed", "", "", 3), [], 30000);
   const wf = useData(listWorkflows, [], 30000); // Get started's "a workflow exists" tick
+  const libs = useData(listLibrariesV2, [], 30000); // the workflow and scanned chips: the Libraries page's own data, joined by library id
+  const running = useData(() => listJobs("running", "", "", 50), [], 15000); // codec and resolution for the converting cards (the running list), joined by job id
   const [live, setLive] = useState<Record<string, Partial<OverviewJob> & { stage?: string; bitrateKbps?: number | null }>>({}), [said, setSaid] = useState("");
-  const reload = useRef(o.reload); reload.current = () => (o.reload(), wl.reload(), fails.reload(), wf.reload());
+  const reload = useRef(o.reload); reload.current = () => (o.reload(), wl.reload(), fails.reload(), wf.reload(), libs.reload(), running.reload());
   useEffect(() => {
     let t: ReturnType<typeof setTimeout> | undefined, clear = false;
     return onLive((type, data) => {
@@ -178,6 +183,11 @@ export function Overview() {
   const wfCount = wf.data && !failed(wf.data) ? wf.data.length : 0, steps = getStartedSteps(v.libraries.length, wfCount, on), next = nextStep(steps);
   const side = (i: number, to: string, label: string) => steps[i] ? <span className="pill ok">Done</span> : next === i ? <Link className="btn sm primary" to={to}>{label}</Link> : <span className="muted sm">after step {i}</span>;
   const workerOf = (id: string) => rows.find((w) => w.jobs.some((j) => j.jobId === id))?.name;
+  // the sections below wait for Get started (design empty-1): Converting now, Libraries, Workers and Last 30 days hide while it shows
+  const starting = showGetStarted(steps, h.filesConverted);
+  const libOf = new Map((libs.data && !failed(libs.data) ? libs.data : []).map((l) => [String(l.id), l] as const));
+  const runOf = new Map((running.data && !failed(running.data) ? running.data.items : []).map((j) => [j.jobId ?? j.id, j] as const));
+  const cl = convertedLine(v.daily);
   // the two averages, shown under the charts and under the "start after two days" placeholders alike
   const hasAvg = v.averages.fileShrinkPercent != null || v.averages.secondsPerGB != null;
   const avgLine = <><span>New files, on average <b>{v.averages.fileShrinkPercent == null ? "not recorded" : Math.round(v.averages.fileShrinkPercent) + "% smaller"}</b></span>
@@ -213,14 +223,14 @@ export function Overview() {
           {rec.length >= 2 && <Spark label={(kept ? "Files made smaller per day" : "Space saved per day") + ", last " + v.daily.length + " days"} color="var(--success)" values={v.daily.map((d) => (d.recorded ? (hasSaved ? d.savedBytes : d.freedBytes) ?? 0 : null))} />}
         </div>
         <div className="tile">
-          <span className="l">Files converted, all time</span>
+          <span className="l">Files converted</span>
           <span className="v">{count(h.filesConverted)}</span>
-          <div className="d"><div>{count(h.filesWaiting)} waiting{failed24 != null && <> · <Link to="/jobs?tab=failed" className={failed24 > 0 ? "bad" : undefined}>{count(failed24)} failed in 24 h</Link></>}</div></div>
+          <div className="d"><div>{cl ? <>{count(cl.perDay)} per day{cl.today && <> · today {count(cl.today.done)} done, {count(cl.today.skipped)} skipped</>}</> : "Charts start after two days of conversions."}</div></div>
           {rec.length >= 2 && <Spark label={"Files converted per day, last " + v.daily.length + " days"} color="var(--accent)" values={v.daily.map((d) => (d.recorded ? d.completed : null))} />}
         </div>
         <div className="tile rt-desk">
           <span className="l">Right now</span>
-          <span className="v">{count(v.active.length)} <small>converting now</small></span>
+          <span className="v">{count(v.active.length)} <small>converting</small></span>
           {/* no daily series for a live count, so no sparkline: there is no history to draw it from */}
           <div className="d"><div>{count(h.filesWaiting)} waiting{failed24 != null && <> · <Link to="/jobs?tab=failed" className={failed24 > 0 ? "bad" : undefined}>{count(failed24)} failed in 24 h</Link></>}</div>
             {stopped > 0 && <div>{plural(stopped, "worker", "workers")} stopped</div>}</div>
@@ -240,7 +250,7 @@ export function Overview() {
 
       {/* empty install: the three steps to a first conversion (design empty-1); each step's line says what it waits for */}
       {/* Get started (design empty-1): the three steps ticked from real data; the section shows until all three are done, and the next step's button is live */}
-      {showGetStarted(steps) && <section className="sec" aria-labelledby="ov-g"><h2 id="ov-g">Get started</h2>
+      {starting && <section className="sec" aria-labelledby="ov-g"><h2 id="ov-g">Get started</h2>
         <ul className="lcards" aria-label="Get started">
           <li className="lcard"><span className="ltile" aria-hidden="true"><Icon id="i-library" /></span>
             <div className="lmain"><div className="lname"><span className="ttl">Add your first library</span></div><span className="muted sm">The folder with your videos. Nothing is converted by looking.</span></div>
@@ -260,26 +270,27 @@ export function Overview() {
             <span className="ltile codec" aria-hidden="true">{j.codec ?? ""}{j.resolution && <><br />{j.resolution}</>}</span>
             <div className="lmain">
               <div className="lname"><Link className="ttl" to={"/jobs?tab=failed&job=" + encodeURIComponent(j.jobId ?? j.id)} title={j.path}>{j.name}</Link><span className="lchev" aria-hidden="true">›</span></div>
-              <div className="chips"><span className="mchip">{j.library}</span>{j.newFileRefused && <span className="mchip">Original kept</span>}</div>
+              <div className="chips"><span className="mchip">{j.library}</span>{libOf.get(String(j.libraryId))?.workflowName && <span className="mchip">{libOf.get(String(j.libraryId))!.workflowName}</span>}{j.newFileRefused && <span className="mchip">Original kept</span>}</div>
             </div>
             <div className="lside">
-              <span className="bad sm">{j.reason?.message ?? "Failed"}</span>
+              <span className="sm" style={{ color: "var(--error-text)" }}>{j.reason?.message ?? "Failed"}</span>
               <span className="pill bad"><Icon id="i-alert" />Failed</span>
               {j.finishedAt && <span className="lnote">{clock(j.finishedAt)}</span>}
             </div>
           </li>)}
         </ul></section>}
 
+      {!starting && <>
       <section className="sec" aria-labelledby="ov-j"><h2 id="ov-j">Converting now {rows.length > 0 && <span className="muted sm">{slotUsed} of {slotTotal} slots</span>} <Link className="more" to="/jobs?tab=running">All jobs</Link></h2>
         {!v.active.length ? <p className="muted">{on > 0 ? "Nothing is converting." : "Nothing is converting. Turn workers on to start."}</p> : (
           // design busy-1: the Jobs running card (the M4 mini card's grammar): tile, name, the Step / Speed / Time left fields, a status pill, a bar along the bottom
-          <ul className="lcards" aria-label="Converting now">{v.active.map((a0) => { const a = { ...a0, ...live[a0.jobId] }, p = pct(a.percent), w = workerOf(a.jobId),
+          <ul className="lcards" aria-label="Converting now">{v.active.map((a0) => { const a = { ...a0, ...live[a0.jobId] }, p = pct(a.percent), w = workerOf(a.jobId), rj = runOf.get(a.jobId), lib = a.library ? libOf.get(a.library.id) : undefined,
                 f = runFields({ stage: a.stage ?? "", percent: a.percent, workflowPercent: 0, elapsedS: 0, speed: a.speed ?? null, etaS: a.etaS, fps: a.fps ?? null, bitrateKbps: a.bitrateKbps ?? null });
               return <li key={a.jobId} className="lcard">
-                <span className="ltile codec" aria-hidden="true"><Icon id="i-file" /></span>
+                <span className="ltile codec" aria-hidden="true">{rj?.codec ? <>{rj.codec}{rj.resolution && <><br />{rj.resolution}</>}</> : <Icon id="i-file" />}</span>
                 <div className="lmain">
                   <div className="lname"><Link className="ttl" to={"/jobs?tab=running&job=" + encodeURIComponent(a.jobId)}>{a.name}</Link><span className="lchev" aria-hidden="true">›</span></div>
-                  <div className="chips">{a.library && <span className="mchip">{a.library.name}</span>}<span className="mchip">{w ?? "This computer"}</span></div>
+                  <div className="chips">{a.library && <span className="mchip">{a.library.name}</span>}{lib?.workflowName && <span className="mchip">{lib.workflowName}</span>}<span className="mchip">{w ?? "This computer"}</span></div>
                   <div className="rfields">
                     <div className="rf"><span className="muted sm">Step</span><span className="rfv">{f.step}</span></div>
                     <div className="rf"><span className="muted sm">Speed</span><span className="rfv">{f.speed}</span></div>
@@ -289,11 +300,10 @@ export function Overview() {
                 </div>
                 <div className="lside">
                   <span className="pill run"><Icon id="i-play" />{p != null ? "Running · " + p + "%" : "Running"}</span>
-                  <span className="lnote">{a.expectedSavingBytes == null ? "Saving: not known yet" : a.expectedSavingBytes < 0 ? "Saving: none, about " + bytes(-a.expectedSavingBytes) + " bigger so far" : "about " + bytes(a.expectedSavingBytes) + " saving expected"}</span>
+                  {a.expectedSavingBytes != null && <span className="lnote">{a.expectedSavingBytes < 0 ? "Saving: none, about " + bytes(-a.expectedSavingBytes) + " bigger so far" : "about " + bytes(a.expectedSavingBytes) + " saving expected"}</span>}
                 </div>
                 {p != null && <div className="lbar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={p} aria-label={a.name}><i style={{ width: p + "%" }} /></div>}
               </li>; })}</ul>)}
-        {v.active.some((a) => a.expectedSavingEstimated) && <p className="muted">Savings are estimated from the size so far; the final number shows when a file is done.</p>}
       </section>
 
       <section className="sec" aria-labelledby="ov-l"><h2 id="ov-l">Libraries <Link className="more" to="/libraries">Libraries page</Link></h2>
@@ -302,13 +312,14 @@ export function Overview() {
           {/* design busy-2: a library is a card (the Libraries page's card grammar): tile, name, fact chips; saved and the share of the total on the right; a bar along the bottom */}
           <ul className="lcards" aria-label="Libraries">{v.libraries.map((l) => { const total = l.saved + l.bytesNow, share = total > 0 ? (100 * l.saved) / total : null, sp = share == null ? null : Math.round(share);
               const frees = h.nextFreeAt ? ", frees from " + dayName(h.nextFreeAt.slice(0, 10)) : "";
+              const lib = libOf.get(String(l.id)); // the Libraries page's workflow and scan figures
               const facts = [l.saved === 0 && l.waitingToFree > 0 ? bytes(l.waitingToFree) + " smaller" + frees : null, l.saved > 0 && l.waitingToFree > 0 ? bytes(l.waitingToFree) + " more" + frees : null, (l.grew ?? 0) > 0 ? bytes(l.grew!) + " added by bigger files" : null].filter(Boolean);
               const files = l.counts.done + l.counts.waiting + l.counts.skipped + l.counts.failed;
               return <li key={l.id} className="lcard">
                 <span className="ltile" aria-hidden="true"><Icon id="i-library" /></span>
                 <div className="lmain">
                   <div className="lname"><Link className="ttl" to={"/libraries/" + l.id}>{l.name}</Link><span className="lchev" aria-hidden="true">›</span></div>
-                  <div className="chips"><span className="mchip">{count(l.counts.waiting)} waiting</span><span className="mchip">{plural(files, "file", "files")}</span>{facts.map((f) => <span key={f} className="mchip">{f}</span>)}</div>
+                  <div className="chips"><span className="mchip">{count(l.counts.waiting)} waiting</span><span className="mchip">{plural(files, "file", "files")}</span>{lib?.workflowName && <span className="mchip">{lib.workflowName}</span>}{lib && <span className="mchip">{lib.scan.lastScanAt ? "Scanned " + lastScan(lib.scan.lastScanAt) : "Not scanned yet"}</span>}{facts.map((f) => <span key={f} className="mchip">{f}</span>)}</div>
                 </div>
                 <div className="lside">
                   {l.saved > 0 ? <span className="saved nowrap"><b className="gain">{bytes(l.saved)}</b> saved</span> : <span className="sm nowrap">{l.waitingToFree > 0 ? bytes(l.waitingToFree) + " smaller" : "Nothing saved yet"}</span>}
@@ -363,6 +374,7 @@ export function Overview() {
         {first && rec.length >= 2 && v.daily.length > 0 && first > v.daily[0].day && <p className="muted sm">Recorded from {dayName(first)}.</p>}
         {rec.length >= 2 && !(MOCK || /^(Etc\/)?UTC$/.test(v.timeZone)) && <p className="muted sm">Days run midnight to midnight, {v.timeZone.split("/").pop()!.replace(/_/g, " ")} time.</p>}
       </Disc></section>
+      </>}
     </div>
   );
 }

@@ -1,6 +1,7 @@
 // Plain-words formatting shared by the screens.
 const GB = 1e9;
 export function bytes(n: number): string {
+  if (n === 0) return "0 B"; // the design's word for nothing ("0 KB" was wrong)
   if (n >= 1e12) return (n / 1e12).toFixed(n >= 1e13 ? 0 : 1) + " TB";
   if (n >= GB) return (n / GB).toFixed(n >= 1e10 ? 0 : 1) + " GB";
   if (n >= 1e6) return Math.round(n / 1e6) + " MB";

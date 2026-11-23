@@ -11,7 +11,7 @@ export interface Overview {
   headline: { freed: number; waitingToFree: number; nextFreeAt: string | null; couldFree: number; grew?: number; filesConverted: number; filesWaiting: number };
   trash: { bytes: number; files: number; nextDeleteAt: string | null };
   workers: { id: string; name: string; kind: string; status: WorkerStatus; slots: { cpu?: { used: number; total: number }; used?: number; total?: number }; jobs: OverviewJob[]; cpuPercent: number | null; gpuPercent: number | null }[];
-  active: { jobId: string; library: { id: string; name: string } | null; name: string; percent: number | null; etaS: number | null; expectedSavingBytes: number | null; expectedSavingEstimated?: boolean; speed?: number | null; fps?: number | null; stage?: string | null; bitrateKbps?: number | null }[];
+  active: { jobId: string; library: { id: string; name: string } | null; name: string; percent: number | null; etaS: number | null; expectedSavingBytes: number | null; expectedSavingEstimated?: boolean; speed?: number | null; fps?: number | null; stage?: string | null }[];
   libraries: { id: string; name: string; state: "active" | "paused" | "paused_share" | "no_workflow"; bytesBefore: number; bytesNow: number; saved: number; savedPercent: number | null; waitingToFree: number; couldFree: number; grew?: number;
     counts: { done: number; waiting: number; skipped: number; failed: number } }[];
   daily: { day: string; recorded: boolean; completed: number; skipped: number; failed: number; freedBytes: number; savedBytes?: number; waitingBytes?: number; couldFreeBytes?: number }[];

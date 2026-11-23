@@ -5,15 +5,21 @@ import { getStartedSteps, nextStep, showGetStarted } from "./getStarted.ts";
 test("none done: all three steps open, the first is live, the section shows", () => {
   const s = getStartedSteps(0, 0, 0);
   assert.deepEqual(s, [false, false, false]);
-  assert.equal(showGetStarted(s), true);
+  assert.equal(showGetStarted(s, 0), true);
   assert.equal(nextStep(s), 0);
 });
 
-test("some done: done steps are marked, the next one not done is live", () => {
+test("some done, nothing converted yet: done steps are marked, the next one not done is live, the section shows", () => {
   const s = getStartedSteps(2, 1, 0);
   assert.deepEqual(s, [true, true, false]);
-  assert.equal(showGetStarted(s), true);
+  assert.equal(showGetStarted(s, 0), true);
   assert.equal(nextStep(s), 2);
+});
+
+test("some done but files already converted (workers paused): the section hides", () => {
+  const s = getStartedSteps(2, 1, 0);
+  assert.deepEqual(s, [true, true, false]);
+  assert.equal(showGetStarted(s, 5), false);
 });
 
 test("a library but no workflow: the workflow step is live, not the worker", () => {
@@ -25,7 +31,7 @@ test("a library but no workflow: the workflow step is live, not the worker", () 
 test("all done: the section hides and no step is live", () => {
   const s = getStartedSteps(1, 1, 3);
   assert.deepEqual(s, [true, true, true]);
-  assert.equal(showGetStarted(s), false);
+  assert.equal(showGetStarted(s, 0), false);
   assert.equal(nextStep(s), null);
 });
 
