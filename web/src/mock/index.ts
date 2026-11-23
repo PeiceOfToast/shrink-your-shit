@@ -411,8 +411,16 @@ const linkWorkflows = (s: State) => { s.wf = s.wf.map((w) => ({ ...w, libraries:
 // POST /api/libraries {name, path, flowId}: 201 with the library, not started (nothing scanned or queued).
 const NO_WORKFLOW = "This library has no workflow, so it can't be started. Assign a workflow, then start it. Nothing was changed.";
 // flowId "0" = no workflow yet (workshop's shape): the library is kept, never started, and has no output setting.
-export function addLibrary(name: string, path: string, flowId: ID): Answer<LibraryItem> {
+export function addLibrary(name: string, path: string, flowId?: ID): Answer<LibraryItem> {
   if (!name.trim()) return { error: { code: "invalid_name", message: "Give the library a name." } };
+  // no flowId: the server makes a published workflow for the library (the recommended settings)
+  if (flowId === undefined) {
+    const bad = pathError(path);
+    if (bad) return { error: bad };
+    const id = "w" + Date.now().toString(36);
+    change((s) => { s.wf = [...s.wf, { ...s.wf[0], id, name: "Shrink videos", libraries: [], publishedRevisionId: id + "r1", version: 1, draftDiffers: false, status: "enabled" }]; });
+    flowId = id;
+  }
   const none = flowId === "0";
   const e = pathError(path) ?? (none ? null : workflowError(flowId) ?? outputInside(flowId, path, name.trim()));
   if (e) return { error: e };

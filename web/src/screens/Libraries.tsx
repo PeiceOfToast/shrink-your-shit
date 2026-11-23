@@ -12,18 +12,13 @@ import { Link, navigate, useSearch } from "../router";
 import { Browse } from "../FolderPicker";
 import { onLive } from "../live";
 import { getPublishedDoc, getWorkflow, listWorkflows as listWorkflowDocs } from "../workflowApi";
-import { bytes, clock, count, duration, plural } from "../format";
+import { bytes, count, duration, lastScan, plural } from "../format";
 import { allShownSelected, doneShare, filterCounts, inFilter, keepShown, needsAttention, selectShown, type LibFilter } from "../libraryList";
 import { useData } from "../useData";
 import { closeMenuToSummary, menuEscape, useCloseOnOutside } from "../menuFocus";
 import type { FirstFiles, FolderReport, LibraryItem } from "../types/v1";
 import type { Library, Variable } from "../types/v2";
 
-function lastScan(t: string | null): string {
-  if (!t) return "Not yet";
-  const d = new Date(t), day = (x: Date) => x.toDateString(), y = new Date(Date.now() - 864e5);
-  return day(d) === day(new Date()) ? clock(d) + " today" : day(d) === day(y) ? "Yesterday " + clock(d) : d.toLocaleDateString([], { day: "numeric", month: "short" }) + " " + clock(d);
-}
 const folder = (p: string) => p.trim().replace(/(.)\/+$/, "$1"); // "/media/kids/" is "/media/kids"
 // A new library's name (design): the folder's last name with a capital first letter; one taken already gets " 2", " 3"...
 export function suggestName(path: string, taken: string[]): string {
@@ -311,23 +306,25 @@ export function FirstFive({ f, scanned = false }: { f: ReturnType<typeof useFold
 
 // The Workflow select. A workflow that can't be used yet (on the mock: never published, 87faa4b) is listed but disabled.
 // none: "No workflow yet" (flowId "0") is offered: a new library, or one that already has no workflow. Never for one that has one.
-export function WorkflowField({ value, onChange, workflows, self, none }: { value: string; onChange: (id: string) => void; workflows?: WorkflowChoice[]; self?: string; none?: boolean }) {
+// makeNew: "Make one for me" (value "new"), offered to a new library when no workflow is usable; the server makes it with the recommended settings
+export function WorkflowField({ value, onChange, workflows, self, none, makeNew }: { value: string; onChange: (id: string) => void; workflows?: WorkflowChoice[]; self?: string; none?: boolean; makeNew?: boolean }) {
   if (!workflows) return <div className="field"><span className="lab">Workflow</span><span className="muted">Loading…</span></div>;
   const others = (workflows.find((w) => w.id === value)?.usedBy ?? []).filter((n) => n !== self);
-  const hint = value === "0" ? "The library won't start until you assign a workflow." : !workflows.some((w) => w.usable) ? "Publish a workflow before a library can use it." : others.length ? "Used by " + names(others) + "." : "No other library uses it.";
+  const hint = value === "new" ? "Made with the recommended settings. You can change it any time in Workflows." : value === "0" ? "Saved with no workflow, so it won't scan or convert until you assign one." : !workflows.some((w) => w.usable) ? "Publish a workflow before a library can use it." : others.length ? "Used by " + names(others) + "." : "No other library uses it.";
   return (
     <div className="field"><label htmlFor="lib-wf">Workflow</label>
       {workflows.length === 0 && !none ? <span>No workflows yet. <Link to="/workflows">Make one in Workflows</Link>, then come back.</span> : <>
         <div className="row" style={{ gap: 8 }}>
           <select id="lib-wf" className="input" value={value} onChange={(e) => onChange(e.target.value)} aria-describedby="lib-wf-hint" style={{ flex: 1 }}>
             {!value && <option value="">Choose a workflow</option>}
+            {makeNew && <option value="new">Make one for me</option>}
             {none && <option value="0">No workflow yet</option>}
             {workflows.map((w) => <option key={w.id} value={w.id} disabled={!w.usable}>{w.name}{w.usable ? "" : " (not published yet)"}</option>)}
           </select>
-          {value && value !== "0" && <Link className="btn sm ghost" to={"/workflows/" + value + "?view=simple"}>Edit this workflow</Link>}
+          {value && value !== "0" && value !== "new" && <Link className="btn sm ghost" to={"/workflows/" + value + "?view=simple"}>Edit this workflow</Link>}
         </div>
         <span id="lib-wf-hint" className="hint">{hint}</span>
-        {workflows.length === 0 && <span className="hint">No workflows yet. <Link to="/workflows">Make one in Workflows</Link>.</span>}
+        {workflows.length === 0 && !makeNew && <span className="hint">No workflows yet. <Link to="/workflows">Make one in Workflows</Link>.</span>}
       </>}
     </div>
   );
@@ -345,14 +342,16 @@ function Form({ l, v, workflows, reload, taken }: { l: LibraryItem | null; v: Li
   const [error, setError] = useState(""), [said, setSaid] = useState(""), [busy, setBusy] = useState(false);
   const noWfNow = v?.status === "no_workflow"; // a library with no workflow yet: its select shows "No workflow yet" until one is chosen
   const cur = l ? (noWfNow ? "0" : l.flowId) : "";
-  const pick = wf || (!l && workflows?.find((w) => w.usable)?.id) || (noWfNow ? "0" : "") || ""; // a new library starts on the first usable one
+  const noUsable = !!workflows && !workflows.some((w) => w.usable);
+  const pick = wf || (!l && workflows && (workflows.find((w) => w.usable)?.id ?? "new")) || (noWfNow ? "0" : "") || ""; // a new library starts on the first usable one, or on "Make one for me" when none is usable
   const moved = !!l && f.checked !== l.path;
   const prioChanged = !!v && priority !== v.priority;
   const changed = !l || name !== l.name || moved || pick !== cur || prioChanged;
   const save = async () => {
     setSaid(""); setError(""); setBusy(true);
     try {
-      if (!l) { const r = await act(() => addLibrary(name, f.checked, pick), setError); if (r) navigate("/libraries/" + r.id); return; }
+      // "Make one for me" posts without flowId: the server makes the workflow
+      if (!l) { const r = await act(() => addLibrary(name, f.checked, pick === "new" ? undefined : pick), setError); if (r) navigate("/libraries/" + r.id); return; }
       if (name !== l.name || moved) { if (!(await act(() => patchLibrary(l.id, { ...(name !== l.name && { name }), ...(moved && { path: f.checked }) }), setError))) return; }
       if (pick !== cur) { if (!(await act(() => setLibraryWorkflow(l.id, pick), setError))) return; }
       if (prioChanged) { if (!(await act(() => patchLibraryV2(l.id, { priority }), setError))) return; setPrio(null); }
@@ -388,7 +387,7 @@ function Form({ l, v, workflows, reload, taken }: { l: LibraryItem | null; v: Li
               <input id="lib-name" className="input" required value={name} onChange={(e) => (setName(e.target.value), setTyped(true))} placeholder="Movies" /></div>
             <FolderField f={f} free={l && !moved ? l.freeBytes : undefined} warn={v && !v.writable && !moved ? v.unwritableMessage || "Can't write to this folder." : undefined} />
             <div className="field"><span className="lab">File type</span><span>Video</span></div>
-            <WorkflowField value={pick} onChange={setWf} workflows={workflows} self={l?.name} none={!l || noWfNow} />
+            <WorkflowField value={pick} onChange={setWf} workflows={workflows} self={l?.name} none={!l || noWfNow} makeNew={!l && noUsable} />
             {v && <div className="field"><label htmlFor="lib-prio">Priority</label>
               <select id="lib-prio" className="input" value={priority} onChange={(e) => setPrio(Number(e.target.value))} aria-describedby="lib-prio-h">
                 {PRIORITIES.map(([n, w]) => <option key={n} value={n}>{w}</option>)}

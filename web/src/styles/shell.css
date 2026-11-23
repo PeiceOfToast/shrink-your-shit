@@ -862,21 +862,16 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 .ov .daytbl{overflow-x:auto;max-width:100%}.ov .daytbl td,.ov .daytbl th{white-space:nowrap}/* it scrolls now, so "567 MB" stays on one line */
 @media (pointer:coarse){.ov .sec>h2 .more,.ov .tiles .tile .d a,.ov a.fname,.ov td.nm a,.ov details>summary{display:inline-flex;align-items:center;min-height:44px}}
 .ov .kv{grid-template-columns:auto minmax(0,1fr)} /* the 30-day totals keep label and figure on one line on phones */
-/* U13 (C12): phones (599 px and below) get tiles 2 x 2, with the third tile split in two (Overview.tsx: rt-desk / rt-ph),
-   and the "Last 30 days" block as a closed disclosure. 600 px and up are unchanged. */
-.ov .tiles .tile.rt-ph{display:none}
+/* U13 (C12), revised for M5c fix 1 (busy-5, the design's 390 shot): phones (599 px and below) stack the three stat cards in one
+   column, each with its sparkline, and the "Last 30 days" block is a closed disclosure. */
 @media (max-width:599px){
-  .ov .tiles{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .ov .tiles .tile{grid-template-columns:minmax(0,1fr)}
+  .ov .tiles{grid-template-columns:minmax(0,1fr)}
   .ov .tiles .tile .v{font-size:var(--fs-xl)}
-  .ov .tiles .tile .spark{display:none}
   .ov .hide-phone{display:none}
-  .ov .tiles .tile.rt-desk{display:none}
-  .ov .tiles .tile.rt-ph{display:grid}
-  .ov details.lastdays>summary{display:list-item;min-height:44px;cursor:pointer;align-items:center}
-  .ov details.lastdays>summary>h2{display:inline;margin:0;font-size:var(--fs-lg);font-weight:var(--fw-strong)}
-  .ov details.lastdays[open]>summary{margin-bottom:10px}
 }
+.ov details.lastdays>summary{display:list-item;min-height:44px;cursor:pointer;align-items:center}
+.ov details.lastdays>summary>h2{display:inline;margin:0;font-size:var(--fs-lg);font-weight:var(--fw-strong)}
+.ov details.lastdays[open]>summary{margin-bottom:10px}
 /* Settings > Connections (V9e): a folder row is "<app> sees" -> "Shrink Your Shit sees" x; at phone widths the two fields stack */
 .cfold>summary{cursor:pointer;overflow-wrap:anywhere}
 .cmap{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr) auto;gap:8px;align-items:end}
@@ -975,6 +970,8 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 /* item 10 (fix 2b): the name is a flex row at every width, so the title (a flex item) can take an ellipsis before the pill */
 .lcard .lname{display:flex;align-items:baseline;gap:8px;min-width:0}
 .lcard .lname .ttl{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lcard .lnote .over{display:inline-flex;align-items:center;min-height:24px} /* axe 2.5.8: the "N failed" link is at least 24 px tall */
+.lcards.gs .lcard .lname .ttl{overflow:visible;text-overflow:clip;white-space:normal} /* Get started: the step titles wrap at 390, never ellipsis */
 .lcard .chips{margin-top:0;display:flex;max-width:100%;min-width:0}
 .lcard .chips .mchip{max-width:100%}
 .lcard .mchip.mono{display:inline-block;overflow:hidden;text-overflow:ellipsis;line-height:var(--chip-h);vertical-align:middle}

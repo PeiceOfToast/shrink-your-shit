@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { etaWords, runFields, runningFor } from "./jobCards.ts";
+import { etaWords, runFields, runningFor, startedAt } from "./jobCards.ts";
 import type { Progress } from "./types/jobs.ts";
 
 const base: Progress = { stage: "Converting video", percent: 48, workflowPercent: 40, elapsedS: 120, speed: null, etaS: null, fps: null, bitrateKbps: null };
@@ -40,6 +40,14 @@ test("runFields: frames per second is one decimal when sent, and a dash when not
 test("runningFor: elapsed time as the side note", () => {
   assert.equal(runningFor(45), "running under a minute");
   assert.equal(runningFor(738), "running 12 min");
+});
+
+test("startedAt: now minus the elapsed seconds, and nothing without elapsed time", () => {
+  const now = new Date("2026-11-23T11:30:00Z");
+  assert.equal(startedAt(1080, now)?.toISOString(), "2026-11-23T11:12:00.000Z");
+  assert.equal(startedAt(0, now)?.getTime(), now.getTime());
+  assert.equal(startedAt(null, now), null);
+  assert.equal(startedAt(undefined, now), null);
 });
 
 test("runFields: a speed under 0.05 is shown as <0.1×, not 0.0×", () => {
