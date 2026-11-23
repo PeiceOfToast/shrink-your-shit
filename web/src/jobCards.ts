@@ -12,7 +12,7 @@ export function runFields(p: Progress): { step: string; fps: string; speed: stri
   return {
     step: p.stage || "—",
     fps: p.fps != null && p.fps > 0 ? p.fps.toFixed(1) : "—",
-    speed: p.speed != null && p.speed > 0 ? p.speed.toFixed(1) + "×" : "—",
+    speed: p.speed != null && p.speed > 0 ? (p.speed < 0.05 ? "<0.1×" : p.speed.toFixed(1) + "×") : "—",
     timeLeft: p.etaS != null && p.etaS > 0 ? etaWords(p.etaS) : "—",
     bitrate: p.bitrateKbps != null ? Math.round(p.bitrateKbps).toLocaleString("en-US") + " kbps" : "—",
   };

@@ -30,6 +30,11 @@ test("runningFor: elapsed time as the side note", () => {
   assert.equal(runningFor(738), "running 12 min");
 });
 
+test("runFields: a speed under 0.05 is shown as <0.1×, not 0.0×", () => {
+  assert.equal(runFields({ ...base, speed: 0.02 }).speed, "<0.1×");
+  assert.equal(runFields({ ...base, speed: 0.06 }).speed, "0.1×");
+});
+
 test("runFields: a zero speed is not shown as one", () => {
   assert.equal(runFields({ ...base, speed: 0 }).speed, "—");
 });
