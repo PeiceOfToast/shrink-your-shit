@@ -135,11 +135,11 @@ function AppRow({ kind, it, first, reload, said }: { kind: IntegrationKind; it?:
   return (
     <div style={first ? undefined : { borderTop: "1px solid var(--border)" }}>
       <SettingRow title={app} desc={<>{APP[kind].does}{it && <> <ValueChip><span style={{ whiteSpace: "normal", overflowWrap: "anywhere" }}>{it.url}</span></ValueChip></>}</>}>
-        <Status it={it} />
+        <div className="stline"><Status it={it} /></div>
         {!open && !confirm && (it
-          ? <>
+          ? <div className="row" style={{ gap: 8 }}>
             <button className="btn sm" type="button" onClick={() => { setOpen(true); setSaved(null); }} aria-label={"Edit " + app}>Edit</button>
-            <button className="btn sm ghost" type="button" onClick={() => { setConfirm(true); setSaved(null); }} aria-label={"Remove " + app}>Remove</button></>
+            <button className="btn sm ghost" type="button" onClick={() => { setConfirm(true); setSaved(null); }} aria-label={"Remove " + app}>Remove</button></div>
           : <button className="btn primary sm" type="button" onClick={() => { setOpen(true); setSaved(null); }} aria-label={"Connect " + app}>Connect</button>)}
       </SettingRow>
       {/* the live region stays mounted so a screen reader announces the text when it arrives */}

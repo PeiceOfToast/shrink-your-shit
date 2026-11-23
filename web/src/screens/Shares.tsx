@@ -37,7 +37,7 @@ function ShareRow({ share, resp, first, onChanged, said }: { share: Share; resp:
   return (
     <div style={first ? undefined : { borderTop: "1px solid var(--border)" }}>
       <SettingRow
-        title={<button className="ttl linkbtn" type="button" onClick={() => setEditing(true)}>{share.name}</button>}
+        title={<button className="ttlbtn" type="button" onClick={() => setEditing(true)}>{share.name}</button>}
         desc={<>
           <span style={{ display: "inline-flex", flexWrap: "wrap", gap: 6 }}><ValueChip><span className="mono" style={{ whiteSpace: "normal", overflowWrap: "anywhere" }}>{share.address}</span></ValueChip><ValueChip>{TYPE[share.type].label}</ValueChip></span>
           <span style={{ display: "block" }}>{libs ? "Used by " + libs : "Not used"}</span></>}>
@@ -55,8 +55,12 @@ function ShareRow({ share, resp, first, onChanged, said }: { share: Share; resp:
       {(share.reason || waiting || canReconnect || canCheck) && <div className="stack" style={{ padding: "0 var(--pad) 12px" }}>
         {share.reason && <p className="muted" style={{ margin: 0 }}>{share.reason.message}</p>}
         {waiting && resp.modeReason === "unprivileged_container" && <p className="hint" style={{ margin: 0 }}>Shrink Your Shit runs in an unprivileged container here, so it can't connect network shares itself. Mount each share on the host with the commands below, or run it on a full computer or VM, or in a privileged Proxmox container with <code>mount=nfs;cifs</code>.</p>}
-        {waiting && <div className="codebox"><code>{share.setup!.text}</code><button className="btn sm" type="button" onClick={() => navigator.clipboard?.writeText(share.setup!.text).catch(() => {})}><Icon id="i-copy" />Copy</button></div>}
-        {(canReconnect || canCheck) && <div className="row" style={{ gap: 8 }}>{canReconnect && <button className="btn sm" type="button" onClick={() => reconnect()}><Icon id="i-refresh" />Reconnect</button>}{canCheck && <button className="btn sm" type="button" onClick={() => reconnect()}><Icon id="i-refresh" />Check again</button>}</div>}
+        {waiting && <div className="codebox"><code>{share.setup!.text}</code></div>}
+        {(waiting || canReconnect || canCheck) && <div className="row" style={{ gap: 8 }}>
+          {waiting && <button className="btn sm" type="button" onClick={() => navigator.clipboard?.writeText(share.setup!.text).catch(() => {})}><Icon id="i-copy" />Copy</button>}
+          {canReconnect && <button className="btn sm" type="button" onClick={() => reconnect()}><Icon id="i-refresh" />Reconnect</button>}
+          {canCheck && <button className="btn sm" type="button" onClick={() => reconnect()}><Icon id="i-refresh" />Check again</button>}
+        </div>}
       </div>}
       {removing && createPortal(<RemoveDialog share={share} onCancel={() => setRemoving(false)} onDone={() => { setRemoving(false); onChanged(); }} said={said} />, document.body)}
       {editing && createPortal(<ShareSheet share={share} resp={resp} onDone={() => { setEditing(false); onChanged(); }} onCancel={() => setEditing(false)} said={said} />, document.body)}

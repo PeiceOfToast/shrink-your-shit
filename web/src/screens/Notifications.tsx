@@ -192,7 +192,10 @@ function SummaryCard({ s, reload, said }: { s: NotifySummary; reload: () => void
         <select id="n-sum" className="input sumsel" style={{ maxWidth: 280 }} value={mode} onChange={(e) => setMode(e.target.value as NotifySummaryMode)}>
           {MODES.map((m) => <option key={m.v} value={m.v}>{m.label}</option>)}
         </select>
-        {timed && <input id="n-at" className="input mono" type="time" aria-label="At" value={at} onChange={(e) => setAt(e.target.value)} style={{ maxWidth: 120 }} />}
+        {timed && <div className="row" style={{ gap: 8 }}>
+          <label htmlFor="n-at">At</label>
+          <input id="n-at" className="input mono" type="time" value={at} onChange={(e) => setAt(e.target.value)} style={{ maxWidth: 120 }} />
+        </div>}
       </SettingRow>
       <div style={{ padding: "0 var(--pad) 12px", display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end" }}>
         {error && <p className="st bad" role="alert" style={{ margin: 0, alignSelf: "stretch" }}><Icon id="i-alert" /><span>{error}</span></p>}

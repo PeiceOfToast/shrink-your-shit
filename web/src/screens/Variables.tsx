@@ -163,9 +163,9 @@ function VariablesCard({ items, reload, said }: { items: WorkflowVar[]; reload: 
             </li>))}
         </ul>
         <div className="stack" style={{ padding: "12px var(--pad)" }}>
-          <div className="row" style={{ gap: 8 }}>
-            <button id="add-var" className="btn" type="button" onClick={addRow} disabled={busy}>Add a variable</button>
-          </div>
+          {!edit && <div className="row" style={{ gap: 8 }}>
+            <button id="add-var" className="btn" type="button" onClick={addRow} disabled={busy}><Icon id="i-plus" />Add a variable</button>
+          </div>}
           <span className="hint">A library's own value wins, then the workflow's, then this one.</span>
           {loose && <p className="st bad" role="alert" style={{ margin: 0 }}><Icon id="i-alert" /><span>{loose}</span></p>}
           {phase
@@ -197,8 +197,10 @@ function VarLine({ r, issue, asking, onEdit, onAsk, onRemove, onKeep }: {
         desc={<>
           <span style={{ display: "inline-flex", flexWrap: "wrap", gap: 6, maxWidth: "100%" }}>{chip(kindName(r.type))}{chip(shownValue(r))}</span>
           {r.description.trim() && <span style={{ display: "block" }}>{r.description}</span>}</>}>
-        <button id={`${r.key}-edit`} className="btn sm ghost" type="button" onClick={onEdit} aria-label={`Edit ${label}`}>Edit</button>
-        <button className="btn sm ghost" type="button" onClick={onAsk} aria-label={`Remove ${label}`}>Remove</button>
+        <div className="row flush" style={{ gap: 8 }}>
+          <button id={`${r.key}-edit`} className="btn sm ghost" type="button" onClick={onEdit} aria-label={`Edit ${label}`}>Edit</button>
+          <button className="btn sm ghost" type="button" onClick={onAsk} aria-label={`Remove ${label}`}>Remove</button>
+        </div>
       </SettingRow>
       {(issue || asking) && <div className="stack" style={{ padding: "0 var(--pad) 12px" }}>
         {issue && <p className="st bad" role="alert" style={{ margin: 0 }}><Icon id="i-alert" /><span>{issue.msg}</span></p>}
@@ -269,7 +271,7 @@ function VarForm({ r, issues, onChange, onKind, onDone, onCancel }: {
         <input className="input" id={`${id}-desc`} style={{ maxWidth: 420 }} value={r.description} onChange={(e) => onChange({ description: e.target.value })} />
       </div>
       <div className="row" style={{ gap: 8 }}>
-        <button className="btn primary" type="submit">Done</button>
+        <button className="btn" type="submit">Done</button>
         <button className="btn ghost" type="button" onClick={onCancel}>Cancel</button>
       </div>
     </form>);
