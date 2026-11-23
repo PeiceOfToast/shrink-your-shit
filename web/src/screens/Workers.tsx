@@ -17,7 +17,10 @@ import { useData } from "../useData";
 import { speedLine, speedsOf } from "../encoderSpeeds";
 import { allWorkers, allowJoin, denyJoin, dismissJoin, newPairing, type Pairing, dismissUpdateNotice, getWorker, patchWorker, workersPage, stoppedByUpdate, testCapabilities, workerAction } from "../workersApi";
 import type { Capability, JoinRequest, Worker } from "../types/v2";
+import type { JobItem } from "../types/jobs";
 import { FileName } from "../FileName";
+import { encoderChip, formatsChip, graphicsLine, systemLine, usageBars } from "../workerCards";
+import { runFields } from "../jobCards";
 
 // review 61dc891 P2-1: only what the server reports (a remote worker may send no OS or host): no guess, no stray dot
 const OS: Record<string, string> = { linux: "Linux", darwin: "macOS", windows: "Windows" };
@@ -281,25 +284,6 @@ function StartStop({ w, onDone }: { w: Worker; onDone: (m: string) => void }) {
   return <button className="btn sm" type="button" onClick={async () => { if (w.currentJobIds.length) return setAsking(true); if (await act(workerAction(w.id, "stop"), onDone)) onDone(w.name + " stopped."); }}><Icon id="i-stop" />Stop</button>;
 }
 
-// design 7.2: each worker's own switch (its row's first control). On = going; off while it finishes its file (draining),
-// with the words saying so; disabled when the worker is offline or stalled. Turning off a converting worker asks first.
-function WorkerSwitch({ w, onDone }: { w: Worker; onDone: (m: string) => void }) {
-  const [asking, setAsking] = useState(false), [busy, setBusy] = useState(false), [want, setWant] = useState<boolean | null>(null), on = going(w), gone = w.status === "offline" || w.status === "stalled", finishing = w.status === "draining";
-  // review2 #451: the switch shows what was asked until the server says so (a reload or heartbeat changes on), or the call fails
-  useEffect(() => setWant(null), [on]);
-  if (asking) return <StopAsk w={w} onDone={(m) => (setAsking(false), onDone(m))} onCancel={() => setAsking(false)} />;
-  const shown = want ?? on; // review #451: decide and label from what the switch shows, not the last server state
-  const flip = async () => {
-    if (shown && w.currentJobIds.length) return setAsking(true);
-    setBusy(true); setWant(!shown); // one call at a time: a quick double flip must not send it twice
-    let ok = false;
-    try { ok = !!(await act(workerAction(w.id, shown ? "stop" : "start"), onDone)); if (ok) onDone(w.name + (shown ? " stopped." : " started.")); }
-    finally { if (!ok) setWant(null); setBusy(false); }
-  };
-  return <label className="sw"><input type="checkbox" role="switch" className="switch" checked={shown} disabled={gone || busy} aria-label={w.name} onChange={flip} />
-    <span className="sm">{shown ? "On" : finishing && want === null ? "Stopping after its current files" : "Off"}</span></label>;
-}
-
 // user item 3: the GPU "—" explains itself; title for mouse, hidden text for touch and screen readers (design 02:12Z)
 const NO_GPU = "Not available: no graphics card, one that doesn't report how busy it is, or a worker on another computer. GPU use is only read on This computer.";
 export function NoGpu() { return <span title={NO_GPU}>—<span className="sr"> ({NO_GPU})</span></span>; }
@@ -307,21 +291,82 @@ export function NoGpu() { return <span title={NO_GPU}>—<span className="sr"> (
 const GPU_ALL = "How busy the whole graphics card is, including other programs using it.";
 export function GpuPct({ n }: { n: number }) { return <span title={GPU_ALL}>{Math.round(n)}%<span className="sr"> ({GPU_ALL})</span></span>; }
 
-function Live({ w }: { w: Worker }) { // only the figures the server sends
+// M4: the mini job card: the file's codec tile, its name, Step / Speed / Time left, the status pill and a bar along the
+// bottom. One stretched link opens the job drawer, as the Jobs list does; the card's buttons sit above it.
+function MiniJob({ j }: { j: JobItem }) {
+  const p = j.progress, pct = p ? Math.round(p.percent ?? p.workflowPercent) : null;
+  const f = p ? runFields(p) : null; // the Jobs list's running fields (jobCards.ts): a value not sent reads "—"
+  return <div className="mjob">
+    <span className="ltile codec" aria-hidden="true">{j.codec ?? ""}{j.resolution && <><br />{j.resolution}</>}</span>
+    <div className="mjob-m">
+      <Link className="mjob-t" to={"/jobs?tab=running&job=" + encodeURIComponent(j.id)} title={j.path || j.name}><FileName n={j.name} /></Link>
+      <dl className="mjob-f">
+        <div><dt>Step</dt><dd>{f?.step ?? "—"}</dd></div>
+        <div><dt>Speed</dt><dd>{f?.speed ?? "—"}</dd></div>
+        <div><dt>Time left</dt><dd>{f?.timeLeft ?? "—"}</dd></div>
+      </dl>
+    </div>
+    <span className="pill run"><Icon id="i-play" />{pct != null ? "Running · " + pct + "%" : "Running"}</span>
+    <span className="mjob-bar" aria-hidden="true"><i style={{ width: (pct ?? 0) + "%" }} /></span>
+  </div>;
+}
+
+// M4: the encoders as chips (what passed, which one is used first) and the one control that changes it, behind
+// "Change encoder" so the choice is not on the card's face. The same EncoderCards as before, same API call.
+function EncoderChips({ w, reload }: { w: Worker; reload: () => void }) {
+  const [open, setOpen] = useState(false), cs = cards(w);
+  return <div>
+    <div className="ec-hd"><h4 className="sm muted ec-h">Encoders</h4>
+      <button className="btn sm ghost" type="button" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "Done" : "Change encoder"}</button></div>
+    <ul className="ech">{cs.map((c) => {
+      const chip = encoderChip(c.name, c.lit, c.lit && c.primary), fmts = c.lit ? formatsChip(c.formats) : "";
+      return <li key={c.name}><span className={"chip-enc " + chip.tone} title={c.lit ? undefined : c.why}>{chip.text}</span>{fmts && <span className="chip-enc chip-fmt">{fmts}</span>}</li>;
+    })}</ul>
+    {open && <EncoderCards w={w} reload={reload} />}
+  </div>;
+}
+
+// the graphics cards with their memory as text (the helper takes text, so it stays free of imports)
+const gpuRows = (w: Worker) => w.gpus.map((g) => ({ model: g.model, vram: g.vramBytes ? bytes(g.vramBytes) : "" }));
+function Live({ w }: { w: Worker }) { // the detail page's live line: only the figures the server sends; the graphics card's name is on its own row
   const l = w.live, out: string[] = [];
   if (l.cpuPercent != null) out.push("CPU " + Math.round(l.cpuPercent) + "%");
   if (l.memUsedBytes != null && l.memTotalBytes) out.push("Memory " + bytes(l.memUsedBytes) + " of " + bytes(l.memTotalBytes));
-  for (const g of w.gpus) out.push("GPU · " + g.model + (g.vramBytes ? " · " + bytes(g.vramBytes) : ""));
   const g = l.gpu[0]?.utilPercent; // workshop #443: one entry, the busiest GPU; [] when unreadable or remote
   if (!out.length && g == null) return null; // a GPU reading shows even before the first CPU reading (review #444)
   return <p className="sm">{out.length > 0 && out.join(" · ") + " · "}GPU {g == null ? <NoGpu /> : <GpuPct n={g} />}</p>;
+}
+
+// M4: the card's facts as a key-value list, with the usage bars under it, and the encoders beside it. Every value is one
+// the server sent; a missing one drops its row.
+function WorkerFacts({ w, reload }: { w: Worker; reload: () => void }) {
+  const [t] = words(w), l = w.live, gpu = l.gpu[0]?.utilPercent ?? null, bars = usageBars(l.cpuPercent, gpu);
+  return <div className="wbody">
+    <div className="wleft">
+      <dl className="kv">
+        <div><dt>Status</dt><dd>{t}</dd></div>
+        <div><dt>System</dt><dd>{systemLine(w.os, w.arch, l.memTotalBytes ? bytes(l.memTotalBytes) : "") || "—"}</dd></div>
+        <div><dt>Graphics card</dt><dd>{graphicsLine(gpuRows(w))}</dd></div>
+        {l.memUsedBytes != null && l.memTotalBytes ? <div><dt>Memory</dt><dd>{bytes(l.memUsedBytes)} of {bytes(l.memTotalBytes)}</dd></div> : null}
+        {w.lastHeartbeatAt && <div><dt>Last heard</dt><dd>{ago(w.lastHeartbeatAt)}</dd></div>}
+        {w.appVersion && <div><dt>Version</dt><dd>{w.appVersion}</dd></div>}
+      </dl>
+      {bars.map((b) => <div className="ubar" key={b.label}><span>{b.label}</span><span className="ubar-t" aria-hidden="true"><i style={{ width: b.pct + "%" }} /></span><span className="mono">{b.pct}%</span></div>)}
+      {gpu == null && w.gpus.length > 0 && <p className="sm muted">Graphics card busy: <NoGpu /></p>}
+      {w.tags.length > 0 && <div className="chips" aria-label="Tags">{w.tags.map((x) => <span className="mchip" key={x}>{x}</span>)}</div>}
+    </div>
+    <div className="wright">
+      <EncoderChips w={w} reload={reload} />
+      <p className="sm">{plural(w.slots.cpu.total, "file", "files")} at once · <Link to={"/workers/" + encodeURIComponent(w.id) + "?tab=limits"}>Change</Link></p>
+    </div>
+  </div>;
 }
 
 export function Workers() {
   const ws = useData(workersPage, [], 15000), jobs = useData(() => listJobs("running", ""), [], 15000), upd = useData(stoppedByUpdate, []);
   const live = useLiveWorkers(() => (ws.reload(), jobs.reload()));
   const [said, setSaid] = useState("");
-  const names = Object.fromEntries((jobs.data && !failed(jobs.data) ? jobs.data.items : []).map((j) => [j.id, j.name]));
+  const jobById: Record<string, JobItem> = Object.fromEntries((jobs.data && !failed(jobs.data) ? jobs.data.items : []).map((j): [string, JobItem] => [j.id, j]));
   const all = ws.data?.items ?? [], list = all.map(live), speeds = ws.data?.encoderSpeeds ?? [];
   const done = (m: string) => (setSaid(m), ws.reload());
   // the "Workers on" switch: one call for every worker (#171)
@@ -348,16 +393,18 @@ export function Workers() {
       {!ws.loaded ? <Skeleton cards={3} /> : ws.error && !ws.data ? <LoadFailed error={ws.error} reload={ws.reload} /> : !list.length ? <Empty icon="i-worker" text="No workers yet." /> : (
         <div className="wgrid">{list.map((w) => {
           const [t, cls, icon] = words(w), gone = w.status === "offline" || w.status === "stalled", mine = speedsOf(speeds, w.id);
-          return <article key={w.id} className={"card wcard" + (gone ? " dim" : "")}>
-            <div className="hd"><h3><Link to={"/workers/" + encodeURIComponent(w.id)}>{w.name}</Link></h3><span className="sp" /><WorkerSwitch w={w} onDone={done} />
+          // M4: a local worker with a running job takes the full row, so its mini job card has room
+          const wide = w.kind === "local" && w.currentJobIds.length > 0;
+          return <article key={w.id} className={"card wcard" + (gone ? " dim" : "") + (wide ? " wide" : "")}>
+            <div className="hd"><h3><Link to={"/workers/" + encodeURIComponent(w.id)}>{w.name}</Link></h3>
+              <span className={"pill " + cls}><Icon id={icon} />{t}</span><span className="sp" />
+              <StartStop w={w} onDone={done} />
               <Link className="btn icon ghost gear" to={"/workers/" + encodeURIComponent(w.id) + "?tab=limits"} aria-label={"Settings for " + w.name} title="Settings"><Icon id="i-gear" /></Link></div>
             <div className="bd stack">
-              <p className="sm muted">{[w.host, OS[w.os ?? ""], w.arch, w.lastHeartbeatAt && "last heard " + ago(w.lastHeartbeatAt)].filter(Boolean).join(" · ")}</p>
-              {w.tags.length > 0 && <div className="chips" aria-label="Tags">{w.tags.map((x) => <span className="mchip" key={x}>{x}</span>)}</div>}
-              <p><span className={"pill " + cls}><Icon id={icon} />{t}</span> <span className="sm">{plural(w.slots.cpu.total, "file", "files")} at once · <Link to={"/workers/" + encodeURIComponent(w.id) + "?tab=limits"}>Change</Link></span></p>
-              <Live w={w} />{/* user item 3: GPU % on the Workers list too (QA #444) */}
-              {w.currentJobIds.map((id) => <p key={id} className="sm">Converting <Link className="mono" to={"/jobs?tab=running&job=" + encodeURIComponent(id)}>{names[id] ?? "Job " + id}</Link></p>)}
-              <div><h4 className="sm muted ec-h">Encoders</h4><EncoderCards w={w} reload={ws.reload} /></div>
+              <WorkerFacts w={w} reload={ws.reload} />
+              {w.currentJobIds.map((id) => jobById[id]
+                ? <MiniJob key={id} j={jobById[id]} />
+                : <p key={id} className="sm">Converting <Link className="mono" to={"/jobs?tab=running&job=" + encodeURIComponent(id)}>{"Job " + id}</Link></p>)}
               {mine.length > 0 && <div><h4 className="sm muted ec-h">Encoder speed</h4>
                 <ul className="sm speeds">{mine.map((s) => <li key={s.encoder} className="mono">{speedLine(s)}</li>)}</ul></div>}
             </div>
@@ -395,7 +442,7 @@ export function WorkerPage({ id }: { id: string }) {
             <ul className="plist">{rows.map((j) => <li key={j.id}><div className="sp"><Link className="ttl clamp2" to={"/jobs?tab=running&job=" + encodeURIComponent(j.id)}><FileName n={j.name} /></Link><span className="sub">{j.library} · {j.progress?.stage ?? ""}</span></div>
               {j.progress && <span className="sm">{Math.round(j.progress.percent ?? j.progress.workflowPercent)}%</span>}</li>)}</ul>)}
         </section>
-        <p className="sm muted">Graphics card: {w.gpus.length ? "not used for converting yet" : "none found"}.</p>
+        <p className="sm muted">Graphics card: {graphicsLine(gpuRows(w))}{w.gpus.length ? " · not used for converting yet" : ""}.</p>
       </>}
       {tab === "capabilities" && <section className="card panel">
         <div className="hd"><h2>Encoders</h2><span className="sp" />
