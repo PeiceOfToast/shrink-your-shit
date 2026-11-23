@@ -9,6 +9,7 @@ import { SettingsTabs } from "../pages";
 import { SettingRow, ValueChip } from "../SettingRow";
 import { useData } from "../useData";
 import { addShare, checkShare, deleteShare, getShares, patchShare, reconnectShare, testShare } from "../sharesApi";
+import { shareIntro } from "../shareIntro";
 import type { Share, ShareTestResult, SharesResponse, ShareType } from "../types/shares";
 
 async function act<T>(p: Promise<Answer<T>>, say: (m: string) => void): Promise<T | null> {
@@ -121,11 +122,7 @@ function ShareSheet({ share, resp, onDone, onCancel, said }: { share?: Share; re
   const [error, setError] = useState("");
   const [savedShare, setSavedShare] = useState<Share | null>(null);
   // Wording per mode (design SCREENS.md V9d): Docker needs no root on the server; an unprivileged LXC mounts on the Proxmox host.
-  const [intro, after] = resp.modeReason === "unprivileged_container"
-    ? ["This container can't connect network shares itself. Mount the share on the Proxmox host, pass the folder into the container, then add this line to your compose file and restart it.", "The Proxmox host keeps it connected. Press Check again once the container is back up."]
-    : resp.mode === "docker"
-      ? ["Add these lines to your compose file, then restart the container.", "Docker connects it each time the container starts. Press Check again once it's back up."]
-      : ["Run this once on this server, as root:", "It connects the share now and after every restart."];
+  const [intro, after] = shareIntro(resp.mode, resp.modeReason);
   const block = (setup: Share["setup"]) => <><p className="st warn" style={{ margin: 0 }}><Icon id="i-clock" />Waiting for setup on the server</p><h4 style={{ margin: 0 }}>Finish on the server</h4>
     <p style={{ margin: 0 }}>{intro}</p>
     <div className="codebox"><code>{setup!.text}</code><button className="btn sm" type="button" onClick={() => navigator.clipboard?.writeText(setup!.text).catch(() => {})}><Icon id="i-copy" />Copy</button></div>
