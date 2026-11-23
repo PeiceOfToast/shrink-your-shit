@@ -4,7 +4,6 @@
 // when it has them. Not here yet: the output path (v2 sends it in convertAgain.outputPath; the drawer does not show it).
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "../Icon";
-import { Skeleton } from "../Skeleton";
 import { MOCK, SignedOut, failed, type Answer } from "../api";
 import { bytes, clock, clockS, count, elapsed, plural, stepTime } from "../format";
 import { type LogLine, type LogProbe, convertDoneAgain, fileJobs, findSkip, getJob, getJobLog, jobAction, listJobs, listKept, restoreKept, type JobLog, type LogMove, type LogStep, type LogVariable } from "../jobsApi";
@@ -21,6 +20,8 @@ import { useData } from "../useData";
 import { afterHeader, queuedLine } from "../jobResult";
 import type { Failure, JobAction, JobDetail, JobItem, JobProgressEvent, JobState, Probe, Tab, Pin } from "../types/jobs";
 import { stepLabel } from "../stepLabel";
+import { runFields, runningFor } from "../jobCards";
+import { keepShown } from "../libraryList";
 
 const TABS: [Tab, string][] = [["waiting", "Waiting"], ["running", "Running"], ["completed", "Done"], ["skipped", "Skipped"], ["failed", "Failed"]];
 // G5: the Done filter for originals waiting in the trash. The words come from design (SCREENS V6); keep them here.
@@ -50,14 +51,14 @@ const libPaused = (j: PillJob) => j.state === "queued" && j.subState === "librar
 // de2f664: a check that refused the new file kept the original; the server lists it as failed, it reads "Original kept" and is neutral, not a failure
 const keptOrig = (j: PillJob) => j.state === "failed" && (j.newFileRefused === true || j.reason?.code === "kept_original" || j.reason?.code === "check_failed");
 const words = (j: PillJob) => (libPaused(j) ? "Library paused" : keptOrig(j) ? "Original kept" : fell(j) ? "Done, with a warning" : j.state === "retry_wait" && j.retryAt ? "Retry at " + clock(j.retryAt) : WORD[j.state]);
-function Pill({ j }: { j: PillJob }) {
-  return <span className={"pill " + (libPaused(j) || fell(j) ? "warn" : keptOrig(j) ? "" : PILL[j.state] ?? "")} title={keptOrig(j) ? j.reason?.message ?? undefined : j.reason?.code === "workflow_stopped" ? stoppedTitle(j.reason.message ?? "") : undefined}><Icon id={libPaused(j) ? "i-pause" : keptOrig(j) ? "i-info" : fell(j) ? "i-alert" : ICON[j.state] ?? "i-play"} />{words(j)}</span>;
+function Pill({ j, pct }: { j: PillJob; pct?: number | null }) {
+  return <span className={"pill " + (libPaused(j) || fell(j) ? "warn" : keptOrig(j) ? "" : PILL[j.state] ?? "")} title={keptOrig(j) ? j.reason?.message ?? undefined : j.reason?.code === "workflow_stopped" ? stoppedTitle(j.reason.message ?? "") : undefined}><Icon id={libPaused(j) ? "i-pause" : keptOrig(j) ? "i-info" : fell(j) ? "i-alert" : ICON[j.state] ?? "i-play"} />{words(j)}{pct != null && " · " + Math.round(pct) + "%"}</span>;
 }
 const reasonText = (j: JobItem) => j.reason?.message ?? j.detail ?? ""; // #130: every row's reason is {code, message}
 const saved = (b?: number, a?: number) => {
   if (!b || a == null) return "";
   const pct = Math.round((100 * (b - a)) / b);
-  return bytes(b) + " → " + bytes(a) + ", " + (pct >= 0 ? pct + "% smaller" : -pct + "% bigger");
+  return bytes(b) + " → " + bytes(a) + " · " + (pct >= 0 ? pct + "% smaller" : -pct + "% bigger");
 };
 // U10: a path wraps after each slash (or backslash), so a long one breaks between folders, not in the middle of a name
 const slashWrap = (p: string) => { const parts = p.replace(/[\\/]/g, (m) => m + "\u0000").split("\u0000"); if (parts[parts.length - 1] === "") parts.pop(); return parts.map((s, i) => <Fragment key={i}>{s}{i < parts.length - 1 && <wbr />}</Fragment>); };
@@ -75,12 +76,32 @@ function Detail({ j }: { j: JobItem }) {
   return <>{reasonText(j)}</>;
 }
 // U4 (C1): the tile names the codec and resolution the file has; with one missing it shows the other, with neither the file icon
-const tileOf = (j: JobItem) => j.codec || j.resolution ? <>{j.codec && <b>{j.codec}</b>}{j.resolution && <span>{j.resolution}</span>}</> : <Icon id="i-file" />;
+// The tile shows the height ("640×360" -> "360p"), so every tile is the same width; an odd size still gives its height.
+const heightP = (r: string) => { const m = /(\d+)\s*[×x]\s*(\d+)/.exec(r); return m ? m[2] + "p" : r; };
+const tileOf = (j: JobItem) => j.codec || j.resolution ? <>{j.codec && <b>{j.codec}</b>}{j.resolution && <span>{heightP(j.resolution)}</span>}</> : <Icon id="i-file" />;
 
 const RUNS: JobState[] = ["preparing", "running", "validating", "committing"]; // live progress only for a running row
 // The drawer opens by job: a skipped row with a job behind it (#149: a workflow's skip after it failed, or one the user
 // stopped) opens that job (steps, tries, log); a file a scan left out has no job and opens its row ("skip-N").
 const key = (j: JobItem) => j.jobId ?? j.id;
+
+// Loading: the shape of a card (tile, name and fact chips, a status pill on the right), grey blocks, no motion
+function JobSkeleton() {
+  return (
+    <div className="skel lskel">
+      <span role="status"><span className="sr">Loading</span></span>
+      <ul className="lcards" aria-hidden="true">
+        {[0, 1, 2, 3, 4].map((i) => (
+          <li className="lcard" key={i}>
+            <span className="ltile skel-tile" />
+            <div className="lmain"><span className="skel-b skel-w40" /><div className="chips"><span className="skel-b skel-pill" /><span className="skel-b skel-pill" /></div></div>
+            <div className="lside"><span className="skel-b skel-pill" /></div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
 
 export function Jobs() {
   const search = new URLSearchParams(useSearch());
@@ -124,7 +145,6 @@ export function Jobs() {
       if (type === "job.state" || type === "resync" || type === "hello" || type === "library.changed") soon(); // #150: a paused library shows at once
     });
   }, []);
-  useEffect(() => setSel([]), [tab]);
   const go = (t: Tab, job?: string | null) => navigate(query(t, library) +(job ? "&job=" + encodeURIComponent(job) : ""));
   const current = page.data?.for === scope ? page.data : undefined;
   // a new tab, search or filter keeps the rows on screen, dimmed, until its rows arrive (the skeleton is for the first load only); an error shows as before
@@ -134,6 +154,9 @@ export function Jobs() {
   const firstRun = noLibs && !kept && !left && !!counts && TABS.every(([t]) => !counts[t]); // every tab empty: no bulk actions to offer
   shown.current = { tab, rows: new Map((current?.items ?? []).map((j) => [j.jobId ?? j.id, j.state])) };
   const picked = items.filter((j) => sel.includes(j.id)), none = !picked.length || busy;
+  // Select mode keeps only the rows still shown: a tab, library or search change drops the rest (and their ticks)
+  const shownKey = items.map((j) => j.id).join("\n");
+  useEffect(() => setSel((s) => { const k = keepShown(s, items); return k.length === s.length ? s : k; }), [shownKey]);
   const run = async (a: JobAction) => {
     if (a === "cancel" && !window.confirm("Cancel " + plural(picked.length, "file", "files") + "? The files stay as they are. Nothing is deleted.")) return;
     const r = await act(jobAction(a, picked.map((j) => j.id), a === "reprioritize" ? prio : undefined), setSaid);
@@ -166,7 +189,8 @@ export function Jobs() {
       {off && <p className="st warn" role="status"><Icon id="i-alert" /><span>{off === "offline"
         ? <>No worker is connected. <Link to="/workers">See Workers.</Link></>
         : <>No worker is running. <Link to="/workers">Turn workers on.</Link></>}</span></p>}
-      {library && <div className="row" style={{ gap: 6 }}><span className="mchip">Library: {libs.data?.find((l) => l.id === library)?.name ?? library}
+      {/* one library filter: the pressed button in the filter row says which library; the chip is only for an id the list lacks (so it can still be cleared) */}
+      {library && !libs.data?.some((l) => l.id === library) && <div className="row" style={{ gap: 6 }}><span className="mchip">Library: {library}
         <button className="btn sm icon ghost" type="button" aria-label="Clear the library filter" onClick={() => navigate(query(tab, ""))}><Icon id="i-x" /></button></span></div>}
       {kept && <div className="row" style={{ gap: 6 }}><span className="mchip">{TRASH_WORDS}
         <button className="btn sm icon ghost" type="button" aria-label="Clear the original-in-the-trash filter" onClick={() => navigate(query(tab, library, ""))}><Icon id="i-x" /></button></span></div>}
@@ -175,56 +199,66 @@ export function Jobs() {
       <div className="tabs" role="tablist" aria-label="Jobs">
         {TABS.map(([t, label]) => <button key={t} role="tab" type="button" aria-selected={tab === t} onClick={() => tab !== t && go(t)}>{label}{counts && <span className="n">{count(t === "completed" && (kept || left) && current ? current.total : counts[t])}</span>}</button>)}
       </div>
-      <div className="ltools" role="toolbar" aria-label="Jobs">
-        {!firstRun && <>
-          {(selecting || sel.length > 0) && <label className="hit selall"><input type="checkbox" aria-label="Select all files" checked={items.length > 0 && sel.length === items.length} onChange={(e) => setSel(e.target.checked ? items.map((j) => j.id) : [])} /><span className="sm">All</span></label>}
-          {(selecting || sel.length > 0) && <span className="desk">{actions}</span>}
-          {selecting && <details className="menu phone"><summary className="btn sm icon ghost" aria-label="More actions"><Icon id="i-more" /></summary><div className="pop" role="menu">{actions}</div></details>}
-        </>}
-        {sel.length > 0 && <span className="muted sm">{sel.length} selected</span>}
-        {/* parity 11-19 #2 (G4): pick a library here too; it sets the same ?libraryId= as "See its jobs", and the chip above stays */}
+      {!firstRun && (selecting || sel.length > 0) && <div className="ltools" role="toolbar" aria-label="Jobs selection">
+        <label className="hit selall"><input type="checkbox" aria-label="Select all files" checked={items.length > 0 && sel.length === items.length} onChange={(e) => setSel(e.target.checked ? items.map((j) => j.id) : [])} /><span className="sm">All</span></label>
+        <span className="desk">{actions}</span>
+        {selecting && <details className="menu phone"><summary className="btn sm icon ghost" aria-label="More actions"><Icon id="i-more" /></summary><div className="pop" role="menu">{actions}</div></details>}
+        {picked.length > 0 && <span className="muted sm">{picked.length} selected</span>}
+      </div>}
+      {/* parity 11-19 #2 (G4): pick a library here too; it sets the same ?libraryId= as "See its jobs", and the chip above stays.
+          One joined button per library (aria-pressed on the chosen one); hidden on the empty state and while loading or on error.
+          An id no library has shows the chip only, with no button row. Its own row under the tabs (design jobs-running): the filter left, the search right. */}
+      <div className="lfilt">
         <span className="filt">{tab === "completed" && <span className="seg" role="group" aria-label="Original file">
+          <button type="button" aria-pressed={!kept && !left} onClick={() => navigate(query("completed", library, ""))}>All</button>
           <button type="button" aria-pressed={kept} onClick={() => navigate(query("completed", library, kept ? "" : "kept"))}>{TRASH_WORDS}</button>
           <button type="button" aria-pressed={left} onClick={() => navigate(query("completed", library, left ? "" : "left"))}>{LEFT_WORDS}</button></span>}
-        {(libs.data?.length ?? 0) > 1 && <select className="input sm lib" aria-label="Library" value={library} onChange={(e) => navigate(query(tab, e.target.value))}>
-          <option value="">Library: All</option>
-          {libs.data?.map((l) => <option key={l.id} value={l.id}>Library: {l.name}</option>)}
-          {library && !libs.data?.some((l) => l.id === library) && <option value={library}>Library: {library}</option>}
-        </select>}</span>
+        {!!page.data && !page.error && !!libs.data && libs.data.length > 1 && (library ? libs.data.some((l) => l.id === library) : items.length > 0) && <span className="seg" role="group" aria-label="Library">
+          <button type="button" aria-pressed={!library} onClick={() => navigate(query(tab, ""))}>All libraries</button>
+          {libs.data.map((l) => <button key={l.id} type="button" aria-pressed={library === l.id} onClick={() => navigate(query(tab, l.id))}>{l.name}</button>)}
+        </span>}</span>
         <input className="input find" type="search" placeholder="Search file names" aria-label="Search file names" value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
       <p className="muted" role="status">{said}</p>
       {page.error && current && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{page.error.message}</span></p>}
-      {!rows || (busy && !items.length) ? (page.error ? <LoadFailed error={page.error} reload={page.reload} /> : <Skeleton rows={5} />) : !items.length ? (q ?<div className="empty">No file matches.</div>
+      {!rows || (busy && !items.length) ? (page.error ? <LoadFailed error={page.error} reload={page.reload} /> : <JobSkeleton />) : !items.length ? (q ?<div className="empty">No file matches.</div>
         : firstRun ? <Empty icon="i-jobs" text="No jobs yet. Jobs start when a library finds videos."><Link className="btn primary" to="/libraries/new"><Icon id="i-plus" />Add library</Link></Empty>
         : <Empty icon="i-jobs" text={kept ? TRASH_EMPTY : left ? LEFT_EMPTY : { waiting: "Nothing is waiting.", running: "Nothing is converting right now.", completed: "No file is done yet.", skipped: "No file was skipped.", failed: "Nothing has failed." }[tab]} />) : (
-        <div className={"list rows" + (selecting ? " selecting" : "")}><table className="tbl jobs" aria-busy={busy || undefined} style={busy ? { opacity: 0.5, pointerEvents: "none" } : undefined}>
-          {/* No table header (U4, C1): a codec and resolution tile, the file and its detail, one chip line of facts, one status pill and the size change. Waiting keeps its position column. */}
-          <tbody>{items.map((j) => {
-            const pct = j.progress ? (j.progress.percent ?? j.progress.workflowPercent) : null;
+        <ul className={"lcards" + (selecting ? " selecting" : "")} aria-busy={busy || undefined} style={busy ? { opacity: 0.5, pointerEvents: "none" } : undefined}>
+          {/* One card per file (design jobs): the name's link opens the drawer through a stretched link (shell.css); the checkbox sits above it. */}
+          {items.map((j) => {
+            const p = j.progress, pct = p ? (p.percent ?? p.workflowPercent) : null, f = p ? runFields(p) : null, checked = sel.includes(j.id);
+            const gain = j.state === "completed" && !!j.beforeBytes && j.afterBytes != null && j.afterBytes < j.beforeBytes;
+            // the facts chips: library, folder, pin, place, worker (the running card shows them above its five fields)
+            const facts = (<div className="chips">
+              <span className="mchip">{j.library}</span>
+              {j.folder !== "." && <span className="mchip">{j.folder}</span>}
+              {j.pin && <span className="mchip prio">{j.pin === "first" ? "First" : "Last"}</span>}
+              {tab === "waiting" && (j.position != null ? <span className="mchip">Place {j.position} in the queue</span> : <span className="mchip">Not taken now</span>)}
+              {j.worker && <span className="mchip">{j.worker === "builtin" ? "This computer" : j.worker}</span>}
+            </div>);
             return (
-            <tr key={j.id} className={sel.includes(j.id) ? "sel" : undefined}>
-              <td className="selc"><label className="hit"><input type="checkbox" aria-label={"Select " + j.name} checked={sel.includes(j.id)} onChange={(e) => setSel(e.target.checked ? [...sel, j.id] : sel.filter((x) => x !== j.id))} /></label></td>
-              {tab === "waiting" && <td className="posc" title={j.position != null ? "Place " + j.position + " in the queue" : "Not taken now"}><span className="sr">Place in the queue </span>{j.position ?? "—"}</td>}
-              <td className="tile"><span className="ltile codec">{tileOf(j)}</span></td>
-              <td className="idc">
+            <li key={j.id} className={"lcard" + (checked ? " sel" : "")}>
+              {selecting && <label className="hit lcheck"><input type="checkbox" aria-label={"Select " + j.name} checked={checked} onChange={(e) => setSel(e.target.checked ? [...sel, j.id] : sel.filter((x) => x !== j.id))} /></label>}
+              <span className="ltile codec">{tileOf(j)}</span>
+              <div className="lmain">
                 <div className="lname"><a className="ttl" href={"/jobs?tab=" + tab + "&job=" + encodeURIComponent(key(j))} data-job={key(j)} title={j.path}
-                  onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); go(tab, key(j)); } }}><FileName n={j.name} /></a>
-                  <span className="lpath sm" title={reasonText(j) || undefined}><Detail j={j} /></span></div>
-                <div className="chips">
-                  <span className="mchip">{j.library}</span>
-                  {j.folder !== "." && <span className="mchip">{j.folder}</span>}
-                  {j.pin && <span className="mchip prio">{j.pin === "first" ? "First" : "Last"}</span>}
-                  {j.worker && <span className="mchip">{j.worker === "builtin" ? "This computer" : j.worker}</span>}
-                  {tab === "completed" && j.finishedAt && <span className="mchip">Finished {clock(j.finishedAt)}</span>}
-                </div>
-                {pct != null && <span className="uline" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(pct)} aria-label={j.progress?.stage || "Progress"}><i style={{ width: pct + "%" }} /></span>}
-              </td>
-              <td className="stc"><Pill j={j} /></td>
-              <td className="sizec sm nowrap">{j.state === "completed" ? <span className={j.beforeBytes && j.afterBytes != null && j.afterBytes < j.beforeBytes ? "gain" : undefined}>{saved(j.beforeBytes, j.afterBytes)}</span> : bytes(j.bytes)}</td>
-            </tr>);})}
-          </tbody>
-        </table></div>)}
+                  onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); go(tab, key(j)); } }}><FileName n={j.name} /></a><span className="lchev" aria-hidden="true">›</span></div>
+                {!f && <span className="lpath sm" title={reasonText(j) || undefined}><Detail j={j} /></span>}
+                {facts}
+                {f && <div className="rfields" role="group" aria-label="Conversion progress">
+                  {([["Step", f.step], ["Frames/s", f.fps], ["Speed", f.speed], ["Time left", f.timeLeft], ["Bitrate", f.bitrate]] as const).map(([label, value]) => <div className="rf" key={label}><span className="muted sm">{label}</span><span className="rfv">{value}</span></div>)}
+                </div>}
+              </div>
+              <div className="lside">
+                <span className={(j.state === "completed" ? "saved nowrap" : "sm nowrap") + (gain ? " gain" : "")}>{j.state === "completed" ? saved(j.beforeBytes, j.afterBytes) : bytes(j.bytes)}</span>
+                <Pill j={j} pct={pct} />
+                {tab === "completed" && j.finishedAt && <span className="lnote">Finished {clock(j.finishedAt)}</span>}
+                {p && p.elapsedS > 0 && <span className="lnote">{runningFor(p.elapsedS)}</span>}
+              </div>
+              {pct != null && <span className="uline" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(pct)} aria-label={j.progress?.stage || "Progress"}><i style={{ width: pct + "%" }} /></span>}
+            </li>);})}
+        </ul>)}
       {current && current.total > items.length && <p className="row muted sm" style={{ gap: 8, justifyContent: "center" }}>Showing {items.length.toLocaleString()} of {current.total.toLocaleString()}
         <button className="btn sm" type="button" disabled={items.length < Math.min(lim, current.total)} onClick={() => setMore({ for: scope, n: lim + 200 })}>Show {Math.min(200, current.total - items.length)} more</button></p>}
       {open && <Drawer id={open} row={items.find((j) => key(j) === open)} onClose={() => go(tab)} onChanged={page.reload} />}

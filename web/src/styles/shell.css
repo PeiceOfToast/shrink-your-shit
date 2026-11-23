@@ -418,8 +418,9 @@ label.chk{cursor:pointer}
 .list .tbl td.sizec{width:1%;text-align:right;color:var(--text-2)}
 .uline{position:absolute;left:0;right:0;bottom:0;height:3px}
 .uline i{display:block;height:100%;background:var(--accent)}
-.ltile.codec{font-size:var(--fs-sm);line-height:1.15;text-align:center;font-variant-numeric:tabular-nums}
+.ltile.codec{font-size:var(--fs-sm);line-height:1.15;text-align:center;font-variant-numeric:tabular-nums;width:64px}
 .ltile.codec b{font-weight:var(--fw-strong)}
+.lside .saved{font-weight:var(--fw-strong)} /* the saving line: bold, the size of the file name (design jobs-done) */
 .tbl td .failedlink{display:block;margin-top:2px;font-size:var(--fs-sm);font-weight:600;color:var(--error-text)} /* Libraries: "2 failed" under the Status chip */
 .ltools{display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-height:36px}
 .ltools .btn.sm{min-height:32px}
@@ -969,12 +970,22 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 .lcard.sel{background:color-mix(in srgb,var(--accent) 10%,var(--surface))}
 .lcard .lcheck{flex:none}
 .lcard .lmain{flex:1 1 auto;min-width:0;display:grid;gap:6px}
-.lcard .lname{display:block}
+/* item 10 (fix 2b): the name is a flex row at every width, so the title (a flex item) can take an ellipsis before the pill */
+.lcard .lname{display:flex;align-items:baseline;gap:8px;min-width:0}
+.lcard .lname .ttl{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lcard .chips{margin-top:0;display:flex;max-width:100%;min-width:0}
 .lcard .chips .mchip{max-width:100%}
 .lcard .mchip.mono{display:inline-block;overflow:hidden;text-overflow:ellipsis;line-height:var(--chip-h);vertical-align:middle}
 .lcard .mchip .ic{width:12px;height:12px;margin-right:4px}
 .lcard .mchip.mono{font-family:var(--font-mono,ui-monospace,monospace)}
+.rfields{display:flex;flex-wrap:wrap;gap:6px 22px;min-width:0}
+.rf{display:grid;gap:2px;min-width:0}
+.rf .rfv{font-weight:var(--fw-strong);overflow-wrap:anywhere}
+.lfilt{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px}
+.lfilt .filt{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.lfilt .seg button{font-size:var(--fs-sm)}
+.lfilt .find{width:240px;max-width:100%;min-height:32px;font-size:var(--fs-sm)}
+@media (max-width:640px){.lfilt .find{width:100%;min-height:44px}}
 .lside{flex:none;display:flex;flex-direction:column;align-items:flex-end;gap:4px;text-align:right;max-width:50%}
 .lnote{display:flex;flex-direction:column;align-items:flex-end;gap:2px;font-size:var(--fs-sm);color:var(--text-2)}
 .lbar{position:absolute;left:0;right:0;bottom:0;height:3px;background:var(--raised)}
@@ -1007,9 +1018,9 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
   .lside{flex:0 0 100%;flex-direction:row;flex-wrap:wrap;align-items:center;justify-content:space-between;text-align:left;max-width:none;padding-left:52px}
   .lnote{flex-direction:row;flex-wrap:wrap;align-items:center;column-gap:10px}
   .lcard .lname{display:flex;align-items:center;gap:8px}
-  .lchev{display:inline;margin-left:auto;font-size:20px;line-height:1;color:var(--text-2)}
-  /* fix 2: at 390 the actions row wraps below the name, so the › is centred on the whole card, not on the first row */
-  .wfcard .lchev{position:absolute;right:12px;top:50%;transform:translateY(-50%);margin:0;pointer-events:none}
+  /* fix 2: at 390 the actions row wraps below the name, so the › is centred on the whole card, not on the first row (job cards too, M3c fix 2) */
+  .lcard .lchev{display:inline;position:absolute;right:12px;top:50%;transform:translateY(-50%);margin:0;font-size:20px;line-height:1;color:var(--text-2);pointer-events:none}
+  .lcard{padding-right:40px}
   /* fix 3: reserve room on the right for the absolutely placed ›, so the tag chip and the favourite note end before it */
   .lcard.wfcard{padding-right:40px}
 }
