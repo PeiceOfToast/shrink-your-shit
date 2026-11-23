@@ -125,7 +125,7 @@ function WfSkeleton() {
 
 // One workflow as a card (design workflows-list): tile, name (a stretched link opens the whole card), a draft chip, the
 // description on one muted line, then the chip row: used by, version, last runs, tags. On the right: the status pill, the
-// status pill, the Enabled switch and the menu; a "★ favourite" note under them. Only the name link is under the card;
+// Enabled switch and the menu; a "★ favourite" note under them. Only the name link is under the card;
 // the switch, menu and chips sit above it.
 function WfCard({ w, hasTags, setSaid, reload }: { w: Workflow; hasTags: boolean; setSaid: (s: string) => void; reload: () => void }) {
   const problems = w.validation.errors + w.validation.warnings;

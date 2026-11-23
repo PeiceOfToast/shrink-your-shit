@@ -21,6 +21,7 @@ import { useData } from "../useData";
 import { afterHeader, queuedLine } from "../jobResult";
 import type { Failure, JobAction, JobDetail, JobItem, JobProgressEvent, JobState, Probe, Tab, Pin } from "../types/jobs";
 import { stepLabel } from "../stepLabel";
+import { closeMenuToSummary, menuEscape } from "../menuFocus";
 
 const TABS: [Tab, string][] = [["waiting", "Waiting"], ["running", "Running"], ["completed", "Done"], ["skipped", "Skipped"], ["failed", "Failed"]];
 // G5: the Done filter for originals waiting in the trash. The words come from design (SCREENS V6); keep them here.
@@ -179,7 +180,7 @@ export function Jobs() {
         {!firstRun && <>
           {(selecting || sel.length > 0) && <label className="hit selall"><input type="checkbox" aria-label="Select all files" checked={items.length > 0 && sel.length === items.length} onChange={(e) => setSel(e.target.checked ? items.map((j) => j.id) : [])} /><span className="sm">All</span></label>}
           {(selecting || sel.length > 0) && <span className="desk">{actions}</span>}
-          {selecting && <details className="menu phone"><summary className="btn sm icon ghost" aria-label="More actions"><Icon id="i-more" /></summary><div className="pop" role="menu">{actions}</div></details>}
+          {selecting && <details className="menu phone" onKeyDown={menuEscape}><summary className="btn sm icon ghost" aria-label="More actions"><Icon id="i-more" /></summary><div className="pop" role="menu" onClick={(e) => closeMenuToSummary(e.currentTarget)}>{actions}</div></details>}
         </>}
         {sel.length > 0 && <span className="muted sm">{sel.length} selected</span>}
         {/* parity 11-19 #2 (G4): pick a library here too; it sets the same ?libraryId= as "See its jobs", and the chip above stays */}
