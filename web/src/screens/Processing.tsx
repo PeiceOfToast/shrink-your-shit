@@ -53,6 +53,8 @@ export function ProcessingSettings() {
           </>}
         </div>
       </div>
+      {/* no Save on this tab: the changes above apply at once, so say so where a Save note sits elsewhere */}
+      <p className="muted" style={{ margin: 0 }}>Changes here apply at once.</p>
     </div>
   );
 }

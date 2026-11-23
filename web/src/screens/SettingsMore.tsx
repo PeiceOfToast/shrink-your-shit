@@ -220,10 +220,10 @@ export function SafetySettings() {
       {!st.data ? <div className="empty">{st.error?.message ?? "Loading…"}</div> : <>
         <section className="card" aria-labelledby="keep-h"><div className="hd"><h2 id="keep-h">Keeping originals</h2></div>
           <div className="bd stack" style={{ padding: 0, gap: 0 }}>
-            <SettingRow title={<label htmlFor="keep-days">Keep originals for (days)</label>} descId="keep-h2" desc="0 means the original is deleted right after the new file has been checked.">
+            <SettingRow title={<label id="keep-days-l" htmlFor="keep-days">Keep originals for</label>} descId="keep-h2" desc="0 means the original is deleted right after the new file has been checked.">
               <div className="row nw" style={{ gap: 8 }}>
-                <input id="keep-days" className="input" type="number" inputMode="numeric" min={0} max={365} step={1} value={now} onChange={(e) => setDays(e.target.value)} aria-describedby="keep-h2" style={{ width: 140, maxWidth: "100%" }} />
-                <span className="muted" aria-hidden="true">days</span>
+                <input id="keep-days" className="input" type="number" inputMode="numeric" min={0} max={365} step={1} value={now} onChange={(e) => setDays(e.target.value)} aria-labelledby="keep-days-l keep-days-u" aria-describedby="keep-h2" style={{ width: 140, maxWidth: "100%" }} />
+                <span id="keep-days-u" className="muted">days</span>
               </div>
             </SettingRow>
             {/* the server's trashPath is a sentence ("... in a folder called .syp-trash"); the folder name is taken from it */}
