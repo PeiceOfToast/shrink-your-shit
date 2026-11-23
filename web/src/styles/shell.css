@@ -988,6 +988,13 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 .lskel .lmain .skel-b{margin:0;height:14px}
 .lskel .skel-pill{height:22px}
 .ltools .seg button{font-size:var(--fs-sm)}
+/* Workflows cards (M3b): the ⋯ menu pops out of the card, so it is not clipped; the star, switch and menu sit above the stretched name link; long text is cut with an ellipsis (the full text is in title) */
+.lcard.wfcard{overflow:visible}
+.wfcard .star{position:relative;z-index:1;flex:none;width:28px;min-width:28px;height:28px;min-height:28px;padding:0;border-color:transparent;background:none}
+.wfcard .lside .menu,.wfcard .lside .hit{position:relative;z-index:1}
+.wfcard .wfact{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.wfcard .cut{display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wfcard .chips .mchip{max-width:100%;overflow:hidden}
 @media (max-width:640px){
   .lcard{flex-wrap:wrap;row-gap:8px;padding:12px 12px 14px}
   .lcard .lmain{flex:1 1 0;min-width:0}

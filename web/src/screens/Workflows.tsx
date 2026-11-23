@@ -4,12 +4,12 @@
 import { Empty, LoadFailed, PageHead } from "../PageHead";
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "../Icon";
-import { Skeleton } from "../Skeleton";
 import { count, plural } from "../format";
 import { SignedOut, failed, type Answer } from "../api";
 import { useData } from "../useData";
 import { createWorkflow, deleteWorkflow, duplicateWorkflow, getDraft, importWorkflow, listTemplates, listWorkflows, patchWorkflow } from "../workflowApi";
 import { importLines, type ReportLine } from "../importReport";
+import { shownWorkflows, wfFilterCounts, type WfFilter } from "../workflowList";
 import { Link, navigate, useSearch } from "../router";
 import type { Workflow } from "../types/v2";
 
@@ -22,13 +22,15 @@ async function act<T>(p: Promise<Answer<T>>, say: (m: string) => void): Promise<
 }
 
 // Recent runs (spec V3, 18:50Z): one quiet line from lastRun, which covers the past 7 days. Zero parts are left out;
-// "failed" uses the error text colour; "skipped" comes after it, muted (lead 18:53Z).
+// "failed" uses the error text colour; "skipped" comes after it, muted (lead 18:53Z). On a card it is a chip; its text is cut
+// with an ellipsis and the full line is in title.
 function Runs({ r }: { r: Workflow["lastRun"] }) {
-  if (!r.at) return <span className="muted sm">Not run yet</span>;
+  if (!r.at) return <span className="mchip"><span className="cut">Never ran</span></span>;
   const min = Math.max(0, Math.round((Date.now() - new Date(r.at).getTime()) / 60000));
   const when = min < 1 ? "just now" : min < 60 ? `${min} min ago` : min < 1440 ? `${Math.round(min / 60)} h ago` : plural(Math.round(min / 1440), "day", "days") + " ago";
   const done = r.completed > 0 ? `${count(r.completed)} done` : "", failed = r.failed > 0 ? `${count(r.failed)} failed` : "", skipped = r.skipped > 0 ? `${count(r.skipped)} skipped` : "";
-  return (<span className="muted sm">Ran {when}{(done || failed || skipped) && " · past 7 days: "}{done}{done && (failed || skipped) && ", "}{failed && <span style={{ color: "var(--error-text)" }}>{failed}</span>}{failed && skipped && ", "}{skipped}</span>);
+  const line = "Ran " + when + (done || failed || skipped ? " · past 7 days: " : "") + [done, failed, skipped].filter(Boolean).join(", ");
+  return (<span className="mchip" title={line}><span className="cut">Ran {when}{(done || failed || skipped) && " · past 7 days: "}{done}{done && (failed || skipped) && ", "}{failed && <span style={{ color: "var(--error-text)" }}>{failed}</span>}{failed && skipped && ", "}{skipped}</span></span>);
 }
 
 function RowMenu({ w, onSaid, reload }: { w: Workflow; onSaid: (s: string) => void; reload: () => void }) {
@@ -100,16 +102,80 @@ function Wizard({ onClose, onMade }: { onClose: () => void; onMade: (w: Workflow
   );
 }
 
+// The filter buttons: the names, with counts once the list has loaded without error (M3a's rule, same group semantics)
+const WF_FILTERS: [WfFilter, string][] = [["all", "All"], ["enabled", "Enabled"], ["problems", "With problems"]];
+
+// Loading: the shape of a card (tile, a row of pill bars, a status pill on the right), grey blocks, no motion
+function WfSkeleton() {
+  return (
+    <div className="skel lskel">
+      <span role="status"><span className="sr">Loading</span></span>
+      <ul className="lcards" aria-hidden="true">
+        {[0, 1, 2, 3].map((i) => (
+          <li className="lcard" key={i}>
+            <span className="ltile skel-tile" />
+            <div className="lmain"><span className="skel-b skel-w40" /><div className="chips"><span className="skel-b skel-pill" /><span className="skel-b skel-pill" /><span className="skel-b skel-pill" /></div></div>
+            <div className="lside"><span className="skel-b skel-pill" /></div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+// One workflow as a card (design workflows-list): tile, name (a stretched link opens the whole card), a draft chip, the
+// description on one muted line, then the chip row: used by, version, last runs, tags. On the right: the status pill, the
+// Enabled switch and the menu; "★ favourite" under them. The star sits at the name. Only the name link is under the card;
+// the star, switch, menu and chips sit above it.
+function WfCard({ w, hasTags, setSaid, reload }: { w: Workflow; hasTags: boolean; setSaid: (s: string) => void; reload: () => void }) {
+  const problems = w.validation.errors + w.validation.warnings;
+  const used = w.libraries.map((l) => l.name).join(", ");
+  const usedText = used ? "used by " + used : "used by nothing yet";
+  return (
+    <li className="lcard wfcard">
+      <span className="ltile" aria-hidden="true"><Icon id="i-workflow" /></span>
+      <div className="lmain">
+        <div className="lname">
+          <button className="btn sm icon ghost star" type="button" aria-pressed={w.favourite} aria-label={"Favourite: " + w.name} style={w.favourite ? { color: "var(--warning-text)" } : undefined}
+            onClick={async () => { if (await act(patchWorkflow(w.id, { favourite: !w.favourite }), setSaid)) reload(); }}><Icon id="i-star" /></button>
+          <Link className="ttl" to={"/workflows/" + w.id} title={w.name}>{w.name}</Link>
+          {w.status === "draft" && <span className="mchip">draft</span>}
+          <span className="lchev" aria-hidden="true">›</span>
+        </div>
+        {w.description && <span className="sub cut" title={w.description}>{w.description}</span>}
+        <div className="chips">
+          <span className="mchip" title={usedText}><Icon id="i-folder" /><span className="cut">{usedText}</span></span>
+          {w.version != null && <span className="mchip" title={"v" + w.version + (w.draftDiffers ? " · draft changes" : "")}><span className="cut">{"v" + w.version + (w.draftDiffers ? " · draft changes" : "")}</span></span>}
+          <Runs r={w.lastRun} />
+          {hasTags && w.tags.map((t) => <span className="mchip" key={t}>{t}</span>)}
+        </div>
+      </div>
+      <div className="lside">
+        <div className="wfact">
+          {problems ? <span className={"pill " + (w.validation.errors ? "bad" : "warn")}><Icon id="i-alert" />{plural(problems, "problem", "problems")}</span>
+            : <span className="pill"><Icon id="i-check-c" />OK</span>}
+          {w.status === "draft" ? <span className="muted" aria-label="Not published yet">-</span>
+            : <label className="hit"><input type="checkbox" role="switch" className="switch" aria-label={"Enabled: " + w.name} checked={w.status === "enabled"} onChange={async (e) => { if (await act(patchWorkflow(w.id, { status: e.target.checked ? "enabled" : "disabled" }), setSaid)) reload(); }} /></label>}
+          <RowMenu w={w} onSaid={setSaid} reload={reload} />
+        </div>
+        {w.favourite && <div className="lnote"><span>★ favourite</span></div>}
+      </div>
+    </li>
+  );
+}
+
 export function Workflows() {
   const wfs = useData(listWorkflows, [], 10000), tpl = useData(listTemplates, []);
   const all = wfs.data ?? [], templates = tpl.data ?? [];
   const tab = new URLSearchParams(useSearch()).get("tab") === "templates" ? "templates" : "workflows"; // in the URL: Back and reload keep it
   const setTab = (t: string) => navigate("/workflows" + (t === "templates" ? "?tab=templates" : ""));
-  const [q, setQ] = useState(""), [tag, setTag] = useState(""), [fav, setFav] = useState(false), [wizard, setWizard] = useState(false), [said, setSaid] = useState("");
+  const [q, setQ] = useState(""), [tag, setTag] = useState(""), [fav, setFav] = useState(false), [filter, setFilter] = useState<WfFilter>("all"), [wizard, setWizard] = useState(false), [said, setSaid] = useState("");
   const tags = [...new Set(all.flatMap((w) => w.tags))].sort();
-  // Pass 5 #3: with no tag on any workflow, the Tags column and the Tag filter are hidden. Based on the list the API returned, so filtering never hides them.
+  // Pass 5 #3: with no tag on any workflow, the Tag filter is hidden and the card shows no tag chips. Based on the list the API returned, so filtering never hides them.
   const hasTags = tags.length > 0, activeTag = hasTags ? tag : "";
-  const rows = all.filter((w) => (!q || (w.name + " " + w.description).toLowerCase().includes(q.toLowerCase())) && (!activeTag || w.tags.includes(activeTag)) && (!fav || w.favourite));
+  // counts are shown only once the list has loaded without error; the empty state has no filters or search at all
+  const counts = wfFilterCounts(all), counted = !!wfs.data && !wfs.error, empty = wfs.loaded && !wfs.error && all.length === 0;
+  const rows = shownWorkflows(all, { filter, q, tag: activeTag, fav });
   // Import: a file becomes a new draft. The panel says what to fix before it runs; a refused file sends nothing new.
   const fileIn = useRef<HTMLInputElement>(null);
   const [imp, setImp] = useState<{ id: string; name: string; lines: ReportLine[] } | null>(null), [impErr, setImpErr] = useState("");
@@ -140,7 +206,7 @@ export function Workflows() {
       </PageHead>
       {wizard && <Wizard onClose={() => setWizard(false)} onMade={(w) => navigate("/workflows/" + w.id)} />}
       <div className="tabs" role="tablist">
-        <button role="tab" type="button" aria-selected={tab === "workflows"} onClick={() => tab !== "workflows" && setTab("workflows")}>Workflows</button>
+        <button role="tab" type="button" aria-selected={tab === "workflows"} onClick={() => tab !== "workflows" && setTab("workflows")}>Workflows {wfs.data && <span className="n">{all.length}</span>}</button>
         <button role="tab" type="button" aria-selected={tab === "templates"} onClick={() => tab !== "templates" && setTab("templates")}>Templates {tpl.data && <span className="n">{templates.length}</span>}</button>
       </div>
       <p className="muted" role="status">{said}</p>
@@ -160,40 +226,22 @@ export function Workflows() {
             <td data-p="3">{t.description}</td><td className="sm" data-p="4">{t.steps.join(", ")}</td><td className="stc"><span className="pill">{t.changesOriginals ? "Changes originals" : "Originals stay"}</span></td></tr>)}</tbody>
         </table></div>
       ) : (<>
-        {/* one toolbar (clean pass T4): the tag pick and search; New workflow, Import and Favourites sit in the page header */}
-        <div className="ltools" role="toolbar" aria-label="Workflows">
+        {/* one toolbar (M3a's): the filter buttons on the left, the tag pick and the search; hidden on the empty state */}
+        {!empty && <div className="ltools" role="toolbar" aria-label="Workflows">
+          <div className="seg" role="group" aria-label="Show workflows">
+            {WF_FILTERS.map(([k, t]) => <button key={k} type="button" aria-pressed={filter === k} onClick={() => setFilter(k)}>{counted ? t + " · " + count(counts[k]) : t}</button>)}
+          </div>
           {hasTags && <select className="input sm" aria-label="Tag" value={activeTag} onChange={(e) => setTag(e.target.value)}>
             <option value="">Tag: any</option>{tags.map((t) => <option key={t} value={t}>{t}</option>)}
           </select>}
           <input className="input find" type="search" placeholder="Search workflows" aria-label="Search workflows" value={q} onChange={(e) => setQ(e.target.value)} />
-        </div>
+        </div>}
         {wfs.error && wfs.data && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{wfs.error.message}</span></p>}
-        {!wfs.loaded ? <Skeleton rows={4} /> : wfs.error && !wfs.data ? <LoadFailed error={wfs.error} reload={wfs.reload} /> : rows.length === 0 ? (all.length ? <div className="empty">No workflow matches.</div>
-          : <Empty icon="i-workflow" text="No workflows yet. A workflow says what happens to each file.">{!wizard && <button className="btn primary" type="button" onClick={() => (setWizard(true), setSaid(""))}><Icon id="i-plus" />New workflow</button>}</Empty>) : (
-          <div className="list rows"><table className="tbl wflist">
-            <thead><tr><th>Name</th><th data-p="2">Libraries</th><th data-p="3">Version</th>{hasTags && <th data-p="6">Tags</th>}<th className="stc">Check</th><th className="actc">Enabled</th><th className="actc"><span className="sr">Menu</span></th></tr></thead>
-            <tbody>{rows.map((w) => {
-              const problems = w.validation.errors + w.validation.warnings;
-              const used = w.libraries.length ? w.libraries.map((l) => l.name).join(", ") : "No library";
-              const version = w.version == null ? "Draft · not published yet" : "v" + w.version + (w.draftDiffers ? " · draft changes" : "");
-              return (
-                <tr key={w.id}>
-                  <td className="idc"><span className="row nw">
-                    <button className="btn sm icon ghost over star" type="button" aria-pressed={w.favourite} aria-label={"Favourite: " + w.name} onClick={async () => { if (await act(patchWorkflow(w.id, { favourite: !w.favourite }), setSaid)) wfs.reload(); }}
-                      style={w.favourite ? { color: "var(--warning-text)" } : undefined}><Icon id="i-star" /></button>
-                    <span><Link className="ttl" to={"/workflows/" + w.id}>{w.name}</Link><span className="sub runs"><Runs r={w.lastRun} /></span>{w.description && <span className="sub" title={w.description}>{w.description}</span>}
-                      <span className="sub phone">{used} · {version}</span></span></span></td>
-                  <td data-p="2">{w.libraries.length ? used : <span className="muted">{used}</span>}</td>
-                  <td className="nowrap" data-p="3">{version}</td>
-                  {hasTags && <td data-p="6"><span className="chips">{w.tags.map((t) => <span className="mchip" key={t}>{t}</span>)}</span></td>}
-                  <td className="stc">{problems ? <span className={"pill " + (w.validation.errors ? "bad" : "warn")}><Icon id="i-alert" />{plural(problems, "problem", "problems")}</span>
-                    : <span className="pill"><Icon id="i-check-c" />OK</span>}</td>
-                  <td className="actc">{w.status === "draft" ? <span className="muted" aria-label="Not published yet">-</span>
-                    : <label className="hit over"><input type="checkbox" role="switch" className="switch" aria-label={"Enabled: " + w.name} checked={w.status === "enabled"} onChange={async (e) => { if (await act(patchWorkflow(w.id, { status: e.target.checked ? "enabled" : "disabled" }), setSaid)) wfs.reload(); }} /></label>}</td>
-                  <td className="actc"><RowMenu w={w} onSaid={setSaid} reload={wfs.reload} /></td>
-                </tr>);
-            })}</tbody>
-          </table></div>)}
+        {!wfs.loaded ? <WfSkeleton /> : wfs.error && !wfs.data ? <LoadFailed error={wfs.error} reload={wfs.reload} /> : all.length === 0 ? <Empty icon="i-workflow" text="No workflows yet. A workflow says what happens to each file.">{!wizard && <button className="btn primary" type="button" onClick={() => (setWizard(true), setSaid(""))}><Icon id="i-plus" />New workflow</button>}</Empty>
+          : rows.length === 0 ? <div className="empty">No workflow matches.</div> : (
+          <ul className="lcards" aria-label="Workflow list">
+            {rows.map((w) => <WfCard key={w.id} w={w} hasTags={hasTags} setSaid={setSaid} reload={wfs.reload} />)}
+          </ul>)}
       </>)}
     </div>
   );
