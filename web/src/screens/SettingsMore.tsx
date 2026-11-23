@@ -267,6 +267,7 @@ function Commands({ settings }: { settings: ReturnType<typeof useData<FirstRunSe
       <div className="bd stack" style={{ padding: 0, gap: 0 }}>
         <SettingRow title={<label htmlFor="cmd-sw">Workflows may run commands</label>} descId="cmd-hint" desc={`A workflow's "Run a command" step starts a program of yours after a file is saved, with the file's path and variables as arguments. The program runs as this app's user, with everything it can reach, so this stays off until you turn it on.`}>
           <input id="cmd-sw" type="checkbox" role="switch" className="switch" checked={on} disabled={busy} aria-describedby="cmd-hint" onChange={(e) => set(e.target.checked)} />
+          <span>{on ? "On" : "Off"}</span>
         </SettingRow>
         {!on && <div className="note" style={{ margin: "0 16px 12px" }}><Icon id="i-shield" /><span>Off: a workflow with a "Run a command" step can't be published, and a published one's step says it can't run.</span></div>}
         {said && <p className="st bad" role="alert" style={{ margin: "0 16px 12px" }}><Icon id="i-alert" /><span>{said}</span></p>}
@@ -284,10 +285,12 @@ function Updates({ version }: { version?: string }) {
   const toSwitch = (e: MouseEvent) => { e.preventDefault(); sw.current?.scrollIntoView({ block: "center" }); sw.current?.focus(); };
   return (
     <section className="card" aria-labelledby="upd-h"><div className="hd"><h2 id="upd-h">Updates</h2></div>
-      <div className="bd stack">
-        <label className="row nw"><input ref={sw} id="upd-sw" type="checkbox" role="switch" className="switch" checked={on} disabled={!st.data || busy} aria-describedby="upd-hint" onChange={(e) => set(e.target.checked)} />
-          <span><strong>Check for updates</strong></span></label>
-        <span className="hint" id="upd-hint">{SENT}</span>
+      <div className="bd stack" style={{ padding: 0, gap: 0 }}>
+        <SettingRow title={<label htmlFor="upd-sw">Check for updates</label>} descId="upd-hint" desc={SENT}>
+          <input ref={sw} id="upd-sw" type="checkbox" role="switch" className="switch" checked={on} disabled={!st.data || busy} aria-describedby="upd-hint" onChange={(e) => set(e.target.checked)} />
+          <span>{on ? "On" : "Off"}</span>
+        </SettingRow>
+        <div className="stack" style={{ padding: "0 var(--pad) 12px" }}>
         <div className="note"><Icon id="i-shield" /><span>The update check is the only thing Shrink Your Shit sends over the internet without you setting it up.</span></div>
         {!d ? (version || u.error) && <p role="status" style={{ margin: 0 }}>{version && <span>Shrink Your Shit {version}. </span>}{u.error && <span className="muted">{u.error.message}</span>}</p>
           : <div className="row" style={{ alignItems: "baseline" }}>
@@ -300,6 +303,7 @@ function Updates({ version }: { version?: string }) {
         </div>}
         {said && <p className="st bad" role="alert" style={{ margin: 0 }}><Icon id="i-alert" /><span>{said}</span></p>}
         {d && <Install d={d} reload={u.reload} check={now} />}
+        </div>
       </div></section>);
 }
 
@@ -408,10 +412,10 @@ export function AboutSettings() {
       <section className="card" aria-labelledby="log-h"><div className="hd"><h2 id="log-h">Recent log lines</h2></div>
         <div className="bd"><pre className="mono sm" tabIndex={0} role="region" aria-labelledby="log-h" style={{ overflow: "auto", maxHeight: "16rem", margin: 0, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{h.data ? (h.data.logsTail.length ? h.data.logsTail.join("\n") : "Nothing has been logged yet.") : ""}</pre></div></section>
       <Updates version={h.data?.version} />
-      <section className="card" aria-labelledby="lic-h"><div className="hd"><h2 id="lic-h">Licences</h2></div>
-        <div className="bd stack">
-          <p>Shrink Your Shit is free software under the GNU Affero General Public License, version 3.</p>
-          <p><a href="/licenses.md" target="_blank" rel="noopener">The licences of the parts this interface is built with</a> (React, React Flow and others).</p>
+      <section className="card" aria-labelledby="about-h"><div className="hd"><h2 id="about-h">About</h2></div>
+        <div className="bd" style={{ padding: 0 }}>
+          <SettingRow title="Version">{h.data?.version && <ValueChip>{h.data.version}</ValueChip>}</SettingRow>
+          <SettingRow title="Licence" desc={<>Shrink Your Shit is free software under the GNU Affero General Public License, version 3. <a href="/licenses.md" target="_blank" rel="noopener">The licences of the parts this interface is built with</a> (React, React Flow and others).</>} />
         </div></section>
     </div>);
 }

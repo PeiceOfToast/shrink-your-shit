@@ -9,6 +9,7 @@ import { failed } from "../api";
 import { applyBackup, createBackup, deleteBackup, downloadUrl, listBackups, previewBackup } from "../backupApi";
 import { bytes, clock, count, plural } from "../format";
 import { SettingsTabs } from "../pages";
+import { SettingRow } from "../SettingRow";
 import { useData } from "../useData";
 import type { Backup, BackupContents, BackupPreview } from "../types/backup";
 
@@ -139,12 +140,13 @@ export function BackupSettings() {
               </section>
               <section className="card" aria-labelledby="rf-h">
                 <div className="hd"><h2 id="rf-h">Restore from a file</h2></div>
-                <div className="bd stack">
-                  <p className="muted" style={{ margin: 0 }}>Choose a backup file from this or another computer. You'll see what it holds before anything changes.</p>
-                  <div className="row"><button className="btn" type="button" onClick={() => { if (!busy) file.current?.click(); }} aria-disabled={!!busy}>Choose a backup file…</button>
+                <div className="bd stack" style={{ padding: 0, gap: 0 }}>
+                  <SettingRow title="Restore from a file" desc="Choose a backup file from this or another computer. You'll see what it holds before anything changes.">
+                    <button className="btn" type="button" onClick={() => { if (!busy) file.current?.click(); }} aria-disabled={!!busy}>Choose a backup file…</button>
                     <input ref={file} type="file" accept=".gz,.json,application/gzip,application/json" hidden
-                      onChange={(e) => { const f = e.target.files?.[0]; if (f) preview(f); }} /></div>
-                  <div role="alert">{fileError && <p className="st bad" style={{ margin: 0 }}><Icon id="i-alert" /><span>{fileError}</span></p>}</div>
+                      onChange={(e) => { const f = e.target.files?.[0]; if (f) preview(f); }} />
+                  </SettingRow>
+                  <div role="alert" style={{ padding: "0 var(--pad) 12px" }}>{fileError && <p className="st bad" style={{ margin: 0 }}><Icon id="i-alert" /><span>{fileError}</span></p>}</div>
                 </div>
               </section>
             </>}
