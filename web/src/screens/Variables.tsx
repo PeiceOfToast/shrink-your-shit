@@ -188,17 +188,17 @@ function VarLine({ r, issue, asking, onEdit, onAsk, onRemove, onKeep }: {
   const label = braces(r.name);
   return (
     <div className="stack" style={{ gap: 4 }}>
-      <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-        <span className="mono">{label}</span>
-        <span className="muted">{kindName(r.type)}</span>
-        <span>{shownValue(r)}</span>
+      <div className="setrow" style={{ padding: "10px 0" }}>
+        <div className="txt">
+          <div className="ttl mono">{label}</div>
+          <p className="muted sub">{kindName(r.type)} · {shownValue(r)}{r.description.trim() ? " · " + r.description : ""}</p>
+        </div>
+        <div className="ctl">
+          <button id={`${r.key}-edit`} className="btn sm ghost" type="button" onClick={onEdit} aria-label={`Edit ${label}`}>Edit</button>
+          <button className="btn sm ghost" type="button" onClick={onAsk} aria-label={`Remove ${label}`}>Remove</button>
+        </div>
       </div>
-      {r.description.trim() && <span className="muted">{r.description}</span>}
       {issue && <p className="st bad" role="alert" style={{ margin: 0 }}><Icon id="i-alert" /><span>{issue.msg}</span></p>}
-      <div className="row" style={{ gap: 8 }}>
-        <button id={`${r.key}-edit`} className="btn sm ghost" type="button" onClick={onEdit} aria-label={`Edit ${label}`}>Edit</button>
-        <button className="btn sm ghost" type="button" onClick={onAsk} aria-label={`Remove ${label}`}>Remove</button>
-      </div>
       {asking && (
         <div className="row" role="group" aria-label={`Remove ${label}`} style={{ gap: 8, flexWrap: "wrap" }}>
           <span>Remove {label}? It goes when you Save.</span>
@@ -216,7 +216,7 @@ function VarForm({ r, issues, onChange, onKind, onDone, onCancel }: {
   const err = (f: Field) => (bad?.field === f ? <p id={`${id}-${f}-err`} className="st bad" role="alert" style={{ margin: 0 }}><Icon id="i-alert" /><span>{bad.msg}</span></p> : null);
   const choices = r.options.split(",").map((s) => s.trim()).filter(Boolean);
   return (
-    <form className="stack" style={{ gap: 8 }} onSubmit={(e) => { e.preventDefault(); onDone(); }}>
+    <form className="stack cform" style={{ gap: 8 }} onSubmit={(e) => { e.preventDefault(); onDone(); }}>
       <div className="field">
         <label htmlFor={`${id}-name`}>Name</label>
         <input className="input mono" id={`${id}-name`} style={{ maxWidth: 320 }} value={r.name} autoComplete="off" spellCheck={false} placeholder="output_dir"

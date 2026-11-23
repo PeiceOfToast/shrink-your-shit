@@ -5,6 +5,7 @@ import { Icon } from "../Icon";
 import { failed, type Answer } from "../api";
 import { PageHead } from "../PageHead";
 import { SettingsTabs } from "../pages";
+import { SettingRow } from "../SettingRow";
 import { useData } from "../useData";
 import { clock } from "../format";
 import { addTarget, getNotifications, patchNotifications, patchTarget, removeTarget, testNotification } from "../notificationsApi";
@@ -138,9 +139,14 @@ function TargetItem({ t, reload, said }: { t: NotifyTarget; reload: () => void; 
   };
   return (
     <div className="stack" style={{ gap: 6, padding: "10px 0", borderBottom: "1px solid var(--border)" }}>
-      <div className="row"><strong>{t.name}</strong><span className="muted">{kindName(t.kind)}</span></div>
-      <Status t={t} />
-      <p className="hint" style={{ margin: 0 }}>{sends(t.events)}</p>
+      <SettingRow title={<>{t.name} <span className="muted">{kindName(t.kind)}</span></>} desc={<><Status t={t} /><br /><span className="hint">{sends(t.events)}</span></>}>
+        {!editing && !confirm && (
+          <>
+            <button className="btn sm" type="button" onClick={test} disabled={testing}>{testing ? "Sending…" : "Send a test"}</button>
+            <button className="btn sm ghost" type="button" onClick={() => { setEditing(true); setNote(null); }} aria-label={"Edit " + t.name}>Edit</button>
+            <button className="btn sm ghost" type="button" onClick={() => { setConfirm(true); setNote(null); }} aria-label={"Remove " + t.name}>Remove</button>
+          </>)}
+      </SettingRow>
       {note && <NoteLine tone={note.tone} text={note.text} />}
       {confirm && (
         <div className="row" role="group" aria-label={"Remove " + t.name} style={{ gap: 8 }}>
@@ -149,14 +155,7 @@ function TargetItem({ t, reload, said }: { t: NotifyTarget; reload: () => void; 
           <button className="btn sm ghost" type="button" onClick={() => setConfirm(false)}>Cancel</button>
           {msg && <span className="st bad"><Icon id="i-alert" />{msg}</span>}
         </div>)}
-      {editing
-        ? <TargetForm t={t} reload={reload} onCancel={() => setEditing(false)} onDone={(text) => { setEditing(false); said(text); reload(); }} />
-        : !confirm && (
-          <div className="row" style={{ gap: 6 }}>
-            <button className="btn sm" type="button" onClick={test} disabled={testing}>{testing ? "Sending…" : "Send a test"}</button>
-            <button className="btn sm ghost" type="button" onClick={() => { setEditing(true); setNote(null); }} aria-label={"Edit " + t.name}>Edit</button>
-            <button className="btn sm ghost" type="button" onClick={() => { setConfirm(true); setNote(null); }} aria-label={"Remove " + t.name}>Remove</button>
-          </div>)}
+      {editing && <TargetForm t={t} reload={reload} onCancel={() => setEditing(false)} onDone={(text) => { setEditing(false); said(text); reload(); }} />}
     </div>);
 }
 

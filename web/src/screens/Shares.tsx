@@ -205,11 +205,11 @@ export function SharesSettings() {
       <SettingsTabs at="shares" />
       <p className="muted" role="status">{said}</p>
       {resp.error && is404(resp.error) ? <p className="muted">This server doesn't have network shares yet.</p> : resp.error && !data ? <LoadFailed error={resp.error} reload={resp.reload} /> : resp.error ? <p className="st bad" role="alert"><Icon id="i-alert" /><span>{resp.error.message}</span></p> : !data ? <div className="empty">Loading…</div> : <>
-        <div className="row" style={{ gap: 6 }}>
-          <p className="muted" style={{ margin: 0 }}>Use a folder on a NAS or another computer as a library. Shrink Your Shit connects to it and reconnects after a restart.</p>
-          <span className="sp" />
-          <button className="btn primary" type="button" onClick={() => setAdding(true)}><Icon id="i-plus" />Add a share</button>
-        </div>
+        <section className="card" aria-labelledby="h-shares">
+          <div className="hd"><h2 id="h-shares">Shares</h2><span className="sp" />
+            <button className="btn primary sm" type="button" onClick={() => setAdding(true)}><Icon id="i-plus" />Add a share</button></div>
+          <div className="bd stack">
+        <p className="muted" style={{ margin: 0 }}>Use a folder on a NAS or another computer as a library. Shrink Your Shit connects to it and reconnects after a restart.</p>
         {(data.items ?? []).length === 0
           ? <Empty icon="i-shares" text="No network shares yet. Libraries can still use any folder this computer can already see." />
           : <div className="list"><table className="tbl"><thead><tr>
@@ -218,6 +218,8 @@ export function SharesSettings() {
               <tbody>{(data.items ?? []).map((s) => <ShareRow key={s.id} share={s} resp={data} onChanged={resp.reload} said={setSaid} />)}</tbody>
             </table>
           </div>}
+          </div>
+        </section>
         {adding && <ShareSheet resp={data} onDone={() => { setAdding(false); resp.reload(); }} onCancel={() => setAdding(false)} said={setSaid} />}
       </>}
     </div>
