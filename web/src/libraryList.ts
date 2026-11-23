@@ -27,10 +27,22 @@ export function filterCounts(ls: Library[]): Record<LibFilter, number> {
   return c;
 }
 
-// Done share: converted-or-skipped files over all files, as 0..1. Waiting and running files are not done. With no
-// files there is no share (null): the card shows no bar, never a made-up one.
+// Done share: converted-or-skipped files over all files, as 0..1. The server's files count (the last scan's videos)
+// includes failed ones, so waiting, running and failed files are not done. With no files there is no share (null):
+// the card shows no bar, never a made-up one. A library whose files all failed shows an empty bar.
 export function doneShare(c: Library["counts"]): number | null {
   if (c.files <= 0) return null;
-  const done = c.files - c.waiting - c.running;
+  const done = c.files - c.waiting - c.running - c.failed;
   return Math.min(1, Math.max(0, done / c.files));
+}
+
+// Select all acts on the libraries on screen only (the filter and the search). Checked when there is one shown and
+// every shown one is selected.
+export function allShownSelected(shown: Library[], sel: string[]): boolean {
+  return shown.length > 0 && shown.every((l) => sel.includes(l.id));
+}
+// The selection after Select all is ticked or cleared: only the shown libraries change; a hidden one keeps its state.
+export function selectShown(sel: string[], shown: Library[], on: boolean): string[] {
+  const ids = new Set(shown.map((l) => l.id));
+  return on ? [...new Set([...sel, ...ids])] : sel.filter((id) => !ids.has(id));
 }

@@ -1,7 +1,7 @@
 // M3a: the Libraries list's filter rule and progress share. Node runs these (npm test).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { doneShare, filterCounts, inFilter, needsAttention } from "./libraryList.ts";
+import { allShownSelected, doneShare, filterCounts, inFilter, needsAttention, selectShown } from "./libraryList.ts";
 import type { Library } from "./types/v2.ts";
 
 const counts = { files: 0, waiting: 0, running: 0, completed: 0, skipped: 0, failed: 0 };
@@ -61,14 +61,38 @@ test("filterCounts counts from the loaded list", () => {
   assert.deepEqual(filterCounts([]), { all: 0, watching: 0, attention: 0, paused: 0 });
 });
 
-test("the done share is (files - waiting - running) / files", () => {
+test("the done share is (files - waiting - running - failed) / files", () => {
   assert.equal(doneShare({ ...counts, files: 1600, waiting: 640, running: 0 }), 0.6);
   assert.equal(doneShare({ ...counts, files: 10, waiting: 2, running: 3 }), 0.5);
   assert.equal(doneShare({ ...counts, files: 210, waiting: 0, running: 0 }), 1);
+});
+
+test("a failed file is not done: failed is subtracted, and an all-failed library is an empty bar", () => {
+  assert.equal(doneShare({ ...counts, files: 10, waiting: 0, running: 0, failed: 4 }), 0.6);
+  assert.equal(doneShare({ ...counts, files: 5, waiting: 0, running: 0, failed: 5 }), 0);
+  assert.equal(doneShare({ ...counts, files: 5, waiting: 1, running: 1, failed: 1 }), 0.4);
 });
 
 test("no files means no share (null), and the share never leaves 0..1", () => {
   assert.equal(doneShare({ ...counts, files: 0 }), null);
   assert.equal(doneShare({ ...counts, files: 4, waiting: 0, running: 9 }), 0); // more running than files: clamped
   assert.equal(doneShare({ ...counts, files: 4, waiting: -1, running: 0 }), 1);
+});
+
+test("Select all is checked only when every shown library is selected (and there is one)", () => {
+  const a = lib({ id: "a" }), b = lib({ id: "b" }), c = lib({ id: "c" });
+  assert.equal(allShownSelected([], []), false);
+  assert.equal(allShownSelected([a, b], ["a"]), false);
+  assert.equal(allShownSelected([a, b], ["a", "b"]), true);
+  assert.equal(allShownSelected([a, b], ["a", "b", "c"]), true); // a hidden one selected does not matter
+  assert.equal(allShownSelected([a], []), false);
+  assert.equal(allShownSelected([c], ["c"]), true);
+});
+
+test("Select all acts on the shown libraries only: a hidden selection is kept, not added to", () => {
+  const a = lib({ id: "a" }), b = lib({ id: "b" }), hidden = lib({ id: "h" });
+  assert.deepEqual(selectShown([], [a, b], true), ["a", "b"]);
+  assert.deepEqual(selectShown(["h"], [a, b], true), ["h", "a", "b"]); // the hidden one stays as it was
+  assert.deepEqual(selectShown(["h", "a", "b"], [a, b], false), ["h"]); // clearing leaves the hidden one selected
+  assert.deepEqual(selectShown(["a"], [a, hidden], true), ["a", "h"]); // a shown one already selected is not doubled
 });
