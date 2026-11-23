@@ -43,8 +43,9 @@ export async function listWorkflows(): Promise<Answer<WorkflowChoice[]>> {
 export const checkFolder = (path: string, outputFolder?: string, next?: { name: string }): Promise<Answer<FolderReport>> =>
   MOCK ? M(mock.checkFolder(path, outputFolder, !!next)) : call("POST", "/api/libraries/check", { path, ...(outputFolder && { outputFolder }), ...(next && { nextToLibrary: true, name: next.name }) });
 export const firstFiles = (path: string): Promise<Answer<FirstFiles>> => (MOCK ? M(mock.firstFiles(path)) : call("POST", "/api/libraries/first-files", { path }));
-export const addLibrary = (name: string, path: string, flowId: string): Promise<Answer<LibraryItem>> =>
-  MOCK ? M(mock.addLibrary(name, path, flowId)) : call("POST", "/api/libraries", { name, path, flowId });
+// flowId absent: the server makes the library's workflow (the recommended one); "0": no workflow yet; an id: that workflow
+export const addLibrary = (name: string, path: string, flowId?: string): Promise<Answer<LibraryItem>> =>
+  MOCK ? M(mock.addLibrary(name, path, flowId)) : call("POST", "/api/libraries", { name, path, ...(flowId !== undefined && { flowId }) });
 export const patchLibrary = (id: string, patch: { name?: string; path?: string }): Promise<Answer<LibraryItem>> =>
   MOCK ? M(mock.patchLibrary(id, patch)) : call("PATCH", "/api/libraries/" + enc(id), patch);
 export const setLibraryWorkflow = (id: string, flowId: string): Promise<Answer<LibraryItem>> =>

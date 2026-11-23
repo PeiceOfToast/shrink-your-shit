@@ -5,15 +5,14 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "../Icon";
 import { MOCK, SignedOut, failed, type Answer } from "../api";
-import { bytes, clock, count, encoderName, plural } from "../format";
+import { bytes, clock, count, dayClock, encoderName, lastScan, plural } from "../format";
 import { getSummary, scanAllLibraries, type RealSummary } from "../dashApi";
 import { getDoctor } from "../doctorApi";
 import { listJobs } from "../jobsApi";
 import { listWorkflows } from "../workflowApi";
 import { listLibrariesV2 } from "../libraryApi";
-import { lastScan } from "./Libraries";
 import { convertedLine } from "../convertedLine";
-import { getStartedSteps, showGetStarted } from "../getStarted";
+import { getStartedSteps, nextStep, showGetStarted } from "../getStarted";
 import { runFields } from "../jobCards";
 const HEALTH_HIDDEN = "syp-health-dismissed"; // the failed checks the Dismiss was for
 import { onLive } from "../live";
@@ -95,15 +94,7 @@ function Spark({ values, label, color }: { values: (number | null)[]; label: str
   </svg>;
 }
 
-// U13: phone width (599 px and below) gets a 2 x 2 tile grid and a closed "Last 30 days" disclosure; desktop renders as before
-function usePhone() {
-  const q = "(max-width:599px)", [m, setM] = useState(() => matchMedia(q).matches);
-  useEffect(() => { const l = matchMedia(q), f = () => setM(l.matches); l.addEventListener("change", f); return () => l.removeEventListener("change", f); }, []);
-  return m;
-}
-
 export function Overview() {
-  const phone = usePhone(), Disc = phone ? "details" : Fragment; // the 30-day block is a closed disclosure on a phone, a plain block (no wrapper) elsewhere
   // the sample install never calls the server (a 401 there would send the page to Sign in)
   // review 61dc891 P2-2: the workers (count, switch and rows) come from GET /api/v2/workers, the Workers page's source,
   // which has remote workers too; the overview's own worker entries add their files' progress
@@ -248,28 +239,29 @@ export function Overview() {
         <ul className="lcards gs" aria-label="Get started">
           <li className="lcard"><span className="ltile" aria-hidden="true"><Icon id="i-library" /></span>
             <div className="lmain"><div className="lname"><span className="ttl">Add your first library</span></div><span className="muted sm">The folder with your videos. Nothing is converted by looking.</span></div>
-            <div className="lside">{side(0, "/libraries/new", "Set up")}</div></li>
+            <div className="lside">{side(0, "/libraries/new", "Set up", nextStep(steps) === 0)}</div></li>
+          {/* step 2 is made by step 1 (Add library makes the workflow): no button of its own */}
           <li className="lcard"><span className="ltile" aria-hidden="true"><Icon id="i-workflow" /></span>
-            <div className="lmain"><div className="lname"><span className="ttl">Publish a workflow</span></div><span className="muted sm">"Shrink videos": HEVC, balanced quality, same resolution. A library needs one published.</span></div>
-            <div className="lside">{side(1, "/workflows", "Open workflows")}</div></li>
+            <div className="lmain"><div className="lname"><span className="ttl">A workflow is made for you</span></div><span className="muted sm">"Shrink videos": HEVC, balanced quality, same resolution. Change it any time.</span></div>
+            <div className="lside">{steps[1] ? <span className="pill ok">Done</span> : <span className="muted sm">after step 1</span>}</div></li>
           <li className="lcard"><span className="ltile" aria-hidden="true"><Icon id="i-worker" /></span>
             <div className="lmain"><div className="lname"><span className="ttl">Start the worker on this computer</span></div><span className="muted sm">Nothing converts until a worker is on.</span></div>
-            <div className="lside">{side(2, "/workers", "Open Workers")}</div></li>
+            <div className="lside">{side(2, "/workers", "Open Workers", nextStep(steps) === 2, 2)}</div></li>
         </ul></section>}
 
       {/* design busy-1 / failures-1: failed jobs first, each with its reason in red; the list is the newest three */}
-      {failedRows.length > 0 && <section className="sec" aria-labelledby="ov-f"><h2 id="ov-f">Needs attention <Link className="more" to="/jobs?tab=failed">Failed jobs</Link></h2>
+      {failedRows.length > 0 && <section className="sec" aria-labelledby="ov-f"><h2 id="ov-f">Needs attention {failed24 != null && <span className={"sm " + (failed24 > 0 ? "bad" : "muted")}>{count(failed24)} failed in 24 h</span>} <Link className="more" to="/jobs?tab=failed">Failed jobs</Link></h2>
         <ul className="lcards" aria-label="Failed jobs">
           {failedRows.map((j) => <li key={j.id} className="lcard">
             <span className="ltile codec" aria-hidden="true">{j.codec ?? ""}{j.resolution && <><br />{j.resolution}</>}</span>
             <div className="lmain">
               <div className="lname"><Link className="ttl" to={"/jobs?tab=failed&job=" + encodeURIComponent(j.jobId ?? j.id)} title={j.path}>{j.name}</Link><span className="lchev" aria-hidden="true">›</span></div>
-              <div className="chips"><span className="mchip">{j.library}</span>{libOf.get(String(j.libraryId))?.workflowName && <span className="mchip">{libOf.get(String(j.libraryId))!.workflowName}</span>}{j.newFileRefused && <span className="mchip">Original kept</span>}</div>
+              <div className="chips"><span className="mchip"><Icon id="i-folder" />{j.library}</span>{libOf.get(String(j.libraryId))?.workflowName && <span className="mchip"><Icon id="i-workflow" />{libOf.get(String(j.libraryId))!.workflowName}</span>}{j.newFileRefused && <span className="mchip">Original kept</span>}</div>
             </div>
             <div className="lside">
               <span className="sm" style={{ color: "var(--error-text)" }}>{j.reason?.message ?? "Failed"}</span>
               <span className="pill bad"><Icon id="i-alert" />Failed</span>
-              {j.finishedAt && <span className="lnote">{clock(j.finishedAt)}</span>}
+              {j.finishedAt && <span className="lnote">{dayClock(j.finishedAt)}</span>}
             </div>
           </li>)}
         </ul></section>}
@@ -284,7 +276,7 @@ export function Overview() {
                 <span className="ltile codec" aria-hidden="true">{rj?.codec ? <>{rj.codec}{rj.resolution && <><br />{rj.resolution}</>}</> : <Icon id="i-file" />}</span>
                 <div className="lmain">
                   <div className="lname"><Link className="ttl" to={"/jobs?tab=running&job=" + encodeURIComponent(a.jobId)}>{a.name}</Link><span className="lchev" aria-hidden="true">›</span></div>
-                  <div className="chips">{a.library && <span className="mchip">{a.library.name}</span>}{lib?.workflowName && <span className="mchip">{lib.workflowName}</span>}<span className="mchip">{w ?? "This computer"}</span></div>
+                  <div className="chips">{a.library && <span className="mchip"><Icon id="i-folder" />{a.library.name}</span>}{lib?.workflowName && <span className="mchip"><Icon id="i-workflow" />{lib.workflowName}</span>}<span className="mchip"><Icon id="i-worker" />{w ?? "This computer"}</span></div>
                   <div className="rfields">
                     <div className="rf"><span className="muted sm">Step</span><span className="rfv">{f.step}</span></div>
                     <div className="rf"><span className="muted sm">Speed</span><span className="rfv">{f.speed}</span></div>
@@ -313,7 +305,7 @@ export function Overview() {
                 <span className="ltile" aria-hidden="true"><Icon id="i-library" /></span>
                 <div className="lmain">
                   <div className="lname"><Link className="ttl" to={"/libraries/" + l.id}>{l.name}</Link><span className="lchev" aria-hidden="true">›</span></div>
-                  <div className="chips"><span className="mchip">{count(l.counts.waiting)} waiting</span><span className="mchip">{plural(files, "file", "files")}</span>{lib?.workflowName && <span className="mchip">{lib.workflowName}</span>}{lib && <span className="mchip">{lib.scan.lastScanAt ? "Scanned " + lastScan(lib.scan.lastScanAt) : "Not scanned yet"}</span>}{facts.map((f) => <span key={f} className="mchip">{f}</span>)}</div>
+                  <div className="chips"><span className="mchip">{count(l.counts.waiting)} waiting</span><span className="mchip">{plural(files, "file", "files")}</span>{lib?.workflowName && <span className="mchip"><Icon id="i-workflow" />{lib.workflowName}</span>}{lib && <span className="mchip">{lib.scan.lastScanAt ? "scanned " + lastScan(lib.scan.lastScanAt) : "not scanned yet"}</span>}{facts.map((f) => <span key={f} className="mchip">{f}</span>)}</div>
                 </div>
                 <div className="lside">
                   {l.saved > 0 ? <span className="saved nowrap"><b className="gain">{bytes(l.saved)}</b> saved</span> : <span className="sm nowrap">{l.waitingToFree > 0 ? bytes(l.waitingToFree) + " smaller" : "Nothing saved yet"}</span>}
@@ -343,7 +335,8 @@ export function Overview() {
       </section>
 
 
-      <section className="sec" aria-labelledby="ov-a"><Disc {...(phone ? { className: "lastdays" } : {})}>{phone ? <summary><h2 id="ov-a">Last 30 days</h2></summary> : <h2 id="ov-a">Last 30 days</h2>}
+      {/* the 30-day block is a closed disclosure at every width (design 1440 and 390) */}
+      <section className="sec" aria-labelledby="ov-a"><details className="lastdays"><summary><h2 id="ov-a">Last 30 days</h2><span className="muted sm">: space saved per day, files per day</span></summary>
         {rec.length < 2 ? <><p className="muted quiet short">Charts start after two days of conversions. So far: {count(h.filesConverted)} {h.filesConverted === 1 ? "file" : "files"} converted.</p>{hasAvg && <div className="chartfoot">{avgLine}</div>}</> : <>
           <div className="charts">
             {/* workshop 11-19: savedBytes and waitingBytes are dated by the day a conversion finished, freedBytes by the day an
@@ -367,7 +360,7 @@ export function Overview() {
           </div></>}
         {first && rec.length >= 2 && v.daily.length > 0 && first > v.daily[0].day && <p className="muted sm">Recorded from {dayName(first)}.</p>}
         {rec.length >= 2 && !(MOCK || /^(Etc\/)?UTC$/.test(v.timeZone)) && <p className="muted sm">Days run midnight to midnight, {v.timeZone.split("/").pop()!.replace(/_/g, " ")} time.</p>}
-      </Disc></section>
+      </details></section>
       </>}
     </div>
   );
