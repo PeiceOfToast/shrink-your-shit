@@ -136,10 +136,6 @@ export async function listWorkers(): Promise<Answer<WorkerV1[]>> {
   const r = await call<{ workers: WorkerV1[] }>("GET", "/api/workers");
   return failed(r) ? r : r.workers;
 }
-export async function startWorker(id: string): Promise<Answer<unknown>> {
-  if (MOCK) return (mock.startAll(), {});
-  return call("POST", "/api/workers/" + enc(id) + "/start");
-}
 
 // The server's folder beside a library with "Next to each library" (V5a, jobs.NextToLibrary): "<library folder> (shrunk)".
 export const shrunk = (path: string) => path.replace(/\/+$/, "") + " (shrunk)";

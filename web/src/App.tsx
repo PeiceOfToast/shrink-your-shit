@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { MOCK, SignedOut, failed } from "./api";
 import { getSettings } from "./libraryApi";
+import { openBeforeFirstRun } from "./firstRun";
 import { SignIn } from "./screens/SignIn";
 import sprite from "./icons.svg?raw";
 import { itemFor } from "./nav";
@@ -49,12 +50,11 @@ export function App() {
   useEffect(() => { document.title = title + " · Shrink Your Shit"; }, [title]);
   // Until the first run is done, every page goes to it (IA.md; parity G8), except sign-in and the About/Health pages. Upgrades from v1 have it done.
   // M5f fix 3: the Change links on the wizard's done cards open a library or a workflow page; those two pages are let through too.
-  const open = (p: string) => p === "/start" || p === "/signin" || p === "/settings/about" || p === "/settings/health" || /^\/(libraries|workflows)\/[^/]+$/.test(p);
   useEffect(() => {
-    if (MOCK || firstRunDone || open(path)) return;
+    if (MOCK || firstRunDone || openBeforeFirstRun(path)) return;
     Promise.all([getSettings(), getSetup()]).then(([r, s]) => { // a joined worker stays on its own page
       if (!failed(r) && r.firstRunDone) firstRunDone = true; // stop asking on every page once it is done
-      if (!failed(r) && !r.firstRunDone && !(!failed(s) && s.role === "worker" && (!s.join || s.join.state === "allowed")) && !open(location.pathname)) navigate("/start"); })
+      if (!failed(r) && !r.firstRunDone && !(!failed(s) && s.role === "worker" && (!s.join || s.join.state === "allowed")) && !openBeforeFirstRun(location.pathname)) navigate("/start"); })
       .catch((e) => { if (!(e instanceof SignedOut)) throw e; });
   }, [path]);
   if (joined && !settings && !start && !signin) return (

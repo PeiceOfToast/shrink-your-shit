@@ -188,7 +188,7 @@ function StepWorkflow({ kept, onDone }: { kept: Kept; onDone: () => void }) {
 function StepWorker({ libraryId }: { libraryId: string }) {
   const ws = useData(workersPage, []);
   const [error, setError] = useState(""), [busy, setBusy] = useState(false);
-  const w = ws.data?.items.find((x) => x.kind === "local") ?? ws.data?.items[0];
+  const w = ws.data?.items.find((x) => x.kind === "local"); // no local worker: nothing starts, the wizard still finishes
   const finish = async (start: boolean) => {
     setError(""); setBusy(true);
     try {
