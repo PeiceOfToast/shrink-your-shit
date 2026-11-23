@@ -789,8 +789,6 @@ func domainOpt(domain string) string {
 	return ",domain=" + domain
 }
 
-// manualMountCommand is the sudo mount for share sh at target, the same whether the target is the
-// app's own folder or a host folder that a container is given.
 // hostOwner is the owner of the host mount: this container's user as the Proxmox host numbers it. The container's
 // uid and gid map to other numbers there, and "syp" usually is not a user on the host. A map that cannot be read
 // gives placeholders and a line saying how to work them out.
@@ -828,6 +826,8 @@ func hostID(mapPath string, id int) (int, bool) {
 	return 0, false
 }
 
+// manualMountCommand is the sudo mount for share sh at target, the same whether the target is the
+// app's own folder or a host folder that a container is given.
 // owner is the uid=,gid= pair the files get: syp for the app's own mount, the host's numbers for a host mount.
 func manualMountCommand(sh jobs.Share, mntAddr, target, owner string) string {
 	if sh.Type == "smb" {
