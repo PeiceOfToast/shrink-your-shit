@@ -2,9 +2,13 @@
 // fields. No React here, so Node can test them.
 import type { Progress } from "./types/jobs";
 
-// "about 12 min" from seconds left; under a minute reads "under a minute"
+// "about 12 min" from seconds left; under a minute reads "under a minute". From 90 min up it reads in hours: "about 1.5 h"
+// (nearest half hour) under 10 h, "about 14 h" (whole hours) from 10 h.
 export function etaWords(s: number): string {
-  return s < 60 ? "under a minute" : "about " + Math.round(s / 60) + " min";
+  if (s < 60) return "under a minute";
+  if (s < 5400) return "about " + Math.round(s / 60) + " min";
+  if (s < 36000) { const h = Math.round(s / 1800) / 2; return "about " + (Number.isInteger(h) ? h : h.toFixed(1)) + " h"; }
+  return "about " + Math.round(s / 3600) + " h";
 }
 
 // The running card's five fields from the live progress. A value the worker has not sent reads "—", never a made-up one.

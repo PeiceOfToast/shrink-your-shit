@@ -132,7 +132,7 @@ export function Shell({ title, proto, children }: { title: string; proto: boolea
           <button className="btn icon ghost menubtn" type="button" aria-label="Open menu" aria-expanded={navOpen} onClick={(e) => (e.stopPropagation(), setNavOpen(!navOpen))}><Icon id="i-menu" /></button>
           <div className="crumb" aria-label="Breadcrumb"><span className="cur">{title}</span></div>
           <div className="sp" />
-          <button className="search" type="button" aria-label="Search or jump to" onClick={() => setPalette(true)}>
+          <button className="search" type="button" aria-label={`Search or jump to…${mac ? "⌘ K" : "Ctrl K"}`} aria-keyshortcuts={mac ? "Meta+K" : "Control+K"} onClick={() => setPalette(true)}>
             <Icon id="i-search" /><span className="txt">Search or jump to…</span><span className="k">{mac ? "⌘ K" : "Ctrl K"}</span>
           </button>
           {converting && <Link className="activity" to="/jobs?tab=running" aria-label={converting}><Icon id="i-play" /><span className="txt">{converting}</span></Link>}

@@ -15,7 +15,7 @@ import { getPublishedDoc, getWorkflow, listWorkflows as listWorkflowDocs } from 
 import { bytes, clock, count, duration, plural } from "../format";
 import { allShownSelected, doneShare, filterCounts, inFilter, keepShown, needsAttention, selectShown, type LibFilter } from "../libraryList";
 import { useData } from "../useData";
-import { closeMenuToSummary, menuEscape } from "../menuFocus";
+import { closeMenuToSummary, menuEscape, useCloseOnOutside } from "../menuFocus";
 import type { FirstFiles, FolderReport, LibraryItem } from "../types/v1";
 import type { Library, Variable } from "../types/v2";
 
@@ -92,6 +92,7 @@ export function Libraries() {
   useEffect(() => onLive((t) => { if (t === "library.changed") libs.reload(); }), []); // eslint-disable-line react-hooks/exhaustive-deps -- #150: at once
   const [sel, setSel] = useState<string[]>([]), [said, setSaid] = useState(flash.said), [q, setQ] = useState(""), [selecting, setSelecting] = useState(false), [filter, setFilter] = useState<LibFilter>("all");
   useEffect(() => { flash.said = ""; }, []);
+  const phoneMenu = useRef<HTMLDetailsElement>(null); useCloseOnOutside(phoneMenu);
   const all = libs.data ?? [], counts = filterCounts(all);
   const shownBy = (f: LibFilter, query: string) => all.filter((l) => inFilter(l, f) && (!query || (l.name + " " + l.paths.join(" ")).toLowerCase().includes(query.toLowerCase())));
   const items = shownBy(filter, q);
@@ -139,7 +140,7 @@ export function Libraries() {
         </div>
         {selecting && <label className="hit selall"><input type="checkbox" aria-label="Select all shown libraries" disabled={items.length === 0} checked={allShownSelected(items, sel)} onChange={(e) => setSel(selectShown(sel, items, e.target.checked))} /><span className="sm">All</span></label>}
         {selecting && <span className="desk">{actions}</span>}
-        {selecting && <details className="menu phone" onKeyDown={menuEscape}><summary className="btn sm icon ghost" aria-label="More actions"><Icon id="i-more" /></summary><div className="pop" role="menu" onClick={(e) => { if ((e.target as Element).closest("button")) closeMenuToSummary(e.currentTarget); }}>{actions}</div></details>}
+        {selecting && <details className="menu phone" ref={phoneMenu} onKeyDown={menuEscape}><summary className="btn sm icon ghost" aria-label="More actions"><Icon id="i-more" /></summary><div className="pop" role="menu" onClick={(e) => { if ((e.target as Element).closest("button")) closeMenuToSummary(e.currentTarget); }}>{actions}</div></details>}
         {picked.length > 0 && <span className="muted sm">{picked.length} selected</span>}
         <input className="input find" type="search" placeholder="Filter libraries" aria-label="Filter libraries" value={q} onChange={(e) => setQ(e.target.value)} />
       </div>}
@@ -182,7 +183,7 @@ function LibCard({ l, tag, selecting, checked, onToggle }: { l: Library; tag: st
       {selecting && <label className="hit lcheck"><input type="checkbox" aria-label={"Select " + l.name} checked={checked} onChange={(e) => onToggle(e.target.checked)} /></label>}
       <span className="ltile" aria-hidden="true"><Icon id="i-library" /></span>
       <div className="lmain">
-        <div className="lname"><Link className="ttl" to={"/libraries/" + l.id}>{l.name}</Link><span className="lchev" aria-hidden="true">›</span></div>
+        <div className="lname"><Link className="ttl" to={"/libraries/" + l.id} title={l.name}>{l.name}</Link><span className="lchev" aria-hidden="true">›</span></div>
         <div className="chips">
           <span className="mchip mono" title={l.paths.join(", ")}>{l.paths.join(", ")}</span>
           {noWf(l) ? <span className="mchip warnchip">No workflow · assign one to start it</span> : <Link className="mchip wf" to={"/workflows/" + l.workflowId} title={l.workflowName + (tag ? " · " + tag : "")}><Icon id="i-workflow" /><span className="cut">{l.workflowName}{tag && " · " + shortTag(tag)}</span></Link>}

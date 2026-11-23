@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { encoderChip, formatsChip, graphicsLine, systemLine, usageBars } from "./workerCards.ts";
+import { encoderChip, formatsChip, graphicsLine, systemLine, usageBars, workerBars } from "./workerCards.ts";
 
 test("graphicsLine: a named card with memory", () => {
   assert.equal(graphicsLine([{ model: "NVIDIA", vram: "8.0 GB" }]), "NVIDIA · 8.0 GB");
@@ -43,4 +43,21 @@ test("encoderChip: used first, works, and not found", () => {
 test("formatsChip: only formats that passed; empty when none", () => {
   assert.equal(formatsChip([["H.264", true], ["HEVC", true], ["AV1", false]]), "H.264 · HEVC");
   assert.equal(formatsChip([["H.264", false]]), "");
+});
+
+test("workerBars: a 0 with no listed card is no GPU reading, so no Graphics bar", () => {
+  assert.deepEqual(workerBars(30, [], [{ utilPercent: 0 }]), [{ label: "Processor", pct: 30 }]);
+});
+
+test("workerBars: a 0 on a listed card is a reading, so the bar shows", () => {
+  assert.deepEqual(workerBars(30, [{}], [{ utilPercent: 0 }]), [{ label: "Processor", pct: 30 }, { label: "Graphics card", pct: 0 }]);
+});
+
+test("workerBars: a number above 0 shows the bar with no card listed (M5a fix 1)", () => {
+  assert.deepEqual(workerBars(30, [], [{ utilPercent: 40 }]), [{ label: "Processor", pct: 30 }, { label: "Graphics card", pct: 40 }]);
+});
+
+test("workerBars: no number, no Graphics bar, even with a card listed", () => {
+  assert.deepEqual(workerBars(30, [{}], [{ utilPercent: null }]), [{ label: "Processor", pct: 30 }]);
+  assert.deepEqual(workerBars(30, [], []), [{ label: "Processor", pct: 30 }]);
 });

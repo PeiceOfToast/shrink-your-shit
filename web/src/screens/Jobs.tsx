@@ -20,7 +20,7 @@ import { useData } from "../useData";
 import { afterHeader, queuedLine } from "../jobResult";
 import type { Failure, JobAction, JobDetail, JobItem, JobProgressEvent, JobState, Probe, Tab, Pin } from "../types/jobs";
 import { stepLabel } from "../stepLabel";
-import { closeMenuToSummary, menuEscape } from "../menuFocus";
+import { closeMenuToSummary, menuEscape, useCloseOnOutside } from "../menuFocus";
 import { runFields, runningFor } from "../jobCards";
 import { keepShown } from "../libraryList";
 
@@ -106,6 +106,7 @@ function JobSkeleton() {
 
 export function Jobs() {
   const search = new URLSearchParams(useSearch());
+  const phoneMenu = useRef<HTMLDetailsElement>(null); useCloseOnOutside(phoneMenu);
   const tab = (TABS.find(([t]) => t === search.get("tab"))?.[0] ?? "waiting") as Tab, open = search.get("job"), library = search.get("libraryId") ?? "";
   // G5: ?kept=1 is Done-only (the server answers 400 on other tabs), so it reads as off on any other tab.
   // left (?left=1) is the same, and only one of the two is on at a time: the server answers 400 for both together
@@ -191,7 +192,7 @@ export function Jobs() {
         ? <>No worker is connected. <Link to="/workers">See Workers.</Link></>
         : <>No worker is running. <Link to="/workers">Turn workers on.</Link></>}</span></p>}
       {/* one library filter: the pressed button in the filter row says which library; the chip is only for an id the list lacks (so it can still be cleared) */}
-      {library && !libs.data?.some((l) => l.id === library) && <div className="row" style={{ gap: 6 }}><span className="mchip">Library: {library}
+      {library && libs.data && !libs.data.some((l) => l.id === library) && <div className="row" style={{ gap: 6 }}><span className="mchip">Library: {library}
         <button className="btn sm icon ghost" type="button" aria-label="Clear the library filter" onClick={() => navigate(query(tab, ""))}><Icon id="i-x" /></button></span></div>}
       {kept && <div className="row" style={{ gap: 6 }}><span className="mchip">{TRASH_WORDS}
         <button className="btn sm icon ghost" type="button" aria-label="Clear the original-in-the-trash filter" onClick={() => navigate(query(tab, library, ""))}><Icon id="i-x" /></button></span></div>}
@@ -203,7 +204,7 @@ export function Jobs() {
       {!firstRun && (selecting || sel.length > 0) && <div className="ltools" role="toolbar" aria-label="Jobs selection">
         <label className="hit selall"><input type="checkbox" aria-label="Select all files" checked={items.length > 0 && sel.length === items.length} onChange={(e) => setSel(e.target.checked ? items.map((j) => j.id) : [])} /><span className="sm">All</span></label>
         <span className="desk">{actions}</span>
-        {selecting && <details className="menu phone" onKeyDown={menuEscape}><summary className="btn sm icon ghost" aria-label="More actions"><Icon id="i-more" /></summary><div className="pop" role="menu" onClick={(e) => { if ((e.target as Element).closest("button")) closeMenuToSummary(e.currentTarget); }}>{actions}</div></details>}
+        {selecting && <details className="menu phone" ref={phoneMenu} onKeyDown={menuEscape}><summary className="btn sm icon ghost" aria-label="More actions"><Icon id="i-more" /></summary><div className="pop" role="menu" onClick={(e) => { if ((e.target as Element).closest("button")) closeMenuToSummary(e.currentTarget); }}>{actions}</div></details>}
         {picked.length > 0 && <span className="muted sm">{picked.length} selected</span>}
       </div>}
       {/* parity 11-19 #2 (G4): pick a library here too; it sets the same ?libraryId= as "See its jobs", and the chip above stays.
