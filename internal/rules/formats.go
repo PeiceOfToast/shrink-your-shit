@@ -28,6 +28,41 @@ var VideoFormats = map[string]VideoFormat{
 		"slower": {"-b:v", "0", "-deadline", "good", "-cpu-used", "1"}}},
 }
 
+// CardOffsets are the graphics encoders' quality offsets (F3): added to a card rung's quality value so it
+// gives about the picture the processor's CRF gives at the same slider position. Keyed by family, then by
+// slider position (1..5). They apply to the HEVC rung only. Only QSV is measured: hevc_qsv's
+// global_quality needed 1 to 2 lower than libx265's CRF for the same SSIM, on two 10 s 1080p cuts on
+// CT 124 (11-23; table in slices/f3-measurements.md). vaapi runs on the same Intel cards but with a fixed QP
+// (CQP), a different scale, so it is not given QSV's numbers. Every other family stays at 0 until it is
+// measured on real hardware.
+var CardOffsets = map[string]map[int]int{
+	"qsv":   {1: -2, 2: -2, 3: -1, 4: -1, 5: -1},
+	"nvenc": {1: 0, 2: 0, 3: 0, 4: 0, 5: 0},
+	"vaapi": {1: 0, 2: 0, 3: 0, 4: 0, 5: 0},
+	"amf":   {1: 0, 2: 0, 3: 0, 4: 0, 5: 0},
+}
+
+// CardOffset is the quality offset for a graphics family at a slider position; an unknown family or
+// position is 0.
+func CardOffset(family string, quality int) int {
+	return CardOffsets[family][quality]
+}
+
+// cardCRFFor is the non-zero offsets at a slider position, by family, for a plan to carry (nil when none,
+// so a plan without a measured offset encodes and fingerprints exactly as before).
+func cardCRFFor(quality int) map[string]int {
+	var out map[string]int
+	for fam := range CardOffsets {
+		if o := CardOffset(fam, quality); o != 0 {
+			if out == nil {
+				out = map[string]int{}
+			}
+			out[fam] = o
+		}
+	}
+	return out
+}
+
 // formatOrder is the order formats are offered in.
 var formatOrder = []string{"hevc", "h264", "av1", "vp9"}
 
