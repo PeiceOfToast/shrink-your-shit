@@ -18,3 +18,6 @@ export const whyHeading = (code: string, withFailure: boolean): string =>
 // so it is shown as it is rather than with the prefix doubled.
 export const stoppedTitle = (message: string): string =>
   /^stopped by/i.test(message) ? message : "Stopped by its workflow: " + message;
+
+// A done job's New file line ("hevc 1280x720 25.000 fps 8-bit, 0 audio, …") as the Video row's value: the codec in capitals, then the rest up to the first comma.
+export const newFileVideo = (line: string): string => line.split(",")[0].replace(/^\w+/, (w) => w.toUpperCase());

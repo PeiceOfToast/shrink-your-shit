@@ -1,7 +1,7 @@
 // The drawer's wording (dev: `npm test`, Node 22.6+ with --experimental-strip-types).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { afterHeader, queuedLine, stoppedTitle, whyHeading } from "./jobResult.ts";
+import { afterHeader, newFileVideo, queuedLine, stoppedTitle, whyHeading } from "./jobResult.ts";
 
 test("a kept job's Result column says the new file was not kept", () => {
   assert.equal(afterHeader(true), "New file (not kept)");
@@ -35,4 +35,8 @@ test("any other failure stays 'Why it failed' (or 'Why' without a failure block)
   assert.equal(whyHeading("ffmpeg_error", true), "Why it failed");
   assert.equal(whyHeading("", true), "Why it failed");
   assert.equal(whyHeading("ffmpeg_error", false), "Why");
+});
+
+test("newFileVideo: the codec in capitals, then the size, fps and bit depth, without the audio and length", () => {
+  assert.equal(newFileVideo("hevc 1280x720 25.000 fps 8-bit, 0 audio, 0 subtitles, 0:00:20"), "HEVC 1280x720 25.000 fps 8-bit");
 });

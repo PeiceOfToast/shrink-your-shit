@@ -18,7 +18,7 @@ import { Empty, LoadFailed, PageHead } from "../PageHead";
 import { Link, navigate, useSearch } from "../router";
 import { listWorkers, noWorker } from "../workersApi";
 import { useData } from "../useData";
-import { afterHeader, queuedLine } from "../jobResult";
+import { afterHeader, newFileVideo, queuedLine } from "../jobResult";
 import type { Failure, JobAction, JobDetail, JobItem, JobProgressEvent, JobState, Probe, Tab, Pin } from "../types/jobs";
 import { stepLabel } from "../stepLabel";
 import { closeMenuToSummary, menuEscape, useCloseOnOutside } from "../menuFocus";
@@ -609,6 +609,18 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
   // M5d: a job opened by a bare ?job= link has no row in the page it loaded. Its row is looked up in the list tab for
   // its state (from the detail), so the saving line, the Size row and the failure reason show. The first page first.
   const dState = d.data?.state;
+  // M5d fix 1: the list behind a bare ?job= link shows the job's own tab, and the URL says so (replace: no Back step).
+  // Only when the state is known and the drawer opened without its row; a tab the user picks afterwards stays.
+  const search = useSearch();
+  useEffect(() => {
+    const t = tabForState(dState);
+    if (row || !t) return;
+    const s = new URLSearchParams(search);
+    if (s.get("tab") === t) return;
+    s.set("tab", t);
+    if (t !== "completed") { s.delete("kept"); s.delete("left"); }
+    navigate("/jobs?" + s.toString(), true);
+  }, [dState, !!row]); // eslint-disable-line react-hooks/exhaustive-deps
   const more = useData(async () => {
     const t = tabForState(dState);
     if (row || !t) return null;
@@ -664,6 +676,9 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
   const showResult = !!(before || after || subsRow || lenRow), lenText = (x?: { durationSec?: number }) => (x?.durationSec != null ? elapsed(x.durationSec) : "—");
   const found = (log.data?.steps ?? []).filter((st) => (st.found?.length ?? 0) > 0);
   const kept0 = !!state && keptOrig({ state, reason: j?.reason ?? own?.reason, newFileRefused: j?.newFileRefused ?? own?.newFileRefused });
+  // A done job's New file line (the check's codec, size and fps) reads in the Video row, as the design has it: "HEVC 1280x720 25.000 fps 8-bit"
+  const newFile = readFound(found.flatMap((st) => st.found!)).rows.find(([k]) => k === "New file")?.[1];
+  const videoNew = state === "completed" && newFile ? newFileVideo(newFile) : after?.video ?? "—";
   // U10: the header's size delta, the list row's wording; a failed or skipped job has none, nor a restored original.
   // M5d: the design's line is the percentage big and green, the sizes muted beside it (done 1).
   const delta = state === "completed" && own?.originalState !== "restored" && own?.beforeBytes && own.afterBytes != null ? { pct: Math.round((100 * (own.beforeBytes - own.afterBytes)) / own.beforeBytes), sizes: bytes(own.beforeBytes) + " → " + bytes(own.afterBytes) } : null;
@@ -723,15 +738,15 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
         </section>
           {j?.removed && j.reason?.code === "removed" ? <div className="note"><Icon id="i-info" /><div>Its library was removed, so this file won't be converted.</div></div>
             : j?.failure ? <WhyFailed id={id} msg={reason} code={j.reason?.code ?? ""} worker={j.worker ?? null} f={j.failure} found={found.flatMap((st) => st.found!)} />
-            : found.length ? <CheckFound lines={found.flatMap((st) => st.found!)} reason={reason} code={j?.reason?.code ?? ""} />
+            : found.length ? (state === "completed" ? null : <CheckFound lines={found.flatMap((st) => st.found!)} reason={reason} code={j?.reason?.code ?? ""} />)
             : reason && <section><h3>{whyHeading(j?.reason?.code ?? "", false)}</h3><p>{reason}</p>{skip && rule && <p className="sm">The rule is <a className="linkbtn" href={"/workflows/" + encodeURIComponent(rule.id)} onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); navigate("/workflows/" + encodeURIComponent(rule.id)); }}}>{rule.name}</a>.</p>}</section>}
           {back && kept && <div role="alertdialog" aria-label="Get the original back?" style={{ padding: 12, border: "1px solid var(--border-strong)", borderRadius: "var(--radius)", background: "var(--raised)" }}
             onKeyDown={(e) => e.key === "Escape" && (e.stopPropagation(), closeBack())}>
             <p style={{ margin: "0 0 8px" }}><strong>Get the original of “{name}” back?</strong> The original ({bytes(kept.originalBytes)}) goes back in place and the smaller version{kept.newPath && kept.newPath.split(/[\\/]/).pop() !== name ? ", " + kept.newPath.split(/[\\/]/).pop() + "," : ""} is deleted. This file won't be converted again unless you press Convert again.</p>
             <div className="row"><button className="btn primary" type="button" autoFocus onClick={getBack}>Get original back</button><button className="btn ghost" type="button" onClick={closeBack}>Cancel</button></div></div>}
           {/* #148: before is the original; null for an older job that replaced a file of the same name: said so, never blank */}
-          {showResult && <section id="job-result"><h3>{state === "completed" ? "What the check found" : "Result"}</h3><table className="tbl kvt"><thead><tr><th><span className="sr-only">Measure</span></th><th>{state === "completed" ? "Original" : "Before"}</th><th>{afterHeader(kept0)}</th></tr></thead><tbody>
-            <tr><th>Video</th>{before ? <td>{before.video}</td> : <td rowSpan={4 + (subsRow ? 1 : 0) + (lenRow ? 1 : 0)} className="muted">Not recorded for this job</td>}<td>{after?.video ?? "—"}</td></tr>
+          {showResult && <section id="job-result"><h3>{state === "completed" ? "What the check found" : "Result"}</h3><table className="tbl kvt"><thead><tr><th><span className="sr-only">Measure</span></th><th>{state === "completed" ? "Original" : "Before"}</th><th>{kept0 ? afterHeader(kept0) : "New file"}</th></tr></thead><tbody>
+            <tr><th>Video</th>{before ? <td>{before.video}</td> : <td rowSpan={4 + (subsRow ? 1 : 0) + (lenRow ? 1 : 0)} className="muted">Not recorded for this job</td>}<td>{videoNew}</td></tr>
             <tr><th>Audio</th>{before && <td>{before.audio}</td>}<td>{after?.audio ?? "—"}</td></tr>
             <tr><th>Bitrate</th>{before && <td>{before.bitrate}</td>}<td>{after?.bitrate ?? "—"}</td></tr>
             <tr><th>Size</th>{before && <td>{before.size}</td>}<td>{after?.size ?? "—"}</td></tr>{subsRow && <tr><th>Subtitles</th>{before && <td>{sumS?.before?.subtitles ?? "—"}</td>}<td>{sumS?.after?.subtitles ?? "—"}</td></tr>}{lenRow && <tr><th>Length</th>{before && <td>{lenText(sumS?.before)}</td>}<td>{lenText(sumS?.after)}</td></tr>}</tbody></table></section>}
