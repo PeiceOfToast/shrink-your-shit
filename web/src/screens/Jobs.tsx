@@ -596,7 +596,7 @@ const fmtV = (p: Probe | null | undefined) => {
 function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; onClose: () => void; onChanged: () => void }) {
   const scan = id.startsWith("skip-"); // a file a scan left out: no job behind it, only its row (key() opens a job when there is one)
   const d = useData(() => (scan ? Promise.resolve(null as unknown as JobDetail) : getJob(id)), [id]);
-  const [said, setSaid] = useState(""), box = useRef<HTMLElement>(null);
+  const [said, setSaid] = useState(""), box = useRef<HTMLDivElement>(null);
   useEffect(() => onLive((type, data) => { if (type === "job.state" && (data as { jobId?: string })?.jobId === id) d.reload(); }), [id]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     box.current?.focus();
@@ -669,7 +669,7 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
   const delta = state === "completed" && own?.originalState !== "restored" && own?.beforeBytes && own.afterBytes != null ? { pct: Math.round((100 * (own.beforeBytes - own.afterBytes)) / own.beforeBytes), sizes: bytes(own.beforeBytes) + " → " + bytes(own.afterBytes) } : null;
   return (
     <div className="drawer-wrap" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <aside className="drawer jobd" ref={box} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="jd-h">
+      <div className="drawer jobd" ref={box} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="jd-h">
         <div className={"hd" + (state === "failed" && !kept0 ? " failed" : "")}>
           <button className="btn icon ghost" type="button" aria-label="Close" onClick={onClose}><Icon id="i-chev-l" /></button>
           {own && <span className="ltile codec">{tileOf(own)}</span>}
@@ -730,7 +730,7 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
             <p style={{ margin: "0 0 8px" }}><strong>Get the original of “{name}” back?</strong> The original ({bytes(kept.originalBytes)}) goes back in place and the smaller version{kept.newPath && kept.newPath.split(/[\\/]/).pop() !== name ? ", " + kept.newPath.split(/[\\/]/).pop() + "," : ""} is deleted. This file won't be converted again unless you press Convert again.</p>
             <div className="row"><button className="btn primary" type="button" autoFocus onClick={getBack}>Get original back</button><button className="btn ghost" type="button" onClick={closeBack}>Cancel</button></div></div>}
           {/* #148: before is the original; null for an older job that replaced a file of the same name: said so, never blank */}
-          {showResult && <section id="job-result"><h3>{state === "completed" ? "What the check found" : "Result"}</h3><table className="tbl kvt"><thead><tr><th /><th>{state === "completed" ? "Original" : "Before"}</th><th>{afterHeader(kept0)}</th></tr></thead><tbody>
+          {showResult && <section id="job-result"><h3>{state === "completed" ? "What the check found" : "Result"}</h3><table className="tbl kvt"><thead><tr><th><span className="sr-only">Measure</span></th><th>{state === "completed" ? "Original" : "Before"}</th><th>{afterHeader(kept0)}</th></tr></thead><tbody>
             <tr><th>Video</th>{before ? <td>{before.video}</td> : <td rowSpan={4 + (subsRow ? 1 : 0) + (lenRow ? 1 : 0)} className="muted">Not recorded for this job</td>}<td>{after?.video ?? "—"}</td></tr>
             <tr><th>Audio</th>{before && <td>{before.audio}</td>}<td>{after?.audio ?? "—"}</td></tr>
             <tr><th>Bitrate</th>{before && <td>{before.bitrate}</td>}<td>{after?.bitrate ?? "—"}</td></tr>
@@ -748,7 +748,7 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
           {/* a done job's .srt files saved beside the new file: one line, then each name; no field, no line */}
           {state === "completed" && !!j?.subtitleFiles?.length && <section><h3>Subtitles saved as files</h3>{j.subtitleFiles.map((n) => <div key={n} style={{ overflowWrap: "anywhere" }}><code>{n}</code></div>)}</section>}
         </div>
-      </aside>
+      </div>
     </div>
   );
 }
