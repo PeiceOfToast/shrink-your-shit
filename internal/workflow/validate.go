@@ -762,6 +762,16 @@ func summary(n Node) string {
 		if b := strOf(c, "maxBitrate", "none"); b != "none" {
 			parts = append(parts, strings.ToUpper(b[:1])+b[1:]+" bitrate limit")
 		}
+		// W7/F4 (design-direction-w7-f4-convert): only the non-default choices are named; Automatic and Try another way add nothing
+		if boolOf(c, "removeBlackBars", false) {
+			parts = append(parts, "removes black bars")
+		}
+		switch strOf(c, "hardware", "auto") {
+		case "only":
+			parts = append(parts, "graphics card only")
+		case "cpu":
+			parts = append(parts, "processor only")
+		}
 		return strings.Join(parts, " · ")
 	case TypeAudio:
 		words := rules.AudioWords[strOf(c, "audio", "stereo_aac")]
