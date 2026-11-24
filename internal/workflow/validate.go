@@ -16,11 +16,12 @@ import (
 // Result is a Doc checked: its issues, whether the stack can show it without loss, each node's
 // summary in plain words, and what the editor may do with each step's place and each step type.
 type Result struct {
-	Issues        []Issue              `json:"issues"`
-	Stackable     bool                 `json:"stackable"`
-	StepSummaries map[string]string    `json:"stepSummaries"`
-	StepPlaces    map[string]StepPlace `json:"stepPlaces"` // one entry per node in the doc
-	AddSteps      map[string]AddStep   `json:"addSteps"`   // one entry per type in Definitions()
+	Issues        []Issue                      `json:"issues"`
+	Stackable     bool                         `json:"stackable"`
+	StepSummaries map[string]string            `json:"stepSummaries"`
+	FileOn        map[string]map[string]string `json:"fileOn"`     // node id -> output port -> the file's state there, by the step's place (fileOnFor)
+	StepPlaces    map[string]StepPlace         `json:"stepPlaces"` // one entry per node in the doc
+	AddSteps      map[string]AddStep           `json:"addSteps"`   // one entry per type in Definitions()
 }
 
 // StepPlace is what the editor may do with a step's place. W11 sends it; W10 (the step editor) makes
@@ -258,7 +259,7 @@ func Validate(d Doc) Result {
 // workflow may name a file it does not have yet. Under the install's policy (FB2b), a card it forbids
 // is an error naming the switch, so the draft is kept but can't be published until the switch is on.
 func ValidateWith(d Doc, s Scopes) Result {
-	r := Result{Issues: []Issue{}, StepSummaries: map[string]string{}, StepPlaces: map[string]StepPlace{}, AddSteps: map[string]AddStep{}}
+	r := Result{Issues: []Issue{}, StepSummaries: map[string]string{}, FileOn: map[string]map[string]string{}, StepPlaces: map[string]StepPlace{}, AddSteps: map[string]AddStep{}}
 	add := func(i Issue) {
 		if i.Severity == "" {
 			i.Severity = "error"
@@ -303,6 +304,7 @@ func ValidateWith(d Doc, s Scopes) Result {
 	}
 	byID := map[string]Node{}
 	triggers := 0
+	afterSave := afterSaveNodes(d)
 	for _, n := range d.Nodes {
 		if n.ID == "" || byID[n.ID].ID != "" {
 			add(Issue{Code: "duplicate_id", NodeID: n.ID, Message: "Two steps have the same id."})
@@ -310,6 +312,7 @@ func ValidateWith(d Doc, s Scopes) Result {
 		}
 		byID[n.ID] = n
 		r.StepPlaces[n.ID] = stepPlace(n)
+		r.FileOn[n.ID] = fileOnFor(defs[n.Type], afterSave[n.ID])
 		def, ok := defs[n.Type]
 		if !ok {
 			add(Issue{Code: "unknown_node_type", NodeID: n.ID, Message: fmt.Sprintf("%q is not a step this version has.", n.Type)})
