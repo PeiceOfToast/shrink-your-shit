@@ -781,6 +781,9 @@ func summary(n Node) string {
 		if boolOf(c, "onlyMyLanguages", true) {
 			words += ", in your languages"
 		}
+		if boolOf(c, "evenLoudness", false) && strOf(c, "audio", "stereo_aac") != "as_is" {
+			words += " · even loudness"
+		}
 		return words
 	case TypeSubtitles:
 		return map[string]string{"keep_all": "Keep all", "my_languages": "Only my languages", "text_only": "Text only", "srt": "As SRT files"}[strOf(c, "subtitles", "keep_all")]
