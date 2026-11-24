@@ -436,7 +436,7 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
 // Its options open under the row; on phones as a full-screen sheet with a back button (M5).
 // W11: every row between Library files and Save the result can move and be deleted; the first and last steps have no menu.
 type DragEv = { button?: number; pointerId: number; pointerType?: string; clientX: number; clientY: number; currentTarget: HTMLElement; preventDefault: () => void };
-type Move = { up: boolean; down: boolean; del: boolean; act: (w: "up" | "down" | "del") => void; grip?: { label: string; lifted: boolean; onKey: (e: { key: string; preventDefault: () => void }) => void; drag: { down: (e: DragEv) => void; move: (e: DragEv) => void; up: () => void; cancel: () => void } } };
+type Move = { up: boolean; down: boolean; del: boolean; act: (w: "up" | "down" | "del") => void; grip?: { label: string; lifted: boolean; onKey: (e: { key: string; preventDefault: () => void }) => void; drag: { down: (e: DragEv) => void; cancel: () => void } } };
 // FB1d: a question's row says what its No does: one of the ends, or another path the graph shows. FB4b: "hand to
 // another workflow" is an end with a setting, so the row shows the workflow picker under it (node: that end).
 type ElseKind = "leave" | "fail" | "goto" | "other" | "none";
@@ -469,7 +469,7 @@ function Step({ n, i, mv, open, toggle, update, issues, otherwise, inline, graph
   return (
     <li className={"srow" + (open ? " open" : "") + (mv.grip?.lifted ? " lifted" : "")} data-sid={n.id} aria-labelledby={n.id + "-name"}>
       <div className="sline">
-        {!end && !inline && mv.grip && <button id={n.id + "-grip"} className="btn icon ghost grip" type="button" aria-label={mv.grip.label} aria-describedby="order-help" data-lifted={mv.grip.lifted ? "" : undefined} onKeyDown={mv.grip.onKey} onClick={(e) => e.stopPropagation()} onPointerDown={mv.grip.drag.down} onPointerMove={mv.grip.drag.move} onPointerUp={mv.grip.drag.up} onPointerCancel={mv.grip.drag.cancel}><Icon id="i-grip" /></button>}
+        {!end && !inline && mv.grip && <button id={n.id + "-grip"} className="btn icon ghost grip" type="button" aria-label={mv.grip.label} aria-describedby="order-help" data-lifted={mv.grip.lifted ? "" : undefined} onKeyDown={mv.grip.onKey} onClick={(e) => e.stopPropagation()} onPointerDown={mv.grip.drag.down} onPointerCancel={mv.grip.drag.cancel}><Icon id="i-grip" /></button>}
         <span className="stepn">{i + 1}</span><span className="sic"><Icon id={ICON[def.icon] ?? "i-box"} /></span>
         <div className="sp" title={(n.name ?? def.name) + ": " + summary(n)}><span className="snm" id={n.id + "-name"}>{n.name ?? def.name}</span> <span className="ssum">{summary(n)}</span></div>
         {mine.length > 0 && <span className="pill bad"><Icon id="i-alert" />{mine.length === 1 ? "1 problem" : mine.length + " problems"}</span>}
@@ -874,17 +874,28 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
       e.preventDefault(); if (lift?.id !== nid) pick(nid);
       try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* the page still follows the release */ }
     },
-    move: (e: DragEv) => {
+    cancel: () => { press.cancel(); if (lift) cancel(); },
+  });
+  // while a step is lifted, its moves and release are read on the window: moving the row drops the handle's pointer capture,
+  // so the handle can miss the release and the step stayed lifted (#707). The handle keeps the press and the cancel.
+  const dragNow = useRef({ move: (_e: { clientX: number; clientY: number }) => {}, up: () => {} });
+  dragNow.current = {
+    move: (e) => {
       if (press.move(e.clientX, e.clientY)) return;
-      if (lift?.id !== nid) return;
-      const li = e.currentTarget.closest("li"), prev = li?.previousElementSibling as HTMLElement | null, next = li?.nextElementSibling as HTMLElement | null;
+      if (!lift) return;
+      const nid = lift.id, li = document.getElementById(nid + "-grip")?.closest("li") ?? null;
+      const prev = li?.previousElementSibling as HTMLElement | null, next = li?.nextElementSibling as HTMLElement | null;
       const k = placeOf(lift.doc, nid);
       if (prev?.dataset.sid && k - 1 >= 1 && e.clientY < prev.getBoundingClientRect().top + prev.offsetHeight / 2) nudge(-1);
       else if (next?.dataset.sid && k + 1 <= movableEnd(lift.doc) && e.clientY > next.getBoundingClientRect().top + next.offsetHeight / 2) nudge(1);
     },
     up: () => { if (press.up()) return; if (lift) drop(); },
-    cancel: () => { press.cancel(); if (lift) cancel(); },
-  });
+  };
+  useEffect(() => {
+    const move = (e: PointerEvent) => dragNow.current.move(e), up = () => dragNow.current.up();
+    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+    return () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+  }, []);
   // a refused order: the check's one not_runnable_yet issue, on the step that's out of place. After a move, drop or delete
   // its sentence goes in the status bar once (Undo move takes that step back); the row keeps the problem pill until the order runs
   const refusals = live.issues.filter((i) => i.code === "not_runnable_yet"), refusal = orderAt === hist.at ? refusals[0] : undefined;
