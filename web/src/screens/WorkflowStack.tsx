@@ -1,7 +1,7 @@
 // V3b Stack view (spec 5.7; DESIGN/v2 SCREENS V3, mockups/workflow-stack.html and -readonly.html) on the real /api/v2
 // (#109: step definitions, the draft, validate, publish), or the mock with ?mock=1 (mock/steps.ts mirrors V1). The step
-// words and problems come from the server's validate, asked again shortly after each change. Not here: drag to reorder
-// (W11's handle, behind a flag) and the graph's keyboard moves, Test run (V5), History, Export, Open graph (V4).
+// words and problems come from the server's validate, asked again shortly after each change. The handle moves a step by
+// pointer or keys (W11). Not here: the graph's keyboard moves, Test run (V5), History, Export, Open graph (V4).
 import { Component, Fragment, createContext, useContext, useEffect, useRef, useState, type FormEvent, type ReactNode, type RefObject } from "react";
 import { Icon } from "../Icon";
 import { GC_CHOICES, gcLabel } from "../gcLabel";
@@ -430,7 +430,8 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
 // One row of the step list (clean pass W1): number, icon, name and summary, the switch or "Always on", the chevron.
 // Its options open under the row; on phones as a full-screen sheet with a back button (M5).
 // W11: every row between Library files and Save the result can move and be deleted; the first and last steps have no menu.
-type Move = { up: boolean; down: boolean; del: boolean; act: (w: "up" | "down" | "del") => void };
+type DragEv = { button?: number; pointerId: number; clientY: number; currentTarget: HTMLElement; preventDefault: () => void };
+type Move = { up: boolean; down: boolean; del: boolean; act: (w: "up" | "down" | "del") => void; grip?: { label: string; lifted: boolean; onKey: (e: { key: string; preventDefault: () => void }) => void; drag: { down: (e: DragEv) => void; move: (e: DragEv) => void; up: () => void; cancel: () => void } } };
 // FB1d: a question's row says what its No does: one of the ends, or another path the graph shows. FB4b: "hand to
 // another workflow" is an end with a setting, so the row shows the workflow picker under it (node: that end).
 type ElseKind = "leave" | "fail" | "goto" | "other" | "none";
@@ -459,8 +460,9 @@ function Step({ n, i, mv, open, toggle, update, issues, otherwise, inline, graph
   const errSaved = def.fileOn?.error === "saved" && (def.outputs ?? []).some((o) => o.name === "error");
   const end = n.type === "input.library" ? "first" : n.type === "output.commit" ? "last" : undefined, nm = n.name ?? def.name;
   return (
-    <li className={"srow" + (open ? " open" : "")} aria-labelledby={n.id + "-name"}>
+    <li className={"srow" + (open ? " open" : "") + (mv.grip?.lifted ? " lifted" : "")} data-sid={n.id} aria-labelledby={n.id + "-name"}>
       <div className="sline">
+        {!end && !inline && mv.grip && <button id={n.id + "-grip"} className="btn icon ghost grip" type="button" aria-label={mv.grip.label} aria-describedby="order-help" data-lifted={mv.grip.lifted ? "" : undefined} onKeyDown={mv.grip.onKey} onClick={(e) => e.stopPropagation()} onPointerDown={mv.grip.drag.down} onPointerMove={mv.grip.drag.move} onPointerUp={mv.grip.drag.up} onPointerCancel={mv.grip.drag.cancel}><Icon id="i-grip" /></button>}
         <span className="stepn">{i + 1}</span><span className="sic"><Icon id={ICON[def.icon] ?? "i-box"} /></span>
         <div className="sp" title={(n.name ?? def.name) + ": " + summary(n)}><span className="snm" id={n.id + "-name"}>{n.name ?? def.name}</span> <span className="ssum">{summary(n)}</span></div>
         {mine.length > 0 && <span className="pill bad"><Icon id="i-alert" />{mine.length === 1 ? "1 problem" : mine.length + " problems"}</span>}
@@ -716,7 +718,9 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
   // the workflow's own variables the server refused on the last save (W4a): shown on their rows until the next edit
   const [refused, setRefused] = useState<ValidationIssue[]>([]);
   // W11 list side: the delete bar (Undo, 8 s), the add-step menu, and the button that opened it (focus goes back there)
-  const [gone, setGone] = useState<{ text: string; at: number } | null>(null), [hold, setHold] = useState(false), [addOpen, setAddOpen] = useState(false);
+  const [gone, setGone] = useState<{ text: string; at: number; undo?: string } | null>(null), [hold, setHold] = useState(false), [addOpen, setAddOpen] = useState(false);
+  // the step a handle has lifted (its order is a copy until the drop), and the history step the last move, drop or delete made
+  const [lift, setLift] = useState<{ id: ID; doc: WorkflowDoc } | null>(null), [orderAt, setOrderAt] = useState<number | null>(null);
   const opener = useRef<HTMLElement | null>(null);
   const doc = hist.docs[hist.at], dirty = doc !== saved;
   const all = useData(listLibraries, []), libs = (all.data ?? []).filter((l) => l.flowId === id).map((l) => l.path);
@@ -791,17 +795,86 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
   useEffect(() => { if (!gone || hold) return; const t = setTimeout(() => setGone(null), 8000); return () => clearTimeout(t); }, [gone, hold]);
   const moveStep = (nid: ID, dir: -1 | 1) => {
     const d = moveNode(doc, nid, dir), now = order(d), k = now.findIndex((x) => x.id === nid);
-    edit(d); setSaid(`Moved ${nameOf(now[k])} to step ${k + 1} of ${now.length}.`);
+    edit(d); setOrderAt(hist.at + 1); setSaid(`Moved ${nameOf(now[k])} to step ${k + 1} of ${now.length}.`);
   };
   const deleteStep = (nid: ID) => {
     const before = order(doc), i = before.findIndex((x) => x.id === nid), prev = before[i - 1], nxt = before[i + 1], gone0 = before[i];
-    edit(deleteNode(doc, nid));
+    edit(deleteNode(doc, nid)); setOrderAt(hist.at + 1);
     setGone({ text: prev && nxt ? `Deleted ${nameOf(gone0)}. ${nameOf(prev)} now goes straight to ${nameOf(nxt)}.` : `Deleted ${nameOf(gone0)}.`, at: hist.at + 1 });
     // focus goes to the next row's More button, or the previous row's when it was the last (never the input or the save row)
     const to = [nxt, prev].find((x) => x && x.type !== "input.library" && x.type !== "output.commit");
     if (to) requestAnimationFrame(() => document.getElementById(to.id + "-more")?.focus());
   };
-  const undoGone = () => { if (gone) setHist({ ...hist, at: gone.at - 1 }); setGone(null); };
+  // W11 keyboard moves on the handle: Space or Enter picks the step up, the arrows move it on a copy of the document,
+  // Space or Enter drops it (one history step, then the check answers), Escape or Tab puts it back; Home and End go to the limits
+  const movableEnd = (d: WorkflowDoc) => { const l = order(d); return l.length - 1 - (l[l.length - 1]?.type === "output.commit" ? 1 : 0); };
+  const placeOf = (d: WorkflowDoc, nid: ID) => order(d).findIndex((x) => x.id === nid);
+  const focusGrip = (nid: ID) => requestAnimationFrame(() => document.getElementById(nid + "-grip")?.focus());
+  const pick = (nid: ID) => { setLift({ id: nid, doc }); const l = order(doc), k = placeOf(doc, nid); setSaid(`${nameOf(l[k])}, picked up. Step ${k + 1} of ${l.length}.`); };
+  const stepWord = (d: WorkflowDoc, nid: ID) => { const l = order(d), k = placeOf(d, nid); return `Step ${k + 1} of ${l.length}, after ${nameOf(l[k - 1])}.`; };
+  const nudge = (dir: -1 | 1) => {
+    if (!lift) return;
+    const cur = lift.doc, k = placeOf(cur, lift.id), l = order(cur);
+    if (k + dir < 1 || k + dir > movableEnd(cur)) { // at a limit: say so, and don't move
+      return setSaid(dir < 0 ? `${nameOf(l[k])} can't go higher. ${nameOf(l[0])} is always first.` : `${nameOf(l[k])} can't go lower. ${nameOf(l[movableEnd(cur) + 1])} is always last.`);
+    }
+    const d2 = moveNode(cur, lift.id, dir);
+    setLift({ id: lift.id, doc: d2 }); setSaid(stepWord(d2, lift.id));
+  };
+  const jump = (dir: -1 | 1) => {
+    if (!lift) return;
+    let d = lift.doc;
+    for (;;) { const k = placeOf(d, lift.id); if (k + dir < 1 || k + dir > movableEnd(d)) break; d = moveNode(d, lift.id, dir); }
+    setLift({ id: lift.id, doc: d }); setSaid(stepWord(d, lift.id));
+  };
+  const drop = () => {
+    if (!lift) return;
+    const { id, doc: d } = lift; setLift(null);
+    const l = order(d), k = placeOf(d, id);
+    if (d !== doc) { edit(d); setOrderAt(hist.at + 1); }
+    setSaid(`${nameOf(l[k])} moved to step ${k + 1} of ${l.length}.`); focusGrip(id);
+  };
+  const cancel = () => {
+    if (!lift) return;
+    const id = lift.id; setLift(null);
+    const l = order(doc), k = placeOf(doc, id); setSaid(`Move cancelled. ${nameOf(l[k])} is step ${k + 1} of ${l.length}.`); focusGrip(id);
+  };
+  const gripKey = (nid: ID) => (e: { key: string; preventDefault: () => void }) => {
+    if (lift?.id !== nid) { if (e.key === " " || e.key === "Enter") { e.preventDefault(); pick(nid); } return; }
+    if (e.key === "ArrowUp" || e.key === "ArrowDown") { e.preventDefault(); nudge(e.key === "ArrowUp" ? -1 : 1); }
+    else if (e.key === "Home" || e.key === "End") { e.preventDefault(); jump(e.key === "Home" ? -1 : 1); }
+    else if (e.key === " " || e.key === "Enter") { e.preventDefault(); drop(); }
+    else if (e.key === "Escape") { e.preventDefault(); cancel(); }
+    else if (e.key === "Tab") cancel();
+  };
+  // pointer drag on the handle: the press picks the step up, each pointer move crossing a neighbour's middle moves it one place
+  // (the same copy and limits as the keys), and the release drops it; a cancelled press puts it back
+  const dragFrom = (nid: ID) => ({
+    down: (e: DragEv) => {
+      if (e.button !== undefined && e.button !== 0) return;
+      e.preventDefault(); if (lift?.id !== nid) pick(nid);
+      try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* the page still follows the release */ }
+    },
+    move: (e: DragEv) => {
+      if (lift?.id !== nid) return;
+      const li = e.currentTarget.closest("li"), prev = li?.previousElementSibling as HTMLElement | null, next = li?.nextElementSibling as HTMLElement | null;
+      const k = placeOf(lift.doc, nid);
+      if (prev?.dataset.sid && k - 1 >= 1 && e.clientY < prev.getBoundingClientRect().top + prev.offsetHeight / 2) nudge(-1);
+      else if (next?.dataset.sid && k + 1 <= movableEnd(lift.doc) && e.clientY > next.getBoundingClientRect().top + next.offsetHeight / 2) nudge(1);
+    },
+    up: () => { if (lift) drop(); },
+    cancel: () => { if (lift) cancel(); },
+  });
+  // a refused order: the check's one not_runnable_yet issue, on the step that's out of place. After a move, drop or delete
+  // its sentence goes in the status bar once (Undo move takes that step back); the row keeps the problem pill until the order runs
+  const refusals = live.issues.filter((i) => i.code === "not_runnable_yet"), refusal = orderAt === hist.at ? refusals[0] : undefined;
+  // the server's sentence without its own draft note (that's said once, here): "…add it. It's saved as a draft until it can."
+  const refusalText = (m: string) => { const parts = m.split(/(?<=\.)\s+/), cut = (parts.length > 1 ? parts.slice(0, -1).join(" ") : m).replace(/\.?$/, "."); return `${cut} It's saved as a draft until it can.`; };
+  useEffect(() => {
+    if (!refusal) return setGone((g) => (g?.undo === "Undo move" ? null : g));
+    setGone({ text: refusalText(refusal.message), at: hist.at, undo: "Undo move" });
+  }, [refusal?.message, hist.at]); // eslint-disable-line react-hooks/exhaustive-deps
+  const undoGone = () => { if (gone) setHist({ ...hist, at: gone.at - 1 }); setGone(null); setSaid("Undone."); };
   const endDef = defs.find((x) => x.type === "flow.end"), failDef = defs.find((x) => x.type === "flow.fail"), gotoDef = defs.find((x) => x.type === "flow.goto");
   // ui-shop review #579: a hand-over's picked workflow is remembered through a switch of Otherwise and back, so an
   // accidental change doesn't empty the picker (the end step is rebuilt from its defaults by setOtherwise)
@@ -868,7 +941,9 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
     <button className="btn sm" type="button" disabled={!dirty} onClick={save}><Icon id="i-save" />Save draft</button>
   </>;
   const canStack = live.stackable;
-  const list = order(doc), total = list.length, tailOut = list[total - 1]?.type === "output.commit", lastMovable = total - 1 - (tailOut ? 1 : 0), only = total <= 1;
+  const view = lift ? lift.doc : doc; // a lifted step's order is the copy being moved; the rest of the page reads the saved draft
+  const rowIssues = [...issues, ...refusals.filter((r) => !issues.includes(r))];
+  const list = order(view), total = list.length, tailOut = list[total - 1]?.type === "output.commit", lastMovable = total - 1 - (tailOut ? 1 : 0), only = total <= 1;
   // FB3 (flow-builder.md 4.3): the simple view is this list filtered to the cards that shape the one conversion (the
   // steps that convert, check and save), each with its form on the page; the questions and actions before them and
   // the steps after the save fold into one line each, which opens the steps view. Same document, same checks.
@@ -939,21 +1014,23 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
             <button className="btn sm" type="button" onClick={startShrink}>Start from Shrink videos</button></div>
         </div></div>}
         {simple && <p className="muted simplenote">The steps that convert, check and save. {before.length + after.length > 0 ? "The rest of this workflow is folded; the steps view has everything." : "Questions, notes and what happens after the save go in the steps view."}</p>}
+        {!simple && <p id="order-help" className="sr">Press Space or Enter on a step's handle to pick it up. Up and down arrows move it, Enter drops it, Escape puts it back.</p>}
         <ol className="steps">{simple && fold(before, "before converting")}{shown.map((n) => {
           const i = list.indexOf(n);
           // moves stay inside the first and last steps (the server's order rules are its answer on the check, not copied here)
           const mv: Move = { up: !simple && i > 1 && i <= lastMovable, down: !simple && i >= 1 && i < lastMovable, del: !simple && i >= 1 && i <= lastMovable, // the simple view shows no place badge or menu: moving and deleting live in the steps view (ui-shop review #543)
-            act: (w) => (w === "del" ? deleteStep(n.id) : moveStep(n.id, w === "up" ? -1 : 1)) };
+            act: (w) => (w === "del" ? deleteStep(n.id) : moveStep(n.id, w === "up" ? -1 : 1)),
+            grip: simple ? undefined : { label: `Move ${nameOf(n)}, step ${i + 1} of ${total}`, lifted: lift?.id === n.id, onKey: gripKey(n.id), drag: dragFrom(n.id) } };
           const ow = isQuestion(n) ? otherwiseOf(doc, n) : undefined;
           const otherwise: Else | undefined = ow ? { kind: ow.kind, set: (k) => setElse(n, k), node: ow.node, update, check: beforeSave(doc, n, defs.find((d) => d.type === n.type)) } : undefined;
-          return <Step key={n.id} n={n} i={i} mv={mv} open={open === n.id} toggle={() => setOpen(open === n.id ? null : n.id)} update={update} issues={issues} otherwise={otherwise} inline={simple} graphHref={`/workflows/${id}/graph?node=${encodeURIComponent(n.id)}`} />;
+          return <Step key={n.id} n={n} i={i} mv={mv} open={open === n.id} toggle={() => setOpen(open === n.id ? null : n.id)} update={update} issues={rowIssues} otherwise={otherwise} inline={simple} graphHref={`/workflows/${id}/graph?node=${encodeURIComponent(n.id)}`} />;
         })}{simple && fold(after, "after the file is saved")}</ol>
         {!only && !simple && <button className="btn sm ghost" type="button" onClick={openAdd}><Icon id="i-plus" />Add step</button>}
         {addOpen && <AddStepMenu wf={id} doc={doc} defs={defs} adds={live.addSteps} onAdd={addStep} onClose={closeAdd} />}
         {/* one status region, always mounted: a delete fills its text, so screen readers announce it */}
         <p className="sr" role="status" aria-live="polite">{gone && hist.at === gone.at ? gone.text : ""}</p>
         {gone && hist.at === gone.at && <div className="note" onPointerEnter={() => setHold(true)} onPointerLeave={() => setHold(false)} onFocus={() => setHold(true)} onBlur={() => setHold(false)}>
-          <Icon id="i-undo" /><span className="sp">{gone.text}</span><button className="btn sm ghost" type="button" onClick={undoGone}>Undo</button></div>}
+          <Icon id="i-undo" /><span className="sp">{gone.text}</span><button className="btn sm ghost" type="button" onClick={undoGone}>{gone.undo ?? "Undo"}</button></div>}
       </> : <ReadOnly doc={doc} id={id} />}
       </div></div>
     </div>

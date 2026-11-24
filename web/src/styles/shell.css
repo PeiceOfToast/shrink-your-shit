@@ -577,6 +577,8 @@ label.chk{cursor:pointer}
 .sline>.pill{flex:none}
 .sic{color:var(--text-2);display:inline-flex}
 .srow.open>.sline{background:var(--raised)}
+.grip{cursor:grab;touch-action:none}
+.srow.lifted{box-shadow:0 0 0 2px var(--accent)}
 .sopts{padding:var(--pad);background:var(--raised);border-top:1px solid var(--border)}
 .sopts .hint a{display:inline-block;min-height:24px;line-height:24px} /* #694: the link is a tap target, 24 px tall at 390 */
 .chev-sp{width:36px;flex:none}
