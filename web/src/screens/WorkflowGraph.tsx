@@ -117,7 +117,7 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
   const seen = useRef(doc);
   useEffect(() => {
     if (doc === seen.current) return; seen.current = doc;
-    const t = setTimeout(async () => { const r = await act(validateDoc(id, doc), setSaid); if (r) setChecked((c) => ({ ...r, fileOn: c.fileOn })); }, 300);
+    const t = setTimeout(async () => { const r = await act(validateDoc(id, doc), setSaid); if (r) setChecked((c) => ({ ...r, fileOn: r.fileOn ?? c.fileOn })); }, 300);
     return () => clearTimeout(t);
   }, [doc]); // eslint-disable-line react-hooks/exhaustive-deps
   const now = useRef({ dirty, doc, layout, etag }); now.current = { dirty, doc, layout, etag };
