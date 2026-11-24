@@ -136,6 +136,19 @@ func ids(d Doc) []string {
 	return out
 }
 
+// Even out loudness names itself in the Audio summary; As it is copies every track, so it names nothing (P3).
+func TestAudioSummaryEvenLoudness(t *testing.T) {
+	d := roundTrip(t, Preset())
+	d.Nodes[3].Config["evenLoudness"] = true
+	if s := Validate(d).StepSummaries[d.Nodes[3].ID]; !strings.HasSuffix(s, " · even loudness") {
+		t.Errorf("on: %q", s)
+	}
+	d.Nodes[3].Config["audio"] = "as_is"
+	if s := Validate(d).StepSummaries[d.Nodes[3].ID]; strings.Contains(s, "even loudness") {
+		t.Errorf("as it is: %q", s)
+	}
+}
+
 // The preset's default Save the result, next to each library, runs (V5a); so do the other choices.
 func TestPresetDefaults(t *testing.T) {
 	d := roundTrip(t, Preset())
