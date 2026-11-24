@@ -9,11 +9,14 @@ export const formatEdit = (c: Record<string, unknown>, k: string, v: unknown): {
   if (drop10) x.bitDepth = undefined;
   if (rc.endsWith("_legacy") && k !== "rateControl") x.rateControl = fmt === "av1" || k === "quality" ? "quality" : "level";
   if (k !== "quality" && k !== "kind" && c.kind !== "selectors") x.kind = "selectors"; // a custom edit turns the slider off
-  const next = String(x.rateControl ?? rc);
-  if (fmt === "av1" && next !== "quality") {
-    x.rateControl = "quality";
-    return { x, said: k === "format" ? "Switched to Quality only: AV1 can't use a bitrate. Your bitrate settings are kept if you switch back." : "" };
-  }
+  let next = k === "rateControl" ? String(v) : String(x.rateControl ?? rc);
+  const av1 = fmt === "av1" && next !== "quality";
+  if (av1) { x.rateControl = "quality"; next = "quality"; }
+  // Quality only has no bitrate cap. A cap left in the draft is refused on Publish, and the card says nothing about it, so it goes too.
+  const toQuality = k === "rateControl" ? next === "quality" : k === "format" && fmt === "av1";
+  const cap = String(c.maxBitrate ?? "none");
+  if (toQuality && cap !== "none" && cap !== "") x.maxBitrate = "none";
+  if (av1) return { x, said: k === "format" ? "Switched to Quality only: AV1 can't use a bitrate." : "" };
   if (k === "format") return { x, said: drop10 ? "Bit depth set to Keep as is: " + (fmt === "h264" ? "H.264" : "VP9") + " can't make 10-bit." : "" };
   return { x };
 };
