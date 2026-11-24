@@ -168,7 +168,7 @@ function Control({ id, name, s, value, set, wf, off, describe }: { id: string; n
       </div><Hint text={hintFor(s, value)} />{name === "subtitles" && value === "srt" && <SrtFiles />}{typeof s.description === "string" && <span className="hint">{s.description}</span>}</fieldset>);
   }
   if (s.enum)
-    return <div className="field"><label htmlFor={fid}>{title}</label><select id={fid} className="input" value={String(value)} onChange={(e) => set(labels(s).find((o) => String(o[0]) === e.target.value)?.[0])}>
+    return <div className="field"><label htmlFor={fid}>{title}</label><select id={fid} className="input" value={String(value)} aria-describedby={describe} onChange={(e) => set(labels(s).find((o) => String(o[0]) === e.target.value)?.[0])}>
       {labels(s).map(([v, l]) => <option key={String(v)} value={String(v)}>{l}</option>)}</select><Hint text={hintFor(s, value)} />{name === "subtitles" && value === "srt" && <SrtFiles />}{typeof s.description === "string" && <span className="hint">{s.description}</span>}</div>;
   // a list of choices (V6a check: "Video format is one of"): a checkbox per choice
   const items = s.items as JSONSchema | undefined;
