@@ -1883,9 +1883,14 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			exp.MainVideo = m
 			changed = true
 		}
-		if n := checkedFrames(exp.VideoPackets, stats, haveReport, vfr); n != exp.VideoPackets {
-			// The report decoded exactly, so it is the count the new file is checked against (a VFR original's
-			// duration × rate guess is not; without a report its frame check is skipped).
+		var srcRate float64
+		if v := src.Video(); v != nil {
+			srcRate = v.FrameRate
+		}
+		if n := checkedFrames(exp.VideoPackets, stats, haveReport, vfr, plan.Video.MaxFPS, srcRate); n != exp.VideoPackets {
+			// The report decoded exactly, so it is the count the new file is checked against, at the output rate when
+			// the frame-rate limit lowered it (a VFR original's duration × rate guess is not; without a report, or with
+			// a limit and a VFR original, its frame check is skipped).
 			exp.VideoPackets = n
 			changed = true
 		}

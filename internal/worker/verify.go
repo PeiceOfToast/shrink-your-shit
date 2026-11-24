@@ -855,8 +855,17 @@ func nominalFrameRate(src media.Info) float64 {
 // checkedFrames is the main video frame count the new file is checked against (slice 13). The encode's own
 // report decoded exactly, so it is the count when there is one; a VFR original's duration × rate guess is
 // not, so without a report its frame check is skipped (0) rather than judge the new file against it.
-func checkedFrames(guess int64, st media.StreamStats, haveReport, vfr bool) int64 {
+// With a frame-rate limit (maxFPS > 0) the new file has the original's frames at the lower rate, so the count is the
+// report's decoded count scaled to that rate (srcRate is the original's rate). A VFR original or an unknown rate has
+// no such count, and is skipped, as it is without a report.
+func checkedFrames(guess int64, st media.StreamStats, haveReport, vfr bool, maxFPS int, srcRate float64) int64 {
+	if maxFPS > 0 && (vfr || srcRate <= 0) {
+		return 0
+	}
 	if haveReport && st.Frames > 0 {
+		if maxFPS > 0 {
+			return int64(math.Round(float64(st.Frames) * float64(maxFPS) / srcRate))
+		}
 		return st.Frames
 	}
 	if vfr {
