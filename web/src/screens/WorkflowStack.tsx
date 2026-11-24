@@ -320,7 +320,7 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
         {/* Picture and Graphics card sit below More options, the same in both modes. They write with set, not put: put would switch the step to custom settings. A default is saved as absent. */}
         <fieldset className="field choice" style={{ marginTop: 12 }}><legend className="lab">Picture</legend>
           <div className="grid cols2">
-            <div className={bad("maxFrameRate").length ? "fieldbad" : undefined} data-field="maxFrameRate" aria-invalid={bad("maxFrameRate").length ? true : undefined}>
+            {props.maxFrameRate && <div className={bad("maxFrameRate").length ? "fieldbad" : undefined} data-field="maxFrameRate" aria-invalid={bad("maxFrameRate").length ? true : undefined}>
               <div className="field"><label htmlFor={n.id + "-fps"}>Frame rate</label>
                 <select id={n.id + "-fps"} className="input" value={String(c.maxFrameRate ?? "keep")} aria-describedby={n.id + "-fps-h"} onChange={(e) => set("maxFrameRate", e.target.value === "keep" ? undefined : e.target.value)}>
                   {labels(fpsSchema).map(([v, l]) => <option key={String(v)} value={String(v)}>{l}</option>)}
@@ -328,8 +328,8 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
                 <span className="hint" id={n.id + "-fps-h"}>{fpsSchema.description as string}</span>
                 {bad("maxFrameRate").map((i, x) => <span key={x} className="hint" role="alert" style={{ color: "var(--error-text)" }}>{i.message}</span>)}
               </div>
-            </div>
-            <div className={bad("bitDepth").length ? "fieldbad" : undefined} data-field="bitDepth" aria-invalid={bad("bitDepth").length ? true : undefined}>
+            </div>}
+            {props.bitDepth && <div className={bad("bitDepth").length ? "fieldbad" : undefined} data-field="bitDepth" aria-invalid={bad("bitDepth").length ? true : undefined}>
               <fieldset className="field choice" aria-describedby={bdDescribed || undefined}><legend className="lab">Bit depth</legend>
                 <div className="seg radios bitdepth">
                   {labels(bdSchema).map(([v, l]) => { const val = String(v), off = val === "10" && no10; return (
@@ -340,7 +340,7 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
                 {bd === "8" && <span className="hint" id={n.id + "-bd-8"} style={{ display: "block" }}>HDR videos stay 10-bit.</span>}
               </fieldset>
               {bad("bitDepth").map((i, x) => <span key={x} className="hint" role="alert" style={{ color: "var(--error-text)" }}>{i.message}</span>)}
-            </div>
+            </div>}
             <div style={{ gridColumn: "1 / -1" }} className={bad("removeBlackBars").length ? "fieldbad" : undefined} data-field="removeBlackBars">
               <div className="field"><label className="row nw" htmlFor={n.id + "-bars"}><input id={n.id + "-bars"} type="checkbox" role="switch" className="switch" checked={c.removeBlackBars === true} aria-describedby={n.id + "-bars-1 " + n.id + "-bars-2"} aria-invalid={bad("removeBlackBars").length ? true : undefined} onChange={(e) => set("removeBlackBars", e.target.checked || undefined)} /><span>Remove black bars</span></label>
               <span className="hint" id={n.id + "-bars-1"} style={{ display: "block" }}>Cuts the black bars above and below (or beside) the picture, when samples from the whole video agree where they are. If they don't, the video is left as it is and the Log says why.</span>
