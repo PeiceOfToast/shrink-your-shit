@@ -325,10 +325,11 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
         <fieldset className="field choice" style={{ marginTop: 12 }}><legend className="lab">Picture</legend>
           <div className="grid cols2">
             <div style={{ gridColumn: "1 / -1" }} className={bad("removeBlackBars").length ? "fieldbad" : undefined} data-field="removeBlackBars">
-              <label className="row nw" htmlFor={n.id + "-bars"}><input id={n.id + "-bars"} type="checkbox" role="switch" className="switch" checked={c.removeBlackBars === true} aria-describedby={n.id + "-bars-1 " + n.id + "-bars-2"} onChange={(e) => set("removeBlackBars", e.target.checked || undefined)} /><span>Remove black bars</span></label>
+              <div className="field"><label className="row nw" htmlFor={n.id + "-bars"}><input id={n.id + "-bars"} type="checkbox" role="switch" className="switch" checked={c.removeBlackBars === true} aria-describedby={n.id + "-bars-1 " + n.id + "-bars-2"} onChange={(e) => set("removeBlackBars", e.target.checked || undefined)} /><span>Remove black bars</span></label>
               <span className="hint" id={n.id + "-bars-1"} style={{ display: "block" }}>Cuts the black bars above and below (or beside) the picture, when samples from the whole video agree where they are. If they don't, the video is left as it is and the Log says why.</span>
               <span className="hint" id={n.id + "-bars-2"} style={{ display: "block" }}>Not yet on remote workers: they leave the bars and say so in the Log.</span>
               {bad("removeBlackBars").map((i, x) => <span key={x} className="hint" role="alert" style={{ color: "var(--error-text)" }}>{i.message}</span>)}
+              </div>
             </div>
           </div>
         </fieldset>
