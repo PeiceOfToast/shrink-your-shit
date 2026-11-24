@@ -338,8 +338,11 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
               {/* one segmented row at 1440 with the chosen hint under it; at 390 stacked rows with each hint under its label (hwchoice CSS in shell.css) */}
               <div className="seg radios hwseg">
                 {GC_CHOICES.map(([v, l, h]) => (
-                  <label key={v} className={String(c.hardware ?? "auto") === v ? "on" : undefined}><input type="radio" name={n.id + "-hw"} checked={String(c.hardware ?? "auto") === v} onChange={() => set("hardware", v === "auto" ? undefined : v)} />
-                    <span>{l}</span><span className="hint hwopt">{h}</span></label>))}
+                  <Fragment key={v}>
+                    <label className={String(c.hardware ?? "auto") === v ? "on" : undefined}><input type="radio" name={n.id + "-hw"} checked={String(c.hardware ?? "auto") === v} aria-describedby={n.id + "-hwo-" + v} onChange={() => set("hardware", v === "auto" ? undefined : v)} />
+                      <span>{l}</span></label>
+                    <span className="hint hwopt" id={n.id + "-hwo-" + v}>{h}</span>
+                  </Fragment>))}
               </div>
               <span className="hint hwchosen" id={n.id + "-hwh"}>{GC_CHOICES.find((x) => x[0] === String(c.hardware ?? "auto"))?.[2]}</span>
               {bad("hardware").map((i, x) => <span key={x} className="hint" role="alert" style={{ color: "var(--error-text)" }}>{i.message}</span>)}
