@@ -269,6 +269,9 @@ func Definitions() []StepDefinition {
 				"cpuQuality": map[string]any{"type": "integer", "minimum": 0, "maximum": 5, "default": 0, "title": "Quality on the processor",
 					"description": "The processor and the graphics card can give different results at the same Quality. Pick a position here to set the processor's own."},
 				// F4: the black bars are cut only when a sample of the file agrees on them; off, the picture is kept as it is.
+				// The bit depth: keep is the source's own, as before. The design's words (brief addendum 18:58Z); the
+				// card shows the HDR note itself.
+				"bitDepth": withDefault(enum([]any{"keep", "8", "10"}, []string{"Keep as is", "8-bit", "10-bit"}), "keep", "Bit depth", "segmented"),
 				"removeBlackBars": typedRef(map[string]any{"type": "boolean", "default": false, "title": "Remove black bars",
 					"description": "Cuts the black bars around the picture when a sample of the file agrees on where they are. Off: the picture is left as it is."}),
 			}, []string{"quality", "format", "resolution", "maxBitrate", "speed"})}),

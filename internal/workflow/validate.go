@@ -753,6 +753,9 @@ func summary(n Node) string {
 			size = "at most " + r + "p"
 		}
 		parts := []string{name, quality, size}
+		if d := strOf(c, "bitDepth", "keep"); d == "8" || d == "10" { // a non-default depth is named; keep adds nothing
+			parts = append(parts, d+"-bit")
+		}
 		if b := strOf(c, "maxBitrate", "none"); b != "none" {
 			parts = append(parts, strings.ToUpper(b[:1])+b[1:]+" bitrate limit")
 		}
