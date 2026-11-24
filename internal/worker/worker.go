@@ -1761,6 +1761,9 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	if note := vbrAverageNote(plan.Video); note != "" {
 		w.jobf(job.ID, ": %s", note)
 	}
+	if plan.FrameRateNote != "" { // FB5b: the frame-rate limit did not apply, and the job says why
+		w.jobf(job.ID, ": %s", plan.FrameRateNote)
+	}
 	setLive(job.ID, LiveJob{Worker: w.ID, Started: w.now(), ConvertingTo: convertingTo(plan, src, gpu), Encoder: encoderWordsUsed(plan, gpu),
 		Decoder: decoderWords(src, full), Progress: media.Progress{ETASeconds: -1}})
 	defer dropLive(job.ID)

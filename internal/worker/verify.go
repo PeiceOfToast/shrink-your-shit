@@ -253,7 +253,7 @@ func (w *Worker) verify(ctx context.Context, src media.Info, exp rules.Expect, s
 		w.jobf(id, ": Comparing picture quality with the original.")
 	}
 	compareStart := w.now()
-	err = w.ssimCheck(ctx, src, out, srcPath, tmp, exp.MinSSIM, exp.LeadInSec, exp.Crop)
+	err = w.ssimCheck(ctx, src, out, srcPath, tmp, exp.MinSSIM, exp.LeadInSec, exp.Crop, exp.OutputFPS)
 	if id != 0 {
 		w.jobf(id, ": Compared in %s.", waitWords(w.now().Sub(compareStart)))
 	}
@@ -482,7 +482,7 @@ var ssimRe = regexp.MustCompile(`SSIM\b.*\bAll:([0-9.]+)`)
 // ssimCheck compares the picture of the original and the new file at up to three places, using
 // ffmpeg's built-in SSIM measure (1.0 = identical). It needs ffmpeg's ssim filter; without it the
 // check cannot run, and then the original is kept.
-func (w *Worker) ssimCheck(ctx context.Context, src, out media.Info, srcPath, tmp string, planSSIM, leadIn float64, crop *rules.CropRect) error {
+func (w *Worker) ssimCheck(ctx context.Context, src, out media.Info, srcPath, tmp string, planSSIM, leadIn float64, crop *rules.CropRect, outFPS int) error {
 	sv, ov := src.MainVideoOrdinal(), out.MainVideoOrdinal()
 	if sv < 0 || ov < 0 {
 		return keptDiffers("there is no video to compare")
@@ -526,7 +526,7 @@ func (w *Worker) ssimCheck(ctx context.Context, src, out media.Info, srcPath, tm
 		var bestFrames []frameScore // the best alignment's frames: the worst of them are the job log's evidence
 		passed := nudges[0]
 		for _, nudge := range nudges {
-			s, frames, err := score(ctx, srcPath, tmp, sv, ov, seg, srcStart, oMain.StartTime+nudge, scaleTo(sMain, oMain, crop))
+			s, frames, err := score(ctx, srcPath, tmp, sv, ov, seg, srcStart, oMain.StartTime+nudge, scaleTo(sMain, oMain, crop, outFPS))
 			if err != nil {
 				return err
 			}
@@ -665,7 +665,7 @@ const seekMargin = 12.0
 // scaleTo is the filter that takes the original's picture to the new file's: the black-bar crop the encode made
 // (F4, first, so the scale works from the cut picture), then a scale when a flow scaled it down (selectors'
 // resolution), so the comparison pairs pictures of one size: "" when there is neither.
-func scaleTo(src, out *media.Stream, crop *rules.CropRect) string {
+func scaleTo(src, out *media.Stream, crop *rules.CropRect, outFPS int) string {
 	if src == nil {
 		return ""
 	}
@@ -673,10 +673,13 @@ func scaleTo(src, out *media.Stream, crop *rules.CropRect) string {
 	if crop != nil {
 		chain, w, h = ","+crop.Filter(), crop.W, crop.H
 	}
-	if out == nil || out.Width <= 0 || out.Height <= 0 || (w == out.Width && h == out.Height) {
-		return chain
+	if out != nil && out.Width > 0 && out.Height > 0 && (w != out.Width || h != out.Height) {
+		chain += fmt.Sprintf(",scale=%d:%d", out.Width, out.Height)
 	}
-	return chain + fmt.Sprintf(",scale=%d:%d", out.Width, out.Height)
+	if outFPS > 0 { // FB5b: the original at the new file's frame rate, so the frames pair in time
+		chain += fmt.Sprintf(",fps=%d", outFPS)
+	}
+	return chain
 }
 
 // ssimSegment compares seg (in seconds from the start of the video) of the original's video stream
