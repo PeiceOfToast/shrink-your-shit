@@ -15,8 +15,8 @@ import (
 
 // The Convert step's hardware choice on a remote worker (W7 round 2): the worker must honour it, not only the server.
 const (
-	noEncoderWords  = "Hardware only: no graphics encoder took this file, and this step never uses the processor. Your original was not touched."
-	onlyFailedWords = "Hardware only: the graphics encoder failed, and this step never uses the processor. Your original was not touched."
+	noEncoderWords  = "Graphics card only: no graphics encoder took this file, and this step never uses the processor. Your original was not touched."
+	onlyFailedWords = "Graphics card only: the graphics encoder failed, and this step never uses the processor. Your original was not touched."
 	failFailedWords = "The graphics encoder failed, and this step is set to fail rather than convert on the processor. Your original was not touched."
 )
 
@@ -49,7 +49,7 @@ func TestRemoteCPUOnlyNeverUsesTheCard(t *testing.T) {
 	if len(x.calls) != 1 || !slices.Contains(x.calls[0], "libx264") || slices.Contains(x.calls[0], "h264_qsv") {
 		t.Errorf("ffmpeg calls %v: want the processor alone", x.calls)
 	}
-	if !slices.ContainsFunc(notes, func(s string) bool { return strings.Contains(s, "CPU only, as the Convert step says") }) {
+	if !slices.ContainsFunc(notes, func(s string) bool { return strings.Contains(s, "Processor only, as the Convert step says") }) {
 		t.Errorf("notes %q: want the CPU-only line", notes)
 	}
 }

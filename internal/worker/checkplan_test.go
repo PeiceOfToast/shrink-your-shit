@@ -96,7 +96,7 @@ func TestACheckThatStopsTheJobIsTheOnlyStep(t *testing.T) {
 			return "", "this computer's card can't make that bit depth"
 		}
 		w.RunOne(context.Background())
-		if j := s.job(); j.Status != jobs.Failed || !strings.Contains(j.Error, "Hardware only: no graphics encoder took this file") {
+		if j := s.job(); j.Status != jobs.Failed || !strings.Contains(j.Error, "Graphics card only: no graphics encoder took this file") {
 			t.Fatalf("status %s, error %q", j.Status, j.Error)
 		}
 		s.wantOnlyTheFailedCheck(t, "no graphics encoder")

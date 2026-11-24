@@ -58,7 +58,7 @@ func (w *Worker) checkPlan(ctx context.Context, job jobs.Job, plan rules.Plan, s
 		if enc.noSlots {
 			words = HardwareOnlySlotsWords
 		}
-		return refuse(failed(words, errors.New("no graphics encoder for this file")))
+		return refuse(failedWithCode(jobs.ReasonHardwareChoice, words, errors.New("no graphics encoder for this file")))
 	}
 	// 2. The free space beside the original, where the new file is made (or, in Folder mode, staged).
 	if err := w.preflight(srcPath, size); err != nil {
@@ -111,7 +111,7 @@ func (w *Worker) encoderFor(ctx context.Context, job jobs.Job, plan rules.Plan, 
 	w.setPhase(secEncode)                                      // the encoder choice and its notes belong to encode (log-spec section 4)
 	cpuOnly := plan.Video.Hardware == "cpu" && w.remote == nil // the Convert step says never the graphics card
 	if cpuOnly {
-		run.why = "CPU only, as the Convert step says"
+		run.why = "Processor only, as the Convert step says"
 	}
 	if w.remote != nil || w.Encoder == nil || cpuOnly {
 		return run, nil
@@ -135,7 +135,7 @@ func (w *Worker) encoderFor(ctx context.Context, job jobs.Job, plan rules.Plan, 
 	case err == nil && paused && (plan.Video.Hardware == "only" || plan.Video.HardwareFail == "fail"):
 		// The Convert step does not let the processor take this file: the card is only temporarily out, so wait for it
 		w.jobf(job.ID, ": %s is paused until %s after three failures in a row; this step waits for it and never converts on the processor", want, until.Local().Format("15:04"))
-		return run, retryable(failed(HardwarePausedWords, errors.New(want+" is paused after three failures in a row")), retryPaused)
+		return run, retryable(failedWithCode(jobs.ReasonHardwareChoice, HardwarePausedWords, errors.New(want+" is paused after three failures in a row")), retryPaused)
 	case err == nil && paused:
 		w.jobf(job.ID, ": %s is paused until %s after three failures in a row; using the processor", want, until.Local().Format("15:04"))
 		run.why = want + " is paused after three failures in a row"

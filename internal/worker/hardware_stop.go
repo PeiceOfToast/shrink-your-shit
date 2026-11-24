@@ -12,10 +12,10 @@ import (
 // The words a job fails with when the Convert step's hardware choice stops it. They are plain, and the job is not
 // retried. Local and remote workers say the same thing.
 const (
-	HardwareOnlyNoEncoderWords = "Hardware only: no graphics encoder took this file, and this step never uses the processor. Your original was not touched."
-	HardwareOnlyFailedWords    = "Hardware only: the graphics encoder failed, and this step never uses the processor. Your original was not touched."
+	HardwareOnlyNoEncoderWords = "Graphics card only: no graphics encoder took this file, and this step never uses the processor. Your original was not touched."
+	HardwareOnlyFailedWords    = "Graphics card only: the graphics encoder failed, and this step never uses the processor. Your original was not touched."
 	HardwareFailFailedWords    = "The graphics encoder failed, and this step is set to fail rather than convert on the processor. Your original was not touched."
-	HardwareOnlySlotsWords     = "Hardware only: the graphics slots are set to 0, so no graphics encoder may run, and this step never uses the processor. Your original was not touched."
+	HardwareOnlySlotsWords     = "Graphics card only: the graphics slots are set to 0, so no graphics encoder may run, and this step never uses the processor. Your original was not touched."
 	HardwarePausedWords        = "The graphics encoder is paused after three failures in a row. This step does not convert on the processor while it is paused, so the job waits and tries again. If it still can't, press Retry once the card is back. Your original was not touched."
 )
 
