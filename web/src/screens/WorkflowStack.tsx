@@ -14,6 +14,7 @@ import { Link, navigate, onLeave } from "../router";
 import { Browse } from "../FolderPicker";
 import { OwnVars, VarInput, builtinsOf, takesVars, varListFor, varProblems, withOwn } from "../VarInput";
 import { refProblem } from "../refFit";
+import { formatEdit } from "../convertFormat";
 import "../styles/variables.css";
 import { getSettings, listLibraries, shrunk } from "../libraryApi";
 import type { TemplateVar } from "../mock/variables";
@@ -233,16 +234,8 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
   const [said, setSaid] = useState("");
   const [ask, setAsk] = useState(false); // "Go back to the slider?" (SCREENS V3)
   const put = (k: string, v: unknown) => {
-    const x: Record<string, unknown> = {}, rc = String(c.rateControl ?? "quality");
-    if (n.type === "video.convert") {
-      // decide from the format this edit leaves (not the saved one): AV1 takes Quality only (engine #211 refuses the rest)
-      const fmt = k === "format" ? String(v) : String(c.format ?? "hevc");
-      if (rc.endsWith("_legacy") && k !== "rateControl") x.rateControl = fmt === "av1" || k === "quality" ? "quality" : "level";
-      if (k !== "quality" && k !== "kind" && c.kind !== "selectors") x.kind = "selectors"; // a custom edit turns the slider off
-      const next = String(x.rateControl ?? rc);
-      if (fmt === "av1" && next !== "quality") { x.rateControl = "quality"; setSaid(k === "format" ? "Switched to Quality only: AV1 can't use a bitrate. Your bitrate settings are kept if you switch back." : ""); }
-      else if (k === "format") setSaid("");
-    }
+    let x: Record<string, unknown> = {};
+    if (n.type === "video.convert") { const f = formatEdit(c, k, v); x = f.x; if (f.said !== undefined) setSaid(f.said); } // #697: the rules live in convertFormat.ts
     set(k, v, x);
   };
   const field = (k: string) => { const b = bad(k), sk = conv(k); if (!sk) return null; return (
@@ -280,6 +273,9 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
     const backToSlider = () => { setAsk(false); set("kind", "slider", { ...SLIDER, vbrMaxKbps: undefined }); };
     const keep = () => { setAsk(false); if (moreRef.current) moreRef.current.open = true; };
     const goBack = () => (differs ? setAsk(true) : backToSlider());
+    // Picture (P6): the schema's own words and hints; bit depth's 10-bit is off with H.264 or VP9
+    const fpsSchema = props.maxFrameRate ?? {}, bdSchema = props.bitDepth ?? {}, bd = String(c.bitDepth ?? "keep");
+    const no10 = ["h264", "vp9"].includes(String(c.format ?? "hevc")), bdDescribed = [no10 ? n.id + "-bd-10" : "", bd === "8" ? n.id + "-bd-8" : ""].filter(Boolean).join(" ");
     return (
       <div className="stack">
         {legacy && <div className="note"><Icon id="i-info" /><div>This step was set up before 13 Nov and still makes the same files as before. Changing its bitrate settings switches it to the new rules.</div></div>}
@@ -320,6 +316,27 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
         {/* Picture and Graphics card sit below More options, the same in both modes. They write with set, not put: put would switch the step to custom settings. A default is saved as absent. */}
         <fieldset className="field choice" style={{ marginTop: 12 }}><legend className="lab">Picture</legend>
           <div className="grid cols2">
+            {props.maxFrameRate && <div className={bad("maxFrameRate").length ? "fieldbad" : undefined} data-field="maxFrameRate" aria-invalid={bad("maxFrameRate").length ? true : undefined}>
+              <div className="field"><label htmlFor={n.id + "-fps"}>Frame rate</label>
+                <select id={n.id + "-fps"} className="input" value={String(c.maxFrameRate ?? "keep")} aria-describedby={n.id + "-fps-h"} onChange={(e) => set("maxFrameRate", e.target.value === "keep" ? undefined : e.target.value)}>
+                  {labels(fpsSchema).map(([v, l]) => <option key={String(v)} value={String(v)}>{l}</option>)}
+                </select>
+                <span className="hint" id={n.id + "-fps-h"}>{fpsSchema.description as string}</span>
+                {bad("maxFrameRate").map((i, x) => <span key={x} className="hint" role="alert" style={{ color: "var(--error-text)" }}>{i.message}</span>)}
+              </div>
+            </div>}
+            {props.bitDepth && <div className={bad("bitDepth").length ? "fieldbad" : undefined} data-field="bitDepth" aria-invalid={bad("bitDepth").length ? true : undefined}>
+              <fieldset className="field choice" aria-describedby={bdDescribed || undefined}><legend className="lab">Bit depth</legend>
+                <div className="seg radios bitdepth">
+                  {labels(bdSchema).map(([v, l]) => { const val = String(v), off = val === "10" && no10; return (
+                    <label key={val} className={bd === val ? "on" : undefined}><input type="radio" name={n.id + "-bd"} checked={bd === val} disabled={off} onChange={() => set("bitDepth", val === "keep" ? undefined : val)} />
+                      <span>{l}</span></label>); })}
+                </div>
+                {no10 && <span className="hint" id={n.id + "-bd-10"} style={{ display: "block" }}>10-bit needs HEVC or AV1.</span>}
+                {bd === "8" && <span className="hint" id={n.id + "-bd-8"} style={{ display: "block" }}>HDR videos stay 10-bit.</span>}
+              </fieldset>
+              {bad("bitDepth").map((i, x) => <span key={x} className="hint" role="alert" style={{ color: "var(--error-text)" }}>{i.message}</span>)}
+            </div>}
             <div style={{ gridColumn: "1 / -1" }} className={bad("removeBlackBars").length ? "fieldbad" : undefined} data-field="removeBlackBars">
               <div className="field"><label className="row nw" htmlFor={n.id + "-bars"}><input id={n.id + "-bars"} type="checkbox" role="switch" className="switch" checked={c.removeBlackBars === true} aria-describedby={n.id + "-bars-1 " + n.id + "-bars-2"} aria-invalid={bad("removeBlackBars").length ? true : undefined} onChange={(e) => set("removeBlackBars", e.target.checked || undefined)} /><span>Remove black bars</span></label>
               <span className="hint" id={n.id + "-bars-1"} style={{ display: "block" }}>Cuts the black bars above and below (or beside) the picture, when samples from the whole video agree where they are. If they don't, the video is left as it is and the Log says why.</span>

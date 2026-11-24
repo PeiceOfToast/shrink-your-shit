@@ -96,7 +96,7 @@ func TestOnlyLocalRefusalLogNeverNamesTheProcessor(t *testing.T) {
 	if n := logCount(t, s, "encoder h264_qsv didn't pass its test here"); n != 1 {
 		t.Errorf("reason line: %d, want 1", n)
 	}
-	if j := s.job(); j.Status != jobs.Failed || !strings.Contains(j.Error, "Hardware only: no graphics encoder") {
+	if j := s.job(); j.Status != jobs.Failed || !strings.Contains(j.Error, "Graphics card only: no graphics encoder") {
 		t.Fatalf("status %s, error %q", j.Status, j.Error)
 	}
 }

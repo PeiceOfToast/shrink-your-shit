@@ -36,7 +36,7 @@ func TestCPUOnlyNeverAsksForAGraphicsEncoder(t *testing.T) {
 	if len(enc) != 1 || !strings.Contains(enc[0], "libx265") || strings.Contains(enc[0], "hevc_") {
 		t.Fatalf("encodes, want the processor alone:\n%s", strings.Join(enc, "\n"))
 	}
-	if n := logCount(t, s, "CPU only, as the Convert step says"); n != 1 {
+	if n := logCount(t, s, "Processor only, as the Convert step says"); n != 1 {
 		t.Errorf("chosen line: %d, want 1", n)
 	}
 }
@@ -48,11 +48,24 @@ func TestHardwareOnlyWithNoGraphicsEncoderFailsPlainly(t *testing.T) {
 	w := hardwareWorker(s, "only", "")
 	w.Encoder = func(string, bool, *rules.HDR) (string, string) { return "", "" }
 	w.RunOne(context.Background()) // a failed job returns its error; the status below is the check
-	if j := s.job(); j.Status != jobs.Failed || !strings.Contains(j.Error, "Hardware only: no graphics encoder") {
+	if j := s.job(); j.Status != jobs.Failed || !strings.Contains(j.Error, "Graphics card only: no graphics encoder") {
 		t.Fatalf("status %s, error %q", j.Status, j.Error)
+	} else if j.ErrorCode != jobs.ReasonHardwareChoice { // the code that gives the drawer design's next step (W7)
+		t.Errorf("stored code %q, want %q", j.ErrorCode, jobs.ReasonHardwareChoice)
 	}
 	if enc := encodeCalls(s); len(enc) != 0 {
 		t.Errorf("an encode ran: %v", enc)
+	}
+	// A refusal before the encode still gets a failure summary, so the drawer has the words and no ffmpeg run.
+	sum, err := s.store.FailureOf(s.id)
+	if err != nil || sum == nil {
+		t.Fatalf("failure summary: %v, %v; want one for the refused job", sum, err)
+	}
+	if sum.Step != stepCheck { // the preflight step the job recorded, so the drawer can name it
+		t.Errorf("summary step %d, want the preflight step %d", sum.Step, stepCheck)
+	}
+	if sum.FfmpegRan || len(sum.KeyLines) != 1 || !strings.Contains(sum.KeyLines[0], "Graphics card only: no graphics encoder") {
+		t.Errorf("summary %+v, want no ffmpeg run and the refusal words as its key line", sum)
 	}
 }
 
@@ -63,8 +76,10 @@ func TestHardwareOnlyFailureFailsTheJob(t *testing.T) {
 	w := hardwareWorker(s, "only", "")
 	w.Encoder = func(string, bool, *rules.HDR) (string, string) { return "hevc_nvenc", "" }
 	w.RunOne(context.Background()) // a failed job returns its error; the status below is the check
-	if j := s.job(); j.Status != jobs.Failed || !strings.Contains(j.Error, "Hardware only: the graphics encoder failed") {
+	if j := s.job(); j.Status != jobs.Failed || !strings.Contains(j.Error, "Graphics card only: the graphics encoder failed") {
 		t.Fatalf("status %s, error %q", j.Status, j.Error)
+	} else if j.ErrorCode != jobs.ReasonHardwareChoice {
+		t.Errorf("stored code %q, want %q", j.ErrorCode, jobs.ReasonHardwareChoice)
 	}
 	enc := encodeCalls(s)
 	if len(enc) != 1 || !strings.Contains(enc[0], "hevc_nvenc") {

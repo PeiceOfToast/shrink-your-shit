@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -20,13 +21,16 @@ import (
 // and checks the result against its Expect. A job keeps its Plan as a snapshot, so what was intended
 // can be read back later (slice 17's audit log).
 type Plan struct {
-	Skip        string      `json:"skip,omitempty"`     // why this file is not converted ("" = convert it)
-	SkipCode    string      `json:"skipCode,omitempty"` // Skip as a code the API can count (Skip* below)
-	Reason      string      `json:"reason,omitempty"`   // why it is converted, shown on the job
-	Eligibility Eligibility `json:"eligibility"`        // the rule that decided Skip (part of the fingerprint)
-	Video       VideoEncode `json:"video"`
-	Output      string      `json:"output"`              // replace | beside
-	OutputDir   string      `json:"outputDir,omitempty"` // "folder" (S6): the new files go here, in the library\'s sub-folders
+	Skip     string `json:"skip,omitempty"`     // why this file is not converted ("" = convert it)
+	SkipCode string `json:"skipCode,omitempty"` // Skip as a code the API can count (Skip* below)
+	Reason   string `json:"reason,omitempty"`   // why it is converted, shown on the job
+	// FrameRateNote (FB5b): why a frame-rate limit the person chose did not apply (the source's rate is unknown).
+	// It is not serialized (json:"-"), so a remote worker that gets the plan does not log it; only the local job does.
+	FrameRateNote string      `json:"-"`
+	Eligibility   Eligibility `json:"eligibility"` // the rule that decided Skip (part of the fingerprint)
+	Video         VideoEncode `json:"video"`
+	Output        string      `json:"output"`              // replace | beside
+	OutputDir     string      `json:"outputDir,omitempty"` // "folder" (S6): the new files go here, in the library\'s sub-folders
 	// KeepIfBigger (R8): a new file bigger than its original is not saved; the original is kept (any output).
 	// False replaces anyway, as before. Omitted when false, so existing Plans and fingerprints are unchanged.
 	KeepIfBigger bool `json:"keepIfBigger,omitempty"`
@@ -148,6 +152,15 @@ type VideoEncode struct {
 	// 10-bit the same way HDR's does (main10 and p010 frames) without HDR's colour tags: an SDR file stays
 	// SDR. Compile sets it from the probe; false is every 8-bit source, whose arguments do not change.
 	TenBit bool `json:"tenBit,omitempty"`
+	// BitDepth is the depth the person chose on the Convert step: 8 or 10. 0 is keep (the source's depth, as before).
+	// 8 makes a 10-bit SDR source 8-bit on every path; it never changes an HDR plan, which stays 10-bit. 10 makes an
+	// 8-bit HEVC or AV1 encode 10-bit. Compile zeroes it where it would change nothing, and for a copied video.
+	BitDepth int `json:"bitDepth,omitempty"`
+	// MaxFPS is the frame-rate limit the person chose on the Convert step: 0 is keep; 24, 25, 30 or 60 lowers a
+	// video whose rate is above it. CompileWith zeroes it where the video is at or under it, or copied, so a plan
+	// that carries it always converts the rate down. The filter sits before the scale; the full GPU pipeline is not
+	// used when it is set.
+	MaxFPS int `json:"maxFPS,omitempty"`
 	// Format is the video format made (S6: h264, av1, vp9); "" is HEVC, as every Plan before S6.
 	Format string `json:"format,omitempty"`
 	// Crop (F4): the person asked for the black bars to be cut. CropRect is what the worker measured for this
@@ -214,8 +227,32 @@ func (t Template) CompileWith(info media.Info, f Facts) (p Plan) {
 		// The plan carries the source's bit depth: a 10-bit (or deeper) first video stream keeps its depth
 		// through the encode where the target's encoder has one (VideoEncode.TenBit). A copied video is the
 		// same bytes, so it is not marked.
-		if v := info.Video(); v != nil && v.BitDepth > 8 && p.Video.Codec != "" && !p.Video.Copy {
-			p.Video.TenBit = true
+		if p.Video.Copy || p.Video.Codec == "" {
+			p.Video.BitDepth = 0
+		}
+		if v := info.Video(); v != nil && p.Video.Codec != "" && !p.Video.Copy {
+			switch {
+			case p.Video.HDR != nil: // HDR is 10-bit whatever the choice; its depth is not the choice's
+				p.Video.BitDepth = 0
+				p.Video.TenBit = v.BitDepth > 8
+			case p.Video.BitDepth == 8 && v.BitDepth <= 8: // 8 of an 8-bit source changes nothing
+				p.Video.BitDepth = 0
+			case p.Video.BitDepth == 8: // a forced 8-bit encode of a deeper source: not TenBit
+			case p.Video.BitDepth == 10 || v.BitDepth > 8:
+				p.Video.TenBit = true
+			}
+		}
+		if p.Video.MaxFPS > 0 { // FB5b: the limit only lowers; a rate it cannot compare with is kept, and the job says so
+			v := info.Video()
+			switch {
+			case v == nil || p.Video.Copy || p.Video.Codec == "":
+				p.Video.MaxFPS = 0
+			case v.FrameRate <= 0:
+				p.Video.MaxFPS = 0
+				p.FrameRateNote = "The frame rate limit was not applied: the source's frame rate is not known, so its own rate is kept."
+			case v.FrameRate <= float64(p.Video.MaxFPS):
+				p.Video.MaxFPS = 0
+			}
 		}
 		p = orderSteps(withStepDecisions(p, info), t.StepOrder)
 	}()
@@ -409,7 +446,8 @@ func (p Plan) HasFullPipeline(enc string) bool { return p.fullPipeline(enc) }
 // cannot decode and scale the picture alone.
 func (p Plan) fullPipeline(enc string) bool {
 	prof, ok := ProfileFor(enc)
-	return p.usesGraphics(enc) && ok && prof.FullPipeline() && p.Video.CropRect == nil
+	// A frame-rate limit is a processor filter before the scale, which the card cannot take (FB5b): it is not used then.
+	return p.usesGraphics(enc) && ok && prof.FullPipeline() && p.Video.CropRect == nil && p.Video.MaxFPS == 0
 }
 
 // usesGraphics is whether FFmpegArgsWith uses enc for the plan's video: an encoder of the plan's format's family,
@@ -436,6 +474,58 @@ func (p Plan) FFmpegArgsFullGPU(in, out, enc string) ([]string, bool) {
 // processor's libx264 and libvpx-vp9 keep the source's depth whatever the target, so it is not these that decide
 // the "converting to" line: convertingTo names the depth of the encoder that runs.
 var tenBitTargets = map[string]bool{"libx265": true, "libsvtav1": true}
+
+// fullScale is the full pipeline's scale filter for the plan's height. A plan that chose its depth names the frames'
+// format in the filter when the family's scale filter does not set one (scale_qsv takes the frames as the decoder
+// made them, so an 8-bit choice of a 10-bit file, or a 10-bit choice of an 8-bit file, would keep the wrong depth).
+func fullScale(p Plan, fam string, ten10 bool) string {
+	sc := profiles[fam].scale(p.Video.Height, ten10)
+	if p.Video.BitDepth != 0 && sc != "" && !strings.Contains(sc, "format=") {
+		f := "nv12"
+		if ten10 {
+			f = pixFmt10(fam)
+		}
+		sc += ":format=" + f
+	}
+	return sc
+}
+
+// fullFormat is the full pipeline's format-only filter, for a plan that chose its depth and scales to no height: the
+// family's card filter with only a format argument. "" for a family whose full pipeline has none.
+func fullFormat(fam string, ten10 bool) string {
+	switch fam {
+	case "qsv":
+		f := "nv12"
+		if ten10 {
+			f = pixFmt10(fam)
+		}
+		return "vpp_qsv=format=" + f
+	case "vaapi":
+		return "scale_vaapi=format=" + vaapiFormat(ten10)
+	}
+	return ""
+}
+
+// bitDepthOf is the plan's depth for the Convert step's choice: 8 or 10, and 0 for keep (or anything else).
+func bitDepthOf(choice string) int {
+	switch choice {
+	case "8":
+		return 8
+	case "10":
+		return 10
+	}
+	return 0
+}
+
+// maxFPSOf is the frame-rate limit for the Convert step's choice: 24, 25, 30 or 60, and 0 for keep (or anything else).
+func maxFPSOf(choice string) int {
+	switch choice {
+	case "24", "25", "30", "60":
+		n, _ := strconv.Atoi(choice)
+		return n
+	}
+	return 0
+}
 
 // EncodeTenBit answers a different question from NeedsTenBit: whether the target's encoder arguments make 10 bits.
 // EncodeTenBit says whether a graphics encoder makes a 10-bit video: HDR (S3), or a 10-bit source kept at its depth
@@ -540,6 +630,14 @@ func (p Plan) ffmpegArgs(in, out, gpu string, full bool) []string {
 				args = append(args, "-pix_fmt:"+v, pixFmt10(fam))
 			}
 		}
+	} else if gpu == "" && p.Video.BitDepth == 8 { // the person's 8 bits: the processor's encoder would keep a 10-bit source's depth
+		args = append(args, "-pix_fmt:"+v, "yuv420p")
+	} else if gpu == "" && p.Video.BitDepth == 10 { // the person's 10 bits: an 8-bit source is made 10-bit (HEVC and AV1 only)
+		args = append(args, "-pix_fmt:"+v, "yuv420p10le")
+	} else if gpu != "" && p.Video.BitDepth == 8 && !full && profiles[fam].Upload(false) == nil {
+		// the person's 8 bits on a card: the processor-decoded 10-bit frames are sent as nv12 (a family whose upload
+		// makes its frames sets the format itself, so it gets none here)
+		args = append(args, "-pix_fmt:"+v, "nv12")
 	} else if ten10 && gpu != "" { // a 10-bit SDR source keeps its depth on a graphics encoder: main10 and p010
 		// (the processor's encoder already keeps the source's depth on its own, and its arguments are today's).
 		if strings.HasPrefix(gpu, "hevc_") { // HEVC's name for the 10-bit profile; AV1's profile 0 already covers p010
@@ -553,14 +651,21 @@ func (p Plan) ffmpegArgs(in, out, gpu string, full bool) []string {
 	if r := p.Video.CropRect; r != nil { // F4: the crop comes first, so the scale and the upload see the cut picture
 		vf = append(vf, Filter{Text: r.Filter()})
 	}
+	if p.Video.MaxFPS > 0 { // FB5b: the limit comes before the scale, so the scale works on the lower rate's frames
+		vf = append(vf, Filter{Text: "fps=" + strconv.Itoa(p.Video.MaxFPS)})
+	}
 	if p.Video.Height > 0 {
 		if full {
-			vf = append(vf, Filter{Text: profiles[fam].scale(p.Video.Height, ten10), Card: true})
+			vf = append(vf, Filter{Text: fullScale(p, fam, ten10), Card: true})
 		} else {
 			vf = append(vf, Filter{Text: "scale=-2:" + strconv.Itoa(p.Video.Height)})
 			if p.Video.SquarePixels { // the scale keeps the shape by carrying a SAR; rounding leaves 1280:1281, so a square source gets 1:1
 				vf = append(vf, Filter{Text: "setsar=1"})
 			}
+		}
+	} else if full && p.Video.BitDepth != 0 { // no scale to name the depth: a format-only filter on the card does it
+		if f := fullFormat(fam, ten10); f != "" {
+			vf = append(vf, Filter{Text: f, Card: true})
 		}
 	}
 	if chain := filterChain(vf, full, profiles[fam].Upload(ten10), gpu != ""); len(chain) > 0 {
@@ -764,6 +869,10 @@ func (p Plan) trackArgs() []string {
 // changes this, not the checks.
 func (p Plan) Expect(src media.Info, packets int64) Expect {
 	e := DefaultExpect(src, packets)
+	if v := src.Video(); p.Video.MaxFPS > 0 && v != nil && packets > 0 { // FB5b: the frames the output has, at its rate
+		n := int64(math.Round(float64(packets) * float64(p.Video.MaxFPS) / v.FrameRate))
+		e.VideoPackets, e.PacketsTol, e.OutputFPS = n, math.Max(0.01, 2/float64(n)), p.Video.MaxFPS // never tighter than 1%; at least two frames on a short file
+	}
 	if p.Video.Index > 0 { // the encoded stream is not the first video (cover art comes first)
 		n := 0
 		for k := range e.Streams {
@@ -1053,6 +1162,8 @@ func compileSelectors(p Plan, s Selectors, info media.Info, langs []string, basi
 	// compiles as it did. A processor quality of its own applies where quality is the CRF (not a bitrate).
 	p.Video.Hardware, p.Video.HardwareFail = s.Hardware, s.HardwareFail
 	p.Video.Crop = s.RemoveBlackBars // F4: the worker measures the bars for a file that asks for it
+	p.Video.BitDepth = bitDepthOf(s.BitDepth)
+	p.Video.MaxFPS = maxFPSOf(s.MaxFrameRate)
 	if p.Video.Hardware == "auto" {
 		p.Video.Hardware = ""
 	}

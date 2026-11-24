@@ -31,6 +31,11 @@ type Selectors struct {
 	// RemoveBlackBars (F4): cut the black bars the picture has, when a sample of the file agrees on them. Off
 	// by default, so a flow that never set it compiles as it did.
 	RemoveBlackBars bool `json:"removeBlackBars,omitempty"`
+	// BitDepth is the Convert step's depth: keep ("" too) | 8 | 10. 10 is HEVC and AV1 only (Validate says so).
+	BitDepth string `json:"bitDepth,omitempty"`
+	// MaxFrameRate is the Convert step's frame-rate limit: keep ("" too) | 24 | 25 | 30 | 60. It only lowers a video
+	// whose rate is above it; a video at or under the limit keeps its own rate.
+	MaxFrameRate string `json:"maxFrameRate,omitempty"`
 	// Notices are coded notes shown on the flow until its next publish (migration 38: bitrate_meaning_changed).
 	Notices []Notice `json:"notices,omitempty"`
 	Audio   string   `json:"audio"` // AvailableAudio (S6: design E's six choices)
@@ -118,6 +123,20 @@ func (s Selectors) Validate() error {
 	if _, ok := SpeedPresets[s.Speed]; !ok {
 		return invalid("speed", s.Speed)
 	}
+	switch s.BitDepth {
+	case "", "keep", "8":
+	case "10":
+		if s.Format != "" && s.Format != "hevc" && s.Format != "av1" {
+			return notYet("Bit depth: 10-bit needs HEVC or AV1.")
+		}
+	default:
+		return invalid("bitDepth", s.BitDepth)
+	}
+	switch s.MaxFrameRate {
+	case "", "keep", "24", "25", "30", "60":
+	default:
+		return invalid("maxFrameRate", s.MaxFrameRate)
+	}
 	switch {
 	case !contains(allFormats, s.Format):
 		return invalid("format", s.Format)
@@ -160,7 +179,7 @@ func (s Selectors) Validate() error {
 		return invalid("hardwareFail", s.HardwareFail)
 	}
 	if _, ok := SliderAt(s.CPUQuality); s.CPUQuality != 0 && !ok {
-		return &SelectorError{"invalid", "CPU quality must be 0 (the same as Quality) or a slider position from 1 to 5. Nothing was changed."}
+		return &SelectorError{"invalid", "Quality on the processor must be 'Same as Quality' or a position from 1 to 5. Nothing was changed."}
 	}
 	switch {
 	case !contains(allAudio, s.Audio):

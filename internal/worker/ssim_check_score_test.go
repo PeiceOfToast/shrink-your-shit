@@ -34,7 +34,7 @@ func fakeInfo() media.Info {
 // The check's job step shows the lowest passing place: 0.99, 0.91 and 0.98 pass at 0.90 and 0.91 is stored.
 func TestSSIMCheckStoresTheLowestPassingPlace(t *testing.T) {
 	w := fakeCheckWorker(map[float64]float64{0: 0.99, 25: 0.91, 45: 0.98})
-	if err := w.ssimCheck(context.Background(), fakeInfo(), fakeInfo(), "src", "tmp", 0, 0, nil); err != nil {
+	if err := w.ssimCheck(context.Background(), fakeInfo(), fakeInfo(), "src", "tmp", 0, 0, nil, 0); err != nil {
 		t.Fatalf("ssimCheck returned %v, want nil", err)
 	}
 	if w.check == nil || w.check.Score != 0.91 || !w.check.Passed || w.check.Min != 0.90 {
@@ -45,7 +45,7 @@ func TestSSIMCheckStoresTheLowestPassingPlace(t *testing.T) {
 // A place that fails keeps the original, and its score is the one stored, as it was before.
 func TestSSIMCheckFailingPlaceStoresItsScoreAndKeeps(t *testing.T) {
 	w := fakeCheckWorker(map[float64]float64{0: 0.99, 25: 0.85, 45: 0.98})
-	err := w.ssimCheck(context.Background(), fakeInfo(), fakeInfo(), "src", "tmp", 0, 0, nil)
+	err := w.ssimCheck(context.Background(), fakeInfo(), fakeInfo(), "src", "tmp", 0, 0, nil, 0)
 	k, ok := err.(*KeptError)
 	if !ok {
 		t.Fatalf("ssimCheck returned %v, want a *KeptError", err)
@@ -70,7 +70,7 @@ func TestSSIMCheckErrorKeepsTheLowestScore(t *testing.T) {
 			return 0.99, nil, nil
 		},
 	}
-	err := w.ssimCheck(context.Background(), fakeInfo(), fakeInfo(), "src", "tmp", 0, 0, nil)
+	err := w.ssimCheck(context.Background(), fakeInfo(), fakeInfo(), "src", "tmp", 0, 0, nil, 0)
 	if err == nil || !strings.Contains(err.Error(), "ffmpeg died") {
 		t.Fatalf("ssimCheck returned %v, want the place's error", err)
 	}

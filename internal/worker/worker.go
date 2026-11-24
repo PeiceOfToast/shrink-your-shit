@@ -861,6 +861,18 @@ func (w *Worker) recordEncode(id int64, args []string, started time.Time, encErr
 		ExitCode: exit, FfmpegRan: ran, KeyLines: keys})
 }
 
+// recordRefusalSummary: a check before the encode refused the job (checkPlan) with a reason code. No ffmpeg ran, so
+// the failure summary has no exit code or log lines to show, only the words the job already has as its key line.
+// Without it the drawer has no next step for these jobs. Only a coded refusal gets one: a skip or a later retry is not a failure.
+func (w *Worker) recordRefusalSummary(id int64, started time.Time, err error) {
+	var fe *FailedError
+	if !errors.As(err, &fe) || fe.Code == "" || w.Queue == nil {
+		return
+	}
+	w.Queue.SetFailureSummary(id, jobs.FailureSummary{Step: stepCheck, StepCount: 1, AfterMs: w.now().Sub(started).Milliseconds(),
+		ExitCode: -1, FfmpegRan: false, KeyLines: []string{fe.Plain}})
+}
+
 // SkippedError: the file is not converted because its flow leaves it alone (S3's Dolby Vision skips);
 // the job ends as a skipped file with these words and code.
 type SkippedError struct{ Words, Code string }
@@ -1692,8 +1704,10 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	// encoder for this file and its bit depth, the free space beside the original, and (in Folder mode) the folder
 	// for new files, made and shown to be writable, with the room on its disk. Its step is recorded before the
 	// encode's, so the run log and the job page show it first: passed, or as the check that stopped the job.
+	checkStarted := w.now()
 	enc, err := w.checkPlan(ctx, job, plan, src, srcPath, before.Size(), newName)
 	if err != nil {
+		w.recordRefusalSummary(job.ID, checkStarted, err)
 		return "", err
 	}
 	gpuSlot := enc.slot // the card's place this job holds while its graphics encode runs
@@ -1760,6 +1774,9 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	}
 	if note := vbrAverageNote(plan.Video); note != "" {
 		w.jobf(job.ID, ": %s", note)
+	}
+	if plan.FrameRateNote != "" { // FB5b: the frame-rate limit did not apply, and the job says why
+		w.jobf(job.ID, ": %s", plan.FrameRateNote)
 	}
 	setLive(job.ID, LiveJob{Worker: w.ID, Started: w.now(), ConvertingTo: convertingTo(plan, src, gpu), Encoder: encoderWordsUsed(plan, gpu),
 		Decoder: decoderWords(src, full), Progress: media.Progress{ETASeconds: -1}})
@@ -1880,9 +1897,14 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			exp.MainVideo = m
 			changed = true
 		}
-		if n := checkedFrames(exp.VideoPackets, stats, haveReport, vfr); n != exp.VideoPackets {
-			// The report decoded exactly, so it is the count the new file is checked against (a VFR original's
-			// duration × rate guess is not; without a report its frame check is skipped).
+		var srcRate float64
+		if v := src.Video(); v != nil {
+			srcRate = v.FrameRate
+		}
+		if n := checkedFrames(exp.VideoPackets, stats, haveReport, vfr, plan.Video.MaxFPS, srcRate); n != exp.VideoPackets {
+			// The report decoded exactly, so it is the count the new file is checked against, at the output rate when
+			// the frame-rate limit lowered it (a VFR original's duration × rate guess is not; without a report, or with
+			// a limit and a VFR original, its frame check is skipped).
 			exp.VideoPackets = n
 			changed = true
 		}
@@ -1950,11 +1972,12 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		}
 		if gpu != "" && !fell { // the Convert step does not allow the processor here: the failure stands, plain words, not retried
 			if words := HardwareStopWords(plan.Video, terr); words != "" {
-				return "", failed(words, fmt.Errorf("%w: %s", terr, firstLines(encErr, 3)))
+				return "", failedWithCode(jobs.ReasonHardwareChoice, words, fmt.Errorf("%w: %s", terr, firstLines(encErr, 3)))
 			}
 		}
 		ferr := failed("Converting stopped with an error. Your original was not touched. Press Retry; if it keeps failing, the file may be damaged.", fmt.Errorf("%w: %s", terr, firstLines(encErr, 3)))
 		if KilledBySignal(terr) || killedRemote(terr) { // stopped by the system (out of memory...), not a problem of the file
+			ferr.(*FailedError).Code = jobs.ReasonKilled // the failed row then shows design's killed sentence (W7)
 			return "", retryable(ferr, retryGeneral)
 		}
 		return "", ferr

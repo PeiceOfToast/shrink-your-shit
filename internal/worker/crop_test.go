@@ -113,7 +113,7 @@ func TestScaleToCutsBeforeItScales(t *testing.T) {
 		{"crop then scale", &media.Stream{Width: 1280, Height: 534}, crop, ",crop=1920:800:0:140,scale=1280:534"},
 	}
 	for _, c := range cases {
-		if got := scaleTo(src, c.out, c.crop); got != c.want {
+		if got := scaleTo(src, c.out, c.crop, 0); got != c.want {
 			t.Errorf("%s: got %q, want %q", c.name, got, c.want)
 		}
 	}
