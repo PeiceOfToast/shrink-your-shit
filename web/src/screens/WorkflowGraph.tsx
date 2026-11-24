@@ -24,9 +24,20 @@ const W = 200, H = (outs: number) => 34 + 24 + Math.max(outs, 1) * 22 + 8; // no
 
 type Data = { node: Node; def?: StepDefinition; summary: string; issues: ValidationIssue[]; edit?: boolean; linked: string[]; tight?: boolean; pickPort?: (id: string, port: string, label: string, step: string) => void };
 type GNodeT = RFNode<Data, "step">;
-// item 7: a port that isn't a success port and has no connection says so on the step: the original file is kept there
+// item 7: a port that isn't a success port and has no connection says so on the step
 // each unlinked port says its own name in words; the error port keeps the spec's "Didn't work" line
-const notLinked = (p: { name: string; label: string; outcome: string }) => (p.outcome === "error" ? "Didn't work" : p.label) + ": not linked. The original file is kept.";
+// W9: after the save (fileOn "saved") the original is already gone for good, so the words say what really happens: the
+// warning and the next steps (error, skipped), or nothing more on a question's No (branch)
+const afterSave = (p: { name: string }, def?: StepDefinition) => def?.fileOn?.[p.name] === "saved";
+const notLinked = (p: { name: string; label: string; outcome: string }, def?: StepDefinition) => {
+  if (afterSave(p, def)) return p.outcome === "branch"
+    ? p.label + ": not linked. The new file is already saved; nothing more happens on this path."
+    : (p.outcome === "error" ? "Didn't work" : p.label) + ": not linked. The new file is already saved; a warning is shown and the next steps still run.";
+  return (p.outcome === "error" ? "Didn't work" : p.label) + ": not linked. The original file is kept.";
+};
+// the wide pill's words (the tight pill always says "Not linked"); pillWidth measures all three
+const pillWords = (p: { name: string; outcome: string }, def?: StepDefinition) => !afterSave(p, def) ? "Not linked: keeps the original" : p.outcome === "branch" ? "Not linked: nothing more" : "Not linked: carries on";
+const PILL_WORDS = ["Not linked: keeps the original", "Not linked: carries on", "Not linked: nothing more"];
 
 function GNode({ data, selected }: NodeProps<GNodeT>) {
   const { node, def, summary, issues, linked, tight, pickPort } = data, errs = issues.filter((i) => i.severity === "error").length;
@@ -41,8 +52,8 @@ function GNode({ data, selected }: NodeProps<GNodeT>) {
         <div key={p.name} className={"gport " + p.outcome}><span>{p.label}</span>
           {p.outcome !== "success" && !linked.includes(p.name) && !issues.some((i) => i.code === "unconnected_port" && i.port === p.name) &&
             (data.edit
-              ? <button type="button" className={"gpill" + (tight ? " inrow" : "")} aria-label={notLinked(p)} title={notLinked(p)} onClick={(e) => (e.stopPropagation(), pickPort?.(node.id, p.name, p.label, node.name ?? def?.name ?? node.type))}>{tight ? "Not linked" : "Not linked: keeps the original"}</button>
-              : <span className={"gpill" + (tight ? " inrow" : "")} title={notLinked(p)}>{tight ? "Not linked" : "Not linked: keeps the original"}</span>)}
+              ? <button type="button" className={"gpill" + (tight ? " inrow" : "")} aria-label={notLinked(p, def)} title={notLinked(p, def)} onClick={(e) => (e.stopPropagation(), pickPort?.(node.id, p.name, p.label, node.name ?? def?.name ?? node.type))}>{tight ? "Not linked" : pillWords(p, def)}</button>
+              : <span className={"gpill" + (tight ? " inrow" : "")} title={notLinked(p, def)}>{tight ? "Not linked" : pillWords(p, def)}</span>)}
           <Handle type="source" position={Position.Right} id={p.name} isConnectable={!!data.edit} /></div>))}
     </div>);
 }
@@ -54,9 +65,12 @@ const pillWidth = () => {
   if (pillPx === undefined && typeof document !== "undefined") {
     const host = document.createElement("div"), b = document.createElement("button");
     host.className = "gnode"; host.style.cssText = "position:absolute;visibility:hidden;left:-9999px;top:0";
-    b.type = "button"; b.className = "gpill"; b.textContent = "Not linked: keeps the original";
+    b.type = "button"; b.className = "gpill";
     host.appendChild(b); document.body.appendChild(host);
-    const w = b.getBoundingClientRect().width; host.remove();
+    // the longest of the wide texts, so no pill covers its neighbour
+    let w = 0;
+    for (const t of PILL_WORDS) { b.textContent = t; w = Math.max(w, b.getBoundingClientRect().width); }
+    host.remove();
     if (w > 0) pillPx = w;
   }
   return pillPx ?? 170;
@@ -178,7 +192,7 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
       const def = defs.find((x) => x.type === n.type);
       return { id: n.id, type: "step", position: layout.nodes[n.id] ?? { x: 0, y: 0 }, draggable: edit, connectable: edit, deletable: edit && def?.category !== "input", selected: n.id === sel, zIndex: free(n, def).length ? 2 : undefined,
         initialWidth: W, initialHeight: H(def?.outputs?.length ?? 1), measured: dims[n.id], // review f03fcad: the minimap only draws nodes with a size
-        ariaLabel: [title(n) + (n.enabled ? "" : " (off)"), summary, ...mine.map((i) => (i.severity === "error" ? "Problem: " : "Warning: ") + i.message), ...free(n, def).map((p) => notLinked(p))].filter(Boolean).join(". "),
+        ariaLabel: [title(n) + (n.enabled ? "" : " (off)"), summary, ...mine.map((i) => (i.severity === "error" ? "Problem: " : "Warning: ") + i.message), ...free(n, def).map((p) => notLinked(p, def))].filter(Boolean).join(". "),
         data: { node: n, def, summary, issues: mine, edit, linked: doc.edges.filter((e) => e.from === n.id).map((e) => e.fromPort), tight: tightPill(n), pickPort: (id: string, port: string, label: string, step: string) => (window.clearTimeout(nudgeTimer.current), setSel(id), setSelEdge(null), setPending({ node: id, port, label, step }), setSaid("Pick a step to add after " + step + " › " + label + ". Esc to cancel."), searchRef.current?.focus()) } };
     });
     const edges: RFEdge[] = doc.edges.map((e) => {
@@ -385,7 +399,7 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
               {checked.stepSummaries?.[picked.id] && <p>{checked.stepSummaries[picked.id]}</p>}
               {pickedDef?.description && <p className="sm">{pickedDef.description}</p>}
               {/* the same full sentence as the pill's title, readable without hover (touch has no title tooltip): the same rule as the canvas's free() */}
-              {(pickedDef?.outputs ?? []).filter((p) => p.outcome !== "success" && !doc.edges.some((e) => e.from === picked.id && e.fromPort === p.name) && !issues.some((i) => i.nodeId === picked.id && i.code === "unconnected_port" && i.port === p.name)).map((p) => <p key={p.name} className="muted sm">{notLinked(p)}</p>)}
+              {(pickedDef?.outputs ?? []).filter((p) => p.outcome !== "success" && !doc.edges.some((e) => e.from === picked.id && e.fromPort === p.name) && !issues.some((i) => i.nodeId === picked.id && i.code === "unconnected_port" && i.port === p.name)).map((p) => <p key={p.name} className="muted sm">{notLinked(p, pickedDef)}</p>)}
               {edit && pickedDef?.category !== "input" && <div className="row"><button className="btn sm" type="button" onClick={() => removeNodes([picked.id])}><Icon id="i-trash" />Delete this step</button></div>}
               {/* step 2b (SCREENS V4 Inspector): the step's own form, the same as the step list's (schema-driven), with the server's problems inline */}
               {edit && pickedDef && !pickedDef.readOnly && <form className="stack ginform" onSubmit={(e) => e.preventDefault()} aria-label={"Settings of " + (picked.name ?? pickedDef.name)}>
