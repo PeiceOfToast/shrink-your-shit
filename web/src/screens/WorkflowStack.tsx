@@ -14,7 +14,7 @@ import { Link, navigate, onLeave, useSearch } from "../router";
 import { Browse } from "../FolderPicker";
 import { OwnVars, VarInput, builtinsOf, takesVars, varListFor, varProblems, withOwn } from "../VarInput";
 import { refProblem } from "../refFit";
-import { formatEdit } from "../convertFormat";
+import { formatEdit, qualityCap } from "../convertFormat";
 import { refusalText } from "../refusalWords";
 import { touchHold } from "../touchHold";
 import "../styles/variables.css";
@@ -280,7 +280,7 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
     // Opening More options is the switch to custom: kind and rateControl in one update (AV1 gets Quality only)
     // an old flow keeps its meaning until its first edit (design: 'Changing its bitrate settings switches it')
     // Quality only, as the slider has it: opening More options changes nothing until the person picks something
-    const custom = () => !legacy && set("kind", "selectors", { rateControl: "quality" });
+    const custom = () => !legacy && set("kind", "selectors", { rateControl: "quality", ...qualityCap(c, "quality") });
     // the slider's own values: custom settings that differ from them are asked about before they're cleared (SCREENS V3)
     const SLIDER = { format: "hevc", resolution: "keep", maxBitrate: "none", speed: "normal", rateControl: "quality" };
     const differs = Object.entries(SLIDER).some(([k, v]) => String(c[k] ?? v) !== v) || c.vbrMaxKbps != null;
