@@ -235,6 +235,10 @@ func selectorsOf(order []Node, leaveFile bool) (rules.Selectors, []Issue) {
 	if s.BitDepth == "keep" {
 		s.BitDepth = ""
 	}
+	s.MaxFrameRate = strOf(cv, "maxFrameRate", "") // FB5b: keep is the default, saved as absent
+	if s.MaxFrameRate == "keep" {
+		s.MaxFrameRate = ""
+	}
 	s.RateControl = strOf(cv, "rateControl", "") // item A; the *_legacy values keep a saved flow's files
 	if s.RateControl == "quality" {
 		s.RateControl = "" // the default is saved as absent, so an unchanged flow keeps its template
@@ -588,6 +592,9 @@ func convertConfig(s rules.Selectors) map[string]any {
 	}
 	if s.BitDepth != "" && s.BitDepth != "keep" { // keep is the default and is not written
 		c["bitDepth"] = s.BitDepth
+	}
+	if s.MaxFrameRate != "" && s.MaxFrameRate != "keep" { // FB5b: keep is the default and is not written
+		c["maxFrameRate"] = s.MaxFrameRate
 	}
 	if s.RateControl != "" && s.RateControl != "quality" {
 		c["rateControl"] = s.RateControl

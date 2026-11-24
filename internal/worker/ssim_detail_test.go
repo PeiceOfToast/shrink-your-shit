@@ -108,7 +108,7 @@ func TestRealBadPictureRefusalListsWorstFrames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = w.ssimCheck(context.Background(), src, out, orig, bad, 0, 0, nil)
+	err = w.ssimCheck(context.Background(), src, out, orig, bad, 0, 0, nil, 0)
 	var k *KeptError
 	if !errors.As(err, &k) {
 		t.Fatalf("ssimCheck returned %v, want a *KeptError", err)
