@@ -563,7 +563,6 @@ label.chk{cursor:pointer}
    under its row; on phones they are a full-screen sheet with a back button */
 .steps{list-style:none;margin:0;padding:0;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface)}
 .srow{border-bottom:1px solid var(--border)}.srow:last-child{border-bottom:0}
-.lock{display:inline-flex;width:20px;justify-content:center;color:var(--text-2)}
 .addgrp{padding:10px 10px 2px;font-size:var(--fs-sm);color:var(--text-2)}
 @media (max-width:640px){.addsheet{position:fixed;left:0;right:0;bottom:0;z-index:20;margin:0;max-height:80vh;overflow:auto;border-radius:12px 12px 0 0;box-shadow:0 -4px 16px rgb(0 0 0/.2)}}
 .addrow{display:flex;align-items:center;gap:10px;min-height:44px;padding:6px 10px;border-radius:6px;cursor:pointer}

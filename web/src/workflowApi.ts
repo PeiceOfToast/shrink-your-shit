@@ -2,9 +2,9 @@
 // module with ?mock=1. Each function answers in the contract's shapes either way.
 import { call, failed, MOCK, type Answer } from "./api";
 import * as mock from "./mock";
-import { STEP_DEFS, addStepsOf, mockLadder, stackable, stepPlacesOf, summary, validate as checkDoc } from "./mock/steps";
+import { STEP_DEFS, addStepsOf, mockLadder, stackable, summary, validate as checkDoc } from "./mock/steps";
 import { mockVariables, type VarList } from "./mock/variables";
-import type { AddStep, Layout, PublishPreview, StepDefinition, StepPlace, Template, ValidationIssue, Workflow, WorkflowDoc, WorkflowRevision } from "./types/v2";
+import type { AddStep, Layout, PublishPreview, StepDefinition, Template, ValidationIssue, Workflow, WorkflowDoc, WorkflowRevision } from "./types/v2";
 
 const enc = encodeURIComponent, base = (id: string) => "/api/v2/workflows/" + enc(id);
 const no = (code: string, message: string) => ({ error: { code, message } });
@@ -78,9 +78,9 @@ export async function saveDraft(id: string, workflow: WorkflowDoc, layout: Layou
   return call("PUT", base(id) + "/draft", { workflow, layout }, { "If-Match": etag });
 }
 // POST /workflows/{id}/validate: nothing saved; the server's problems, step words and whether the list can show it.
-export interface Checked { issues: ValidationIssue[]; stackable: boolean; stepSummaries: Record<string, string>; stepPlaces?: Record<string, StepPlace>; addSteps?: Record<string, AddStep> }
+export interface Checked { issues: ValidationIssue[]; stackable: boolean; stepSummaries: Record<string, string>; addSteps?: Record<string, AddStep> }
 export async function validateDoc(id: string, workflow: WorkflowDoc): Promise<Answer<Checked>> {
-  if (MOCK) return { issues: checkDoc(workflow), stackable: stackable(workflow), stepSummaries: Object.fromEntries(workflow.nodes.map((n) => [n.id, summary(n)])), stepPlaces: stepPlacesOf(workflow), addSteps: addStepsOf(workflow) };
+  if (MOCK) return { issues: checkDoc(workflow), stackable: stackable(workflow), stepSummaries: Object.fromEntries(workflow.nodes.map((n) => [n.id, summary(n)])), addSteps: addStepsOf(workflow) };
   return call("POST", base(id) + "/validate", { workflow });
 }
 export async function publishPreview(id: string): Promise<Answer<PublishPreview>> {

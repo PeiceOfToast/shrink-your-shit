@@ -429,10 +429,8 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
 
 // One row of the step list (clean pass W1): number, icon, name and summary, the switch or "Always on", the chevron.
 // Its options open under the row; on phones as a full-screen sheet with a back button (M5).
-// W11: a step the server marks fixed (or any step, when the server sends no places) can't move or be deleted: a lock,
-// "Set place", and its More menu greyed out with the line below. The first and last steps have no menu.
-const FIXED_LINE = "The steps that convert run in a set order for now, so they can't be moved or deleted. To skip this step, turn it off.";
-type Move = { fixed: boolean; reason?: string; up: boolean; down: boolean; del: boolean; act: (w: "up" | "down" | "del") => void };
+// W11: every row between Library files and Save the result can move and be deleted; the first and last steps have no menu.
+type Move = { up: boolean; down: boolean; del: boolean; act: (w: "up" | "down" | "del") => void };
 // FB1d: a question's row says what its No does: one of the ends, or another path the graph shows. FB4b: "hand to
 // another workflow" is an end with a setting, so the row shows the workflow picker under it (node: that end).
 type ElseKind = "leave" | "fail" | "goto" | "other" | "none";
@@ -463,7 +461,7 @@ function Step({ n, i, mv, open, toggle, update, issues, otherwise, inline, graph
   return (
     <li className={"srow" + (open ? " open" : "")} aria-labelledby={n.id + "-name"}>
       <div className="sline">
-        <span className="stepn">{i + 1}</span>{!end && mv.fixed && <span className="lock" aria-hidden="true"><Icon id="i-lock" /></span>}<span className="sic"><Icon id={ICON[def.icon] ?? "i-box"} /></span>
+        <span className="stepn">{i + 1}</span><span className="sic"><Icon id={ICON[def.icon] ?? "i-box"} /></span>
         <div className="sp" title={(n.name ?? def.name) + ": " + summary(n)}><span className="snm" id={n.id + "-name"}>{n.name ?? def.name}</span> <span className="ssum">{summary(n)}</span></div>
         {mine.length > 0 && <span className="pill bad"><Icon id="i-alert" />{mine.length === 1 ? "1 problem" : mine.length + " problems"}</span>}
         {end ? <span className="muted sm nowrap">{end === "first" ? "Always first" : "Always last"}</span>
@@ -489,7 +487,7 @@ function Step({ n, i, mv, open, toggle, update, issues, otherwise, inline, graph
                 {otherwise.kind !== "other" && <option value="other">another path (in the graph)</option>}
               </select></label>
           : def.alwaysOn ? <span className="muted sm nowrap">Always on</span>
-          : <>{mv.fixed && !inline && <span className="muted sm nowrap" title={mv.reason ?? FIXED_LINE}>Set place</span>}
+          : <>
             <input type="checkbox" role="switch" className="switch" aria-label={(def.name) + " on"} checked={n.enabled} onChange={(e) => update({ ...n, enabled: e.target.checked })} /></>}
         {!end && !inline && <details className="menu" onKeyDown={menuEscape}>
           <summary className="btn icon ghost" id={n.id + "-more"} aria-label={"More for " + nm}><Icon id="i-more" /></summary>
@@ -497,7 +495,6 @@ function Step({ n, i, mv, open, toggle, update, issues, otherwise, inline, graph
             <button className="it" type="button" role="menuitem" aria-disabled={mv.up ? undefined : true} onClick={(e) => { closeMenuToSummary(e.currentTarget); if (mv.up) mv.act("up"); }}>Move up</button>
             <button className="it" type="button" role="menuitem" aria-disabled={mv.down ? undefined : true} onClick={(e) => { closeMenuToSummary(e.currentTarget); if (mv.down) mv.act("down"); }}>Move down</button>
             <button className="it" type="button" role="menuitem" aria-disabled={mv.del ? undefined : true} onClick={(e) => { closeMenuToSummary(e.currentTarget); if (mv.del) mv.act("del"); }}>Delete</button>
-            {mv.fixed && <><hr /><p className="hd" style={{ whiteSpace: "normal", maxWidth: 260 }}>{mv.reason ?? FIXED_LINE}</p></>}
           </div></details>}
         {hasOptions && !inline ? <button className="btn icon ghost" type="button" aria-expanded={open} aria-controls={n.id + "-opts"} aria-label={"Options for " + def.name} onClick={toggle}><Icon id={open ? "i-chev-d" : "i-chev-r"} /></button>
           : <span className="chev-sp" />}
@@ -944,9 +941,8 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
         {simple && <p className="muted simplenote">The steps that convert, check and save. {before.length + after.length > 0 ? "The rest of this workflow is folded; the steps view has everything." : "Questions, notes and what happens after the save go in the steps view."}</p>}
         <ol className="steps">{simple && fold(before, "before converting")}{shown.map((n) => {
           const i = list.indexOf(n);
-          // the server's places: no answer for a step means it's fixed. Moves stay inside the first and last steps.
-          const p = live.stepPlaces?.[n.id], fixed = p ? p.fixedPlace : true;
-          const mv: Move = { fixed, reason: p?.fixedReason, up: !fixed && !simple && i > 1 && i <= lastMovable, down: !fixed && !simple && i >= 1 && i < lastMovable, del: !fixed && !simple && i >= 1 && i <= lastMovable, // the simple view shows no place badge or menu: moving and deleting live in the steps view (ui-shop review #543)
+          // moves stay inside the first and last steps (the server's order rules are its answer on the check, not copied here)
+          const mv: Move = { up: !simple && i > 1 && i <= lastMovable, down: !simple && i >= 1 && i < lastMovable, del: !simple && i >= 1 && i <= lastMovable, // the simple view shows no place badge or menu: moving and deleting live in the steps view (ui-shop review #543)
             act: (w) => (w === "del" ? deleteStep(n.id) : moveStep(n.id, w === "up" ? -1 : 1)) };
           const ow = isQuestion(n) ? otherwiseOf(doc, n) : undefined;
           const otherwise: Else | undefined = ow ? { kind: ow.kind, set: (k) => setElse(n, k), node: ow.node, update, check: beforeSave(doc, n, defs.find((d) => d.type === n.type)) } : undefined;
