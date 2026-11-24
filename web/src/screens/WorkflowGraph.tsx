@@ -9,6 +9,7 @@ import dagre from "@dagrejs/dagre";
 import { Fragment, useEffect, useMemo, useRef, useState, type DragEvent, type RefObject } from "react";
 import { SignedOut, failed, type Answer } from "../api";
 import { Icon } from "../Icon";
+import { joinSentences, notLinked, pillWords, PILL_WORDS } from "../pillWords";
 import { Link, onLeave } from "../router";
 import { useData } from "../useData";
 import { getDraft, getWorkflow, publish, publishPreview, saveDraft, stepDefinitions, validateDoc, type Checked } from "../workflowApi";
@@ -24,9 +25,6 @@ const W = 200, H = (outs: number) => 34 + 24 + Math.max(outs, 1) * 22 + 8; // no
 
 type Data = { node: Node; def?: StepDefinition; summary: string; issues: ValidationIssue[]; edit?: boolean; linked: string[]; tight?: boolean; pickPort?: (id: string, port: string, label: string, step: string) => void };
 type GNodeT = RFNode<Data, "step">;
-// item 7: a port that isn't a success port and has no connection says so on the step: the original file is kept there
-// each unlinked port says its own name in words; the error port keeps the spec's "Didn't work" line
-const notLinked = (p: { name: string; label: string; outcome: string }) => (p.outcome === "error" ? "Didn't work" : p.label) + ": not linked. The original file is kept.";
 
 function GNode({ data, selected }: NodeProps<GNodeT>) {
   const { node, def, summary, issues, linked, tight, pickPort } = data, errs = issues.filter((i) => i.severity === "error").length;
@@ -41,8 +39,8 @@ function GNode({ data, selected }: NodeProps<GNodeT>) {
         <div key={p.name} className={"gport " + p.outcome}><span>{p.label}</span>
           {p.outcome !== "success" && !linked.includes(p.name) && !issues.some((i) => i.code === "unconnected_port" && i.port === p.name) &&
             (data.edit
-              ? <button type="button" className={"gpill" + (tight ? " inrow" : "")} aria-label={notLinked(p)} title={notLinked(p)} onClick={(e) => (e.stopPropagation(), pickPort?.(node.id, p.name, p.label, node.name ?? def?.name ?? node.type))}>{tight ? "Not linked" : "Not linked: keeps the original"}</button>
-              : <span className={"gpill" + (tight ? " inrow" : "")} title={notLinked(p)}>{tight ? "Not linked" : "Not linked: keeps the original"}</span>)}
+              ? <button type="button" className={"gpill" + (tight ? " inrow" : "")} aria-label={notLinked(p, def)} title={notLinked(p, def)} onClick={(e) => (e.stopPropagation(), pickPort?.(node.id, p.name, p.label, node.name ?? def?.name ?? node.type))}>{tight ? "Not linked" : pillWords(p, def)}</button>
+              : <span className={"gpill" + (tight ? " inrow" : "")} title={notLinked(p, def)}>{tight ? "Not linked" : pillWords(p, def)}</span>)}
           <Handle type="source" position={Position.Right} id={p.name} isConnectable={!!data.edit} /></div>))}
     </div>);
 }
@@ -54,9 +52,12 @@ const pillWidth = () => {
   if (pillPx === undefined && typeof document !== "undefined") {
     const host = document.createElement("div"), b = document.createElement("button");
     host.className = "gnode"; host.style.cssText = "position:absolute;visibility:hidden;left:-9999px;top:0";
-    b.type = "button"; b.className = "gpill"; b.textContent = "Not linked: keeps the original";
+    b.type = "button"; b.className = "gpill";
     host.appendChild(b); document.body.appendChild(host);
-    const w = b.getBoundingClientRect().width; host.remove();
+    // the longest of the wide texts, so no pill covers its neighbour
+    let w = 0;
+    for (const t of PILL_WORDS) { b.textContent = t; w = Math.max(w, b.getBoundingClientRect().width); }
+    host.remove();
     if (w > 0) pillPx = w;
   }
   return pillPx ?? 170;
@@ -99,7 +100,7 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
   const cur = hist.list[hist.at], doc = cur.doc, layout = cur.layout;
   const [saved, setSaved] = useState(cur), [etag, setEtag] = useState(first.etag), [checked, setChecked] = useState<Checked>({ issues: first.validation, stackable: first.stackable, stepSummaries: first.stepSummaries });
   const [dims, setDims] = useState<Record<string, { width: number; height: number }>>({});
-  const [sel, setSel] = useState<string | null>(null), [selEdge, setSelEdge] = useState<string | null>(null), [said, setSaid] = useState(""), [panel, setPanel] = useState<PublishPreview | null>(null), [ver, setVer] = useState(published);
+  const [sel, setSel] = useState<string | null>(() => new URLSearchParams(window.location.search).get("node")), [selEdge, setSelEdge] = useState<string | null>(null), [said, setSaid] = useState(""), [panel, setPanel] = useState<PublishPreview | null>(null), [ver, setVer] = useState(published);
   const dirty = cur !== saved;
   // item 7 (#467 follow-up): a click on an unlinked port's pill makes the next added step link from that port
   const [pending, setPending] = useState<{ node: string; port: string; label: string; step: string } | null>(null);
@@ -178,7 +179,7 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
       const def = defs.find((x) => x.type === n.type);
       return { id: n.id, type: "step", position: layout.nodes[n.id] ?? { x: 0, y: 0 }, draggable: edit, connectable: edit, deletable: edit && def?.category !== "input", selected: n.id === sel, zIndex: free(n, def).length ? 2 : undefined,
         initialWidth: W, initialHeight: H(def?.outputs?.length ?? 1), measured: dims[n.id], // review f03fcad: the minimap only draws nodes with a size
-        ariaLabel: [title(n) + (n.enabled ? "" : " (off)"), summary, ...mine.map((i) => (i.severity === "error" ? "Problem: " : "Warning: ") + i.message), ...free(n, def).map((p) => notLinked(p))].filter(Boolean).join(". "),
+        ariaLabel: joinSentences([title(n) + (n.enabled ? "" : " (off)"), summary, ...mine.map((i) => (i.severity === "error" ? "Problem: " : "Warning: ") + i.message), ...free(n, def).map((p) => notLinked(p, def))]),
         data: { node: n, def, summary, issues: mine, edit, linked: doc.edges.filter((e) => e.from === n.id).map((e) => e.fromPort), tight: tightPill(n), pickPort: (id: string, port: string, label: string, step: string) => (window.clearTimeout(nudgeTimer.current), setSel(id), setSelEdge(null), setPending({ node: id, port, label, step }), setSaid("Pick a step to add after " + step + " › " + label + ". Esc to cancel."), searchRef.current?.focus()) } };
     });
     const edges: RFEdge[] = doc.edges.map((e) => {
@@ -367,7 +368,7 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
         <div className="gcanvas" aria-label={"The steps of " + name + " as a graph"} onDragOver={edit ? onDragOver : undefined} onDragLeave={edit ? (e: DragEvent) => { if (!e.currentTarget.contains(e.relatedTarget as HTMLElement | null)) (setGhost(null), setPointer(null)); } : undefined} onDrop={edit ? onDrop : undefined} onBlur={() => (nudgeRun.current = null)}>
           {ghost && <div className="gdrop" aria-hidden="true" style={{ left: ghost.x, top: ghost.y, width: W * rf.getZoom(), height: 72 * rf.getZoom() }} />}
           {pointer && dragType && <div className="gghost" aria-hidden="true" style={{ left: pointer.x + 12, top: pointer.y + 12 }}>{defs.find((x) => x.type === dragType)?.name}</div>}
-          <ReactFlow nodes={shown} edges={edges} nodeTypes={nodeTypes} onInit={frame} minZoom={0.2} maxZoom={2} nodesDraggable={edit} nodesConnectable={edit} elementsSelectable
+          <ReactFlow nodes={shown} edges={edges} nodeTypes={nodeTypes} onInit={(rf) => (frame(rf), focusNode(rf, new URLSearchParams(window.location.search).get("node")))}minZoom={0.2} maxZoom={2} nodesDraggable={edit} nodesConnectable={edit} elementsSelectable
             onConnect={connect} isValidConnection={valid} onNodesChange={onNodesChange} onDelete={({ nodes: ns, edges: es }) => (ns.length ? removeNodes(ns.map((n) => n.id)) : removeEdges(es.map((e) => e.id)))} deleteKeyCode={edit ? ["Delete", "Backspace"] : null}
             onNodeClick={(_, n) => (setSel(n.id), setSelEdge(null), unpend(n.id))} onEdgeClick={(_, e) => (setSelEdge(e.id), setSel(null), unpend(null))} onPaneClick={() => (setSel(null), setSelEdge(null), unpend(null))}>
             <Background gap={20} />
@@ -385,7 +386,7 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
               {checked.stepSummaries?.[picked.id] && <p>{checked.stepSummaries[picked.id]}</p>}
               {pickedDef?.description && <p className="sm">{pickedDef.description}</p>}
               {/* the same full sentence as the pill's title, readable without hover (touch has no title tooltip): the same rule as the canvas's free() */}
-              {(pickedDef?.outputs ?? []).filter((p) => p.outcome !== "success" && !doc.edges.some((e) => e.from === picked.id && e.fromPort === p.name) && !issues.some((i) => i.nodeId === picked.id && i.code === "unconnected_port" && i.port === p.name)).map((p) => <p key={p.name} className="muted sm">{notLinked(p)}</p>)}
+              {(pickedDef?.outputs ?? []).filter((p) => p.outcome !== "success" && !doc.edges.some((e) => e.from === picked.id && e.fromPort === p.name) && !issues.some((i) => i.nodeId === picked.id && i.code === "unconnected_port" && i.port === p.name)).map((p) => <p key={p.name} className="muted sm">{notLinked(p, pickedDef)}</p>)}
               {edit && pickedDef?.category !== "input" && <div className="row"><button className="btn sm" type="button" onClick={() => removeNodes([picked.id])}><Icon id="i-trash" />Delete this step</button></div>}
               {/* step 2b (SCREENS V4 Inspector): the step's own form, the same as the step list's (schema-driven), with the server's problems inline */}
               {edit && pickedDef && !pickedDef.readOnly && <form className="stack ginform" onSubmit={(e) => e.preventDefault()} aria-label={"Settings of " + (picked.name ?? pickedDef.name)}>
@@ -449,7 +450,7 @@ function useMedia(q: string) {
 // The opening view and Fit never go below 75%. When the whole graph would fit smaller, it opens at 75% with the library
 // files step (the start; else the top-left-most step) at the top-left, and the person pans from there. Manual zoom keeps 20%.
 const FLOOR = 0.75;
-type Flow = { getNodes(): { position: { x: number; y: number }; measured?: { width?: number; height?: number }; initialHeight?: number; data: unknown }[]; fitView(o: { padding: number }): unknown; setViewport(v: { x: number; y: number; zoom: number }): unknown };
+type Flow = { getNodes(): { id: string; position: { x: number; y: number }; measured?: { width?: number; height?: number }; initialHeight?: number; data: unknown }[]; fitView(o: { padding: number }): unknown; getZoom(): number; setViewport(v: { x: number; y: number; zoom: number }): unknown; setCenter(x: number, y: number, o: { duration: number }): unknown };
 function frame(rf: Flow) {
   const nodes = rf.getNodes(), box = document.querySelector(".gcanvas")?.getBoundingClientRect();
   if (!nodes.length || !box) return;
@@ -458,6 +459,23 @@ function frame(rf: Flow) {
   if (Math.min(box.width / ((right - left) * 1.15), box.height / ((bottom - top) * 1.15)) >= FLOOR) { rf.fitView({ padding: 0.15 }); return; } // fitView's own fit: padding 0.15 adds 15% to the size
   const start = nodes.find((n) => (n.data as { node?: Node }).node?.type === "input.library") ?? nodes.reduce((a, c) => (c.position.y < a.position.y || (c.position.y === a.position.y && c.position.x < a.position.x) ? c : a));
   rf.setViewport({ x: 24 - start.position.x * FLOOR, y: 24 - start.position.y * FLOOR, zoom: FLOOR });
+}
+// ?node=<id> (the stack's "Add another path in the graph" link): the step is centred; its selection is set from the URL
+// The step's size and the fit settle a few frames after the graph renders, so this waits (a frame at a time, up to
+// 60) until the zoom and the step's height hold steady for six frames and the rendered height matches the measured
+// one, then centres on it.
+function focusNode(rf: Flow, id: string | null, tries = 60, last = "", stable = 0) {
+  const n = id ? rf.getNodes().find((x) => x.id === id) : undefined;
+  const box = document.querySelector(".gcanvas")?.getBoundingClientRect();
+  if (!n || !box || box.width <= 0 || box.height <= 0) return;
+  const el = document.querySelector<HTMLElement>(`.react-flow__node[data-id="${CSS.escape(n.id)}"]`);
+  const z = rf.getZoom(), now = `${z}:${el?.offsetHeight}`;
+  const agree = !!el && el.offsetHeight === n.measured?.height;
+  const same = agree && now === last;
+  if ((!same || stable < 6) && tries > 0) { requestAnimationFrame(() => focusNode(rf, id, tries - 1, now, same ? stable + 1 : 0)); return; }
+  if (!el) return;
+  const cx = n.position.x + W / 2, cy = n.position.y + el.offsetHeight / 2;
+  rf.setViewport({ x: box.width / 2 - cx * z, y: box.height / 2 - cy * z, zoom: z });
 }
 
 // Toolbar zoom (SCREENS V4: Fit, Zoom -, %, +).

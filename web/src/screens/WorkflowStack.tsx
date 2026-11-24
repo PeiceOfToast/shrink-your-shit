@@ -443,7 +443,8 @@ const OTHERWISE_AFTER: [Otherwise, string][] = [["none", "nothing more"], ["othe
 // FB4b-3: between the check and the save a No keeps the original (the new file is thrown away) or stops the run;
 // a hand-over makes no sense there, since the conversion is done
 const OTHERWISE_CHECK: [Otherwise, string][] = [["leave", "leave the file alone"], ["fail", "stop as failed"], ["other", "another path (in the graph)"]];
-function Step({ n, i, mv, open, toggle, update, issues, otherwise, inline }: { n: Node; i: number; mv: Move; open: boolean; toggle: () => void; update: (n: Node) => void; issues: ValidationIssue[]; otherwise?: Else; inline?: boolean }) {
+// W9: a step whose error port runs after the save (fileOn "saved") says what happens when it fails, and links to the graph
+function Step({ n, i, mv, open, toggle, update, issues, otherwise, inline, graphHref }: { n: Node; i: number; mv: Move; open: boolean; toggle: () => void; update: (n: Node) => void; issues: ValidationIssue[]; otherwise?: Else; inline?: boolean; graphHref?: string }) {
   const { stepDef, summary, wf } = useReg(), def = stepDef(n.type), mine = issues.filter((x) => x.nodeId === n.id);
   if (inline) open = true; // FB3, the simple view: every form is on the page, nothing folds
   const back = useRef<HTMLButtonElement>(null);
@@ -457,6 +458,7 @@ function Step({ n, i, mv, open, toggle, update, issues, otherwise, inline }: { n
         <div className="sm muted">Its settings are kept as they are. {def ? def.description : "This version of the page doesn't know this step, so it only shows it."}</div></div>
       <span className="muted sm">Read-only</span></div></li>);
   const hasOptions = Object.values((def.configSchema.properties ?? {}) as Props).some((s) => !s.readOnly);
+  const errSaved = def.fileOn?.error === "saved" && (def.outputs ?? []).some((o) => o.name === "error");
   const end = n.type === "input.library" ? "first" : n.type === "output.commit" ? "last" : undefined, nm = n.name ?? def.name;
   return (
     <li className={"srow" + (open ? " open" : "")} aria-labelledby={n.id + "-name"}>
@@ -507,7 +509,8 @@ function Step({ n, i, mv, open, toggle, update, issues, otherwise, inline }: { n
         </div>); })()}
       {open && hasOptions && <div className={"sopts" + (inline ? " inline" : "")} id={n.id + "-opts"} role="group" aria-label={"Options for " + def.name} onKeyDown={(e) => !inline && e.key === "Escape" && toggle()}>
         {!inline && <div className="sheethd phone"><button ref={back} className="btn icon ghost" type="button" aria-label="Back to the steps" onClick={toggle}><Icon id="i-chev-l" /></button><strong>{def.name}</strong></div>}
-        <Options n={n} issues={issues} set={(k, v, more) => update({ ...n, config: { ...n.config, [k]: v, ...more } })} /></div>}
+        <Options n={n} issues={issues} set={(k, v, more) => update({ ...n, config: { ...n.config, [k]: v, ...more } })} />
+        {errSaved && <p className="hint">If it doesn't work: a warning, and the next steps still run. <Link to={graphHref ?? ""}>Add another path in the graph</Link></p>}</div>}
     </li>);
 }
 
@@ -947,7 +950,7 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
             act: (w) => (w === "del" ? deleteStep(n.id) : moveStep(n.id, w === "up" ? -1 : 1)) };
           const ow = isQuestion(n) ? otherwiseOf(doc, n) : undefined;
           const otherwise: Else | undefined = ow ? { kind: ow.kind, set: (k) => setElse(n, k), node: ow.node, update, check: beforeSave(doc, n, defs.find((d) => d.type === n.type)) } : undefined;
-          return <Step key={n.id} n={n} i={i} mv={mv} open={open === n.id} toggle={() => setOpen(open === n.id ? null : n.id)} update={update} issues={issues} otherwise={otherwise} inline={simple} />;
+          return <Step key={n.id} n={n} i={i} mv={mv} open={open === n.id} toggle={() => setOpen(open === n.id ? null : n.id)} update={update} issues={issues} otherwise={otherwise} inline={simple} graphHref={`/workflows/${id}/graph?node=${encodeURIComponent(n.id)}`} />;
         })}{simple && fold(after, "after the file is saved")}</ol>
         {!only && !simple && <button className="btn sm ghost" type="button" onClick={openAdd}><Icon id="i-plus" />Add step</button>}
         {addOpen && <AddStepMenu wf={id} doc={doc} defs={defs} adds={live.addSteps} onAdd={addStep} onClose={closeAdd} />}

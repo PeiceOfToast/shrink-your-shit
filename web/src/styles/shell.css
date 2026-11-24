@@ -579,6 +579,7 @@ label.chk{cursor:pointer}
 .sic{color:var(--text-2);display:inline-flex}
 .srow.open>.sline{background:var(--raised)}
 .sopts{padding:var(--pad);background:var(--raised);border-top:1px solid var(--border)}
+.sopts .hint a{display:inline-block;min-height:24px;line-height:24px} /* #694: the link is a tap target, 24 px tall at 390 */
 .chev-sp{width:36px;flex:none}
 .sheethd{align-items:center;gap:8px;margin:-8px 0 8px}
 .checkline{margin:-6px 0 0}
