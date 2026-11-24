@@ -468,7 +468,7 @@ function focusNode(rf: Flow, id: string | null, tries = 60, last = "", stable = 
   const n = id ? rf.getNodes().find((x) => x.id === id) : undefined;
   const box = document.querySelector(".gcanvas")?.getBoundingClientRect();
   if (!n || !box || box.width <= 0 || box.height <= 0) return;
-  const el = document.querySelector<HTMLElement>(`.react-flow__node[data-id="${n.id}"]`);
+  const el = document.querySelector<HTMLElement>(`.react-flow__node[data-id="${CSS.escape(n.id)}"]`);
   const z = rf.getZoom(), now = `${z}:${el?.offsetHeight}`;
   const agree = !!el && el.offsetHeight === n.measured?.height;
   const same = agree && now === last;
