@@ -56,6 +56,9 @@ type Expect struct {
 	// 0 = unknown, unchecked.
 	VideoPackets int64
 	PacketsTol   float64
+	// OutputFPS (FB5b) is the new file's frame rate when the plan caps it: the picture comparison resamples the
+	// original to it, so the two streams' frames pair. 0 keeps the original's rate.
+	OutputFPS int
 	// VideoCopied: the video is copied, not encoded (S4's repackaging); the picture comparison is skipped.
 	VideoCopied bool
 	// MinSSIM is the picture threshold the flow asks for; 0 = the program's -min-ssim.

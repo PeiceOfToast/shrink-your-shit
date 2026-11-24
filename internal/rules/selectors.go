@@ -33,6 +33,9 @@ type Selectors struct {
 	RemoveBlackBars bool `json:"removeBlackBars,omitempty"`
 	// BitDepth is the Convert step's depth: keep ("" too) | 8 | 10. 10 is HEVC and AV1 only (Validate says so).
 	BitDepth string `json:"bitDepth,omitempty"`
+	// MaxFrameRate is the Convert step's frame-rate limit: keep ("" too) | 24 | 25 | 30 | 60. It only lowers a video
+	// whose rate is above it; a video at or under the limit keeps its own rate.
+	MaxFrameRate string `json:"maxFrameRate,omitempty"`
 	// Notices are coded notes shown on the flow until its next publish (migration 38: bitrate_meaning_changed).
 	Notices []Notice `json:"notices,omitempty"`
 	Audio   string   `json:"audio"` // AvailableAudio (S6: design E's six choices)
@@ -124,10 +127,15 @@ func (s Selectors) Validate() error {
 	case "", "keep", "8":
 	case "10":
 		if s.Format != "" && s.Format != "hevc" && s.Format != "av1" {
-			return notYet("10-bit needs HEVC or AV1.")
+			return notYet("Bit depth: 10-bit needs HEVC or AV1.")
 		}
 	default:
 		return invalid("bitDepth", s.BitDepth)
+	}
+	switch s.MaxFrameRate {
+	case "", "keep", "24", "25", "30", "60":
+	default:
+		return invalid("maxFrameRate", s.MaxFrameRate)
 	}
 	switch {
 	case !contains(allFormats, s.Format):

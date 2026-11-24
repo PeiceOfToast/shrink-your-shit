@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -20,13 +21,16 @@ import (
 // and checks the result against its Expect. A job keeps its Plan as a snapshot, so what was intended
 // can be read back later (slice 17's audit log).
 type Plan struct {
-	Skip        string      `json:"skip,omitempty"`     // why this file is not converted ("" = convert it)
-	SkipCode    string      `json:"skipCode,omitempty"` // Skip as a code the API can count (Skip* below)
-	Reason      string      `json:"reason,omitempty"`   // why it is converted, shown on the job
-	Eligibility Eligibility `json:"eligibility"`        // the rule that decided Skip (part of the fingerprint)
-	Video       VideoEncode `json:"video"`
-	Output      string      `json:"output"`              // replace | beside
-	OutputDir   string      `json:"outputDir,omitempty"` // "folder" (S6): the new files go here, in the library\'s sub-folders
+	Skip     string `json:"skip,omitempty"`     // why this file is not converted ("" = convert it)
+	SkipCode string `json:"skipCode,omitempty"` // Skip as a code the API can count (Skip* below)
+	Reason   string `json:"reason,omitempty"`   // why it is converted, shown on the job
+	// FrameRateNote (FB5b): why a frame-rate limit the person chose did not apply (the source's rate is unknown).
+	// It is not serialized (json:"-"), so a remote worker that gets the plan does not log it; only the local job does.
+	FrameRateNote string      `json:"-"`
+	Eligibility   Eligibility `json:"eligibility"` // the rule that decided Skip (part of the fingerprint)
+	Video         VideoEncode `json:"video"`
+	Output        string      `json:"output"`              // replace | beside
+	OutputDir     string      `json:"outputDir,omitempty"` // "folder" (S6): the new files go here, in the library\'s sub-folders
 	// KeepIfBigger (R8): a new file bigger than its original is not saved; the original is kept (any output).
 	// False replaces anyway, as before. Omitted when false, so existing Plans and fingerprints are unchanged.
 	KeepIfBigger bool `json:"keepIfBigger,omitempty"`
@@ -152,6 +156,11 @@ type VideoEncode struct {
 	// 8 makes a 10-bit SDR source 8-bit on every path; it never changes an HDR plan, which stays 10-bit. 10 makes an
 	// 8-bit HEVC or AV1 encode 10-bit. Compile zeroes it where it would change nothing, and for a copied video.
 	BitDepth int `json:"bitDepth,omitempty"`
+	// MaxFPS is the frame-rate limit the person chose on the Convert step: 0 is keep; 24, 25, 30 or 60 lowers a
+	// video whose rate is above it. CompileWith zeroes it where the video is at or under it, or copied, so a plan
+	// that carries it always converts the rate down. The filter sits before the scale; the full GPU pipeline is not
+	// used when it is set.
+	MaxFPS int `json:"maxFPS,omitempty"`
 	// Format is the video format made (S6: h264, av1, vp9); "" is HEVC, as every Plan before S6.
 	Format string `json:"format,omitempty"`
 	// Crop (F4): the person asked for the black bars to be cut. CropRect is what the worker measured for this
@@ -231,6 +240,18 @@ func (t Template) CompileWith(info media.Info, f Facts) (p Plan) {
 			case p.Video.BitDepth == 8: // a forced 8-bit encode of a deeper source: not TenBit
 			case p.Video.BitDepth == 10 || v.BitDepth > 8:
 				p.Video.TenBit = true
+			}
+		}
+		if p.Video.MaxFPS > 0 { // FB5b: the limit only lowers; a rate it cannot compare with is kept, and the job says so
+			v := info.Video()
+			switch {
+			case v == nil || p.Video.Copy || p.Video.Codec == "":
+				p.Video.MaxFPS = 0
+			case v.FrameRate <= 0:
+				p.Video.MaxFPS = 0
+				p.FrameRateNote = "The frame rate limit was not applied: the source's frame rate is not known, so its own rate is kept."
+			case v.FrameRate <= float64(p.Video.MaxFPS):
+				p.Video.MaxFPS = 0
 			}
 		}
 		p = orderSteps(withStepDecisions(p, info), t.StepOrder)
@@ -425,7 +446,8 @@ func (p Plan) HasFullPipeline(enc string) bool { return p.fullPipeline(enc) }
 // cannot decode and scale the picture alone.
 func (p Plan) fullPipeline(enc string) bool {
 	prof, ok := ProfileFor(enc)
-	return p.usesGraphics(enc) && ok && prof.FullPipeline() && p.Video.CropRect == nil
+	// A frame-rate limit is a processor filter before the scale, which the card cannot take (FB5b): it is not used then.
+	return p.usesGraphics(enc) && ok && prof.FullPipeline() && p.Video.CropRect == nil && p.Video.MaxFPS == 0
 }
 
 // usesGraphics is whether FFmpegArgsWith uses enc for the plan's video: an encoder of the plan's format's family,
@@ -491,6 +513,16 @@ func bitDepthOf(choice string) int {
 		return 8
 	case "10":
 		return 10
+	}
+	return 0
+}
+
+// maxFPSOf is the frame-rate limit for the Convert step's choice: 24, 25, 30 or 60, and 0 for keep (or anything else).
+func maxFPSOf(choice string) int {
+	switch choice {
+	case "24", "25", "30", "60":
+		n, _ := strconv.Atoi(choice)
+		return n
 	}
 	return 0
 }
@@ -618,6 +650,9 @@ func (p Plan) ffmpegArgs(in, out, gpu string, full bool) []string {
 	var vf []Filter
 	if r := p.Video.CropRect; r != nil { // F4: the crop comes first, so the scale and the upload see the cut picture
 		vf = append(vf, Filter{Text: r.Filter()})
+	}
+	if p.Video.MaxFPS > 0 { // FB5b: the limit comes before the scale, so the scale works on the lower rate's frames
+		vf = append(vf, Filter{Text: "fps=" + strconv.Itoa(p.Video.MaxFPS)})
 	}
 	if p.Video.Height > 0 {
 		if full {
@@ -834,6 +869,10 @@ func (p Plan) trackArgs() []string {
 // changes this, not the checks.
 func (p Plan) Expect(src media.Info, packets int64) Expect {
 	e := DefaultExpect(src, packets)
+	if v := src.Video(); p.Video.MaxFPS > 0 && v != nil && packets > 0 { // FB5b: the frames the output has, at its rate
+		n := int64(math.Round(float64(packets) * float64(p.Video.MaxFPS) / v.FrameRate))
+		e.VideoPackets, e.PacketsTol, e.OutputFPS = n, math.Max(0.01, 2/float64(n)), p.Video.MaxFPS // never tighter than 1%; at least two frames on a short file
+	}
 	if p.Video.Index > 0 { // the encoded stream is not the first video (cover art comes first)
 		n := 0
 		for k := range e.Streams {
@@ -1124,6 +1163,7 @@ func compileSelectors(p Plan, s Selectors, info media.Info, langs []string, basi
 	p.Video.Hardware, p.Video.HardwareFail = s.Hardware, s.HardwareFail
 	p.Video.Crop = s.RemoveBlackBars // F4: the worker measures the bars for a file that asks for it
 	p.Video.BitDepth = bitDepthOf(s.BitDepth)
+	p.Video.MaxFPS = maxFPSOf(s.MaxFrameRate)
 	if p.Video.Hardware == "auto" {
 		p.Video.Hardware = ""
 	}

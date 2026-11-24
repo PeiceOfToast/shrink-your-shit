@@ -1080,3 +1080,22 @@ func TestRuntimeSummaryDefaultsToTwoSeconds(t *testing.T) {
 		t.Errorf("summary %q", s)
 	}
 }
+
+// W7/F4: the closed row names only the non-default graphics card choice and black bars, in that order, after the old text
+func TestConvertSummaryNamesBlackBarsAndGraphicsCard(t *testing.T) {
+	base := summary(node(TypeConvert, "", map[string]any{}))
+	cases := []struct {
+		cfg  map[string]any
+		want string
+	}{
+		{map[string]any{"hardware": "auto", "hardwareFail": "next"}, base},
+		{map[string]any{"hardware": "only"}, base + " · graphics card only"},
+		{map[string]any{"hardware": "cpu", "hardwareFail": "fail"}, base + " · processor only"},
+		{map[string]any{"removeBlackBars": true, "hardware": "only"}, base + " · removes black bars · graphics card only"},
+	}
+	for _, c := range cases {
+		if got := summary(node(TypeConvert, "", c.cfg)); got != c.want {
+			t.Errorf("%v: %q, want %q", c.cfg, got, c.want)
+		}
+	}
+}

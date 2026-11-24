@@ -272,6 +272,10 @@ func Definitions() []StepDefinition {
 				// The bit depth: keep is the source's own, as before. The design's words (brief addendum 18:58Z); the
 				// card shows the HDR note itself.
 				"bitDepth": withDefault(enum([]any{"keep", "8", "10"}, []string{"Keep as is", "8-bit", "10-bit"}), "keep", "Bit depth", "segmented"),
+				// FB5b: the frame-rate limit only lowers a faster video; the hint says so.
+				"maxFrameRate": described(withDefault(enum([]any{"keep", "24", "25", "30", "60"},
+					[]string{"Keep as is", "At most 24 fps", "At most 25 fps", "At most 30 fps", "At most 60 fps"}), "keep", "Frame rate", "segmented"),
+					"Only ever lowered. A video at or under the limit keeps its own rate."),
 				"removeBlackBars": typedRef(map[string]any{"type": "boolean", "default": false, "title": "Remove black bars",
 					"description": "Cuts the black bars around the picture when a sample of the file agrees on where they are. Off: the picture is left as it is."}),
 			}, []string{"quality", "format", "resolution", "maxBitrate", "speed"})}),

@@ -756,8 +756,21 @@ func summary(n Node) string {
 		if d := strOf(c, "bitDepth", "keep"); d == "8" || d == "10" { // a non-default depth is named; keep adds nothing
 			parts = append(parts, d+"-bit")
 		}
+		if f := strOf(c, "maxFrameRate", "keep"); f != "keep" && f != "" { // FB5b: the limit is named; keep adds nothing
+			parts = append(parts, "at most "+f+" fps")
+		}
 		if b := strOf(c, "maxBitrate", "none"); b != "none" {
 			parts = append(parts, strings.ToUpper(b[:1])+b[1:]+" bitrate limit")
+		}
+		// W7/F4 (design-direction-w7-f4-convert): only the non-default choices are named; Automatic and Try another way add nothing
+		if boolOf(c, "removeBlackBars", false) {
+			parts = append(parts, "removes black bars")
+		}
+		switch strOf(c, "hardware", "auto") {
+		case "only":
+			parts = append(parts, "graphics card only")
+		case "cpu":
+			parts = append(parts, "processor only")
 		}
 		return strings.Join(parts, " · ")
 	case TypeAudio:

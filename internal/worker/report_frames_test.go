@@ -90,7 +90,7 @@ func TestCheckedFramesUsesTheReportAndSkipsAVFRGuess(t *testing.T) {
 		{"no report, VFR: skipped", 2000, media.StreamStats{}, false, true, 0},
 		{"a report of no frames is not used", 2500, media.StreamStats{Frames: 0}, true, false, 2500},
 	} {
-		if got := checkedFrames(c.guess, c.st, c.have, c.vfr); got != c.want {
+		if got := checkedFrames(c.guess, c.st, c.have, c.vfr, 0, 0); got != c.want {
 			t.Errorf("%s: %d, want %d", c.name, got, c.want)
 		}
 	}

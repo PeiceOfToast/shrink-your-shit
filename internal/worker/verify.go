@@ -253,7 +253,7 @@ func (w *Worker) verify(ctx context.Context, src media.Info, exp rules.Expect, s
 		w.jobf(id, ": Comparing picture quality with the original.")
 	}
 	compareStart := w.now()
-	err = w.ssimCheck(ctx, src, out, srcPath, tmp, exp.MinSSIM, exp.LeadInSec, exp.Crop)
+	err = w.ssimCheck(ctx, src, out, srcPath, tmp, exp.MinSSIM, exp.LeadInSec, exp.Crop, exp.OutputFPS)
 	if id != 0 {
 		w.jobf(id, ": Compared in %s.", waitWords(w.now().Sub(compareStart)))
 	}
@@ -482,7 +482,7 @@ var ssimRe = regexp.MustCompile(`SSIM\b.*\bAll:([0-9.]+)`)
 // ssimCheck compares the picture of the original and the new file at up to three places, using
 // ffmpeg's built-in SSIM measure (1.0 = identical). It needs ffmpeg's ssim filter; without it the
 // check cannot run, and then the original is kept.
-func (w *Worker) ssimCheck(ctx context.Context, src, out media.Info, srcPath, tmp string, planSSIM, leadIn float64, crop *rules.CropRect) error {
+func (w *Worker) ssimCheck(ctx context.Context, src, out media.Info, srcPath, tmp string, planSSIM, leadIn float64, crop *rules.CropRect, outFPS int) error {
 	sv, ov := src.MainVideoOrdinal(), out.MainVideoOrdinal()
 	if sv < 0 || ov < 0 {
 		return keptDiffers("there is no video to compare")
@@ -508,9 +508,15 @@ func (w *Worker) ssimCheck(ctx context.Context, src, out media.Info, srcPath, tm
 	// stays low at every alignment, a merely misaligned good one jumps up.
 	sMain, oMain := src.Video(), out.Video()
 	srcStart := sMain.StartTime + leadIn
+	// The comparison runs on the new file's frame grid: with a frame-rate limit the original is resampled to
+	// the output rate (scaleTo), so one frame is 1/outFPS; otherwise it is the original's own frame.
+	grid := sMain.FrameRate
+	if outFPS > 0 {
+		grid = float64(outFPS)
+	}
 	frame := 1.0 / 25
-	if sMain.FrameRate > 0 {
-		frame = 1 / sMain.FrameRate
+	if grid > 0 {
+		frame = 1 / grid
 	}
 	var done []placeScore // the places measured so far, for the job log
 	var lowest *CheckScore
@@ -526,7 +532,7 @@ func (w *Worker) ssimCheck(ctx context.Context, src, out media.Info, srcPath, tm
 		var bestFrames []frameScore // the best alignment's frames: the worst of them are the job log's evidence
 		passed := nudges[0]
 		for _, nudge := range nudges {
-			s, frames, err := score(ctx, srcPath, tmp, sv, ov, seg, srcStart, oMain.StartTime+nudge, scaleTo(sMain, oMain, crop))
+			s, frames, err := score(ctx, srcPath, tmp, sv, ov, seg, srcStart, oMain.StartTime+nudge, scaleTo(sMain, oMain, crop, outFPS))
 			if err != nil {
 				return err
 			}
@@ -543,7 +549,7 @@ func (w *Worker) ssimCheck(ctx context.Context, src, out media.Info, srcPath, tm
 			w.check = &CheckScore{Score: best, Min: threshold, Passed: false}
 			ke := kept(pictureTooDifferent+" (similarity %.3f at %s, %.2f is required)",
 				best, rules.Clock(seg.start), threshold).(*KeptError)
-			ke.Detail = ssimDetail(src.DurationSec, segs, done, bestFrames, sMain.FrameRate, threshold)
+			ke.Detail = ssimDetail(src.DurationSec, segs, done, bestFrames, grid, threshold)
 			return ke
 		}
 		if lowest == nil || best < lowest.Score { // all passed: the job's check step shows the lowest place
@@ -665,7 +671,7 @@ const seekMargin = 12.0
 // scaleTo is the filter that takes the original's picture to the new file's: the black-bar crop the encode made
 // (F4, first, so the scale works from the cut picture), then a scale when a flow scaled it down (selectors'
 // resolution), so the comparison pairs pictures of one size: "" when there is neither.
-func scaleTo(src, out *media.Stream, crop *rules.CropRect) string {
+func scaleTo(src, out *media.Stream, crop *rules.CropRect, outFPS int) string {
 	if src == nil {
 		return ""
 	}
@@ -673,10 +679,13 @@ func scaleTo(src, out *media.Stream, crop *rules.CropRect) string {
 	if crop != nil {
 		chain, w, h = ","+crop.Filter(), crop.W, crop.H
 	}
-	if out == nil || out.Width <= 0 || out.Height <= 0 || (w == out.Width && h == out.Height) {
-		return chain
+	if out != nil && out.Width > 0 && out.Height > 0 && (w != out.Width || h != out.Height) {
+		chain += fmt.Sprintf(",scale=%d:%d", out.Width, out.Height)
 	}
-	return chain + fmt.Sprintf(",scale=%d:%d", out.Width, out.Height)
+	if outFPS > 0 { // FB5b: the original at the new file's frame rate, so the frames pair in time
+		chain += fmt.Sprintf(",fps=%d", outFPS)
+	}
+	return chain
 }
 
 // ssimSegment compares seg (in seconds from the start of the video) of the original's video stream
@@ -852,8 +861,17 @@ func nominalFrameRate(src media.Info) float64 {
 // checkedFrames is the main video frame count the new file is checked against (slice 13). The encode's own
 // report decoded exactly, so it is the count when there is one; a VFR original's duration × rate guess is
 // not, so without a report its frame check is skipped (0) rather than judge the new file against it.
-func checkedFrames(guess int64, st media.StreamStats, haveReport, vfr bool) int64 {
+// With a frame-rate limit (maxFPS > 0) the new file has the original's frames at the lower rate, so the count is the
+// report's decoded count scaled to that rate (srcRate is the original's rate). A VFR original or an unknown rate has
+// no such count, and is skipped, as it is without a report.
+func checkedFrames(guess int64, st media.StreamStats, haveReport, vfr bool, maxFPS int, srcRate float64) int64 {
+	if maxFPS > 0 && (vfr || srcRate <= 0) {
+		return 0
+	}
 	if haveReport && st.Frames > 0 {
+		if maxFPS > 0 {
+			return int64(math.Round(float64(st.Frames) * float64(maxFPS) / srcRate))
+		}
 		return st.Frames
 	}
 	if vfr {

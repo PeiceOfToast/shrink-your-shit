@@ -103,8 +103,10 @@ export function summary(n: Node): string {
     case "video.convert": {
       // A-API-SHAPE: a slider step names its position; custom settings name the resolution and the level or VBR max
       const r = str(c, "resolution", "keep"), b = str(c, "maxBitrate", "none"), f = FORMATS[str(c, "format", "hevc")] ?? "HEVC";
-      if (c.kind === "selectors") return "Custom: " + f + " · " + (r === "keep" ? "same resolution" : r + "p") + " · " + (c.rateControl === "quality" ? "Quality only" : c.rateControl === "vbr" ? "VBR, max " + (Number(c.vbrMaxKbps) || 0).toLocaleString() + " kbps" : b[0].toUpperCase() + b.slice(1));
-      return [f, QUALITY[(Number(c.quality) || 3) - 1], r === "keep" ? "same resolution" : "at most " + r + "p"].join(" · ");
+      // W7/F4: the same non-default choices the server names (validate.go summary)
+      const gc = (c.removeBlackBars === true ? " · removes black bars" : "") + (c.hardware === "only" ? " · graphics card only" : c.hardware === "cpu" ? " · processor only" : "");
+      if (c.kind === "selectors") return "Custom: " + f + " · " + (r === "keep" ? "same resolution" : r + "p") + " · " + (c.rateControl === "quality" ? "Quality only" : c.rateControl === "vbr" ? "VBR, max " + (Number(c.vbrMaxKbps) || 0).toLocaleString() + " kbps" : b[0].toUpperCase() + b.slice(1)) + gc;
+      return [f, QUALITY[(Number(c.quality) || 3) - 1], r === "keep" ? "same resolution" : "at most " + r + "p"].join(" · ") + gc;
     }
     case "audio.tracks": return (AUDIO.find((a) => a[0] === str(c, "audio", "stereo_aac"))?.[1] ?? "") + (c.onlyMyLanguages === false ? "" : ", in your languages");
     case "subtitles.tracks": return SUBS[str(c, "subtitles", "keep_all")];
