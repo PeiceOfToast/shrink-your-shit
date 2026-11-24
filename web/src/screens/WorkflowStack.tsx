@@ -10,7 +10,7 @@ import { SignedOut, failed, type Answer } from "../api";
 import { afterOnly, beforeSave, deleteNode, groupOf, insertAfter, insertAfterSave, insertQuestion, isQuestion, moveNode, newNode, order, otherwiseOf, setOtherwise, type Otherwise } from "../stepEdits"; // the steps in running order: a property of the document, not data
 import { useData } from "../useData";
 import { exportWorkflow, getDraft, getLadder, getWorkflow, listTemplates, listWorkflows, patchWorkflow, publish, publishPreview, saveDraft, stepDefinitions, validateDoc, type Checked, type Ladder } from "../workflowApi";
-import { Link, navigate, onLeave } from "../router";
+import { Link, navigate, onLeave, useSearch } from "../router";
 import { Browse } from "../FolderPicker";
 import { OwnVars, VarInput, builtinsOf, takesVars, varListFor, varProblems, withOwn } from "../VarInput";
 import { refProblem } from "../refFit";
@@ -878,7 +878,8 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
   // FB3 (flow-builder.md 4.3): the simple view is this list filtered to the cards that shape the one conversion (the
   // steps that convert, check and save), each with its form on the page; the questions and actions before them and
   // the steps after the save fold into one line each, which opens the steps view. Same document, same checks.
-  const simple = new URLSearchParams(location.search).get("view") === "simple";
+  // read through useSearch so a search-only navigate (Simple, Steps, Back, Forward) re-renders the page (F2)
+  const simple = new URLSearchParams(useSearch()).get("view") === "simple";
   const shapes = (n: Node) => { const r = defs.find((d) => d.type === n.type)?.runsAs; return r === "plan" || r === "verify" || r === "commit"; };
   const saveAt = list.findIndex((n) => n.type === "output.commit");
   const before = list.filter((n, i) => i > 0 && !shapes(n) && (saveAt < 0 || i < saveAt)), after = saveAt < 0 ? [] : list.slice(saveAt + 1);
