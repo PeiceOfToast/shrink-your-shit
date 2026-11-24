@@ -450,7 +450,7 @@ function useMedia(q: string) {
 // The opening view and Fit never go below 75%. When the whole graph would fit smaller, it opens at 75% with the library
 // files step (the start; else the top-left-most step) at the top-left, and the person pans from there. Manual zoom keeps 20%.
 const FLOOR = 0.75;
-type Flow = { getNodes(): { id: string; position: { x: number; y: number }; measured?: { width?: number; height?: number }; initialHeight?: number; data: unknown }[]; fitView(o: { padding: number }): unknown; setViewport(v: { x: number; y: number; zoom: number }): unknown; setCenter(x: number, y: number, o: { duration: number }): unknown };
+type Flow = { getNodes(): { id: string; position: { x: number; y: number }; measured?: { width?: number; height?: number }; initialHeight?: number; data: unknown }[]; fitView(o: { padding: number }): unknown; getZoom(): number; setViewport(v: { x: number; y: number; zoom: number }): unknown; setCenter(x: number, y: number, o: { duration: number }): unknown };
 function frame(rf: Flow) {
   const nodes = rf.getNodes(), box = document.querySelector(".gcanvas")?.getBoundingClientRect();
   if (!nodes.length || !box) return;
@@ -461,14 +461,21 @@ function frame(rf: Flow) {
   rf.setViewport({ x: 24 - start.position.x * FLOOR, y: 24 - start.position.y * FLOOR, zoom: FLOOR });
 }
 // ?node=<id> (the stack's "Add another path in the graph" link): the step is centred; its selection is set from the URL
-function focusNode(rf: Flow, id: string | null) {
+// The step's size and the fit settle a few frames after the graph renders, so this waits (a frame at a time, up to
+// 60) until the zoom and the step's height hold steady for six frames and the rendered height matches the measured
+// one, then centres on it.
+function focusNode(rf: Flow, id: string | null, tries = 60, last = "", stable = 0) {
   const n = id ? rf.getNodes().find((x) => x.id === id) : undefined;
-  // at the frame's own zoom (FLOOR): setCenter at a non-max zoom did not centre here, so the viewport is set directly, as frame() does
   const box = document.querySelector(".gcanvas")?.getBoundingClientRect();
-  if (n && box) {
-    const cx = n.position.x + W / 2, cy = n.position.y + (n.measured?.height ?? n.initialHeight ?? 100) / 2;
-    rf.setViewport({ x: box.width / 2 - cx * FLOOR, y: box.height / 2 - cy * FLOOR, zoom: FLOOR });
-  }
+  if (!n || !box || box.width <= 0 || box.height <= 0) return;
+  const el = document.querySelector<HTMLElement>(`.react-flow__node[data-id="${n.id}"]`);
+  const z = rf.getZoom(), now = `${z}:${el?.offsetHeight}`;
+  const agree = !!el && el.offsetHeight === n.measured?.height;
+  const same = agree && now === last;
+  if ((!same || stable < 6) && tries > 0) { requestAnimationFrame(() => focusNode(rf, id, tries - 1, now, same ? stable + 1 : 0)); return; }
+  if (!el) return;
+  const cx = n.position.x + W / 2, cy = n.position.y + el.offsetHeight / 2;
+  rf.setViewport({ x: box.width / 2 - cx * z, y: box.height / 2 - cy * z, zoom: z });
 }
 
 // Toolbar zoom (SCREENS V4: Fit, Zoom -, %, +).
