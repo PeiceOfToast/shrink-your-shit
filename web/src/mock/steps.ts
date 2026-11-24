@@ -110,7 +110,7 @@ export function summary(n: Node): string {
       if (c.kind === "selectors") return "Custom: " + f + " · " + (r === "keep" ? "same resolution" : r + "p") + " · " + (c.rateControl === "quality" ? "Quality only" : c.rateControl === "vbr" ? "VBR, max " + (Number(c.vbrMaxKbps) || 0).toLocaleString() + " kbps" : b[0].toUpperCase() + b.slice(1)) + gc;
       return [f, QUALITY[(Number(c.quality) || 3) - 1], r === "keep" ? "same resolution" : "at most " + r + "p"].join(" · ") + gc;
     }
-    case "audio.tracks": return (AUDIO.find((a) => a[0] === str(c, "audio", "stereo_aac"))?.[1] ?? "") + (c.onlyMyLanguages === false ? "" : ", in your languages");
+    case "audio.tracks": return (AUDIO.find((a) => a[0] === str(c, "audio", "stereo_aac"))?.[1] ?? "") + (c.onlyMyLanguages === false ? "" : ", in your languages") + (c.evenLoudness === true && str(c, "audio", "stereo_aac") !== "as_is" ? " · even loudness" : "");
     case "subtitles.tracks": return SUBS[str(c, "subtitles", "keep_all")];
     case "container.output": return TYPES[str(c, "fileType", "mkv")];
     case "verify.output": return "The new file must play through, look like the original and hold what you chose";

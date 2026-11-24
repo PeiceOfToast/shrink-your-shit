@@ -93,7 +93,7 @@ function RefPick({ fid, title, value, set, back, selectRef, none, s, wf }: { fid
     </div>);
 }
 
-function Field(props: { id: string; name: string; s: JSONSchema; value: unknown; set: (v: unknown) => void; wf: string }) {
+function Field(props: { id: string; name: string; s: JSONSchema; value: unknown; set: (v: unknown) => void; wf: string; off?: string; describe?: string }) {
   const { id, name, s, value, set } = props;
   const title = (s.title as string) ?? name.charAt(0).toUpperCase() + name.slice(1).replace(/([A-Z])/g, " $1").toLowerCase(), fid = id + "-" + name;
   const [refMode, setRefMode] = useState(false), typed = s["x-variableRef"] === true;
@@ -134,7 +134,8 @@ function WorkflowPick({ fid, title, value, set, wf, description }: { fid: string
     </div>);
 }
 
-function Control({ id, name, s, value, set, wf }: { id: string; name: string; s: JSONSchema; value: unknown; set: (v: unknown) => void; wf: string }) {
+// off: why the control can't be used right now (its switch is disabled and says so); describe: the id of a line that explains this field
+function Control({ id, name, s, value, set, wf, off, describe }: { id: string; name: string; s: JSONSchema; value: unknown; set: (v: unknown) => void; wf: string; off?: string; describe?: string }) {
   // The schema's title; without one (V1's "ignore" has none), the key in plain form.
   const title = (s.title as string) ?? name.charAt(0).toUpperCase() + name.slice(1).replace(/([A-Z])/g, " $1").toLowerCase(), fid = id + "-" + name;
   if (widget(s) === "slider") {
@@ -150,18 +151,25 @@ function Control({ id, name, s, value, set, wf }: { id: string; name: string; s:
         <Hint text={hintFor(s, value)} />
       </div>);
   }
-  if (s.type === "boolean")
-    return <label className="row nw" htmlFor={fid}><input id={fid} type="checkbox" role="switch" className="switch" checked={value === true} onChange={(e) => set(e.target.checked)} /><span>{title}</span></label>;
+  if (s.type === "boolean") {
+    // the words sit under the switch, outside its label, so they are not part of its name (the radio lesson of P2)
+    const line = off ?? (typeof s.description === "string" ? s.description : ""), hid = fid + "-h";
+    return (
+      <div className="field">
+        <label className="row nw" htmlFor={fid}><input id={fid} type="checkbox" role="switch" className="switch" checked={value === true} disabled={!!off} aria-describedby={line ? hid : undefined} onChange={(e) => set(e.target.checked)} /><span>{title}</span></label>
+        {line && <span className="hint" id={hid}>{line}</span>}
+      </div>);
+  }
   if (s.enum && widget(s) === "segmented") {
     const avail = s["x-available"] as unknown[] | undefined;
     return (
-      <fieldset className="field choice"><legend className="lab">{title}</legend><div className="row">
+      <fieldset className="field choice" aria-describedby={describe}><legend className="lab">{title}</legend><div className="row">
         {labels(s).map(([v, l]) => (
           <label key={String(v)} className="radio"><input type="radio" name={fid} checked={value === v} disabled={!!avail && !avail.includes(v)} onChange={() => set(v)} /><span>{l}</span></label>))}
       </div><Hint text={hintFor(s, value)} />{name === "subtitles" && value === "srt" && <SrtFiles />}{typeof s.description === "string" && <span className="hint">{s.description}</span>}</fieldset>);
   }
   if (s.enum)
-    return <div className="field"><label htmlFor={fid}>{title}</label><select id={fid} className="input" value={String(value)} onChange={(e) => set(labels(s).find((o) => String(o[0]) === e.target.value)?.[0])}>
+    return <div className="field"><label htmlFor={fid}>{title}</label><select id={fid} className="input" value={String(value)} aria-describedby={describe} onChange={(e) => set(labels(s).find((o) => String(o[0]) === e.target.value)?.[0])}>
       {labels(s).map(([v, l]) => <option key={String(v)} value={String(v)}>{l}</option>)}</select><Hint text={hintFor(s, value)} />{name === "subtitles" && value === "srt" && <SrtFiles />}{typeof s.description === "string" && <span className="hint">{s.description}</span>}</div>;
   // a list of choices (V6a check: "Video format is one of"): a checkbox per choice
   const items = s.items as JSONSchema | undefined;
@@ -242,9 +250,12 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
     if (n.type === "video.convert") { const f = formatEdit(c, k, v); x = f.x; if (f.said !== undefined) setSaid(f.said); } // #697: the rules live in convertFormat.ts
     set(k, v, x);
   };
+  // Audio (P3): As it is copies every track, so Even out loudness is off and says why, and the Audio choice points at that line
+  const asIs = n.type === "audio.tracks" && c.audio === "as_is" && keys.includes("evenLoudness"), AS_IS_LINE = "Not used with As it is: every track is copied unchanged.";
   const field = (k: string) => { const b = bad(k), sk = conv(k); if (!sk) return null; return (
     <div key={k} className={b.length ? "fieldbad" : undefined} data-field={k} aria-invalid={b.length ? true : undefined}>
-      <Field id={n.id} name={k} s={sk} value={c[k] ?? sk.default} set={(v) => put(k, v)} wf={wf} />
+      <Field id={n.id} name={k} s={sk} value={c[k] ?? sk.default} set={(v) => put(k, v)} wf={wf}
+        off={asIs && k === "evenLoudness" ? AS_IS_LINE : undefined} describe={asIs && k === "audio" ? n.id + "-evenLoudness-h" : undefined} />
       {b.map((i, x) => <span key={x} className="hint" role="alert" style={{ color: "var(--error-text)" }}>{i.message}</span>)}
     </div>); };
   // a problem in a field under 'More options' opens it by itself (review c0189fa P3), also when the problems list picks
