@@ -14,7 +14,7 @@ import { Link, navigate, onLeave, useSearch } from "../router";
 import { Browse } from "../FolderPicker";
 import { OwnVars, VarInput, builtinsOf, takesVars, varListFor, varProblems, withOwn } from "../VarInput";
 import { refProblem } from "../refFit";
-import { customEdit, formatEdit } from "../convertFormat";
+import { customEdit, formatEdit, qualityCap } from "../convertFormat";
 import { refusalText } from "../refusalWords";
 import { touchHold } from "../touchHold";
 import "../styles/variables.css";
@@ -317,7 +317,7 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
                 <span><strong>Bitrate level</strong><span className="hint" style={{ display: "block" }}>Aims for the level's bitrate for each file's resolution.</span></span></label>
               <label className="radio" style={{ alignItems: "flex-start" }}><input type="radio" name={n.id + "-rc"} checked={rc === "vbr"} disabled={av1} onChange={() => put("rateControl", "vbr")} />
                 <span><strong>VBR with a max</strong><span className="hint" style={{ display: "block" }}>Aims for a steady picture and uses only the bitrate each scene needs, never above your max.</span></span></label>
-              <label className="radio" style={{ alignItems: "flex-start" }}><input type="radio" name={n.id + "-rc"} checked={rc === "quality"} onChange={() => put("rateControl", "quality")} />
+              <label className="radio" style={{ alignItems: "flex-start" }}><input type="radio" name={n.id + "-rc"} checked={rc === "quality"} onChange={() => undefined} onClick={() => { if (rc !== "quality" || Object.keys(qualityCap(c, "quality")).length) put("rateControl", "quality"); }} />
                 <span><strong>Quality only</strong><span className="hint" style={{ display: "block" }}>Uses the Quality setting above, with no bitrate limit. File sizes vary the most.</span></span></label>
               {legacy && <label className="radio" style={{ alignItems: "flex-start" }}><input type="radio" name={n.id + "-rc"} checked onChange={() => undefined} />
                 <span><strong>As set up before 13 Nov</strong><span className="hint" style={{ display: "block" }}>Makes the same files as before.</span></span></label>}

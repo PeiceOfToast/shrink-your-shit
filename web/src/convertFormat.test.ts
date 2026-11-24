@@ -84,3 +84,8 @@ test("More options on a step with no cap writes Quality only and no maxBitrate",
   assert.deepEqual(x, { rateControl: "quality" });
   assert.ok(!("maxBitrate" in x));
 });
+
+test("picking Quality only on a capped quality step clears the cap, so a stuck AV1 draft can publish", () => {
+  assert.deepEqual(formatEdit({ format: "av1", rateControl: "quality", maxBitrate: "medium" }, "rateControl", "quality").x.maxBitrate, "none");
+  assert.deepEqual(formatEdit({ format: "hevc", rateControl: "quality", maxBitrate: "high" }, "rateControl", "quality").x.maxBitrate, "none");
+});
