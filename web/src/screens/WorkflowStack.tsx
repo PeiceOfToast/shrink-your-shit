@@ -436,6 +436,7 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
 // Its options open under the row; on phones as a full-screen sheet with a back button (M5).
 // W11: every row between Library files and Save the result can move and be deleted; the first and last steps have no menu.
 type DragEv = { button?: number; pointerId: number; pointerType?: string; clientX: number; clientY: number; currentTarget: HTMLElement; preventDefault: () => void };
+type DragMove = { pointerId: number; clientX: number; clientY: number };
 type Move = { up: boolean; down: boolean; del: boolean; act: (w: "up" | "down" | "del") => void; grip?: { label: string; lifted: boolean; onKey: (e: { key: string; preventDefault: () => void }) => void; drag: { down: (e: DragEv) => void; cancel: () => void } } };
 // FB1d: a question's row says what its No does: one of the ends, or another path the graph shows. FB4b: "hand to
 // another workflow" is an end with a setting, so the row shows the workflow picker under it (node: that end).
@@ -863,9 +864,12 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
   // a touch press lifts only after the hold (touchHold.ts); a move or release before that cancels it. Mouse and pen lift at once.
   const [press] = useState(() => touchPress());
   useEffect(() => () => press.dispose(), [press]); // a hold still pending when the stack unmounts must not lift a step
+  // the pointer whose press is dragging a step: the window follows only this pointer, so a keyboard lift ignores the mouse
+  const dragPointer = useRef<number | null>(null);
   const dragFrom = (nid: ID) => ({
     down: (e: DragEv) => {
       if (e.button !== undefined && e.button !== 0) return;
+      dragPointer.current = e.pointerId;
       if (e.pointerType === "touch") {
         const el = e.currentTarget, pid = e.pointerId;
         press.down(e.clientX, e.clientY, () => { pick(nid); try { el.setPointerCapture(pid); } catch { /* the page still follows the release */ } });
@@ -874,13 +878,14 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
       e.preventDefault(); if (lift?.id !== nid) pick(nid);
       try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* the page still follows the release */ }
     },
-    cancel: () => { press.cancel(); if (lift) cancel(); },
+    cancel: () => { dragPointer.current = null; press.cancel(); if (lift) cancel(); },
   });
   // while a step is lifted, its moves and release are read on the window: moving the row drops the handle's pointer capture,
   // so the handle can miss the release and the step stayed lifted (#707). The handle keeps the press and the cancel.
-  const dragNow = useRef({ move: (_e: { clientX: number; clientY: number }) => {}, up: () => {} });
+  const dragNow = useRef({ move: (_e: DragMove) => {}, up: (_e: DragMove) => {} });
   dragNow.current = {
     move: (e) => {
+      if (dragPointer.current !== e.pointerId) return;
       if (press.move(e.clientX, e.clientY)) return;
       if (!lift) return;
       const nid = lift.id, li = document.getElementById(nid + "-grip")?.closest("li") ?? null;
@@ -889,10 +894,10 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
       if (prev?.dataset.sid && k - 1 >= 1 && e.clientY < prev.getBoundingClientRect().top + prev.offsetHeight / 2) nudge(-1);
       else if (next?.dataset.sid && k + 1 <= movableEnd(lift.doc) && e.clientY > next.getBoundingClientRect().top + next.offsetHeight / 2) nudge(1);
     },
-    up: () => { if (press.up()) return; if (lift) drop(); },
+    up: (e) => { if (dragPointer.current !== e.pointerId) return; dragPointer.current = null; if (press.up()) return; if (lift) drop(); },
   };
   useEffect(() => {
-    const move = (e: PointerEvent) => dragNow.current.move(e), up = () => dragNow.current.up();
+    const move = (e: PointerEvent) => dragNow.current.move(e), up = (e: PointerEvent) => dragNow.current.up(e);
     window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
     return () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
   }, []);
