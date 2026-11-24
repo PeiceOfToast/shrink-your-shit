@@ -654,7 +654,7 @@ func revisionView(r jobs.Revision, sc workflow.Scopes) map[string]any {
 	}
 	return map[string]any{"id": id, "workflowId": strconv.FormatInt(r.WorkflowID, 10), "number": r.Number, "status": r.Status,
 		"workflow": workflow.Masked(r.Doc), "layout": r.Layout, "logicHash": r.LogicHash, "stackable": res.Stackable,
-		"stepSummaries": res.StepSummaries, "validation": res.Issues, "etag": r.Etag, "createdAt": r.Created, "publishedAt": r.Published}
+		"stepSummaries": res.StepSummaries, "fileOn": res.FileOn, "validation": res.Issues, "etag": r.Etag, "createdAt": r.Created, "publishedAt": r.Published}
 }
 
 func stepTypes(d workflow.Doc) []string {
