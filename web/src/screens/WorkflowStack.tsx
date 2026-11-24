@@ -279,7 +279,9 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
     const goBack = () => (differs ? setAsk(true) : backToSlider());
     // Picture (P6): the schema's own words and hints; bit depth's 10-bit is off with H.264 or VP9
     const fpsSchema = props.maxFrameRate ?? {}, bdSchema = props.bitDepth ?? {}, bd = String(c.bitDepth ?? "keep");
-    const no10 = ["h264", "vp9"].includes(String(c.format ?? "hevc")), bdDescribed = [no10 ? n.id + "-bd-10" : "", bd === "8" ? n.id + "-bd-8" : ""].filter(Boolean).join(" ");
+    // One hint line at a time: with H.264 or VP9 only "10-bit needs HEVC or AV1."; the HDR line shows only where 10-bit can be made
+    const no10 = ["h264", "vp9"].includes(String(c.format ?? "hevc")), hdrLine = bd === "8" && !no10;
+    const bdDescribed = [no10 ? n.id + "-bd-10" : "", hdrLine ? n.id + "-bd-8" : ""].filter(Boolean).join(" ");
     return (
       <div className="stack">
         {legacy && <div className="note"><Icon id="i-info" /><div>This step was set up before 13 Nov and still makes the same files as before. Changing its bitrate settings switches it to the new rules.</div></div>}
@@ -337,7 +339,7 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
                       <span>{l}</span></label>); })}
                 </div>
                 {no10 && <span className="hint" id={n.id + "-bd-10"} style={{ display: "block" }}>10-bit needs HEVC or AV1.</span>}
-                {bd === "8" && <span className="hint" id={n.id + "-bd-8"} style={{ display: "block" }}>HDR videos stay 10-bit.</span>}
+                {hdrLine && <span className="hint" id={n.id + "-bd-8"} style={{ display: "block" }}>HDR videos stay 10-bit.</span>}
               </fieldset>
               {bad("bitDepth").map((i, x) => <span key={x} className="hint" role="alert" style={{ color: "var(--error-text)" }}>{i.message}</span>)}
             </div>}
