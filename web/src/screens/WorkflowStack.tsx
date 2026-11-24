@@ -485,10 +485,10 @@ function Step({ n, i, mv, open, toggle, update, issues, otherwise, inline, errLi
         </div>); })()}
       {open && hasOptions && <div className={"sopts" + (inline ? " inline" : "")} id={n.id + "-opts"} role="group" aria-label={"Options for " + def.name} onKeyDown={(e) => !inline && e.key === "Escape" && toggle()}>
         {!inline && <div className="sheethd phone"><button ref={back} className="btn icon ghost" type="button" aria-label="Back to the steps" onClick={toggle}><Icon id="i-chev-l" /></button><strong>{def.name}</strong></div>}
-        <Options n={n} issues={issues} set={(k, v, more) => update({ ...n, config: { ...n.config, [k]: v, ...more } })} /></div>}
-      {open && errSaved && <p className="hint">{errLinked
-        ? <>If it doesn't work: another path runs instead of the steps below. <Link to={graphHref ?? ""}>Edit it in the graph</Link></>
-        : <>If it doesn't work: a warning, and the next steps still run. <Link to={graphHref ?? ""}>Add another path in the graph</Link></>}</p>}
+        <Options n={n} issues={issues} set={(k, v, more) => update({ ...n, config: { ...n.config, [k]: v, ...more } })} />
+        {errSaved && <p className="hint">{errLinked
+          ? <>If it doesn't work: another path runs instead of the steps below. <Link to={graphHref ?? ""}>Edit it in the graph</Link></>
+          : <>If it doesn't work: a warning, and the next steps still run. <Link to={graphHref ?? ""}>Add another path in the graph</Link></>}</p>}</div>}
     </li>);
 }
 

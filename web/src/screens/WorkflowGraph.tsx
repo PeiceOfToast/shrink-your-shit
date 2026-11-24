@@ -9,6 +9,7 @@ import dagre from "@dagrejs/dagre";
 import { Fragment, useEffect, useMemo, useRef, useState, type DragEvent, type RefObject } from "react";
 import { SignedOut, failed, type Answer } from "../api";
 import { Icon } from "../Icon";
+import { notLinked, pillWords, PILL_WORDS } from "../pillWords";
 import { Link, onLeave } from "../router";
 import { useData } from "../useData";
 import { getDraft, getWorkflow, publish, publishPreview, saveDraft, stepDefinitions, validateDoc, type Checked } from "../workflowApi";
@@ -24,20 +25,6 @@ const W = 200, H = (outs: number) => 34 + 24 + Math.max(outs, 1) * 22 + 8; // no
 
 type Data = { node: Node; def?: StepDefinition; summary: string; issues: ValidationIssue[]; edit?: boolean; linked: string[]; tight?: boolean; pickPort?: (id: string, port: string, label: string, step: string) => void };
 type GNodeT = RFNode<Data, "step">;
-// item 7: a port that isn't a success port and has no connection says so on the step
-// each unlinked port says its own name in words; the error port keeps the spec's "Didn't work" line
-// W9: after the save (fileOn "saved") the original is already gone for good, so the words say what really happens: the
-// warning and the next steps (error, skipped), or nothing more on a question's No (branch)
-const afterSave = (p: { name: string }, def?: StepDefinition) => def?.fileOn?.[p.name] === "saved";
-const notLinked = (p: { name: string; label: string; outcome: string }, def?: StepDefinition) => {
-  if (afterSave(p, def)) return p.outcome === "branch"
-    ? p.label + ": not linked. The new file is already saved; nothing more happens on this path."
-    : (p.outcome === "error" ? "Didn't work" : p.label) + ": not linked. The new file is already saved; a warning is shown and the next steps still run.";
-  return (p.outcome === "error" ? "Didn't work" : p.label) + ": not linked. The original file is kept.";
-};
-// the wide pill's words (the tight pill always says "Not linked"); pillWidth measures all three
-const pillWords = (p: { name: string; outcome: string }, def?: StepDefinition) => !afterSave(p, def) ? "Not linked: keeps the original" : p.outcome === "branch" ? "Not linked: nothing more" : "Not linked: carries on";
-const PILL_WORDS = ["Not linked: keeps the original", "Not linked: carries on", "Not linked: nothing more"];
 
 function GNode({ data, selected }: NodeProps<GNodeT>) {
   const { node, def, summary, issues, linked, tight, pickPort } = data, errs = issues.filter((i) => i.severity === "error").length;
