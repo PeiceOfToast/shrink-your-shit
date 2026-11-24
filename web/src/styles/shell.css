@@ -132,12 +132,14 @@ textarea.input{min-height:72px;font-family:var(--mono);font-size:var(--fs-sm)}
 .seg.radios label:last-child{border-right:0}
 .seg.radios label.on{background:var(--raised);font-weight:var(--fw-strong);box-shadow:inset 0 -3px 0 var(--accent)}
 .seg.radios label:has(input:focus-visible){outline:2px solid var(--focus);outline-offset:-2px}
+/* #697: with the radio circle hidden, a disabled segment dims like a disabled .btn (design FITS condition) */
+.seg.radios label:has(input:disabled){opacity:.5;cursor:not-allowed}
 /* Graphics card (W7): one segmented row with the chosen hint under it at wider widths; on a phone the three options stack, each with its hint (the .seg row can't fit them) */
 /* Written as .seg.radios.hwseg so they beat .seg.radios label(.on) (0,2,1) and .seg.radios label.on (0,3,1) */
 /* The hint is a sibling after its label (not inside it), so the radio's name is just the option; the last label is last-of-type, since a hint follows it */
 .seg.radios.hwseg .hwopt{display:none}
 .seg.radios.hwseg label:last-of-type{border-right:0}
-.seg.radios.hwfail input[type=radio]{position:absolute;width:1px;height:1px;margin:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap} /* the fail segments hide the radio at every width (review2 F1, FITS) */
+.seg.radios.hwfail input[type=radio],.seg.radios.bitdepth input[type=radio]{position:absolute;width:1px;height:1px;margin:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap} /* the fail segments and Bit depth hide the radio at every width (review2 F1, FITS; #697) */
 @media (min-width:641px){ /* the segment shows the ring, as Appearance's do: the radio is hidden like .sr (pages.tsx:79) */
   .seg.radios.hwseg input[type=radio]{position:absolute;width:1px;height:1px;margin:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 }

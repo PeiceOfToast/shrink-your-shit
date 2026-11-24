@@ -104,7 +104,9 @@ export function summary(n: Node): string {
       // A-API-SHAPE: a slider step names its position; custom settings name the resolution and the level or VBR max
       const r = str(c, "resolution", "keep"), b = str(c, "maxBitrate", "none"), f = FORMATS[str(c, "format", "hevc")] ?? "HEVC";
       // W7/F4: the same non-default choices the server names (validate.go summary)
-      const gc = (c.removeBlackBars === true ? " · removes black bars" : "") + (c.hardware === "only" ? " · graphics card only" : c.hardware === "cpu" ? " · processor only" : "");
+      // P6: bit depth and the frame-rate limit are named when they aren't Keep as is, as the server's summary does
+      const pic = (c.bitDepth === "8" || c.bitDepth === "10" ? " · " + c.bitDepth + "-bit" : "") + (c.maxFrameRate && c.maxFrameRate !== "keep" ? " · at most " + c.maxFrameRate + " fps" : "");
+      const gc = pic + (c.removeBlackBars === true ? " · removes black bars" : "") + (c.hardware === "only" ? " · graphics card only" : c.hardware === "cpu" ? " · processor only" : "");
       if (c.kind === "selectors") return "Custom: " + f + " · " + (r === "keep" ? "same resolution" : r + "p") + " · " + (c.rateControl === "quality" ? "Quality only" : c.rateControl === "vbr" ? "VBR, max " + (Number(c.vbrMaxKbps) || 0).toLocaleString() + " kbps" : b[0].toUpperCase() + b.slice(1)) + gc;
       return [f, QUALITY[(Number(c.quality) || 3) - 1], r === "keep" ? "same resolution" : "at most " + r + "p"].join(" · ") + gc;
     }
