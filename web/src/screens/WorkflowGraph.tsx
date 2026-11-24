@@ -463,7 +463,12 @@ function frame(rf: Flow) {
 // ?node=<id> (the stack's "Add another path in the graph" link): the step is centred; its selection is set from the URL
 function focusNode(rf: Flow, id: string | null) {
   const n = id ? rf.getNodes().find((x) => x.id === id) : undefined;
-  if (n) rf.setCenter(n.position.x + W / 2, n.position.y + (n.measured?.height ?? n.initialHeight ?? 100) / 2, { duration: 0 });
+  // at the frame's own zoom (FLOOR): setCenter at a non-max zoom did not centre here, so the viewport is set directly, as frame() does
+  const box = document.querySelector(".gcanvas")?.getBoundingClientRect();
+  if (n && box) {
+    const cx = n.position.x + W / 2, cy = n.position.y + (n.measured?.height ?? n.initialHeight ?? 100) / 2;
+    rf.setViewport({ x: box.width / 2 - cx * FLOOR, y: box.height / 2 - cy * FLOOR, zoom: FLOOR });
+  }
 }
 
 // Toolbar zoom (SCREENS V4: Fit, Zoom -, %, +).
