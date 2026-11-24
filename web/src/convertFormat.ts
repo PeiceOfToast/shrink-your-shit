@@ -7,6 +7,8 @@ export const qualityCap = (c: Record<string, unknown>, rc: string): { maxBitrate
   const cap = String(c.maxBitrate ?? "none");
   return rc === "quality" && cap !== "none" && cap !== "" ? { maxBitrate: "none" } : {};
 };
+// What More options writes with kind selectors: Quality only, and any cap goes with it (#706)
+export const customEdit = (c: Record<string, unknown>): Record<string, unknown> => ({ rateControl: "quality", ...qualityCap(c, "quality") });
 export const formatEdit = (c: Record<string, unknown>, k: string, v: unknown): { x: Record<string, unknown>; said?: string } => {
   const x: Record<string, unknown> = {}, rc = String(c.rateControl ?? "quality");
   // decide from the format this edit leaves (not the saved one)

@@ -1,7 +1,7 @@
 // #697: the format edit on a Convert step: the 10-bit reset and the AV1 rate rule.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { formatEdit, qualityCap } from "./convertFormat.ts";
+import { customEdit, formatEdit, qualityCap } from "./convertFormat.ts";
 
 test("switching an HEVC 10-bit step to H.264 resets bit depth, in the same update, with its line", () => {
   const r = formatEdit({ format: "hevc", bitDepth: "10" }, "format", "h264");
@@ -73,4 +73,14 @@ test("More options on an AV1 step with a cap clears the cap (custom path)", () =
 test("qualityCap writes nothing when there is no cap or the rate control is not Quality", () => {
   assert.deepEqual(qualityCap({ maxBitrate: "none" }, "quality"), {});
   assert.deepEqual(qualityCap({ maxBitrate: "high" }, "level"), {});
+});
+
+test("More options on a capped step writes Quality only and clears the cap", () => {
+  assert.deepEqual(customEdit({ format: "hevc", rateControl: "level", maxBitrate: "high" }), { rateControl: "quality", maxBitrate: "none" });
+});
+
+test("More options on a step with no cap writes Quality only and no maxBitrate", () => {
+  const x = customEdit({ format: "hevc", rateControl: "level", maxBitrate: "none" });
+  assert.deepEqual(x, { rateControl: "quality" });
+  assert.ok(!("maxBitrate" in x));
 });
