@@ -853,12 +853,13 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
   // (the same copy and limits as the keys), and the release drops it; a cancelled press puts it back
   // a touch press lifts only after the hold (touchHold.ts); a move or release before that cancels it. Mouse and pen lift at once.
   const holdRef = useRef<ReturnType<typeof touchHold> | null>(null);
+  useEffect(() => () => holdRef.current?.stop(), []); // a hold still pending when the stack unmounts must not lift a step
   const dragFrom = (nid: ID) => ({
     down: (e: DragEv) => {
       if (e.button !== undefined && e.button !== 0) return;
       if (e.pointerType === "touch") {
         const el = e.currentTarget, pid = e.pointerId, h = touchHold(() => { pick(nid); try { el.setPointerCapture(pid); } catch { /* the page still follows the release */ } });
-        holdRef.current = h; h.start(); return;
+        holdRef.current?.stop(); holdRef.current = h; h.start(); return;
       }
       e.preventDefault(); if (lift?.id !== nid) pick(nid);
       try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* the page still follows the release */ }
