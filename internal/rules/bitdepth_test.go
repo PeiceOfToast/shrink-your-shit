@@ -52,9 +52,13 @@ func TestBitDepthEightMakesATenBitSDRSourceEightBit(t *testing.T) {
 	gp := gpuPlan(22, func(v *VideoEncode) { v.BitDepth = 8 })
 	for _, enc := range []string{"hevc_nvenc", "hevc_qsv", "hevc_amf"} {
 		args, ok := gp.FFmpegArgsWith("in.mkv", "out.mkv", enc)
-		if !ok || hasFlag(args, "-profile:v:0") || hasFlag(args, "-pix_fmt:v:0") {
-			t.Errorf("%s: 8 on a 10-bit SDR source has 10-bit args: ok %v, %v", enc, ok, args)
+		if !ok || hasFlag(args, "-profile:v:0") || !has(args, "-pix_fmt:v:0", "nv12") {
+			t.Errorf("%s: 8 on a 10-bit SDR source: want nv12 and no main10: ok %v, %v", enc, ok, args)
 		}
+	}
+	// VAAPI's upload already names nv12 for 8-bit frames, so it gets no -pix_fmt of its own
+	if args, ok := gp.FFmpegArgsWith("in.mkv", "out.mkv", "hevc_vaapi"); !ok || !has(args, "-filter:v:0", "format=nv12,hwupload") || hasFlag(args, "-profile:v:0") {
+		t.Errorf("hevc_vaapi: 8 on a 10-bit SDR source: want format=nv12,hwupload and no main10: ok %v, %v", ok, args)
 	}
 	// the full pipeline's scale names 8-bit frames, so a decoder's 10-bit frames are made 8-bit
 	gp.Video.Height = 1080
@@ -157,3 +161,16 @@ func bitDepthPlanJSON(t *testing.T, p Plan) string {
 }
 
 func planArgs(p Plan) []string { return p.FFmpegArgs("in.mkv", "out.mkv") }
+
+// With no height to scale to, the full pipeline's format-only filter names the card's frames: nv12 for 8 bits and
+// p010 for 10 bits, on the source's depth either way (a 10-bit choice of an 8-bit file gets p010 too).
+func TestBitDepthCardFullPipelineWithoutScale(t *testing.T) {
+	eight := gpuPlan(22, func(v *VideoEncode) { v.BitDepth = 8 })
+	if args, ok := eight.FFmpegArgsFullGPU("in.mkv", "out.mkv", "hevc_qsv"); !ok || !has(args, "-filter:v:0", "vpp_qsv=format=nv12") {
+		t.Errorf("8 on a 10-bit SDR source, full pipeline, no scale: want vpp_qsv=format=nv12: ok %v, %v", ok, args)
+	}
+	ten := gpuPlan(22, func(v *VideoEncode) { v.BitDepth = 10; v.TenBit = true })
+	if args, ok := ten.FFmpegArgsFullGPU("in.mkv", "out.mkv", "hevc_qsv"); !ok || !has(args, "-filter:v:0", "vpp_qsv=format=p010le") {
+		t.Errorf("10 on an 8-bit source, full pipeline, no scale: want vpp_qsv=format=p010le: ok %v, %v", ok, args)
+	}
+}

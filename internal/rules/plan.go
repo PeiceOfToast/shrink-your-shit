@@ -468,6 +468,22 @@ func fullScale(p Plan, fam string, ten10 bool) string {
 	return sc
 }
 
+// fullFormat is the full pipeline's format-only filter, for a plan that chose its depth and scales to no height: the
+// family's card filter with only a format argument. "" for a family whose full pipeline has none.
+func fullFormat(fam string, ten10 bool) string {
+	switch fam {
+	case "qsv":
+		f := "nv12"
+		if ten10 {
+			f = pixFmt10(fam)
+		}
+		return "vpp_qsv=format=" + f
+	case "vaapi":
+		return "scale_vaapi=format=" + vaapiFormat(ten10)
+	}
+	return ""
+}
+
 // bitDepthOf is the plan's depth for the Convert step's choice: 8 or 10, and 0 for keep (or anything else).
 func bitDepthOf(choice string) int {
 	switch choice {
@@ -586,6 +602,10 @@ func (p Plan) ffmpegArgs(in, out, gpu string, full bool) []string {
 		args = append(args, "-pix_fmt:"+v, "yuv420p")
 	} else if gpu == "" && p.Video.BitDepth == 10 { // the person's 10 bits: an 8-bit source is made 10-bit (HEVC and AV1 only)
 		args = append(args, "-pix_fmt:"+v, "yuv420p10le")
+	} else if gpu != "" && p.Video.BitDepth == 8 && !full && profiles[fam].Upload(false) == nil {
+		// the person's 8 bits on a card: the processor-decoded 10-bit frames are sent as nv12 (a family whose upload
+		// makes its frames sets the format itself, so it gets none here)
+		args = append(args, "-pix_fmt:"+v, "nv12")
 	} else if ten10 && gpu != "" { // a 10-bit SDR source keeps its depth on a graphics encoder: main10 and p010
 		// (the processor's encoder already keeps the source's depth on its own, and its arguments are today's).
 		if strings.HasPrefix(gpu, "hevc_") { // HEVC's name for the 10-bit profile; AV1's profile 0 already covers p010
@@ -607,6 +627,10 @@ func (p Plan) ffmpegArgs(in, out, gpu string, full bool) []string {
 			if p.Video.SquarePixels { // the scale keeps the shape by carrying a SAR; rounding leaves 1280:1281, so a square source gets 1:1
 				vf = append(vf, Filter{Text: "setsar=1"})
 			}
+		}
+	} else if full && p.Video.BitDepth != 0 { // no scale to name the depth: a format-only filter on the card does it
+		if f := fullFormat(fam, ten10); f != "" {
+			vf = append(vf, Filter{Text: f, Card: true})
 		}
 	}
 	if chain := filterChain(vf, full, profiles[fam].Upload(ten10), gpu != ""); len(chain) > 0 {
