@@ -24,6 +24,7 @@
   --success-text: var(--success);  /* status words; light theme darkens these */
   --warning-text: var(--warning);
   --error-text: var(--error);
+  --bad-text: color-mix(in srgb, var(--error) 75%, #fff); /* ADDED: text of a problem pill (.pill.bad, .errchip); 4.94:1 on --raised, 5.95:1 on --surface, the 14% fill included */
   --focus: var(--accent);   /* 2 px ring plus 2 px offset; 6.2:1 on the page */
   --chart-muted: #6A7C9F;   /* "skipped" and "originals left in place" in charts, next to success/error/pending; 3.85:1 on --surface (design 11-19: 3:1+ on the card), protan dE 8.2 from --error */
   --chart-pending: #9FE3C4; /* saving still waiting in the trash: a lighter tint of --success (design 11-19: the darker step was 2.5:1 on bg); 3:1+ on bg, dE 15 from --success */
@@ -49,6 +50,7 @@
   --success-text: #13704D;    /* ADDED: #16835A is 4.07-4.42:1 on bg/sidebar/raised; this is 5.2:1 or more */
   --warning-text: #8A5208;    /* ADDED: #A9650D is 3.96-4.3:1 on bg/sidebar/raised; this is 5.5:1 or more */
   --error-text: var(--error);
+  --bad-text: #AE2D40;        /* ADDED: problem-pill text; #B72F43 was 4.27:1 on --raised, this is 4.62:1 (5.21:1 on --surface) */
   --focus: var(--accent);
   --chart-muted: #7D8BA0;
   --chart-pending: #6FB19A;
@@ -62,7 +64,7 @@
     --text: #172033; --text-2: #5A687B; --border: #CCD5E1; --border-strong: #7D8BA0;
     --accent: #365FE2; --accent-2: #7454C8; --on-accent: #FFFFFF; --accent-text: #2B50C8;
     --success: #16835A; --warning: #A9650D; --error: #B72F43;
-    --success-text: #13704D; --warning-text: #8A5208; --error-text: #B72F43; --focus: var(--accent);
+    --success-text: #13704D; --warning-text: #8A5208; --error-text: #B72F43; --bad-text: #AE2D40; --focus: var(--accent);
     --chart-muted: #7D8BA0; --chart-pending: #6FB19A;
   }
 }

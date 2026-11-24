@@ -163,7 +163,7 @@ textarea.input{min-height:72px;font-family:var(--mono);font-size:var(--fs-sm)}
 .pill .ic{width:12px;height:12px}
 .pill.run{background:var(--accent-soft);color:var(--accent-text)}
 .pill.ok{background:var(--raised);color:var(--success-text)} /* U8: Done is success text on a neutral pill, not a success fill */
-.pill.bad{background:var(--bad-soft);color:var(--error-text)}
+.pill.bad{background:var(--bad-soft);color:var(--bad-text)}
 .pill.warn,.pill.sample{background:var(--warn-soft);color:var(--warning-text)}
 .gain{color:var(--success-text)} /* U8: a saved figure is success text, never a fill */
 .st.ok{color:var(--success-text)}.st.run{color:var(--accent-text)}.st.bad{color:var(--error-text)}.st.warn{color:var(--warning-text)}.st.wait{color:var(--text-2)}
@@ -443,7 +443,7 @@ label.chk{cursor:pointer}
 .list.rows .chips{margin-top:4px}
 .list.rows .mchip{text-decoration:none;color:var(--text-2)}
 .list.rows .mchip.warnchip{background:var(--warn-soft);color:var(--warning-text)}
-.list.rows .mchip.errchip{background:var(--bad-soft);color:var(--error-text);font-weight:600}
+.list.rows .mchip.errchip{background:var(--bad-soft);color:var(--bad-text);font-weight:600}
 .list.rows .tbl td.stc{width:1%}
 .selall{display:inline-flex;align-items:center;gap:4px;min-height:32px}
 /* Jobs (U4, C1): the size change is the right-hand fact; the 3 px underline runs along a live row's bottom edge */

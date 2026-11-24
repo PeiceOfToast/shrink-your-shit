@@ -17,6 +17,63 @@ import (
 // somewhere (design 02:05Z: every branch has a defined outcome), and no check may sit among the steps
 // that convert.
 
+// afterSaveNodes is the set of steps on the walk after each Save: from its success port, an after-action's
+// success and error and an after-question's match and else, the same links afterChain follows. A step
+// turned off is in the set too: the file is saved there whether or not the step runs. The walk stops at
+// anything else and at a step already seen. (A second walk beside afterChain; sharing one is a follow-up.)
+func afterSaveNodes(d Doc) map[string]bool {
+	byID := map[string]Node{}
+	for _, n := range d.Nodes {
+		byID[n.ID] = n
+	}
+	out := map[[2]string]string{} // [node, port] -> the next node; the first edge wins, as branchTemplate has it
+	for _, e := range d.Edges {
+		if k := [2]string{e.From, e.FromPort}; out[k] == "" {
+			out[k] = e.To
+		}
+	}
+	set := map[string]bool{}
+	var walk func(id string)
+	walk = func(id string) {
+		an, ok := byID[id]
+		if !ok || set[id] || !slices.Contains(definitionPhase(an.Type), PhaseAfter) {
+			return
+		}
+		switch {
+		case IsQuestion(an.Type):
+			set[id] = true
+			walk(out[[2]string{id, "match"}])
+			walk(out[[2]string{id, "else"}])
+		case IsAction(an.Type):
+			set[id] = true
+			walk(out[[2]string{id, "success"}])
+			walk(out[[2]string{id, "error"}])
+		}
+	}
+	for _, n := range d.Nodes {
+		if n.Type == TypeCommit {
+			walk(out[[2]string{n.ID, "success"}])
+		}
+	}
+	return set
+}
+
+// fileOnFor is a step's file state per output port: its definition's, except that a step on the walk
+// after the save has its file saved on every port (the save is done before it runs). The definition is
+// not changed; a step's place is what the page reads.
+func fileOnFor(def StepDefinition, afterSave bool) map[string]string {
+	out := map[string]string{}
+	for port, st := range def.FileOn {
+		out[port] = st
+	}
+	if afterSave {
+		for _, p := range def.Outputs {
+			out[p.Name] = FileSaved
+		}
+	}
+	return out
+}
+
 // branchTemplate is d's Template when d has checks (ok false: it isn't a graph of branches at all).
 func branchTemplate(d Doc) (rules.Template, []Issue) {
 	byID := map[string]Node{}
