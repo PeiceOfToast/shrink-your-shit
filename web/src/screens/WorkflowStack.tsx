@@ -347,7 +347,7 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
             {String(c.hardware ?? "auto") !== "cpu" && <fieldset className={"field choice" + (bad("hardwareFail").length ? " fieldbad" : "")} data-field="hardwareFail"><legend className="lab">If the graphics card fails</legend>
               <div className="row">{GC_FAIL.map(([v, l]) => (
                 <label key={v} className="radio"><input type="radio" name={n.id + "-hwfail"} checked={String(c.hardwareFail ?? "next") === v} onChange={() => set("hardwareFail", v === "next" ? undefined : v)} /><span>{l}</span></label>))}</div>
-              <span className="hint" aria-live="polite">{GC_FAIL.find((x) => x[0] === String(c.hardwareFail ?? "next"))?.[2]}</span>
+              <span className="hint">{GC_FAIL.find((x) => x[0] === String(c.hardwareFail ?? "next"))?.[2]}</span>
               {bad("hardwareFail").map((i, x) => <span key={x} className="hint" role="alert" style={{ color: "var(--error-text)" }}>{i.message}</span>)}
             </fieldset>}
             {String(c.hardware ?? "auto") !== "only" && (!sel || rc === "quality") && <div className={bad("cpuQuality").length ? "fieldbad" : undefined} data-field="cpuQuality">
