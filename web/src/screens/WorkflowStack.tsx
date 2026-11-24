@@ -281,6 +281,8 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
     // an old flow keeps its meaning until its first edit (design: 'Changing its bitrate settings switches it')
     // Quality only, as the slider has it: opening More options changes nothing until the person picks something
     const custom = () => !legacy && set("kind", "selectors", customEdit(c));
+    // Quality only: a click or Space/Enter on it applies, even when it is already checked (no change event fires then; #706)
+    const pickQuality = () => { if (rc !== "quality" || Object.keys(qualityCap(c, "quality")).length) put("rateControl", "quality"); };
     // the slider's own values: custom settings that differ from them are asked about before they're cleared (SCREENS V3)
     const SLIDER = { format: "hevc", resolution: "keep", maxBitrate: "none", speed: "normal", rateControl: "quality" };
     const differs = Object.entries(SLIDER).some(([k, v]) => String(c[k] ?? v) !== v) || c.vbrMaxKbps != null;
@@ -317,7 +319,7 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
                 <span><strong>Bitrate level</strong><span className="hint" style={{ display: "block" }}>Aims for the level's bitrate for each file's resolution.</span></span></label>
               <label className="radio" style={{ alignItems: "flex-start" }}><input type="radio" name={n.id + "-rc"} checked={rc === "vbr"} disabled={av1} onChange={() => put("rateControl", "vbr")} />
                 <span><strong>VBR with a max</strong><span className="hint" style={{ display: "block" }}>Aims for a steady picture and uses only the bitrate each scene needs, never above your max.</span></span></label>
-              <label className="radio" style={{ alignItems: "flex-start" }}><input type="radio" name={n.id + "-rc"} checked={rc === "quality"} onChange={() => undefined} onClick={() => { if (rc !== "quality" || Object.keys(qualityCap(c, "quality")).length) put("rateControl", "quality"); }} />
+              <label className="radio" style={{ alignItems: "flex-start" }}><input type="radio" name={n.id + "-rc"} checked={rc === "quality"} onChange={() => undefined} onClick={pickQuality} onKeyDown={(e) => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); pickQuality(); } }} />
                 <span><strong>Quality only</strong><span className="hint" style={{ display: "block" }}>Uses the Quality setting above, with no bitrate limit. File sizes vary the most.</span></span></label>
               {legacy && <label className="radio" style={{ alignItems: "flex-start" }}><input type="radio" name={n.id + "-rc"} checked onChange={() => undefined} />
                 <span><strong>As set up before 13 Nov</strong><span className="hint" style={{ display: "block" }}>Makes the same files as before.</span></span></label>}
