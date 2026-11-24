@@ -15,6 +15,7 @@ import { Browse } from "../FolderPicker";
 import { OwnVars, VarInput, builtinsOf, takesVars, varListFor, varProblems, withOwn } from "../VarInput";
 import { refProblem } from "../refFit";
 import { formatEdit } from "../convertFormat";
+import { refusalText } from "../refusalWords";
 import "../styles/variables.css";
 import { getSettings, listLibraries, shrunk } from "../libraryApi";
 import type { TemplateVar } from "../mock/variables";
@@ -819,13 +820,13 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
       return setSaid(dir < 0 ? `${nameOf(l[k])} can't go higher. ${nameOf(l[0])} is always first.` : `${nameOf(l[k])} can't go lower. ${nameOf(l[movableEnd(cur) + 1])} is always last.`);
     }
     const d2 = moveNode(cur, lift.id, dir);
-    setLift({ id: lift.id, doc: d2 }); setSaid(stepWord(d2, lift.id));
+    setLift({ id: lift.id, doc: d2 }); setSaid(stepWord(d2, lift.id)); focusGrip(lift.id); // the row's node moves in the DOM, which drops focus
   };
   const jump = (dir: -1 | 1) => {
     if (!lift) return;
     let d = lift.doc;
     for (;;) { const k = placeOf(d, lift.id); if (k + dir < 1 || k + dir > movableEnd(d)) break; d = moveNode(d, lift.id, dir); }
-    setLift({ id: lift.id, doc: d }); setSaid(stepWord(d, lift.id));
+    setLift({ id: lift.id, doc: d }); setSaid(stepWord(d, lift.id)); focusGrip(lift.id);
   };
   const drop = () => {
     if (!lift) return;
@@ -868,8 +869,6 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
   // a refused order: the check's one not_runnable_yet issue, on the step that's out of place. After a move, drop or delete
   // its sentence goes in the status bar once (Undo move takes that step back); the row keeps the problem pill until the order runs
   const refusals = live.issues.filter((i) => i.code === "not_runnable_yet"), refusal = orderAt === hist.at ? refusals[0] : undefined;
-  // the server's sentence without its own draft note (that's said once, here): "…add it. It's saved as a draft until it can."
-  const refusalText = (m: string) => { const parts = m.split(/(?<=\.)\s+/), cut = (parts.length > 1 ? parts.slice(0, -1).join(" ") : m).replace(/\.?$/, "."); return `${cut} It's saved as a draft until it can.`; };
   useEffect(() => {
     if (!refusal) return setGone((g) => (g?.undo === "Undo move" ? null : g));
     setGone({ text: refusalText(refusal.message), at: hist.at, undo: "Undo move" });
