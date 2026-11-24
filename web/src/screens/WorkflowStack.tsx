@@ -334,8 +334,9 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
         </fieldset>
         <details ref={gcRef} style={{ marginTop: 12 }}><summary className="btn sm" style={{ display: "inline-flex" }}>Graphics card: {GC_CHOICES.find((x) => x[0] === String(c.hardware ?? "auto"))?.[1] ?? "Automatic"}</summary>
           <div className="stack" style={{ marginTop: 12 }}>
-            <fieldset className={"field choice hwchoice" + (bad("hardware").length ? " fieldbad" : "")} data-field="hardware" aria-invalid={bad("hardware").length ? true : undefined} aria-describedby={n.id + "-hwh"}><legend className="lab">Graphics card</legend>
-              {/* one segmented row at 1440 with the chosen hint under it; at 390 stacked rows with each hint under its label (hwchoice CSS in shell.css) */}
+            <div className={bad("hardware").length ? "fieldbad" : undefined} data-field="hardware" aria-invalid={bad("hardware").length ? true : undefined}>
+            <fieldset className="field choice" aria-describedby={n.id + "-hwh"}><legend className="lab">Graphics card</legend>
+              {/* one segmented row at 1440 with the chosen hint under it; at 390 stacked rows with each hint under its label (.hwseg rules in shell.css) */}
               <div className="seg radios hwseg">
                 {GC_CHOICES.map(([v, l, h]) => (
                   <Fragment key={v}>
@@ -347,19 +348,22 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
               <span className="hint hwchosen" id={n.id + "-hwh"}>{GC_CHOICES.find((x) => x[0] === String(c.hardware ?? "auto"))?.[2]}</span>
               {bad("hardware").map((i, x) => <span key={x} className="hint" role="alert" style={{ color: "var(--error-text)" }}>{i.message}</span>)}
             </fieldset>
-            {String(c.hardware ?? "auto") !== "cpu" && <fieldset className={"field choice" + (bad("hardwareFail").length ? " fieldbad" : "")} data-field="hardwareFail"><legend className="lab">If the graphics card fails</legend>
-              <div className="row">{GC_FAIL.map(([v, l]) => (
-                <label key={v} className="radio"><input type="radio" name={n.id + "-hwfail"} checked={String(c.hardwareFail ?? "next") === v} onChange={() => set("hardwareFail", v === "next" ? undefined : v)} /><span>{l}</span></label>))}</div>
-              <span className="hint">{GC_FAIL.find((x) => x[0] === String(c.hardwareFail ?? "next"))?.[2]}</span>
+            </div>
+            {String(c.hardware ?? "auto") !== "cpu" && <div className={bad("hardwareFail").length ? "fieldbad" : undefined} data-field="hardwareFail" aria-invalid={bad("hardwareFail").length ? true : undefined}>
+            <fieldset className="field choice" aria-describedby={n.id + "-hwfh"}><legend className="lab">If the graphics card fails</legend>
+              <div className="seg radios hwfail">{GC_FAIL.map(([v, l]) => { const on = String(c.hardwareFail ?? "next") === v; return (
+                <label key={v} className={on ? "on" : undefined}><input type="radio" name={n.id + "-hwfail"} checked={on} onChange={() => set("hardwareFail", v === "next" ? undefined : v)} /><span>{l}</span></label>); })}</div>
+              <span className="hint" id={n.id + "-hwfh"}>{GC_FAIL.find((x) => x[0] === String(c.hardwareFail ?? "next"))?.[2]}</span>
               {bad("hardwareFail").map((i, x) => <span key={x} className="hint" role="alert" style={{ color: "var(--error-text)" }}>{i.message}</span>)}
-            </fieldset>}
-            {String(c.hardware ?? "auto") !== "only" && (!sel || rc === "quality") && <div className={bad("cpuQuality").length ? "fieldbad" : undefined} data-field="cpuQuality">
+            </fieldset>
+            </div>}
+            {String(c.hardware ?? "auto") !== "only" && (!sel || rc === "quality") && <div className={bad("cpuQuality").length ? "fieldbad" : undefined} data-field="cpuQuality"><div className="field">
               <label htmlFor={n.id + "-cpuq"}>Quality on the processor</label>
               <select id={n.id + "-cpuq"} className="input" value={String(Number(c.cpuQuality ?? 0))} onChange={(e) => set("cpuQuality", Number(e.target.value) || undefined)}>
                 {CPU_Q.map((l, i) => <option key={i} value={i}>{l}</option>)}</select>
               <span className="hint">The processor and the graphics card can give different results at the same Quality. Pick a position here to set the processor's own.</span>
               {bad("cpuQuality").map((i, x) => <span key={x} className="hint" role="alert" style={{ color: "var(--error-text)" }}>{i.message}</span>)}
-            </div>}
+            </div></div>}
           </div>
         </details>
         {said && <p className="hint" role="status">{said}</p>}

@@ -138,7 +138,7 @@ textarea.input{min-height:72px;font-family:var(--mono);font-size:var(--fs-sm)}
 .seg.radios.hwseg .hwopt{display:none}
 .seg.radios.hwseg label:last-of-type{border-right:0}
 @media (min-width:641px){ /* the segment shows the ring, as Appearance's do: the radio is hidden like .sr (pages.tsx:79) */
-  .seg.radios.hwseg input[type=radio]{position:absolute;width:1px;height:1px;margin:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+  .seg.radios.hwseg input[type=radio],.seg.radios.hwfail input[type=radio]{position:absolute;width:1px;height:1px;margin:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 }
 @media (max-width:640px){
   .seg.radios.hwseg{display:flex;flex-direction:column;align-items:stretch;border-radius:0;border:0;overflow:visible}
