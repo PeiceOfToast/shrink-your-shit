@@ -58,6 +58,13 @@ test("the revision's per-port state beats the definition's", () => {
   assert.equal(pillWords(error, saved, { error: "original" }), "Not linked: keeps the original");
 });
 
+// #704: the editable graph's pill must read the revision's state too; a question's No after the save, on a definition whose port isn't 'saved'
+test("the revision's state for a question's No reads 'nothing more' even when the definition says otherwise", () => {
+  const no = { name: "no", label: "Question No", outcome: "branch" };
+  assert.equal(pillWords(no, before, { no: "saved" }), "Not linked: nothing more");
+  assert.equal(pillWords(no, before, undefined), "Not linked: keeps the original");
+});
+
 test("a revision entry without this port reads as not saved", () => {
   assert.equal(pillWords(error, saved, {}), "Not linked: keeps the original");
 });
