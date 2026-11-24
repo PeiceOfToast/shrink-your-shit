@@ -861,6 +861,18 @@ func (w *Worker) recordEncode(id int64, args []string, started time.Time, encErr
 		ExitCode: exit, FfmpegRan: ran, KeyLines: keys})
 }
 
+// recordRefusalSummary: a check before the encode refused the job (checkPlan) with a reason code. No ffmpeg ran, so
+// the failure summary has no exit code or log lines to show, only the words the job already has as its key line.
+// Without it the drawer has no next step for these jobs. Only a coded refusal gets one: a skip or a later retry is not a failure.
+func (w *Worker) recordRefusalSummary(id int64, started time.Time, err error) {
+	var fe *FailedError
+	if !errors.As(err, &fe) || fe.Code == "" || w.Queue == nil {
+		return
+	}
+	w.Queue.SetFailureSummary(id, jobs.FailureSummary{Step: 0, StepCount: 1, AfterMs: w.now().Sub(started).Milliseconds(),
+		ExitCode: -1, FfmpegRan: false, KeyLines: []string{fe.Plain}})
+}
+
 // SkippedError: the file is not converted because its flow leaves it alone (S3's Dolby Vision skips);
 // the job ends as a skipped file with these words and code.
 type SkippedError struct{ Words, Code string }
@@ -1692,8 +1704,10 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 	// encoder for this file and its bit depth, the free space beside the original, and (in Folder mode) the folder
 	// for new files, made and shown to be writable, with the room on its disk. Its step is recorded before the
 	// encode's, so the run log and the job page show it first: passed, or as the check that stopped the job.
+	checkStarted := w.now()
 	enc, err := w.checkPlan(ctx, job, plan, src, srcPath, before.Size(), newName)
 	if err != nil {
+		w.recordRefusalSummary(job.ID, checkStarted, err)
 		return "", err
 	}
 	gpuSlot := enc.slot // the card's place this job holds while its graphics encode runs

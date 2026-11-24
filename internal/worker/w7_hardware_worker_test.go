@@ -56,6 +56,14 @@ func TestHardwareOnlyWithNoGraphicsEncoderFailsPlainly(t *testing.T) {
 	if enc := encodeCalls(s); len(enc) != 0 {
 		t.Errorf("an encode ran: %v", enc)
 	}
+	// A refusal before the encode still gets a failure summary, so the drawer has the words and no ffmpeg run.
+	sum, err := s.store.FailureOf(s.id)
+	if err != nil || sum == nil {
+		t.Fatalf("failure summary: %v, %v; want one for the refused job", sum, err)
+	}
+	if sum.FfmpegRan || len(sum.KeyLines) != 1 || !strings.Contains(sum.KeyLines[0], "Graphics card only: no graphics encoder") {
+		t.Errorf("summary %+v, want no ffmpeg run and the refusal words as its key line", sum)
+	}
 }
 
 // "Hardware only" and the card fails: the job fails with plain words; the processor does not convert the file.
