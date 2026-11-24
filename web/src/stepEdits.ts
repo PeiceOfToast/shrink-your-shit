@@ -67,10 +67,12 @@ function relink(d: WorkflowDoc, ids: ID[]): WorkflowDoc {
   return { ...d, edges: [...other, ...chain] };
 }
 
-// Move one step up or down the chain. The input and the last step never move (the page doesn't offer it).
+// Move one step up or down the chain. The input never moves, nothing moves onto it, and the commit (when the chain ends
+// in one) stays last: a move that breaks one of these returns the document as it was.
 export function moveNode(d: WorkflowDoc, id: ID, dir: -1 | 1): WorkflowDoc {
-  const ids = order(d).map((n) => n.id), i = ids.indexOf(id), j = i + dir;
-  if (i < 0 || j < 0 || j >= ids.length) return d;
+  const l = order(d), ids = l.map((n) => n.id), i = ids.indexOf(id), j = i + dir;
+  const lastMovable = ids.length - 1 - (l[l.length - 1]?.type === "output.commit" ? 1 : 0);
+  if (i < 1 || i > lastMovable || j < 1 || j > lastMovable) return d;
   [ids[i], ids[j]] = [ids[j], ids[i]];
   return relink(d, ids);
 }
