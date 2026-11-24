@@ -508,9 +508,15 @@ func (w *Worker) ssimCheck(ctx context.Context, src, out media.Info, srcPath, tm
 	// stays low at every alignment, a merely misaligned good one jumps up.
 	sMain, oMain := src.Video(), out.Video()
 	srcStart := sMain.StartTime + leadIn
+	// The comparison runs on the new file's frame grid: with a frame-rate limit the original is resampled to
+	// the output rate (scaleTo), so one frame is 1/outFPS; otherwise it is the original's own frame.
+	grid := sMain.FrameRate
+	if outFPS > 0 {
+		grid = float64(outFPS)
+	}
 	frame := 1.0 / 25
-	if sMain.FrameRate > 0 {
-		frame = 1 / sMain.FrameRate
+	if grid > 0 {
+		frame = 1 / grid
 	}
 	var done []placeScore // the places measured so far, for the job log
 	var lowest *CheckScore
@@ -543,7 +549,7 @@ func (w *Worker) ssimCheck(ctx context.Context, src, out media.Info, srcPath, tm
 			w.check = &CheckScore{Score: best, Min: threshold, Passed: false}
 			ke := kept(pictureTooDifferent+" (similarity %.3f at %s, %.2f is required)",
 				best, rules.Clock(seg.start), threshold).(*KeptError)
-			ke.Detail = ssimDetail(src.DurationSec, segs, done, bestFrames, sMain.FrameRate, threshold)
+			ke.Detail = ssimDetail(src.DurationSec, segs, done, bestFrames, grid, threshold)
 			return ke
 		}
 		if lowest == nil || best < lowest.Score { // all passed: the job's check step shows the lowest place
