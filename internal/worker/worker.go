@@ -1950,11 +1950,12 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		}
 		if gpu != "" && !fell { // the Convert step does not allow the processor here: the failure stands, plain words, not retried
 			if words := HardwareStopWords(plan.Video, terr); words != "" {
-				return "", failed(words, fmt.Errorf("%w: %s", terr, firstLines(encErr, 3)))
+				return "", failedWithCode(jobs.ReasonHardwareChoice, words, fmt.Errorf("%w: %s", terr, firstLines(encErr, 3)))
 			}
 		}
 		ferr := failed("Converting stopped with an error. Your original was not touched. Press Retry; if it keeps failing, the file may be damaged.", fmt.Errorf("%w: %s", terr, firstLines(encErr, 3)))
 		if KilledBySignal(terr) || killedRemote(terr) { // stopped by the system (out of memory...), not a problem of the file
+			ferr.(*FailedError).Code = jobs.ReasonKilled // the failed row then shows design's killed sentence (W7)
 			return "", retryable(ferr, retryGeneral)
 		}
 		return "", ferr

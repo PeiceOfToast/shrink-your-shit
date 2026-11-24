@@ -68,7 +68,7 @@ func TestRealHardwareChoicesOnConvert(t *testing.T) {
 		if j, _ := st.Get(id); j.Status != jobs.Done {
 			t.Fatalf("status %s, error %q", j.Status, j.Error)
 		}
-		if !has(log, "CPU only, as the Convert step says") {
+		if !has(log, "Processor only, as the Convert step says") {
 			t.Errorf("no CPU-only line:\n%s", strings.Join(log, "\n"))
 		}
 		if has(log, "hevc_vaapi") {
@@ -79,7 +79,7 @@ func TestRealHardwareChoicesOnConvert(t *testing.T) {
 	t.Run("hardware only with a failing card fails the job in plain words", func(t *testing.T) {
 		st, id, log := run(t, "only", "")
 		j, _ := st.Get(id)
-		if j.Status != jobs.Failed || !strings.Contains(j.Error, "Hardware only: the graphics encoder failed") {
+		if j.Status != jobs.Failed || !strings.Contains(j.Error, "Graphics card only: the graphics encoder failed") {
 			t.Fatalf("status %s, error %q", j.Status, j.Error)
 		}
 		if has(log, "converted on the processor") {

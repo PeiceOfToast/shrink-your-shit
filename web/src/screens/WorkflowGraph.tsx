@@ -334,9 +334,10 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
         {checked.issues && <span className={"pill " + (errors.length ? "bad" : probs ? "warn" : "ok")}><Icon id={probs ? "i-alert" : "i-check-c"} />{probs ? (probs === 1 ? "1 problem" : probs + " problems") : "No problems"}</span>}
         <div className="mid">
           <div className="edsegs" role="group" aria-label="View">
-            {checked.stackable ? <Link to={"/workflows/" + id} aria-pressed="false">Steps</Link> : <span title="This workflow has more than one path, so it is edited here">Steps</span>}
-            <button type="button" aria-pressed="true">Graph</button>
+            {checked.stackable ? <Link to={"/workflows/" + id}>Steps</Link> : <span role="link" aria-disabled="true" tabIndex={0} aria-describedby="steps-why" title="This workflow has more than one path, so it is edited here">Steps</span>}
+            <span aria-current="page">Graph</span>
           </div>
+          {!checked.stackable && <span id="steps-why" className="sr">Steps isn't available: this workflow has more than one path, so it is edited here.</span>}
           {edit && <><span className="vr" aria-hidden="true" />
             <button className="btn sm icon ghost" type="button" title="Undo" aria-label="Undo" disabled={hist.at === 0} onClick={() => (setBar(null), setHist({ ...hist, at: hist.at - 1 }))}><Icon id="i-undo" /></button>
             <button className="btn sm icon ghost" type="button" title="Redo" aria-label="Redo" disabled={hist.at === hist.list.length - 1} onClick={() => (setBar(null), setHist({ ...hist, at: hist.at + 1 }))}><Icon id="i-redo" /></button></>}

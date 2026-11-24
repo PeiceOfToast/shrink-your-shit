@@ -171,7 +171,7 @@ func (s Selectors) Validate() error {
 		return invalid("hardwareFail", s.HardwareFail)
 	}
 	if _, ok := SliderAt(s.CPUQuality); s.CPUQuality != 0 && !ok {
-		return &SelectorError{"invalid", "CPU quality must be 0 (the same as Quality) or a slider position from 1 to 5. Nothing was changed."}
+		return &SelectorError{"invalid", "Quality on the processor must be 'Same as Quality' or a position from 1 to 5. Nothing was changed."}
 	}
 	switch {
 	case !contains(allAudio, s.Audio):
