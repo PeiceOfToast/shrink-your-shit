@@ -842,8 +842,9 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
     if (!lift) return;
     const { id, doc: d } = lift; setLift(null);
     const l = order(d), k = placeOf(d, id);
-    if (d !== doc) { edit(d); setOrderAt(hist.at + 1); }
-    setSaid(`${nameOf(l[k])} moved to step ${k + 1} of ${l.length}.`); focusGrip(id);
+    if (d !== doc) { edit(d); setOrderAt(hist.at + 1); setSaid(`${nameOf(l[k])} moved to step ${k + 1} of ${l.length}.`); }
+    else setSaid(`${nameOf(l[k])} stays at step ${k + 1} of ${l.length}.`);
+    focusGrip(id);
   };
   // refocus: Escape and a pointer cancel put focus back on the handle; Tab leaves it to the browser (one Tab press leaves)
   const cancel = (refocus = true) => {
