@@ -563,7 +563,6 @@ label.chk{cursor:pointer}
    under its row; on phones they are a full-screen sheet with a back button */
 .steps{list-style:none;margin:0;padding:0;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface)}
 .srow{border-bottom:1px solid var(--border)}.srow:last-child{border-bottom:0}
-.lock{display:inline-flex;width:20px;justify-content:center;color:var(--text-2)}
 .addgrp{padding:10px 10px 2px;font-size:var(--fs-sm);color:var(--text-2)}
 @media (max-width:640px){.addsheet{position:fixed;left:0;right:0;bottom:0;z-index:20;margin:0;max-height:80vh;overflow:auto;border-radius:12px 12px 0 0;box-shadow:0 -4px 16px rgb(0 0 0/.2)}}
 .addrow{display:flex;align-items:center;gap:10px;min-height:44px;padding:6px 10px;border-radius:6px;cursor:pointer}
@@ -578,6 +577,8 @@ label.chk{cursor:pointer}
 .sline>.pill{flex:none}
 .sic{color:var(--text-2);display:inline-flex}
 .srow.open>.sline{background:var(--raised)}
+.grip{cursor:grab;touch-action:none}
+.srow.lifted{box-shadow:0 0 0 2px var(--accent)}
 .sopts{padding:var(--pad);background:var(--raised);border-top:1px solid var(--border)}
 .sopts .hint a{display:inline-block;min-height:24px;line-height:24px} /* #694: the link is a tap target, 24 px tall at 390 */
 .chev-sp{width:36px;flex:none}
@@ -633,6 +634,7 @@ label.chk{cursor:pointer}
   .plist .sub{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;white-space:normal;overflow-wrap:anywhere}
   .plist .prog>.sm{display:none}
   .sline>.sp{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+  .sline:has(>.pill)>.sp{flex:1 1 12rem} /* only a row with a problem pill: its title keeps at least 12rem, so the pill wraps below it instead of crushing the title (qa2-697 390) */
 }
 .plist .ttl.clamp2{display:-webkit-box}   /* .plist .ttl's display:block had switched the clamp off */
 @media (min-width:901px){.list .tbl td.idc>.sub:not(.phone):not(.libfacts):not(.live),.list .tbl td.idc .row .sub:not(.phone):not(.libfacts):not(.live){display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}}

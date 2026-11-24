@@ -1,7 +1,7 @@
 // The Stack view's server side, mocked from V1 as built (origin/v2-workflows internal/workflow: registry.go for the
 // step definitions and their configSchema, validate.go for the step summaries; "Next to each library" runs since V5a #133).
 import REGISTRY from "./registry-4df3345.json";
-import type { AddStep, Edge, ID, JSONSchema, Node, Port, PublishPreview, StepDefinition, StepPlace, ValidationIssue, WorkflowDoc, WorkflowRevision } from "../types/v2";
+import type { AddStep, Edge, ID, JSONSchema, Node, Port, PublishPreview, StepDefinition, ValidationIssue, WorkflowDoc, WorkflowRevision } from "../types/v2";
 import type { Ladder } from "../workflowApi";
 import { groupOf, order } from "../stepEdits";
 import { mockVariables } from "./variables";
@@ -160,13 +160,7 @@ export function emptyDoc(): WorkflowDoc {
 export { order }; // the running order: the chain of success edges (stepEdits.ts)
 export const stackable = (d: WorkflowDoc) => order(d).length === d.nodes.length && d.edges.every((e) => e.fromPort === "success");
 
-// W11 (validate's stepPlaces and addSteps, contract final 05:58Z). Mock: every step is fixed in place unless ?movable=1
-// (the server marks movable steps once W10 lands); each step type either can be added after a step, or is refused.
-const MOVABLE: string[] = ["filter.video_skips", "filter.video", "audio.tracks", "subtitles.tracks", "container.output"];
-export function stepPlacesOf(d: WorkflowDoc): Record<ID, StepPlace> {
-  const movable = new URLSearchParams(location.search).has("movable");
-  return Object.fromEntries(d.nodes.map((n) => [n.id, { fixedPlace: !(movable && MOVABLE.includes(n.type)) }]));
-}
+// W11 (validate's addSteps): each step type either can be added after a step, or is refused.
 export function addStepsOf(d: WorkflowDoc): Record<string, AddStep> {
   const ids = order(d).map((n) => n.id), out: Record<string, AddStep> = {};
   for (const s of STEP_DEFS) {
