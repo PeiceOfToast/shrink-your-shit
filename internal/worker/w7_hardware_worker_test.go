@@ -61,6 +61,9 @@ func TestHardwareOnlyWithNoGraphicsEncoderFailsPlainly(t *testing.T) {
 	if err != nil || sum == nil {
 		t.Fatalf("failure summary: %v, %v; want one for the refused job", sum, err)
 	}
+	if sum.Step != stepCheck { // the preflight step the job recorded, so the drawer can name it
+		t.Errorf("summary step %d, want the preflight step %d", sum.Step, stepCheck)
+	}
 	if sum.FfmpegRan || len(sum.KeyLines) != 1 || !strings.Contains(sum.KeyLines[0], "Graphics card only: no graphics encoder") {
 		t.Errorf("summary %+v, want no ffmpeg run and the refusal words as its key line", sum)
 	}

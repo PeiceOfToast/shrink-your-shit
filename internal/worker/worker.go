@@ -869,7 +869,7 @@ func (w *Worker) recordRefusalSummary(id int64, started time.Time, err error) {
 	if !errors.As(err, &fe) || fe.Code == "" || w.Queue == nil {
 		return
 	}
-	w.Queue.SetFailureSummary(id, jobs.FailureSummary{Step: 0, StepCount: 1, AfterMs: w.now().Sub(started).Milliseconds(),
+	w.Queue.SetFailureSummary(id, jobs.FailureSummary{Step: stepCheck, StepCount: 1, AfterMs: w.now().Sub(started).Milliseconds(),
 		ExitCode: -1, FfmpegRan: false, KeyLines: []string{fe.Plain}})
 }
 
