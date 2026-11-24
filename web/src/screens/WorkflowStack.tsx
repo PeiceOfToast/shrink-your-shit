@@ -461,6 +461,8 @@ function Step({ n, i, mv, open, toggle, update, issues, otherwise, inline, graph
   const hasOptions = Object.values((def.configSchema.properties ?? {}) as Props).some((s) => !s.readOnly);
   const errSaved = def.fileOn?.error === "saved" && (def.outputs ?? []).some((o) => o.name === "error");
   const end = n.type === "input.library" ? "first" : n.type === "output.commit" ? "last" : undefined, nm = n.name ?? def.name;
+  // the refused order's sentence: the same words as the bar; in the options, so a phone's full-screen sheet shows it first
+  const refused = mine.filter((x) => x.code === "not_runnable_yet").map((x, k) => <p key={"refused" + k} className="hint" style={{ color: "var(--error-text)" }}>{refusalText(x.message)}</p>);
   return (
     <li className={"srow" + (open ? " open" : "") + (mv.grip?.lifted ? " lifted" : "")} data-sid={n.id} aria-labelledby={n.id + "-name"}>
       <div className="sline">
@@ -508,10 +510,11 @@ function Step({ n, i, mv, open, toggle, update, issues, otherwise, inline, graph
           <WorkflowPick fid={g.id + "-workflow"} title={"When " + nm + " answers No, hand the file to"} value={String(g.config.workflow ?? "")} set={(v) => put({ ...g, config: { ...g.config, workflow: v } })} wf={wf} description={stepDef("flow.goto")?.description} />
           {bad.map((x, k) => <span key={k} className="hint" role="alert" style={{ color: "var(--error-text)" }}>{x.message}</span>)}
         </div>); })()}
-      {/* the refused order's sentence, in the card too (design item 3): the same words as the bar */}
-      {open && mine.filter((x) => x.code === "not_runnable_yet").map((x, k) => <p key={"refused" + k} className="hint" style={{ color: "var(--error-text)" }}>{refusalText(x.message)}</p>)}
+      {/* a step with no options has no sheet: its refused sentence goes here (design item 3); with options it sits in the sheet */}
+      {open && !hasOptions && refused}
       {open && hasOptions && <div className={"sopts" + (inline ? " inline" : "")} id={n.id + "-opts"} role="group" aria-label={"Options for " + def.name} onKeyDown={(e) => !inline && e.key === "Escape" && toggle()}>
         {!inline && <div className="sheethd phone"><button ref={back} className="btn icon ghost" type="button" aria-label="Back to the steps" onClick={toggle}><Icon id="i-chev-l" /></button><strong>{def.name}</strong></div>}
+        {refused}
         <Options n={n} issues={issues} set={(k, v, more) => update({ ...n, config: { ...n.config, [k]: v, ...more } })} />
         {errSaved && <p className="hint">If it doesn't work: a warning, and the next steps still run. <Link to={graphHref ?? ""}>Add another path in the graph</Link></p>}</div>}
     </li>);
