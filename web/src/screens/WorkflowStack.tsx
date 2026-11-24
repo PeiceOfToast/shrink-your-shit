@@ -4,6 +4,7 @@
 // (W11's handle, behind a flag) and the graph's keyboard moves, Test run (V5), History, Export, Open graph (V4).
 import { Component, Fragment, createContext, useContext, useEffect, useRef, useState, type FormEvent, type ReactNode, type RefObject } from "react";
 import { Icon } from "../Icon";
+import { GC_CHOICES, gcLabel } from "../gcLabel";
 import { PageHead } from "../PageHead";
 import { SignedOut, failed, type Answer } from "../api";
 import { afterOnly, beforeSave, deleteNode, groupOf, insertAfter, insertAfterSave, insertQuestion, isQuestion, moveNode, newNode, order, otherwiseOf, setOtherwise, type Otherwise } from "../stepEdits"; // the steps in running order: a property of the document, not data
@@ -218,11 +219,6 @@ function convertField(k: string, s: JSONSchema, c: Record<string, unknown>, l: L
   return { ...s, enum: e, "x-enumLabels": named, description: (s.description as string) + perRow };
 }
 
-// Convert's graphics card words (design-direction-w7-f4-convert): the card's own, not the registry's labels
-const GC_CHOICES: [string, string, string][] = [
-  ["auto", "Automatic", "Uses the graphics card when it can convert the file, and the processor when it can't."],
-  ["only", "Graphics card only", "Never uses the processor. If the graphics card can't convert a file, its job fails and the original is kept."],
-  ["cpu", "Processor only", "Never uses the graphics card. Slower, but the same on every machine."]];
 const GC_FAIL: [string, string, string][] = [
   ["next", "Try another way", "Steps down to the next way of converting the file, as before."],
   ["fail", "Fail the job", "Stops at the first failure and says why. The file isn't tried again by itself."]];
@@ -361,7 +357,7 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
             </div>
           </div>
         </fieldset>
-        <details ref={gcRef} style={{ marginTop: 12 }}><summary className="btn sm" style={{ display: "inline-flex" }}>Graphics card: {GC_CHOICES.find((x) => x[0] === String(c.hardware ?? "auto"))?.[1] ?? "Automatic"}</summary>
+        <details ref={gcRef} style={{ marginTop: 12 }}><summary className="btn sm" style={{ display: "inline-flex" }}>Graphics card: {gcLabel(c.hardware)}</summary>
           <div className="stack" style={{ marginTop: 12 }}>
             <div className={bad("hardware").length ? "fieldbad" : undefined} data-field="hardware" aria-invalid={bad("hardware").length ? true : undefined}>
             <fieldset className="field choice" aria-describedby={n.id + "-hwh"}><legend className="lab">Graphics card</legend>
