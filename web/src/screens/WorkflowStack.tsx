@@ -508,6 +508,8 @@ function Step({ n, i, mv, open, toggle, update, issues, otherwise, inline, graph
           <WorkflowPick fid={g.id + "-workflow"} title={"When " + nm + " answers No, hand the file to"} value={String(g.config.workflow ?? "")} set={(v) => put({ ...g, config: { ...g.config, workflow: v } })} wf={wf} description={stepDef("flow.goto")?.description} />
           {bad.map((x, k) => <span key={k} className="hint" role="alert" style={{ color: "var(--error-text)" }}>{x.message}</span>)}
         </div>); })()}
+      {/* the refused order's sentence, in the card too (design item 3): the same words as the bar */}
+      {open && mine.filter((x) => x.code === "not_runnable_yet").map((x, k) => <p key={"refused" + k} className="hint" style={{ color: "var(--error-text)" }}>{refusalText(x.message)}</p>)}
       {open && hasOptions && <div className={"sopts" + (inline ? " inline" : "")} id={n.id + "-opts"} role="group" aria-label={"Options for " + def.name} onKeyDown={(e) => !inline && e.key === "Escape" && toggle()}>
         {!inline && <div className="sheethd phone"><button ref={back} className="btn icon ghost" type="button" aria-label="Back to the steps" onClick={toggle}><Icon id="i-chev-l" /></button><strong>{def.name}</strong></div>}
         <Options n={n} issues={issues} set={(k, v, more) => update({ ...n, config: { ...n.config, [k]: v, ...more } })} />
@@ -803,9 +805,9 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
     const before = order(doc), i = before.findIndex((x) => x.id === nid), prev = before[i - 1], nxt = before[i + 1], gone0 = before[i];
     edit(deleteNode(doc, nid)); setOrderAt(hist.at + 1);
     setGone({ text: prev && nxt ? `Deleted ${nameOf(gone0)}. ${nameOf(prev)} now goes straight to ${nameOf(nxt)}.` : `Deleted ${nameOf(gone0)}.`, at: hist.at + 1 });
-    // focus goes to the next row's More button, or the previous row's when it was the last (never the input or the save row)
+    // focus goes to the next row's handle, or the previous row's when it was the last (never the input or the save row)
     const to = [nxt, prev].find((x) => x && x.type !== "input.library" && x.type !== "output.commit");
-    if (to) requestAnimationFrame(() => document.getElementById(to.id + "-more")?.focus());
+    if (to) requestAnimationFrame(() => document.getElementById(to.id + "-grip")?.focus());
   };
   // W11 keyboard moves on the handle: Space or Enter picks the step up, the arrows move it on a copy of the document,
   // Space or Enter drops it (one history step, then the check answers), Escape or Tab puts it back; Home and End go to the limits
@@ -836,10 +838,11 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
     if (d !== doc) { edit(d); setOrderAt(hist.at + 1); }
     setSaid(`${nameOf(l[k])} moved to step ${k + 1} of ${l.length}.`); focusGrip(id);
   };
-  const cancel = () => {
+  // refocus: Escape and a pointer cancel put focus back on the handle; Tab leaves it to the browser (one Tab press leaves)
+  const cancel = (refocus = true) => {
     if (!lift) return;
     const id = lift.id; setLift(null);
-    const l = order(doc), k = placeOf(doc, id); setSaid(`Move cancelled. ${nameOf(l[k])} is step ${k + 1} of ${l.length}.`); focusGrip(id);
+    const l = order(doc), k = placeOf(doc, id); setSaid(`Move cancelled. ${nameOf(l[k])} is step ${k + 1} of ${l.length}.`); if (refocus) focusGrip(id);
   };
   const gripKey = (nid: ID) => (e: { key: string; preventDefault: () => void }) => {
     if (lift?.id !== nid) { if (e.key === " " || e.key === "Enter") { e.preventDefault(); pick(nid); } return; }
@@ -847,7 +850,7 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
     else if (e.key === "Home" || e.key === "End") { e.preventDefault(); jump(e.key === "Home" ? -1 : 1); }
     else if (e.key === " " || e.key === "Enter") { e.preventDefault(); drop(); }
     else if (e.key === "Escape") { e.preventDefault(); cancel(); }
-    else if (e.key === "Tab") cancel();
+    else if (e.key === "Tab") cancel(false);
   };
   // pointer drag on the handle: the press picks the step up, each pointer move crossing a neighbour's middle moves it one place
   // (the same copy and limits as the keys), and the release drops it; a cancelled press puts it back
