@@ -325,7 +325,7 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
         <fieldset className="field choice" style={{ marginTop: 12 }}><legend className="lab">Picture</legend>
           <div className="grid cols2">
             <div style={{ gridColumn: "1 / -1" }} className={bad("removeBlackBars").length ? "fieldbad" : undefined} data-field="removeBlackBars">
-              <div className="field"><label className="row nw" htmlFor={n.id + "-bars"}><input id={n.id + "-bars"} type="checkbox" role="switch" className="switch" checked={c.removeBlackBars === true} aria-describedby={n.id + "-bars-1 " + n.id + "-bars-2"} onChange={(e) => set("removeBlackBars", e.target.checked || undefined)} /><span>Remove black bars</span></label>
+              <div className="field"><label className="row nw" htmlFor={n.id + "-bars"}><input id={n.id + "-bars"} type="checkbox" role="switch" className="switch" checked={c.removeBlackBars === true} aria-describedby={n.id + "-bars-1 " + n.id + "-bars-2"} aria-invalid={bad("removeBlackBars").length ? true : undefined} onChange={(e) => set("removeBlackBars", e.target.checked || undefined)} /><span>Remove black bars</span></label>
               <span className="hint" id={n.id + "-bars-1"} style={{ display: "block" }}>Cuts the black bars above and below (or beside) the picture, when samples from the whole video agree where they are. If they don't, the video is left as it is and the Log says why.</span>
               <span className="hint" id={n.id + "-bars-2"} style={{ display: "block" }}>Not yet on remote workers: they leave the bars and say so in the Log.</span>
               {bad("removeBlackBars").map((i, x) => <span key={x} className="hint" role="alert" style={{ color: "var(--error-text)" }}>{i.message}</span>)}
@@ -360,7 +360,7 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
             </div>}
             {String(c.hardware ?? "auto") !== "only" && (!sel || rc === "quality") && <div className={bad("cpuQuality").length ? "fieldbad" : undefined} data-field="cpuQuality"><div className="field">
               <label htmlFor={n.id + "-cpuq"}>Quality on the processor</label>
-              <select id={n.id + "-cpuq"} className="input" value={String(Number(c.cpuQuality ?? 0))} onChange={(e) => set("cpuQuality", Number(e.target.value) || undefined)}>
+              <select id={n.id + "-cpuq"} className="input" value={String(Number(c.cpuQuality ?? 0))} aria-invalid={bad("cpuQuality").length ? true : undefined} onChange={(e) => set("cpuQuality", Number(e.target.value) || undefined)}>
                 {CPU_Q.map((l, i) => <option key={i} value={i}>{l}</option>)}</select>
               <span className="hint">The processor and the graphics card can give different results at the same Quality. Pick a position here to set the processor's own.</span>
               {bad("cpuQuality").map((i, x) => <span key={x} className="hint" role="alert" style={{ color: "var(--error-text)" }}>{i.message}</span>)}
