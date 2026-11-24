@@ -23,7 +23,7 @@ const CAT: Record<string, string> = { input: "var(--cat-input)", filter: "var(--
 const PALETTE_TYPE = "application/x-syp-step"; // the drag data of a palette step (its type)
 const W = 200, H = (outs: number) => 34 + 24 + Math.max(outs, 1) * 22 + 8; // node size for layout (matches .gnode; FB6: 200 wide)
 
-type Data = { node: Node; def?: StepDefinition; summary: string; issues: ValidationIssue[]; edit?: boolean; linked: string[]; tight?: boolean; pickPort?: (id: string, port: string, label: string, step: string) => void };
+type Data = { node: Node; def?: StepDefinition; fileOn?: Record<string, string>; summary: string; issues: ValidationIssue[]; edit?: boolean; linked: string[]; tight?: boolean; pickPort?: (id: string, port: string, label: string, step: string) => void };
 type GNodeT = RFNode<Data, "step">;
 
 function GNode({ data, selected }: NodeProps<GNodeT>) {
@@ -39,8 +39,8 @@ function GNode({ data, selected }: NodeProps<GNodeT>) {
         <div key={p.name} className={"gport " + p.outcome}><span>{p.label}</span>
           {p.outcome !== "success" && !linked.includes(p.name) && !issues.some((i) => i.code === "unconnected_port" && i.port === p.name) &&
             (data.edit
-              ? <button type="button" className={"gpill" + (tight ? " inrow" : "")} aria-label={notLinked(p, def)} title={notLinked(p, def)} onClick={(e) => (e.stopPropagation(), pickPort?.(node.id, p.name, p.label, node.name ?? def?.name ?? node.type))}>{tight ? "Not linked" : pillWords(p, def)}</button>
-              : <span className={"gpill" + (tight ? " inrow" : "")} title={notLinked(p, def)}>{tight ? "Not linked" : pillWords(p, def)}</span>)}
+              ? <button type="button" className={"gpill" + (tight ? " inrow" : "")} aria-label={notLinked(p, def, data.fileOn)} title={notLinked(p, def, data.fileOn)} onClick={(e) => (e.stopPropagation(), pickPort?.(node.id, p.name, p.label, node.name ?? def?.name ?? node.type))}>{tight ? "Not linked" : pillWords(p, def, data.fileOn)}</button>
+              : <span className={"gpill" + (tight ? " inrow" : "")} title={notLinked(p, def, data.fileOn)}>{tight ? "Not linked" : pillWords(p, def, data.fileOn)}</span>)}
           <Handle type="source" position={Position.Right} id={p.name} isConnectable={!!data.edit} /></div>))}
     </div>);
 }
@@ -98,7 +98,7 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
   // the document (logic) and the layout (positions) are kept apart (spec 13); undo/redo walks both
   const [hist, setHist] = useState<{ at: number; list: { doc: WorkflowDoc; layout: Layout }[] }>(() => ({ at: 0, list: [{ doc: first.workflow, layout: { ...first.layout, nodes: place(first, defs) } }] }));
   const cur = hist.list[hist.at], doc = cur.doc, layout = cur.layout;
-  const [saved, setSaved] = useState(cur), [etag, setEtag] = useState(first.etag), [checked, setChecked] = useState<Checked>({ issues: first.validation, stackable: first.stackable, stepSummaries: first.stepSummaries });
+  const [saved, setSaved] = useState(cur), [etag, setEtag] = useState(first.etag), [checked, setChecked] = useState<Checked>({ issues: first.validation, stackable: first.stackable, stepSummaries: first.stepSummaries, fileOn: first.fileOn });
   const [dims, setDims] = useState<Record<string, { width: number; height: number }>>({});
   const [sel, setSel] = useState<string | null>(() => new URLSearchParams(window.location.search).get("node")), [selEdge, setSelEdge] = useState<string | null>(null), [said, setSaid] = useState(""), [panel, setPanel] = useState<PublishPreview | null>(null), [ver, setVer] = useState(published);
   const dirty = cur !== saved;
@@ -117,7 +117,7 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
   const seen = useRef(doc);
   useEffect(() => {
     if (doc === seen.current) return; seen.current = doc;
-    const t = setTimeout(async () => { const r = await act(validateDoc(id, doc), setSaid); if (r) setChecked(r); }, 300);
+    const t = setTimeout(async () => { const r = await act(validateDoc(id, doc), setSaid); if (r) setChecked((c) => ({ ...r, fileOn: r.fileOn ?? c.fileOn })); }, 300);
     return () => clearTimeout(t);
   }, [doc]); // eslint-disable-line react-hooks/exhaustive-deps
   const now = useRef({ dirty, doc, layout, etag }); now.current = { dirty, doc, layout, etag };
@@ -179,8 +179,8 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
       const def = defs.find((x) => x.type === n.type);
       return { id: n.id, type: "step", position: layout.nodes[n.id] ?? { x: 0, y: 0 }, draggable: edit, connectable: edit, deletable: edit && def?.category !== "input", selected: n.id === sel, zIndex: free(n, def).length ? 2 : undefined,
         initialWidth: W, initialHeight: H(def?.outputs?.length ?? 1), measured: dims[n.id], // review f03fcad: the minimap only draws nodes with a size
-        ariaLabel: joinSentences([title(n) + (n.enabled ? "" : " (off)"), summary, ...mine.map((i) => (i.severity === "error" ? "Problem: " : "Warning: ") + i.message), ...free(n, def).map((p) => notLinked(p, def))]),
-        data: { node: n, def, summary, issues: mine, edit, linked: doc.edges.filter((e) => e.from === n.id).map((e) => e.fromPort), tight: tightPill(n), pickPort: (id: string, port: string, label: string, step: string) => (window.clearTimeout(nudgeTimer.current), setSel(id), setSelEdge(null), setPending({ node: id, port, label, step }), setSaid("Pick a step to add after " + step + " › " + label + ". Esc to cancel."), searchRef.current?.focus()) } };
+        ariaLabel: joinSentences([title(n) + (n.enabled ? "" : " (off)"), summary, ...mine.map((i) => (i.severity === "error" ? "Problem: " : "Warning: ") + i.message), ...free(n, def).map((p) => notLinked(p, def, checked.fileOn?.[n.id]))]),
+        data: { node: n, def, fileOn: checked.fileOn?.[n.id], summary, issues: mine, edit, linked: doc.edges.filter((e) => e.from === n.id).map((e) => e.fromPort), tight: tightPill(n), pickPort: (id: string, port: string, label: string, step: string) => (window.clearTimeout(nudgeTimer.current), setSel(id), setSelEdge(null), setPending({ node: id, port, label, step }), setSaid("Pick a step to add after " + step + " › " + label + ". Esc to cancel."), searchRef.current?.focus()) } };
     });
     const edges: RFEdge[] = doc.edges.map((e) => {
       const from = doc.nodes.find((n) => n.id === e.from), outs = defs.find((x) => x.type === from?.type)?.outputs ?? [], port = outs.find((p) => p.name === e.fromPort);
@@ -306,7 +306,7 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
   const save = async () => {
     const r = await act(saveDraft(id, doc, layout, etag), setSaid);
     if (!r) return null;
-    setEtag(r.etag); setSaved(cur); setChecked({ issues: r.validation, stackable: r.stackable, stepSummaries: r.stepSummaries }); setSaid("Draft saved.");
+    setEtag(r.etag); setSaved(cur); setChecked({ issues: r.validation, stackable: r.stackable, stepSummaries: r.stepSummaries, fileOn: r.fileOn }); setSaid("Draft saved.");
     return r;
   };
   const openPublish = async () => { if (dirty && !(await save())) return; const p = await act(publishPreview(id), setSaid); if (p) setPanel(p); };
@@ -386,7 +386,7 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
               {checked.stepSummaries?.[picked.id] && <p>{checked.stepSummaries[picked.id]}</p>}
               {pickedDef?.description && <p className="sm">{pickedDef.description}</p>}
               {/* the same full sentence as the pill's title, readable without hover (touch has no title tooltip): the same rule as the canvas's free() */}
-              {(pickedDef?.outputs ?? []).filter((p) => p.outcome !== "success" && !doc.edges.some((e) => e.from === picked.id && e.fromPort === p.name) && !issues.some((i) => i.nodeId === picked.id && i.code === "unconnected_port" && i.port === p.name)).map((p) => <p key={p.name} className="muted sm">{notLinked(p, pickedDef)}</p>)}
+              {(pickedDef?.outputs ?? []).filter((p) => p.outcome !== "success" && !doc.edges.some((e) => e.from === picked.id && e.fromPort === p.name) && !issues.some((i) => i.nodeId === picked.id && i.code === "unconnected_port" && i.port === p.name)).map((p) => <p key={p.name} className="muted sm">{notLinked(p, pickedDef, checked.fileOn?.[picked.id])}</p>)}
               {edit && pickedDef?.category !== "input" && <div className="row"><button className="btn sm" type="button" onClick={() => removeNodes([picked.id])}><Icon id="i-trash" />Delete this step</button></div>}
               {/* step 2b (SCREENS V4 Inspector): the step's own form, the same as the step list's (schema-driven), with the server's problems inline */}
               {edit && pickedDef && !pickedDef.readOnly && <form className="stack ginform" onSubmit={(e) => e.preventDefault()} aria-label={"Settings of " + (picked.name ?? pickedDef.name)}>

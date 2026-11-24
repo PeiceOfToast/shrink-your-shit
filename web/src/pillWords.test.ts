@@ -49,3 +49,27 @@ test("an aria-label joins its parts without a double full stop", () => {
   assert.equal(joinSentences(["Name", "Summary", notLinked(error, before)]), "Name. Summary. Didn't work: not linked. The original file is kept.");
   assert.equal(joinSentences(["Name.", "", "Warning: x."]), "Name. Warning: x.");
 });
+
+// the revision's per-node fileOn (the server's answer for this save) beats the definition's; the definition is only the fallback
+test("the revision's per-port state beats the definition's", () => {
+  const nodeSaved = { success: "saved", error: "saved" };
+  assert.equal(pillWords(error, before, nodeSaved), "Not linked: carries on");
+  assert.equal(notLinked(error, before, nodeSaved), "Didn't work: not linked. The new file is already saved; a warning is shown and the next steps still run.");
+  assert.equal(pillWords(error, saved, { error: "original" }), "Not linked: keeps the original");
+});
+
+// #704: the editable graph's pill must read the revision's state too; a question's No after the save, on a definition whose port isn't 'saved'
+test("the revision's state for a question's No reads 'nothing more' even when the definition says otherwise", () => {
+  const no = { name: "no", label: "Question No", outcome: "branch" };
+  assert.equal(pillWords(no, before, { no: "saved" }), "Not linked: nothing more");
+  assert.equal(pillWords(no, before, undefined), "Not linked: keeps the original");
+});
+
+test("a revision entry without this port reads as not saved", () => {
+  assert.equal(pillWords(error, saved, {}), "Not linked: keeps the original");
+});
+
+test("no revision entry falls back to the definition", () => {
+  assert.equal(pillWords(error, saved, undefined), "Not linked: carries on");
+  assert.equal(pillWords(error, before, undefined), "Not linked: keeps the original");
+});
