@@ -78,7 +78,7 @@ export async function saveDraft(id: string, workflow: WorkflowDoc, layout: Layou
   return call("PUT", base(id) + "/draft", { workflow, layout }, { "If-Match": etag });
 }
 // POST /workflows/{id}/validate: nothing saved; the server's problems, step words and whether the list can show it.
-export interface Checked { issues: ValidationIssue[]; stackable: boolean; stepSummaries: Record<string, string>; stepPlaces?: Record<string, StepPlace>; addSteps?: Record<string, AddStep> }
+export interface Checked { issues: ValidationIssue[]; stackable: boolean; stepSummaries: Record<string, string>; fileOn?: Record<string, Record<string, string>>; stepPlaces?: Record<string, StepPlace>; addSteps?: Record<string, AddStep> }
 export async function validateDoc(id: string, workflow: WorkflowDoc): Promise<Answer<Checked>> {
   if (MOCK) return { issues: checkDoc(workflow), stackable: stackable(workflow), stepSummaries: Object.fromEntries(workflow.nodes.map((n) => [n.id, summary(n)])), stepPlaces: stepPlacesOf(workflow), addSteps: addStepsOf(workflow) };
   return call("POST", base(id) + "/validate", { workflow });

@@ -188,6 +188,7 @@ export interface WorkflowRevision {
   logicHash: string;
   stackable: boolean;
   stepSummaries: Record<ID, string>;
+  fileOn?: Record<ID, Record<string, "original" | "staged" | "saved" | "none">>; // per step, per port: what the file is at that port after the saves
   validation: ValidationIssue[];
   etag: string;
   createdAt: Time; publishedAt: Time | null;
