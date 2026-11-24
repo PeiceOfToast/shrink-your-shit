@@ -25,7 +25,7 @@ type Plan struct {
 	SkipCode string `json:"skipCode,omitempty"` // Skip as a code the API can count (Skip* below)
 	Reason   string `json:"reason,omitempty"`   // why it is converted, shown on the job
 	// FrameRateNote (FB5b): why a frame-rate limit the person chose did not apply (the source's rate is unknown).
-	// It is for the job log, and is not kept in the plan.
+	// It is not serialized (json:"-"), so a remote worker that gets the plan does not log it; only the local job does.
 	FrameRateNote string      `json:"-"`
 	Eligibility   Eligibility `json:"eligibility"` // the rule that decided Skip (part of the fingerprint)
 	Video         VideoEncode `json:"video"`
@@ -871,7 +871,7 @@ func (p Plan) Expect(src media.Info, packets int64) Expect {
 	e := DefaultExpect(src, packets)
 	if v := src.Video(); p.Video.MaxFPS > 0 && v != nil && packets > 0 { // FB5b: the frames the output has, at its rate
 		n := int64(math.Round(float64(packets) * float64(p.Video.MaxFPS) / v.FrameRate))
-		e.VideoPackets, e.PacketsTol, e.OutputFPS = n, 1/float64(n), p.Video.MaxFPS // one frame either way
+		e.VideoPackets, e.PacketsTol, e.OutputFPS = n, math.Max(0.01, 2/float64(n)), p.Video.MaxFPS // never tighter than 1%; at least two frames on a short file
 	}
 	if p.Video.Index > 0 { // the encoded stream is not the first video (cover art comes first)
 		n := 0

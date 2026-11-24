@@ -90,24 +90,25 @@ func TestMaxFrameRateCardPaths(t *testing.T) {
 	}
 }
 
-// The packet estimate is the output's frame count: the source's count at the limit's rate, one frame either way.
+// The packet estimate is the output's frame count: the source's count at the limit's rate. The tolerance is 1%, or two
+// frames on a short file, whichever is larger: the fps filter's count can be a frame or two off on any file.
 func TestMaxFrameRatePacketEstimateIsOutputRate(t *testing.T) {
-	src := probe("h264", 1920, 1080, 60, 12000) // 60 s
-	const packets = 3600
-	e := standard(func(s *Selectors) { s.MaxFrameRate = "30" }).Compile(src).Expect(src, packets)
-	if e.VideoPackets != 1800 || e.OutputFPS != 30 {
-		t.Fatalf("60 fps to 30: VideoPackets %d, OutputFPS %d; want 1800 and 30", e.VideoPackets, e.OutputFPS)
+	long := probe("h264", 1920, 1080, 60, 12000) // 48 minutes at 60 fps
+	e := standard(func(s *Selectors) { s.MaxFrameRate = "30" }).Compile(long).Expect(long, 172800)
+	if e.VideoPackets != 86400 || e.OutputFPS != 30 || e.PacketsTol != 0.01 {
+		t.Errorf("60 fps to 30, long: VideoPackets %d, OutputFPS %d, PacketsTol %v; want 86400, 30, 0.01",
+			e.VideoPackets, e.OutputFPS, e.PacketsTol)
 	}
-	tol := e.PacketsTol * float64(e.VideoPackets)
-	if d := 1801 - float64(e.VideoPackets); d > tol || -d > tol {
-		t.Errorf("one frame over the estimate is refused: tolerance %.3f frames", tol)
+	short := probe("h264", 1920, 1080, 30, 12000)
+	s := standard(func(s *Selectors) { s.MaxFrameRate = "24" }).Compile(short).Expect(short, 90)
+	if s.VideoPackets != 72 || s.OutputFPS != 24 || s.PacketsTol != 2.0/72 {
+		t.Errorf("30 fps to 24, short: VideoPackets %d, OutputFPS %d, PacketsTol %v; want 72, 24, 2/72",
+			s.VideoPackets, s.OutputFPS, s.PacketsTol)
 	}
-	if d := 1802 - float64(e.VideoPackets); d <= tol {
-		t.Errorf("two frames over the estimate is accepted: tolerance %.3f frames", tol)
-	}
-	keep := standard(func(*Selectors) {}).Compile(src).Expect(src, packets)
-	if keep.VideoPackets != packets || keep.OutputFPS != 0 {
-		t.Errorf("keep: VideoPackets %d, OutputFPS %d; want %d and 0", keep.VideoPackets, keep.OutputFPS, packets)
+	keep := standard(func(*Selectors) {}).Compile(long).Expect(long, 172800)
+	if keep.VideoPackets != 172800 || keep.OutputFPS != 0 || keep.PacketsTol != 0.01 {
+		t.Errorf("keep: VideoPackets %d, OutputFPS %d, PacketsTol %v; want 172800, 0, 0.01",
+			keep.VideoPackets, keep.OutputFPS, keep.PacketsTol)
 	}
 }
 

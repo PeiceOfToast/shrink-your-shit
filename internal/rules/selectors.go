@@ -127,7 +127,7 @@ func (s Selectors) Validate() error {
 	case "", "keep", "8":
 	case "10":
 		if s.Format != "" && s.Format != "hevc" && s.Format != "av1" {
-			return notYet("10-bit needs HEVC or AV1.")
+			return notYet("Bit depth: 10-bit needs HEVC or AV1.")
 		}
 	default:
 		return invalid("bitDepth", s.BitDepth)

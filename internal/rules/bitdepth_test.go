@@ -119,7 +119,7 @@ func TestBitDepthValidate(t *testing.T) {
 		s := DefaultSelectors(3)
 		s.Format, s.BitDepth = format, "10"
 		err, ok := s.Validate().(*SelectorError)
-		if !ok || err.Code != "not_available" || err.Message != "10-bit needs HEVC or AV1. Nothing was changed." {
+		if !ok || err.Code != "not_available" || err.Message != "Bit depth: 10-bit needs HEVC or AV1. Nothing was changed." {
 			t.Errorf("10 on %s: %v", format, err)
 		}
 	}
