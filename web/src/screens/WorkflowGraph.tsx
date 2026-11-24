@@ -9,7 +9,7 @@ import dagre from "@dagrejs/dagre";
 import { Fragment, useEffect, useMemo, useRef, useState, type DragEvent, type RefObject } from "react";
 import { SignedOut, failed, type Answer } from "../api";
 import { Icon } from "../Icon";
-import { notLinked, pillWords, PILL_WORDS } from "../pillWords";
+import { joinSentences, notLinked, pillWords, PILL_WORDS } from "../pillWords";
 import { Link, onLeave } from "../router";
 import { useData } from "../useData";
 import { getDraft, getWorkflow, publish, publishPreview, saveDraft, stepDefinitions, validateDoc, type Checked } from "../workflowApi";
@@ -100,7 +100,7 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
   const cur = hist.list[hist.at], doc = cur.doc, layout = cur.layout;
   const [saved, setSaved] = useState(cur), [etag, setEtag] = useState(first.etag), [checked, setChecked] = useState<Checked>({ issues: first.validation, stackable: first.stackable, stepSummaries: first.stepSummaries });
   const [dims, setDims] = useState<Record<string, { width: number; height: number }>>({});
-  const [sel, setSel] = useState<string | null>(null), [selEdge, setSelEdge] = useState<string | null>(null), [said, setSaid] = useState(""), [panel, setPanel] = useState<PublishPreview | null>(null), [ver, setVer] = useState(published);
+  const [sel, setSel] = useState<string | null>(() => new URLSearchParams(window.location.search).get("node")), [selEdge, setSelEdge] = useState<string | null>(null), [said, setSaid] = useState(""), [panel, setPanel] = useState<PublishPreview | null>(null), [ver, setVer] = useState(published);
   const dirty = cur !== saved;
   // item 7 (#467 follow-up): a click on an unlinked port's pill makes the next added step link from that port
   const [pending, setPending] = useState<{ node: string; port: string; label: string; step: string } | null>(null);
@@ -179,7 +179,7 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
       const def = defs.find((x) => x.type === n.type);
       return { id: n.id, type: "step", position: layout.nodes[n.id] ?? { x: 0, y: 0 }, draggable: edit, connectable: edit, deletable: edit && def?.category !== "input", selected: n.id === sel, zIndex: free(n, def).length ? 2 : undefined,
         initialWidth: W, initialHeight: H(def?.outputs?.length ?? 1), measured: dims[n.id], // review f03fcad: the minimap only draws nodes with a size
-        ariaLabel: [title(n) + (n.enabled ? "" : " (off)"), summary, ...mine.map((i) => (i.severity === "error" ? "Problem: " : "Warning: ") + i.message), ...free(n, def).map((p) => notLinked(p, def))].filter(Boolean).join(". "),
+        ariaLabel: joinSentences([title(n) + (n.enabled ? "" : " (off)"), summary, ...mine.map((i) => (i.severity === "error" ? "Problem: " : "Warning: ") + i.message), ...free(n, def).map((p) => notLinked(p, def))]),
         data: { node: n, def, summary, issues: mine, edit, linked: doc.edges.filter((e) => e.from === n.id).map((e) => e.fromPort), tight: tightPill(n), pickPort: (id: string, port: string, label: string, step: string) => (window.clearTimeout(nudgeTimer.current), setSel(id), setSelEdge(null), setPending({ node: id, port, label, step }), setSaid("Pick a step to add after " + step + " › " + label + ". Esc to cancel."), searchRef.current?.focus()) } };
     });
     const edges: RFEdge[] = doc.edges.map((e) => {
@@ -368,7 +368,7 @@ function Canvas({ id, name, published, doc: first, defs }: { id: string; name: s
         <div className="gcanvas" aria-label={"The steps of " + name + " as a graph"} onDragOver={edit ? onDragOver : undefined} onDragLeave={edit ? (e: DragEvent) => { if (!e.currentTarget.contains(e.relatedTarget as HTMLElement | null)) (setGhost(null), setPointer(null)); } : undefined} onDrop={edit ? onDrop : undefined} onBlur={() => (nudgeRun.current = null)}>
           {ghost && <div className="gdrop" aria-hidden="true" style={{ left: ghost.x, top: ghost.y, width: W * rf.getZoom(), height: 72 * rf.getZoom() }} />}
           {pointer && dragType && <div className="gghost" aria-hidden="true" style={{ left: pointer.x + 12, top: pointer.y + 12 }}>{defs.find((x) => x.type === dragType)?.name}</div>}
-          <ReactFlow nodes={shown} edges={edges} nodeTypes={nodeTypes} onInit={frame} minZoom={0.2} maxZoom={2} nodesDraggable={edit} nodesConnectable={edit} elementsSelectable
+          <ReactFlow nodes={shown} edges={edges} nodeTypes={nodeTypes} onInit={(rf) => (frame(rf), focusNode(rf, new URLSearchParams(window.location.search).get("node")))}minZoom={0.2} maxZoom={2} nodesDraggable={edit} nodesConnectable={edit} elementsSelectable
             onConnect={connect} isValidConnection={valid} onNodesChange={onNodesChange} onDelete={({ nodes: ns, edges: es }) => (ns.length ? removeNodes(ns.map((n) => n.id)) : removeEdges(es.map((e) => e.id)))} deleteKeyCode={edit ? ["Delete", "Backspace"] : null}
             onNodeClick={(_, n) => (setSel(n.id), setSelEdge(null), unpend(n.id))} onEdgeClick={(_, e) => (setSelEdge(e.id), setSel(null), unpend(null))} onPaneClick={() => (setSel(null), setSelEdge(null), unpend(null))}>
             <Background gap={20} />
@@ -450,7 +450,7 @@ function useMedia(q: string) {
 // The opening view and Fit never go below 75%. When the whole graph would fit smaller, it opens at 75% with the library
 // files step (the start; else the top-left-most step) at the top-left, and the person pans from there. Manual zoom keeps 20%.
 const FLOOR = 0.75;
-type Flow = { getNodes(): { position: { x: number; y: number }; measured?: { width?: number; height?: number }; initialHeight?: number; data: unknown }[]; fitView(o: { padding: number }): unknown; setViewport(v: { x: number; y: number; zoom: number }): unknown };
+type Flow = { getNodes(): { id: string; position: { x: number; y: number }; measured?: { width?: number; height?: number }; initialHeight?: number; data: unknown }[]; fitView(o: { padding: number }): unknown; setViewport(v: { x: number; y: number; zoom: number }): unknown; setCenter(x: number, y: number, o: { duration: number }): unknown };
 function frame(rf: Flow) {
   const nodes = rf.getNodes(), box = document.querySelector(".gcanvas")?.getBoundingClientRect();
   if (!nodes.length || !box) return;
@@ -459,6 +459,11 @@ function frame(rf: Flow) {
   if (Math.min(box.width / ((right - left) * 1.15), box.height / ((bottom - top) * 1.15)) >= FLOOR) { rf.fitView({ padding: 0.15 }); return; } // fitView's own fit: padding 0.15 adds 15% to the size
   const start = nodes.find((n) => (n.data as { node?: Node }).node?.type === "input.library") ?? nodes.reduce((a, c) => (c.position.y < a.position.y || (c.position.y === a.position.y && c.position.x < a.position.x) ? c : a));
   rf.setViewport({ x: 24 - start.position.x * FLOOR, y: 24 - start.position.y * FLOOR, zoom: FLOOR });
+}
+// ?node=<id> (the stack's "Add another path in the graph" link): the step is centred; its selection is set from the URL
+function focusNode(rf: Flow, id: string | null) {
+  const n = id ? rf.getNodes().find((x) => x.id === id) : undefined;
+  if (n) rf.setCenter(n.position.x + W / 2, n.position.y + (n.measured?.height ?? n.initialHeight ?? 100) / 2, { duration: 0 });
 }
 
 // Toolbar zoom (SCREENS V4: Fit, Zoom -, %, +).

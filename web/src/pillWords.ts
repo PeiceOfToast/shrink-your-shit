@@ -15,3 +15,5 @@ export const notLinked = (p: { name: string; label: string; outcome: string }, d
 // the wide pill's words (the tight pill always says "Not linked"); pillWidth measures all three
 export const pillWords = (p: { name: string; outcome: string }, def?: StepDefinition) => !afterSave(p, def) ? "Not linked: keeps the original" : p.outcome === "branch" ? "Not linked: nothing more" : "Not linked: carries on";
 export const PILL_WORDS = ["Not linked: keeps the original", "Not linked: carries on", "Not linked: nothing more"];
+// a step's aria-label: its parts joined with ". ", but a part that already ends in a stop, ! or ? gets no second one (#694)
+export const joinSentences = (parts: string[]) => parts.filter(Boolean).map((p) => p.trim()).reduce((a, p) => (a === "" ? p : /[.!?]$/.test(a) ? a + " " + p : a + ". " + p), "");

@@ -1,7 +1,7 @@
 // W9 (#694): the "Not linked" words on a graph step's free ports, chosen from the step's fileOn.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { notLinked, pillWords, PILL_WORDS } from "./pillWords.ts";
+import { joinSentences, notLinked, pillWords, PILL_WORDS } from "./pillWords.ts";
 import type { StepDefinition } from "./types/v2.ts";
 
 const saved = { fileOn: { success: "saved", error: "saved", skipped: "saved", no: "saved" } } as unknown as StepDefinition;
@@ -43,4 +43,9 @@ test("an unknown port, or no definition, falls back to the original-file words",
 
 test("the wide pill has three possible words, and all are measured", () => {
   assert.deepEqual(PILL_WORDS, ["Not linked: keeps the original", "Not linked: carries on", "Not linked: nothing more"]);
+});
+
+test("an aria-label joins its parts without a double full stop", () => {
+  assert.equal(joinSentences(["Name", "Summary", notLinked(error, before)]), "Name. Summary. Didn't work: not linked. The original file is kept.");
+  assert.equal(joinSentences(["Name.", "", "Warning: x."]), "Name. Warning: x.");
 });
