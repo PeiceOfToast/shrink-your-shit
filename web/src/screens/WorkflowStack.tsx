@@ -13,6 +13,7 @@ import { Link, navigate, onLeave } from "../router";
 import { Browse } from "../FolderPicker";
 import { OwnVars, VarInput, builtinsOf, takesVars, varListFor, varProblems, withOwn } from "../VarInput";
 import { refProblem } from "../refFit";
+import { formatEdit } from "../convertFormat";
 import "../styles/variables.css";
 import { getSettings, listLibraries, shrunk } from "../libraryApi";
 import type { TemplateVar } from "../mock/variables";
@@ -237,19 +238,8 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
   const [said, setSaid] = useState("");
   const [ask, setAsk] = useState(false); // "Go back to the slider?" (SCREENS V3)
   const put = (k: string, v: unknown) => {
-    const x: Record<string, unknown> = {}, rc = String(c.rateControl ?? "quality");
-    if (n.type === "video.convert") {
-      // decide from the format this edit leaves (not the saved one): AV1 takes Quality only (engine #211 refuses the rest)
-      const fmt = k === "format" ? String(v) : String(c.format ?? "hevc");
-      // P6: H.264 and VP9 can't make 10-bit; switching to them while 10-bit is chosen resets it to Keep as is, in this same update
-      const drop10 = k === "format" && (fmt === "h264" || fmt === "vp9") && String(c.bitDepth ?? "keep") === "10";
-      if (drop10) x.bitDepth = undefined;
-      if (rc.endsWith("_legacy") && k !== "rateControl") x.rateControl = fmt === "av1" || k === "quality" ? "quality" : "level";
-      if (k !== "quality" && k !== "kind" && c.kind !== "selectors") x.kind = "selectors"; // a custom edit turns the slider off
-      const next = String(x.rateControl ?? rc);
-      if (fmt === "av1" && next !== "quality") { x.rateControl = "quality"; setSaid(k === "format" ? "Switched to Quality only: AV1 can't use a bitrate. Your bitrate settings are kept if you switch back." : ""); }
-      else if (k === "format") setSaid(drop10 ? "Bit depth set to Keep as is: " + (fmt === "h264" ? "H.264" : "VP9") + " can't make 10-bit." : "");
-    }
+    let x: Record<string, unknown> = {};
+    if (n.type === "video.convert") { const f = formatEdit(c, k, v); x = f.x; if (f.said !== undefined) setSaid(f.said); } // #697: the rules live in convertFormat.ts
     set(k, v, x);
   };
   const field = (k: string) => { const b = bad(k), sk = conv(k); if (!sk) return null; return (
@@ -341,7 +331,7 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
             </div>
             <div className={bad("bitDepth").length ? "fieldbad" : undefined} data-field="bitDepth" aria-invalid={bad("bitDepth").length ? true : undefined}>
               <fieldset className="field choice" aria-describedby={bdDescribed || undefined}><legend className="lab">Bit depth</legend>
-                <div className="seg radios">
+                <div className="seg radios bitdepth">
                   {labels(bdSchema).map(([v, l]) => { const val = String(v), off = val === "10" && no10; return (
                     <label key={val} className={bd === val ? "on" : undefined}><input type="radio" name={n.id + "-bd"} checked={bd === val} disabled={off} onChange={() => set("bitDepth", val === "keep" ? undefined : val)} />
                       <span>{l}</span></label>); })}
