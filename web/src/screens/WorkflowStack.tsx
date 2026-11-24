@@ -277,7 +277,8 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
     const sl = lad?.slider.find((x) => x.position === Number(c.quality ?? 3) && x.format === String(c.format ?? "hevc"));
     // Opening More options is the switch to custom: kind and rateControl in one update (AV1 gets Quality only)
     // an old flow keeps its meaning until its first edit (design: 'Changing its bitrate settings switches it')
-    const custom = () => !legacy && set("kind", "selectors", { rateControl: av1 ? "quality" : "level" });
+    // Quality only, as the slider has it: opening More options changes nothing until the person picks something
+    const custom = () => !legacy && set("kind", "selectors", { rateControl: "quality" });
     // the slider's own values: custom settings that differ from them are asked about before they're cleared (SCREENS V3)
     const SLIDER = { format: "hevc", resolution: "keep", maxBitrate: "none", speed: "normal", rateControl: "quality" };
     const differs = Object.entries(SLIDER).some(([k, v]) => String(c[k] ?? v) !== v) || c.vbrMaxKbps != null;
