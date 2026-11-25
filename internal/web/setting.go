@@ -62,7 +62,7 @@ var selectorFields = map[string]bool{"speed": true, "format": true, "resolution"
 // settingEcho are the fields a setting answer carries that a client may send back unchanged: ignored.
 var settingEcho = map[string]bool{"kind": true, "positions": true, "order": true, "availableformats": true, "availableaudio": true,
 	"availablesubtitles": true, "availablefiletypes": true, "warnings": true, "sharedflowchoice": true, "fitsbasic": true, "becomes": true, "bitrateladder": true, "notes": true, "minsavingpct": true, "skipsmall": true, "skiphdr": true, "editablehere": true, "reason": true,
-	"keepifbigger": true, "ratecontrol": true, "hardware": true}
+	"keepifbigger": true, "ratecontrol": true, "hardware": true, "audiolanguages": true, "subtitlelanguages": true}
 
 // unchangedFrom is the body without the fields whose values are the ones the setting shows now: a page that
 // saves back what GET showed has chosen none of those.

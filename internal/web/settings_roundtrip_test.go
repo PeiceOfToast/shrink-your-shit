@@ -5,6 +5,7 @@ package web
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -192,5 +193,36 @@ func TestV1SettingRefusesAChangedEchoedField(t *testing.T) {
 	got, _ := st.GetFlow(l.FlowID)
 	if s := got.Template.Selectors; s == nil || s.RateControl != "level" || s.Speed != "normal" {
 		t.Errorf("a refused save changed the template: %+v", s)
+	}
+}
+
+// A flow whose audio and subtitles steps keep their own lists (G2): GET shows them, the whole body saved back
+// with one choice changed saves (200), and the steps' lists stay as they were (#724 review2 P2).
+func TestLibrarySettingWithStepLanguagesSavesItsGetBody(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	sel := rules.DefaultSelectors(3)
+	sel.Audio, sel.OnlyMyLanguages, _ = rules.StandardAudio("my_languages", true)
+	sel.AudioLangs = []string{"eng", "ger"}
+	sel.Subtitles = "my_languages"
+	sel.SubLangs = []string{"fre"}
+	l, _ := st.AddLibrary("Movies", t.TempDir(), sel.Template(), true)
+	path := fmt.Sprintf("/api/libraries/%d/setting", l.ID)
+	_, before, _ := do(t, nil, srv, call{method: "GET", path: path})
+	if !strings.Contains(before, `"audioLanguages"`) || !strings.Contains(before, `"subtitleLanguages"`) {
+		t.Fatalf("GET does not show the step languages: %s", before)
+	}
+	var m map[string]any
+	if err := json.Unmarshal([]byte(before), &m); err != nil {
+		t.Fatal(err)
+	}
+	m["quality"] = 2
+	b, _ := json.Marshal(m)
+	if code, out := post(t, srv, "PUT", path, string(b)); code != 200 {
+		t.Fatalf("PUT of the GET body with one choice changed: %d %s", code, out)
+	}
+	f, _ := st.GetFlow(l.FlowID)
+	got := f.Template.Selectors
+	if got == nil || !slices.Equal(got.AudioLangs, []string{"eng", "ger"}) || !slices.Equal(got.SubLangs, []string{"fre"}) {
+		t.Errorf("the step lists changed: audio %v, subtitles %v", got.AudioLangs, got.SubLangs)
 	}
 }
