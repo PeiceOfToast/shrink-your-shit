@@ -18,7 +18,7 @@ import { filesFoot, shrinkLine, spaceFoot, spaceHeadline } from "../cardLines";
 import { getStartedSteps, nextStep, showGetStarted } from "../getStarted";
 import { runFields, startedAt } from "../jobCards";
 import { filesFact, freshFact, lastDoneFact, nextScanFact, nothingFact, stateWord, workersFact, type Fact } from "../statusStrip";
-import { convertingEmpty, libraryRight } from "../dashRowText";
+import { convertingEmpty, libraryRight, shareText } from "../dashRowText";
 import { attentionRows, LIBRARY_WORD } from "../attention";
 const HEALTH_HIDDEN = "syp-health-dismissed"; // the failed checks the Dismiss was for
 import { onLive } from "../live";
@@ -377,7 +377,7 @@ export function Overview() {
               const frees = h.nextFreeAt ? ", frees from " + dayName(h.nextFreeAt.slice(0, 10)) : "";
               const nextFreeDay = h.nextFreeAt ? dayName(h.nextFreeAt.slice(0, 10)) : null;
               const lib = libOf.get(String(l.id)); // the Libraries page's workflow and scan figures
-              const facts = [l.saved === 0 && l.waitingToFree > 0 ? bytes(l.waitingToFree) + " smaller" + frees : null, l.saved > 0 && l.waitingToFree > 0 ? bytes(l.waitingToFree) + " more" + frees : null, (l.grew ?? 0) > 0 ? bytes(l.grew!) + " added by bigger files" : null].filter(Boolean);
+              const facts = [l.saved > 0 && l.waitingToFree > 0 ? bytes(l.waitingToFree) + " more" + frees : null, (l.grew ?? 0) > 0 ? bytes(l.grew!) + " added by bigger files" : null].filter(Boolean);
               const files = l.counts.done + l.counts.waiting + l.counts.skipped + l.counts.failed, right = libraryRight(l, nextFreeDay, bytes);
               return <li key={l.id} className="lcard">
                 <span className="ltile" aria-hidden="true"><Icon id="i-library" /></span>
@@ -393,7 +393,7 @@ export function Overview() {
                     {l.state === "no_workflow" ? <span className="pill warn">No workflow</span> : l.state === "paused" ? <span className="pill warn">Paused</span> : l.state === "paused_share" ? <span className="pill warn">Share not connected yet</span> : null}
                   </span>
                 </div>
-                {sp != null && <div className="lbar" role="progressbar" aria-label={l.name + ": " + sp + "% saved"} aria-valuemin={0} aria-valuemax={100} aria-valuenow={sp}><i style={{ width: (share ?? 0) + "%" }} /></div>}
+                {sp != null && <div className="lbar" role="progressbar" aria-label={l.name + ": " + shareText(share ?? 0) + " saved"} aria-valuemin={0} aria-valuemax={100} aria-valuenow={sp}><i style={{ width: (share ?? 0) + "%" }} /></div>}
               </li>; })}</ul></>}
       </section>
 
