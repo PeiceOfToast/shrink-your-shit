@@ -66,7 +66,7 @@ function LanguagePicker({ codes, set, ticked, onTick, fromSettings }: { codes: s
     <div className="stack" style={{ gap: 6 }}>
       <div className="row" style={{ flexWrap: "wrap", gap: 6 }}>
         {codes.map((c) => (
-          <span className="mchip" key={c}><span>{name(c)}</span>
+          <span className={"mchip" + (ticked ? " removable" : "")} key={c}><span>{name(c)}</span>
             {ticked && <button type="button" className="btn sm ghost" aria-label={"Remove " + name(c)} onClick={() => set(codes.filter((x) => x !== c))}>×</button>}</span>
         ))}
         {codes.length === 0 && <span className="hint">No languages chosen: tracks with no language set are kept.</span>}
@@ -248,8 +248,7 @@ export function Guided({ id }: { id?: string }) {
         <PageHead icon="i-workflow" title="Basic" sub="Answer the questions; the steps are made for you." />
         <FlowTabs id={id!} on="basic" />
         <section className="card"><div className="bd stack">
-          <p className="st warn" role="status">Basic can't show this workflow.</p>
-          {g.why && <p>{g.why}</p>}
+          <p className="st warn" role="status">{g.why || "Basic can't show this workflow."}</p>
           <div className="row"><button className="btn primary" type="button" onClick={() => navigate("/workflows/" + id)}>Open in Advanced</button></div>
         </div></section>
       </div>
@@ -381,11 +380,11 @@ export function Guided({ id }: { id?: string }) {
           {extra.length > 0 && <p className="hint">Basic doesn't ask about: {extra.join(", ")}. They stay as they are.</p>}
           {lines.length > 0 ? <ul className="stack" style={{ gap: 4 }}>{lines.map((l, i) => <li key={i}>{l}</li>)}</ul> : <p className="muted">Working out the sentences…</p>}
           {issues.length > 0 && <ul>{issues.map((x, i) => <li key={i} className="bad">{x.message}</li>)}</ul>}
-          <div className="row" style={{ flexWrap: "wrap" }} aria-label="Change an answer">
+          {!done && <div className="row" style={{ flexWrap: "wrap" }} aria-label="Change an answer">
             {Array.from({ length: total }, (_, i) => i + 1).map((n) => (
               <button key={n} className="btn sm ghost" type="button" onClick={() => { setFromSummary(true); goTo(n); }}>Change {n}</button>))}
-          </div>
-          <div className="row" style={{ flexWrap: "wrap", alignItems: "flex-end" }}>
+          </div>}
+          {!done && <div className="row" style={{ flexWrap: "wrap", alignItems: "flex-end" }}>
             {editing ? (
               <button className="btn primary" type="button" disabled={busy} onClick={save}>Save changes</button>
             ) : (<>
@@ -395,7 +394,7 @@ export function Guided({ id }: { id?: string }) {
               <button className="btn ghost" type="button" disabled={busy} onClick={() => make("draft")}>Save as a draft</button>
             </>)}
             <button className="btn ghost" type="button" onClick={back}>Back</button>
-          </div>
+          </div>}
         </div></section>
       )}
     </div>
