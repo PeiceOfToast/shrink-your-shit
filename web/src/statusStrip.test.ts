@@ -18,10 +18,22 @@ test("the state word: not responding beats offline, busy is converting, nothing 
 
 test("workers on, none busy: Waiting when files are waiting, Idle when nothing is", () => {
   assert.deepEqual(stateWord([{ name: "A", status: "online" }], 1120), { word: "Waiting", tone: "muted" });
-  assert.deepEqual(stateWord([{ name: "A", status: "draining" }], 1), { word: "Waiting", tone: "muted" });
   assert.deepEqual(stateWord([{ name: "A", status: "online" }], 0), { word: "Idle", tone: "muted" });
   // a worker that is busy still reads Converting, whatever is waiting
   assert.deepEqual(stateWord([{ name: "A", status: "busy" }, { name: "B", status: "online" }], 1120), { word: "Converting", tone: "ok" });
+});
+
+test("a draining worker is still writing its file: Converting, and it counts as busy", () => {
+  assert.deepEqual(stateWord([{ name: "A", status: "draining" }], 1), { word: "Converting", tone: "ok" });
+  assert.deepEqual(stateWord([{ name: "A", status: "draining" }, { name: "B", status: "online" }], 0), { word: "Converting", tone: "ok" });
+  assert.deepEqual(workersFact([{ name: "A", status: "draining" }]), { text: { pre: "", value: "1 of 1", post: " worker busy" }, notReady: null });
+});
+
+test("a paused worker is named stopped, unless every worker is paused", () => {
+  assert.deepEqual(workersFact([{ name: "Desk", status: "busy" }, { name: "NAS", status: "paused" }]), { text: { pre: "", value: "1 of 2", post: " workers busy" }, notReady: "NAS is stopped" });
+  assert.deepEqual(workersFact([{ name: "NAS", status: "paused" }, { name: "Box", status: "offline" }]), { text: { pre: "", value: "0 of 2", post: " workers busy" }, notReady: "NAS is stopped and 1 more" });
+  assert.deepEqual(workersFact([{ name: "NAS", status: "paused" }, { name: "Box", status: "paused" }]), { text: { pre: "", value: "0 of 2", post: " workers busy" }, notReady: null });
+  assert.equal(stateWord([{ name: "NAS", status: "paused" }, { name: "Box", status: "paused" }], 0).word, "Off");
 });
 
 test("the workers fact counts the busy ones (bold value) and names the first worker that is not ready", () => {
@@ -64,9 +76,11 @@ test("a library that can't run means no Nothing needs you", () => {
   assert.equal(allLibrariesRunning([]), true);
 });
 
-test("the fresh-install sentence: none until the Get started steps are done, then a library or a worker is named", () => {
-  assert.equal(freshFact(0, false), "Add a library to start");
-  assert.equal(freshFact(2, false), "nothing converts until you start a worker");
-  assert.equal(freshFact(2, true), null);
-  assert.equal(freshFact(0, true), null);
+test("the fresh-install sentence names the missing step; no step (card not shown) gives no sentence", () => {
+  assert.equal(freshFact(0), "Add a library to start");
+  assert.equal(freshFact(1), "Pick a workflow for your library to start");
+  assert.equal(freshFact(2), "Turn on the workers to start");
+  assert.equal(freshFact(null), null);
 });
+// The page passes nextStep only while showGetStarted is true, so an established install with paused workers
+// (converted > 0, Get started card hidden) gets no sentence; getStarted.test.ts covers showGetStarted.

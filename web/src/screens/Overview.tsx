@@ -182,7 +182,6 @@ export function Overview() {
         <section className="tiles" aria-hidden="true">{[0, 1].map((k) => <div key={k} className="tile"><span className="skel-ph" style={{ width: "40%", height: 12 }} /><span className="skel-ph" style={{ width: 120, height: 30, gridColumn: 2, gridRow: 1, justifySelf: "end" }} /><span className="skel-ph" style={{ width: "60%", height: 12 }} /></div>)}</section>
         <section className="sec"><h2>Converting now</h2><ul className="lcards" aria-hidden="true">{[0, 1].map(ph)}</ul></section>
         <section className="sec"><h2>Libraries</h2><ul className="lcards" aria-hidden="true">{[0, 1, 2].map(ph)}</ul></section>
-        <section className="sec"><h2>Workers</h2><ul className="lcards" aria-hidden="true">{[0].map(ph)}</ul></section>
         <section className="sec"><h2>Last 30 days</h2><div className="lcard lskel" aria-hidden="true" style={{ minHeight: 160, display: "block" }}><span className="skel-ph" style={{ width: "40%", height: 12 }} /><div className="skel-ph" style={{ display: "block", width: "100%", height: 110, marginTop: 12 }} /></div></section>
       </>}
     </div>;
@@ -230,8 +229,8 @@ export function Overview() {
   // Needs attention card and its notes have nothing to show (the same conditions as today; D2 moves them into one card)
   const healthShown = failedNow.length > 0 && failKey !== hidKey, summaryOk = !!sum.data && !failed(sum.data);
   const needsNone = summaryOk && failedRows.length === 0 && !healthShown && !(v.encoderFallbacks?.length) && allLibrariesRunning(v.libraries.map((l) => l.state));
-  // before the Get started steps are done the strip says what is missing (Off), not the usual facts
-  const fresh = freshFact(v.libraries.length, steps.every(Boolean));
+  // while the Get started card shows, the strip says which step is missing (Off), not the usual facts
+  const fresh = freshFact(starting ? nextStep(steps) : null);
   const sw = fresh ? { word: "Off", tone: "muted" as const } : stateWord(rows, h.filesWaiting), wfact = workersFact(rows), facts: ReactNode[] = [];
   const shown = (f: Fact) => typeof f === "string" ? f : <>{f.pre}<b>{f.value}</b>{f.post}</>; // the value is bold, the words are not
   if (fresh) facts.push(fresh);
