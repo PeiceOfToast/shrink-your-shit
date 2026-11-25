@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { canForget, fileName, nextForgetId, unreachableLine } from "./unreachable.ts";
+import { canForget, fileName, nextForgetId, reasonLine, unreachableLine } from "./unreachable.ts";
 import type { Unreachable } from "./types/v2.ts";
 
 const row = (id: number, code: Unreachable["code"]): Unreachable => ({ id, path: `/share/${id}.mkv`, code, reason: "x" });
@@ -41,4 +41,11 @@ test("null only when no forgettable row is left anywhere, so focus goes to the w
   assert.equal(nextForgetId(list, 1), null);
   assert.equal(nextForgetId(list, 5), null);
   assert.equal(nextForgetId([], 0), null);
+});
+
+test("a server reason starts with a capital on screen; empty and already-capital reasons are unchanged", () => {
+  assert.equal(reasonLine("its file was not found under the library folders."), "Its file was not found under the library folders.");
+  assert.equal(reasonLine("a queued or running job uses this file, so its kept original was left."), "A queued or running job uses this file, so its kept original was left.");
+  assert.equal(reasonLine("Already capital."), "Already capital.");
+  assert.equal(reasonLine(""), "");
 });
