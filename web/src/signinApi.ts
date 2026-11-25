@@ -36,6 +36,8 @@ export async function setAuthMode(body: { mode: AuthMode; password?: string }): 
 export async function signIn(body: { password: string } | { token: string }): Promise<Answer<unknown>> {
   if (!MOCK) return call("POST", "/api/login", body);
   const e = q.get("authErr");
-  if ("password" in body && (e === "bad_password" || e === "too_many_tries")) return fail(e, e === "too_many_tries" ? { retryAfter: 60 } : {});
+  // too_many_tries carries the server's wait unless retryAfter=none (the sentence without a count)
+  if (e === "too_many_tries") return fail(e, q.get("retryAfter") !== "none" ? { retryAfter: 60 } : {});
+  if ("password" in body && e === "bad_password") return fail(e);
   return {};
 }

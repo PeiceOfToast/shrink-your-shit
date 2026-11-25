@@ -1,6 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { MIN_PASSWORD, authWord, canSave, passwordProblem } from "./signinRules.ts";
+import { MIN_PASSWORD, TOO_MANY, WAIT_A_MINUTE, authWord, canSave, passwordProblem, tryAgainIn } from "./signinRules.ts";
+
+test("too many tries: the count reads in seconds, singular for one", () => {
+  assert.equal(tryAgainIn(1), "Try again in 1 second.");
+  assert.equal(tryAgainIn(2), "Try again in 2 seconds.");
+  assert.equal(tryAgainIn(60), "Try again in 60 seconds.");
+  assert.equal(TOO_MANY + " " + WAIT_A_MINUTE, "Too many tries. Wait a minute, then try again.");
+});
 
 test("a password must be at least the minimum and typed the same twice", () => {
   assert.equal(MIN_PASSWORD, 8);

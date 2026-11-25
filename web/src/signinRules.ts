@@ -26,3 +26,9 @@ export const AUTH_WORDS: Record<string, string> = {
   too_many_tries: "Too many tries. Wait a minute, then try again.",
 };
 export const authWord = (code: string, fallback: string): string => AUTH_WORDS[code] ?? fallback;
+
+// too_many_tries at the field (design #713 answer 3). The alert holds only the first sentence, so the ticking count
+// is outside the live region and isn't read out again. Without the server's wait, the sentence says a minute.
+export const TOO_MANY = "Too many tries.";
+export const WAIT_A_MINUTE = "Wait a minute, then try again.";
+export const tryAgainIn = (n: number): string => `Try again in ${n} ${n === 1 ? "second" : "seconds"}.`;
