@@ -288,7 +288,7 @@ export function Overview() {
             <div className="lside"><span className="pill warn">{word}</span></div>
           </li>; })}
         </ul>
-        {attn.dropped > 0 && <p className="muted sm">Failures from libraries you removed don't show here; they stay in the Jobs log.</p>}
+        <p className="muted sm">Failures from libraries you removed don't show here; they stay in the Jobs log.</p>
       </section>}
       {/* U6 (C2): three tiles replace the headline band. Sparklines come from daily[] only: a day not recorded is a gap, never a zero */}
       <section className="tiles" aria-label="Totals">
