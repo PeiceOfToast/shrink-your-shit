@@ -101,15 +101,28 @@ func v2Guide(api *http.ServeMux, store *jobs.Store, svc *integrations.Service, n
 			guideStoreErr(w, err)
 			return
 		}
-		if g := workflow.GuideOf(cur.Doc); g.Coverage == workflow.CoverageNone {
-			writeErrorWith(w, http.StatusConflict, "not_guided", g.Why+" Change it in the steps, or start over from the questions as a new workflow. Nothing was changed.", map[string]any{"why": g.Why})
+		// the saving flow must be able to read the workflow: Basic's views over one it can't show would
+		// rewrite what it doesn't see; Advanced refuses only what no questions can show
+		g := workflow.GuideOf(cur.Doc)
+		switch {
+		case g.Advanced == workflow.CoverageNone:
+			writeErrorWith(w, http.StatusConflict, "not_guided", g.AdvancedWhy+" Nothing was changed.", map[string]any{"why": g.AdvancedWhy, "flow": workflow.FlowAdvanced})
+			return
+		case in.Answers.Flow != workflow.FlowAdvanced && g.Coverage == workflow.CoverageNone:
+			writeErrorWith(w, http.StatusConflict, "not_guided", g.Why+" Nothing was changed.", map[string]any{"why": g.Why, "flow": workflow.FlowBasic})
 			return
 		}
 		a := workflow.Fill(in.Answers)
 		if !answersOK(w, a) {
 			return
 		}
-		d, err := store.SaveDraft(id, workflow.Apply(cur.Doc, a), cur.Layout, r.Header.Get("If-Match"))
+		// a secret is never sent to the page, so a variable saved back without a value keeps the stored one
+		doc := workflow.KeepSecretValues(workflow.Apply(cur.Doc, a), cur.Doc)
+		if vs := workflow.CheckVariables(doc); len(vs) > 0 {
+			writeErrorWith(w, http.StatusBadRequest, vs[0].Code, vs[0].Message+" Nothing was changed.", map[string]any{"issues": vs, "field": "variables"})
+			return
+		}
+		d, err := store.SaveDraft(id, doc, cur.Layout, r.Header.Get("If-Match"))
 		if err != nil {
 			guideStoreErr(w, err)
 			return
