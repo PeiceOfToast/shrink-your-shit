@@ -95,7 +95,7 @@ function CardBars({ label, days, series, fmt, extra, quiet }: { label: string; d
         // a part with a value is drawn at least 1 unit tall, so a small one beside a big one (Failed 1 beside Done 4,000) still shows
         const parts = series.filter((s) => s.value(dd) > 0).map((s) => ({ s, h: Math.max(1, y(s.value(dd))) }));
         let yy = base;
-        return <g key={dd.day}>{parts.map((p, k) => { const bottom = k === 0, last = k === parts.length - 1, hh = bottom ? p.h : p.h - gap; yy -= p.h;
+        return <g key={dd.day}>{parts.map((p, k) => { const bottom = k === 0, last = k === parts.length - 1, hh = bottom ? p.h : Math.max(1, p.h - gap); yy -= p.h;
           return last ? <path key={k} d={barPath({ i, x, y: yy, w, h: hh })} fill={p.s.color} /> : <rect key={k} x={x} y={yy} width={w} height={hh} fill={p.s.color} />; })}</g>; })}
       {days.map((_, i) => <rect key={"h" + i} x={i * slot} y="0" width={slot} height={H} fill="transparent" {...hit(i)} />)}
     </svg>
@@ -194,8 +194,7 @@ export function Overview() {
   const hasSaved = rec.some((d) => d.savedBytes != null), three = hasSaved && rec.some((d) => d.couldFreeBytes != null), kept = !three && h.couldFree > 0 && hasSaved, split = !kept && hasSaved;
   // design 11-19 (SCREENS.md:37): never "0 KB" in the note, only the parts there are; the legend keeps all three, kept is --chart-muted
   const freedPart = Math.max(0, tot.saved - tot.waiting - tot.kept), spaceNote = [freedPart > 0 ? bytes(freedPart) + " freed" : "nothing freed yet",
-    tot.waiting > 0 && <Link to="/jobs?tab=completed&kept=1">{bytes(tot.waiting) + " waiting in the trash"}</Link>, tot.kept > 0 && <Link to="/jobs?tab=completed&left=1">{bytes(tot.kept) + " in originals left in place"}</Link>,
-    v.trash.bytes > 0 && <Link to="/settings/safety">{bytes(v.trash.bytes) + " in the trash"}</Link>]
+    tot.waiting > 0 && <Link to="/jobs?tab=completed&kept=1">{bytes(tot.waiting) + " waiting in the trash"}</Link>, tot.kept > 0 && <Link to="/jobs?tab=completed&left=1">{bytes(tot.kept) + " in originals left in place"}</Link>]
     .filter(Boolean).map((p, i) => <Fragment key={i}>{i > 0 && " · "}{p}</Fragment>);
   // D3: the two cards' bar parts and table columns (the SCREENS V2 Space split rules, unchanged): Freed / Waiting in the trash /
   // Originals left in place when the server has them; one series "Smaller" when only the kept split is known; else "Freed"
@@ -218,7 +217,7 @@ export function Overview() {
   const libOf = new Map((libs.data && !failed(libs.data) ? libs.data : []).map((l) => [String(l.id), l] as const));
   const runOf = new Map((running.data && !failed(running.data) ? running.data.items : []).map((j) => [j.jobId ?? j.id, j] as const));
   const perDay = convertedLine(v.daily);
-  const more = [h.waitingToFree > 0 && bytes(h.waitingToFree) + (h.freed > 0 ? " more" : " frees") + (h.nextFreeAt ? " by " + dayName(h.nextFreeAt.slice(0, 10)) : ""), h.couldFree > 0 && <Link to="/jobs?tab=completed&left=1">{"could free " + bytes(h.couldFree) + " if you remove the originals"}</Link>].filter(Boolean).map((p, i) => <Fragment key={i}>{i > 0 && " · "}{p}</Fragment>);
+  const more = [h.waitingToFree > 0 && bytes(h.waitingToFree) + (h.freed > 0 ? " more" : " frees") + (h.nextFreeAt ? " by " + dayName(h.nextFreeAt.slice(0, 10)) : ""), h.couldFree > 0 && <Link to="/jobs?tab=completed&left=1">{"could free " + bytes(h.couldFree) + " if you remove the originals"}</Link>, v.trash.bytes > 0 && <Link to="/settings/safety">{bytes(v.trash.bytes) + " in the trash"}</Link>].filter(Boolean).map((p, i) => <Fragment key={i}>{i > 0 && " · "}{p}</Fragment>);
   // Needs attention (D2): one list from the page's own data; the card and the Status strip's "Nothing needs you" both read attn.none
   const healthShown = failedNow.length > 0 && failKey !== hidKey, summaryOk = !!sum.data && !failed(sum.data), libsOk = !!libs.data && !failed(libs.data);
   const attn = attentionRows({ failures: sum.data && !failed(sum.data) ? sum.data.recentFailures : [], libraryIds: libsOk ? new Set([...libOf.keys()]) : null, healthShown, fallbacks: v.encoderFallbacks?.length ?? 0, libraries: v.libraries });
