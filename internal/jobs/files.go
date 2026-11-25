@@ -36,6 +36,9 @@ type FileFilter struct {
 	Since     string   // skipped: only those decided at or after this time (RFC3339); "" for any
 	Kept      bool
 	Left      bool // processed: only those whose original was left where it was (could free)
+	// LiveLibraries: only jobs whose library still exists (or that name none). The summary's recent failures
+	// use it; a deleted library's jobs stay in the log.
+	LiveLibraries bool
 	// QueueOrder: waiting jobs in the order workers take them (Claim's: priority, then age), ready ones
 	// first, then those waiting to retry (soonest first) or being stopped.
 	QueueOrder    bool
@@ -130,6 +133,9 @@ func (f FileFilter) jobFilters() (string, []any) {
 	if f.LibraryID > 0 {
 		where += " AND j.library_id=?"
 		args = append(args, f.LibraryID)
+	}
+	if f.LiveLibraries {
+		where += " AND (j.library_id IS NULL OR l.id IS NOT NULL)" // jobFrom joins l: NULL when the library is gone
 	}
 	if q := strings.TrimSpace(f.Q); q != "" {
 		where += " AND (instr(" + nameOf("j.path") + ", lower(?))>0 OR instr(" + nameOf("COALESCE(o.new_path,'')") + ", lower(?))>0)"
