@@ -134,7 +134,7 @@ export function Libraries() {
       <Problem m={libs.data ? libs.error?.message : undefined} />
       {/* one toolbar: the filter buttons with their counts on the left, the search on the right; while selecting, All and the bulk actions (on phones they sit under "...") */}
       {!empty && <div className="ltools" role="toolbar" aria-label="Libraries">
-        <div className="seg" role="group" aria-label="Show libraries">
+        <div className="seg seg2x2" role="group" aria-label="Show libraries">
           {FILTERS.map(([k, t]) => <button key={k} type="button" aria-pressed={filter === k} onClick={() => setFilter(k)}>{counted ? t + " · " + count(counts[k]) : t}</button>)}
         </div>
         {selecting && <label className="hit selall"><input type="checkbox" aria-label="Select all shown libraries" disabled={items.length === 0} checked={allShownSelected(items, sel)} onChange={(e) => setSel(selectShown(sel, items, e.target.checked))} /><span className="sm">All</span></label>}
