@@ -48,7 +48,8 @@ if (new URLSearchParams(location.search).get("jobs") === "many") items = [...ite
 const TAB: Record<Tab, JobState[]> = { waiting: ["queued", "retry_wait"], running: ["preparing", "running", "validating", "committing"], completed: ["completed"], skipped: ["skipped", "cancelled"], failed: ["failed"] };
 const tabOf = (s: JobState) => (Object.keys(TAB) as Tab[]).find((t) => TAB[t].includes(s))!;
 export function mockJobs(tab: Tab, q: string, path?: string, limit = 200, library = "", kept = false, left = false): JobsPage {
-  const mine = items.filter((j) => !library || j.libraryId === library); // as the server: ?libraryId= narrows the rows and the tab counts
+  const calm = new URLSearchParams(location.search).has("calm"); // D2: ?calm has no failed jobs, so the Needs attention card is absent
+  const mine = items.filter((j) => (!library || j.libraryId === library) && !(calm && tabOf(j.state) === "failed")); // as the server: ?libraryId= narrows the rows and the tab counts
   const counts = Object.fromEntries((Object.keys(TAB) as Tab[]).map((t) => [t, mine.filter((j) => tabOf(j.state) === t).length])) as Record<Tab, number>;
   // as the server with ?kept=1 or ?left=1 (Done only): the rows whose original is still kept, or still left beside or in place; the counts stay the tab's own
   let rows = mine.filter((j) => tabOf(j.state) === tab && (!q || j.name.toLowerCase().includes(q.toLowerCase())) && (!path || j.path === path) && (!kept || (tab === "completed" && j.originalState === "kept")) && (!left || (tab === "completed" && (j.originalState === "left_in_place" || j.originalState === "kept_beside"))));

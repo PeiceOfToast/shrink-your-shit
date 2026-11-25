@@ -15,7 +15,8 @@ import { convertedLine } from "../convertedLine";
 import { barPath, sparkBars, sparkValue } from "../sparkBars";
 import { getStartedSteps, nextStep, showGetStarted } from "../getStarted";
 import { runFields, startedAt } from "../jobCards";
-import { allLibrariesRunning, filesFact, freshFact, lastDoneFact, nextScanFact, nothingFact, stateWord, workersFact, type Fact } from "../statusStrip";
+import { filesFact, freshFact, lastDoneFact, nextScanFact, nothingFact, stateWord, workersFact, type Fact } from "../statusStrip";
+import { attentionRows, LIBRARY_WORD } from "../attention";
 const HEALTH_HIDDEN = "syp-health-dismissed"; // the failed checks the Dismiss was for
 import { onLive } from "../live";
 import { LoadFailed, PageHead } from "../PageHead";
@@ -197,8 +198,7 @@ export function Overview() {
     return { id: w.id, name: w.name, kind: ow?.kind ?? "remote", status: w.status, slots: w.slots, cpuPercent: ow?.cpuPercent ?? null, gpuPercent: ow?.gpuPercent ?? null, jobs: w.currentJobIds.map(jobInfo) }; }) : v.workers;
   const on = rows.filter((w) => w.status === "busy" || w.status === "online").length, fin = rows.filter((w) => w.status === "draining").length;
   const busy = rows.some((w) => w.jobs.length > 0), failed24 = sum.data && !failed(sum.data) ? sum.data.last24h.failed : null;
-  // Needs attention: the summary's newest failures (the same rows as the jobs list, so the list's own fields)
-  const failedRows = sum.data && !failed(sum.data) ? sum.data.recentFailures.slice(0, 3) : [], s24 = sum.data && !failed(sum.data) ? sum.data.last24h : null;
+  const s24 = sum.data && !failed(sum.data) ? sum.data.last24h : null;
   const slotUsed = rows.reduce((a, w) => a + slots(w).used, 0), slotTotal = rows.reduce((a, w) => a + slots(w).total, 0);
   const rec = v.daily.filter((d) => d.recorded), first = rec[0]?.day, add = (f: (d: Day) => number) => rec.reduce((a, d) => a + f(d), 0);
   const tot = { done: add((d) => d.completed), skipped: add((d) => d.skipped), failed: add((d) => d.failed), freed: add((d) => d.freedBytes), saved: add((d) => d.savedBytes ?? 0), waiting: add((d) => d.waitingBytes ?? 0), kept: add((d) => d.couldFreeBytes ?? 0) };
@@ -225,10 +225,11 @@ export function Overview() {
   const avgLine = <><span>New files, on average <b>{v.averages.fileShrinkPercent == null ? "not recorded" : Math.round(v.averages.fileShrinkPercent) + "% smaller"}</b></span>
             <span>Time per GB <b>{perGB(v.averages.secondsPerGB)}</b></span></>;
   const more = [h.waitingToFree > 0 && bytes(h.waitingToFree) + (h.freed > 0 ? " more" : " frees") + (h.nextFreeAt ? " by " + dayName(h.nextFreeAt.slice(0, 10)) : ""), h.couldFree > 0 && <Link to="/jobs?tab=completed&left=1">{"could free " + bytes(h.couldFree) + " if you remove the originals"}</Link>].filter(Boolean).map((p, i) => <Fragment key={i}>{i > 0 && " · "}{p}</Fragment>);
-  // the Status strip (dashboard cards §1): the state word and the facts a person checks. "Nothing needs you" when the
-  // Needs attention card and its notes have nothing to show (the same conditions as today; D2 moves them into one card)
-  const healthShown = failedNow.length > 0 && failKey !== hidKey, summaryOk = !!sum.data && !failed(sum.data);
-  const needsNone = summaryOk && failedRows.length === 0 && !healthShown && !(v.encoderFallbacks?.length) && allLibrariesRunning(v.libraries.map((l) => l.state));
+  // Needs attention (D2): one list from the page's own data; the card and the Status strip's "Nothing needs you" both read attn.none
+  const healthShown = failedNow.length > 0 && failKey !== hidKey, summaryOk = !!sum.data && !failed(sum.data), libsOk = !!libs.data && !failed(libs.data);
+  const attn = attentionRows({ failures: sum.data && !failed(sum.data) ? sum.data.recentFailures : [], libraryIds: new Set([...libOf.keys()]), healthShown, fallbacks: v.encoderFallbacks?.length ?? 0, libraries: v.libraries });
+  // the Status strip (dashboard cards §1): "Nothing needs you" only once the summary and the libraries have loaded
+  const needsNone = summaryOk && libsOk && attn.none;
   // while the Get started card shows, the strip says which step is missing (Off), not the usual facts
   const fresh = freshFact(starting ? nextStep(steps) : null);
   const sw = fresh ? { word: "Off", tone: "muted" as const } : stateWord(rows, h.filesWaiting), wfact = workersFact(rows), facts: ReactNode[] = [];
@@ -253,13 +254,41 @@ export function Overview() {
         </div>
       </section>
       {said && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{said}</span></p>}
-      {failedNow.length > 0 && failKey !== hidKey && <div className="note bad"><Icon id="i-alert" /><div style={{ flex: 1 }}>
-        <b>{failedNow.length === 1 ? "A health check failed" : plural(failedNow.length, "health check", "health checks") + " failed"}:</b> {failedNow[0].detail} <Link to="/settings/system#health">Open Health</Link>
-      </div><button className="btn sm ghost" type="button" onClick={hideHealth}>Dismiss</button></div>}
-      {v.encoderFallbacks?.map((f) => <div key={f.workerId} className="note warn"><Icon id="i-alert" /><div>
-        <b>{f.worker}'s graphics encoder ({encoderName(f.encoder)}) failed {f.count === 1 ? "once" : plural(f.count, "time", "times")} today.</b>{" "}
-        {f.pausedUntil ? <>It converts on the processor until {clock(f.pausedUntil)}, which is slower. <Link to={"/workers/" + encodeURIComponent(f.workerId) + "?tab=capabilities"}>Test the encoders</Link></> : (f.count === 1 ? "That file was" : "Those files were") + " converted on the processor instead, which is slower."}
-      </div></div>)}
+      {/* Needs attention (D2, design busy-1 / failures-1): one card under the strip; failed jobs first, then the health and encoder notes and the libraries that aren't running */}
+      {!attn.none && <section className="sec" aria-labelledby="ov-f"><h2 id="ov-f">Needs attention {failed24 != null && <span className={"sm " + (failed24 > 0 ? "bad" : "muted")}>{count(failed24)} failed in 24 h</span>} <Link className="more" to="/jobs?tab=failed">Failed jobs</Link></h2>
+        <ul className="lcards" aria-label="Needs attention">
+          {attn.failures.map((j) => <li key={j.id} className="lcard">
+            <span className="ltile codec" aria-hidden="true">{j.codec ?? ""}{j.resolution && <><br />{j.resolution}</>}</span>
+            <div className="lmain">
+              <div className="lname"><Link className="ttl" to={"/jobs?tab=failed&job=" + encodeURIComponent(j.jobId ?? j.id)} title={j.path}>{j.name}</Link><span className="lchev" aria-hidden="true">›</span></div>
+              <div className="chips"><span className="mchip"><Icon id="i-folder" />{j.library}</span>{libOf.get(String(j.libraryId))?.workflowName && <span className="mchip"><Icon id="i-workflow" />{libOf.get(String(j.libraryId))!.workflowName}</span>}{j.newFileRefused && <span className="mchip">Original kept</span>}</div>
+            </div>
+            <div className="lside">
+              <span className="sm" style={{ color: "var(--error-text)" }}>{j.reason?.message ?? "Failed"}</span>
+              <span className="pill bad"><Icon id="i-alert" />Failed</span>
+              {j.finishedAt && <span className="lnote">{dayClock(j.finishedAt)}</span>}
+            </div>
+          </li>)}
+          {attn.health && <li className="lcard">
+            <span className="ltile" aria-hidden="true"><Icon id="i-alert" /></span>
+            <div className="lmain"><div className="lname"><b>{failedNow.length === 1 ? "A health check failed" : plural(failedNow.length, "health check", "health checks") + " failed"}:</b></div>
+              <span className="sm">{failedNow[0].detail} <Link to="/settings/system#health">Open Health</Link></span></div>
+            <div className="lside"><button className="btn sm ghost" type="button" onClick={hideHealth}>Dismiss</button></div>
+          </li>}
+          {v.encoderFallbacks?.map((f) => <li key={f.workerId} className="lcard">
+            <span className="ltile" aria-hidden="true"><Icon id="i-alert" /></span>
+            <div className="lmain"><div className="lname"><b>{f.worker}'s graphics encoder ({encoderName(f.encoder)}) failed {f.count === 1 ? "once" : plural(f.count, "time", "times")} today.</b></div>
+              <span className="sm">{f.pausedUntil ? <>It converts on the processor until {clock(f.pausedUntil)}, which is slower. <Link to={"/workers/" + encodeURIComponent(f.workerId) + "?tab=capabilities"}>Test the encoders</Link></> : (f.count === 1 ? "That file was" : "Those files were") + " converted on the processor instead, which is slower."}</span></div>
+          </li>)}
+          {attn.libraries.map((l) => { const [word, meaning] = LIBRARY_WORD[l.state] ?? [l.state, ""]; return <li key={"lib" + l.id} className="lcard">
+            <span className="ltile" aria-hidden="true"><Icon id="i-library" /></span>
+            <div className="lmain"><div className="lname"><Link className="ttl" to={"/libraries/" + encodeURIComponent(String(l.id))}>{l.name}</Link><span className="lchev" aria-hidden="true">›</span></div>
+              <span className="sm muted">{meaning}</span></div>
+            <div className="lside"><span className="pill warn">{word}</span></div>
+          </li>; })}
+        </ul>
+        {attn.dropped > 0 && <p className="muted sm">Failures from libraries you removed don't show here; they stay in the Jobs log.</p>}
+      </section>}
       {/* U6 (C2): three tiles replace the headline band. Sparklines come from daily[] only: a day not recorded is a gap, never a zero */}
       <section className="tiles" aria-label="Totals">
         <div className="tile">
@@ -297,23 +326,6 @@ export function Overview() {
           <li className="lcard"><span className="ltile" aria-hidden="true"><Icon id="i-worker" /></span>
             <div className="lmain"><div className="lname"><span className="ttl">Start the worker on this computer</span></div><span className="muted sm">Nothing converts until a worker is on.</span></div>
             <div className="lside">{side(2, "/workers", "Open Workers", nextStep(steps) === 2, 2)}</div></li>
-        </ul></section>}
-
-      {/* design busy-1 / failures-1: failed jobs first, each with its reason in red; the list is the newest three */}
-      {failedRows.length > 0 && <section className="sec" aria-labelledby="ov-f"><h2 id="ov-f">Needs attention {failed24 != null && <span className={"sm " + (failed24 > 0 ? "bad" : "muted")}>{count(failed24)} failed in 24 h</span>} <Link className="more" to="/jobs?tab=failed">Failed jobs</Link></h2>
-        <ul className="lcards" aria-label="Failed jobs">
-          {failedRows.map((j) => <li key={j.id} className="lcard">
-            <span className="ltile codec" aria-hidden="true">{j.codec ?? ""}{j.resolution && <><br />{j.resolution}</>}</span>
-            <div className="lmain">
-              <div className="lname"><Link className="ttl" to={"/jobs?tab=failed&job=" + encodeURIComponent(j.jobId ?? j.id)} title={j.path}>{j.name}</Link><span className="lchev" aria-hidden="true">›</span></div>
-              <div className="chips"><span className="mchip"><Icon id="i-folder" />{j.library}</span>{libOf.get(String(j.libraryId))?.workflowName && <span className="mchip"><Icon id="i-workflow" />{libOf.get(String(j.libraryId))!.workflowName}</span>}{j.newFileRefused && <span className="mchip">Original kept</span>}</div>
-            </div>
-            <div className="lside">
-              <span className="sm" style={{ color: "var(--error-text)" }}>{j.reason?.message ?? "Failed"}</span>
-              <span className="pill bad"><Icon id="i-alert" />Failed</span>
-              {j.finishedAt && <span className="lnote">{dayClock(j.finishedAt)}</span>}
-            </div>
-          </li>)}
         </ul></section>}
 
       {!starting && <>
