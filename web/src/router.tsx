@@ -14,6 +14,7 @@ window.addEventListener("popstate", () => {
   here = location.pathname + location.search;
   notify();
 });
+window.addEventListener("hashchange", notify); // a plain #anchor link: the page can land on it again
 
 // The page shown now registers what to do before it is left (e.g. Appearance asks "Keep these colours?").
 export function onLeave(f: (() => void | boolean) | null) {
@@ -33,9 +34,14 @@ export function useSearch(): string {
   return useSyncExternalStore((f) => (listeners.add(f), () => listeners.delete(f)), () => location.search);
 }
 
-// The path inside the app ("/", "/jobs", "/settings/appearance").
+// The path inside the app ("/", "/jobs", "/settings/general").
 export function usePath(): string {
   return useSyncExternalStore((f) => (listeners.add(f), () => listeners.delete(f)), path);
+}
+
+// The #fragment of the current address ("#safety"); a same-page hash change re-renders the page that reads it.
+export function useHash(): string {
+  return useSyncExternalStore((f) => (listeners.add(f), () => listeners.delete(f)), () => location.hash);
 }
 
 export function Link({ to, onClick, ...rest }: { to: string } & AnchorHTMLAttributes<HTMLAnchorElement>) {

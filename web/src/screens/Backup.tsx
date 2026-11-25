@@ -4,11 +4,10 @@
 import { useEffect, useRef, useState } from "react";
 import { FileName } from "../FileName";
 import { Icon } from "../Icon";
-import { LoadFailed, PageHead } from "../PageHead";
+import { LoadFailed } from "../PageHead";
 import { failed } from "../api";
 import { applyBackup, createBackup, deleteBackup, downloadUrl, listBackups, previewBackup } from "../backupApi";
 import { bytes, clock, count, plural } from "../format";
-import { SettingsTabs } from "../pages";
 import { SettingRow } from "../SettingRow";
 import { useData } from "../useData";
 import type { Backup, BackupContents, BackupPreview } from "../types/backup";
@@ -115,9 +114,7 @@ export function BackupSettings() {
   };
 
   return (
-    <div className="stack">
-      <PageHead icon="i-settings" title="Settings" />
-      <SettingsTabs at="backup" />
+    <section id="backup" aria-labelledby="bk-h" className="stack settings-sec">
       <p className="muted" style={{ margin: 0 }}>A backup holds your settings, workflows, libraries, network shares, connections and job history. Not your videos.</p>
       <p className="muted" role="status" style={{ margin: 0 }}>{said}{busy === "preview" && "Reading the backup…"}</p>
       <div role="alert">{error && <p className="st bad" style={{ margin: 0 }}><Icon id="i-alert" /><span>{error}</span></p>}</div>
@@ -152,5 +149,5 @@ export function BackupSettings() {
                 </div>
               </section>
             </>}
-    </div>);
+    </section>);
 }

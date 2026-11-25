@@ -1,12 +1,10 @@
 // Settings > Processing (SCREENS V9): "Look for new files" (#136: settings.scanEvery, seconds, with scanEverySource
 // "flag" until someone changes it here). Applies at once. Not here yet: New files (Add to queue / Hold).
 import { useState } from "react";
-import { PageHead } from "../PageHead";
 import { SettingRow } from "../SettingRow";
 import { SignedOut, failed } from "../api";
 import { duration } from "../format";
 import { getSettings, patchSettings } from "../libraryApi";
-import { SettingsTabs } from "../pages";
 import { useData } from "../useData";
 
 const CHOICES = [30, 60, 300, 900, 3600]; // design: Every 30 seconds (default) / minute / 5 minutes / 15 minutes / hour
@@ -30,11 +28,9 @@ export function ProcessingSettings() {
     } catch (e) { if (!(e instanceof SignedOut)) throw e; } finally { setBusy(false); }
   };
   return (
-    <div className="stack">
-      <PageHead icon="i-settings" title="Settings" />
-      <SettingsTabs at="processing" />
+    <section id="processing" aria-labelledby="processing-h" className="stack settings-sec">
       <div className="card">
-        <div className="hd"><h2>Processing</h2></div>
+        <div className="hd"><h2 id="processing-h">Processing</h2></div>
         <div className="bd stack" style={{ padding: 0, gap: 0 }}>
           {!s ? <p className="muted" style={PAD}>{st.error?.message ?? "Loading…"}</p> : now === undefined ? <p className="muted" style={PAD}>This server doesn't say how often it looks for new files.</p> : <>
             <SettingRow title={<label htmlFor="scan-every">Look for new files</label>} descId="scan-every-h"
@@ -55,6 +51,6 @@ export function ProcessingSettings() {
       </div>
       {/* no Save on this tab: the changes above apply at once, so say so where a Save note sits elsewhere */}
       <p className="muted" style={{ margin: 0 }}>Changes here apply at once.</p>
-    </div>
+    </section>
   );
 }

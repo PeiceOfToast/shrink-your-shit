@@ -288,6 +288,25 @@ func (s *Store) ShareMountsByShare(shareID int64) ([]ShareMount, error) {
 	return out, nil
 }
 
+// MountRoots lists the mount paths the shares are recorded at, now. A re-added share gets its new mount here
+// (U-B: its libraries keep their old paths); the purge searches them for moved originals.
+func (s *Store) MountRoots() ([]string, error) {
+	rows, err := s.db.Query(`SELECT DISTINCT mount_path FROM share_mounts WHERE mount_path != ''`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
 // DecryptSharePassword returns the plaintext password for a share (used from the web package).
 func (s *Store) DecryptSharePassword(id int64) (string, error) {
 	sh, err := s.ShareByID(id)
