@@ -117,3 +117,40 @@ func TestVBRLimitRange(t *testing.T) {
 		t.Error("the field is the Max bitrate")
 	}
 }
+
+// A step's own languages (G2) are checked like the Settings list: a bad code and more than 20 codes are refused
+// on the step's languages field.
+func TestStepLanguagesCheckedAgainstTheSchema(t *testing.T) {
+	sel := rules.DefaultSelectors(3)
+	sel.Audio, sel.OnlyMyLanguages, _ = rules.StandardAudio("my_languages", true)
+	sel.AudioLangs = []string{"eng"}
+	withLangs := func(v []any) Result {
+		d := FromTemplate(sel.Template(), nil)
+		found := false
+		for i := range d.Nodes {
+			if d.Nodes[i].Type == TypeAudio {
+				d.Nodes[i].Config["languages"] = v
+				found = true
+			}
+		}
+		if !found {
+			t.Fatal("no audio.tracks step in the flow")
+		}
+		return Validate(d)
+	}
+	if r := withLangs([]any{"eng", "fre"}); r.Errors() {
+		t.Errorf("valid list refused: %+v", r.Issues)
+	}
+	r := withLangs([]any{"eng", "xyz"})
+	if !r.Errors() || !strings.Contains(r.Issues[0].Message, `"xyz"`) || r.Issues[0].Field != "languages" {
+		t.Errorf("bad code: %+v", r.Issues)
+	}
+	many := make([]any, 21)
+	for i := range many {
+		many[i] = "eng"
+	}
+	r = withLangs(many)
+	if !r.Errors() || !strings.Contains(r.Issues[0].Message, "at most 20 entries") || r.Issues[0].Field != "languages" {
+		t.Errorf("21 codes: %+v", r.Issues)
+	}
+}

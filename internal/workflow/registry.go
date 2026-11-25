@@ -195,8 +195,8 @@ func Definitions() []StepDefinition {
 		"The smallest audio, for MKV files. Doesn't play on Apple TV or most TVs.", "Tracks are copied unchanged."})
 	audio["x-available"] = audioAvailable
 	subtitles := hinted(enum(anys(rules.AvailableSubtitles), []string{"Keep all", "Keep only my languages", "Keep only text subtitles", "Save as separate .srt files"}), []string{
-		"Every subtitle track is kept as it is.", "Keeps subtitles in your languages (Settings > General) and those with no language set; the others are left out, even if none match.",
-		"Picture subtitles are left out. Text subtitles are kept.", "Subtitles in your languages (Settings > General) are saved next to the new file as .srt files; other languages, and picture subtitles, stay inside the file."})
+		"Every subtitle track is kept as it is.", "Keeps subtitles in the languages chosen on this step, or your languages in Settings when none are, and those with no language set; the others are left out, even if none match.",
+		"Picture subtitles are left out. Text subtitles are kept.", "Subtitles in the languages chosen on this step, or your languages in Settings when none are, are saved next to the new file as .srt files; other languages, and picture subtitles, stay inside the file."})
 	subtitles["description"] = "Subtitle pictures are never burned into the video."
 	subtitles["x-available"] = []string{"keep_all", "my_languages", "text_only"}
 	if rules.HasEncoder("srt") {
@@ -285,7 +285,8 @@ func Definitions() []StepDefinition {
 				"audio": typedRef(withDefault(audio, "stereo_aac", "Audio", "")),
 				"onlyMyLanguages": typedRef(map[string]any{"type": "boolean", "default": true, "title": "Only my languages",
 					// design's words (02:38Z), true to planAudio: with none matching, a stereo choice keeps the main track only
-					"description": "Keeps only tracks in your languages (Settings > General). Tracks with no language set are always kept. If none match, a stereo choice keeps the main track; the other choices keep all tracks."}),
+					"description": "Keeps only tracks in the languages chosen on this step, or your languages in Settings when none are. Tracks with no language set are always kept. If none match, a stereo choice keeps the main track; the other choices keep all tracks."}),
+				"languages": languagesSchema("Languages on this step"),
 				// F5: only the tracks this step converts or adds are measured, and a copied track is never touched.
 				"evenLoudness": typedRef(map[string]any{"type": "boolean", "default": false, "title": "Even out loudness",
 					"description": "Brings quiet and loud videos to the same level, so you don't keep reaching for the volume. Only the tracks this step converts are changed; a track kept as it is stays exactly as it was. Each converted track is measured first, so jobs take a little longer."}),
@@ -294,6 +295,7 @@ func Definitions() []StepDefinition {
 			Description: "Which subtitles the new file keeps.", Inputs: []Port{in}, Outputs: []Port{success}, RunsWith: encodeSegment,
 			SideEffects: "none", ConfigSchema: object(map[string]any{
 				"subtitles": typedRef(withDefault(subtitles, "keep_all", "Subtitles", "")),
+				"languages": languagesSchema("Languages on this step"),
 			}, []string{"subtitles"})}),
 		def(StepDefinition{Type: TypeContainer, RunsAs: RunsPlan, Category: "container", Name: "File type", Icon: "file", TypeLabel: "Container",
 			Description: "The new file's type.", Inputs: []Port{in}, Outputs: []Port{success}, RunsWith: encodeSegment, SideEffects: "none",
@@ -614,6 +616,14 @@ func templated(s map[string]any) map[string]any {
 // reference, {{name}} (W1, workflow-architecture.md 2.2 rule 3): the value it resolves to is checked
 // against the setting's own schema. A reference with text around it is refused, and so is one to a
 // secret: a secret only fills a field that takes text.
+// languagesSchema is an Audio or Subtitles step's own languages (G2): ISO 639-2 codes, at most
+// rules.MaxStepLanguages. None (or absent) means the person's languages in Settings.
+func languagesSchema(title string) map[string]any {
+	return map[string]any{"type": "array", "title": title, "maxItems": rules.MaxStepLanguages,
+		"items":       map[string]any{"type": "string", "x-language": true},
+		"description": "Language codes such as eng, fre, ger. Empty uses your languages in Settings > General."}
+}
+
 func typedRef(s map[string]any) map[string]any {
 	s["x-variableRef"] = true
 	return s

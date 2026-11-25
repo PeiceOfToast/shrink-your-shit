@@ -229,8 +229,8 @@ func TestFsDirsListsFoldersOnly(t *testing.T) {
 }
 
 func TestLibraryListShapeAndVersionHeader(t *testing.T) {
-	srv, st, a, _ := libServer(t, false)
-	passwordMode(t, a)
+	srv, st, _, _ := libServer(t, false)
+	finishSetup(t, st) // an install past first-run: the lock does not apply; loopback is open in home mode
 	st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), false)
 	code, body, resp := do(t, nil, srv, call{method: "GET", path: "/api/libraries"})
 	if code != 200 || !strings.Contains(body, `"total":1`) || !strings.Contains(body, `"id":"1"`) || !strings.Contains(body, `"flowId":"1"`) {

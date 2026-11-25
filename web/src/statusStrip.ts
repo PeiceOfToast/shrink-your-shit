@@ -66,7 +66,3 @@ export function freshFact(step: number | null): string | null {
   return ["Add a library to start", "Pick a workflow for your library to start", "Turn on the workers to start"][step] ?? null;
 }
 
-// A library that can't run (paused, no workflow, share not connected) is a Needs attention row, so Nothing needs you waits.
-export function allLibrariesRunning(states: string[]): boolean {
-  return states.every((s) => s === "active");
-}

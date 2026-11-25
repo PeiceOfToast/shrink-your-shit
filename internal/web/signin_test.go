@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,12 +23,35 @@ import (
 // trusted names the proxies whose forwarded address is believed.
 func peerServer(t *testing.T, a *Access, peer string, trusted ...string) *httptest.Server {
 	t.Helper()
+	return peerServerAt(t, a, peer, true, trusted...)
+}
+
+// finishSetup marks first-run setup done, as its last step does (settings firstRunDone).
+func finishSetup(t *testing.T, st *jobs.Store) {
+	t.Helper()
+	ss := &settingsStore{store: st}
+	s, err := ss.load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.FirstRunDone = true
+	if err := ss.save(s); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// peerServerAt is peerServer; done says whether first-run setup is finished in its store.
+func peerServerAt(t *testing.T, a *Access, peer string, done bool, trusted ...string) *httptest.Server {
+	t.Helper()
 	st, err := jobs.Open(filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	st.SetPaused(false)
 	t.Cleanup(func() { st.Close() })
+	if done {
+		finishSetup(t, st)
+	}
 	proxies, err := ParseTrustedProxies(strings.Join(trusted, ","))
 	if err != nil {
 		t.Fatal(err)
@@ -501,5 +525,204 @@ func TestChainedProxiesKeyTheLimiterOnTheClient(t *testing.T) {
 	}
 	if code, body := wrong("198.51.100.1, 172.16.0.5"); code != 401 || errCode(body) != "bad_password" {
 		t.Errorf("another client behind the same inner proxy: %d %s, want 401 bad_password (not locked)", code, body)
+	}
+}
+
+// Before first-run setup is finished, a new install is locked: a LAN address needs the token, even in home
+// mode. This computer (loopback) stays open in home mode, as it is today. After setup, the choice applies.
+func TestNewInstallIsLockedUntilSetupIsDone(t *testing.T) {
+	a := newAccess(t, false)
+	tok := a.Token()
+	if tok == "" {
+		t.Fatal("a new install makes a token, so it can be signed in to during setup")
+	}
+	srv := peerServerAt(t, a, "192.168.1.7:5555", false)
+	for _, path := range []string{"/api/status", "/api/libraries"} {
+		if code, _, _ := do(t, nil, srv, call{method: "GET", path: path}); code != 401 {
+			t.Errorf("locked new install, LAN, no token: GET %s = %d, want 401", path, code)
+		}
+		if code, body, _ := do(t, nil, srv, call{method: "GET", path: path, bearer: tok}); code != 200 {
+			t.Errorf("locked new install, LAN, with the token: GET %s = %d %s, want 200", path, code, body)
+		}
+	}
+	if got := authState(t, srv, nil); got["open"] != false {
+		t.Errorf("locked LAN /api/auth open = %v, want false", got["open"])
+	}
+
+	loop := peerServerAt(t, a, "127.0.0.1:5555", false)
+	if code, _, _ := do(t, nil, loop, call{method: "GET", path: "/api/status"}); code != 200 {
+		t.Errorf("locked new install on this computer in home mode: %d, want 200 as today", code)
+	}
+}
+
+// A new install whose token file is lost before setup reopens with no token; the startup check makes one,
+// and it works from the LAN. Without the check the LAN gets 401 and nothing shows the token.
+func TestLostTokenNewInstallStaysLockedFromTheLAN(t *testing.T) {
+	dir := t.TempDir()
+	if _, created, err := OpenAccess(dir, false); err != nil || !created {
+		t.Fatalf("first start: created=%v err=%v", created, err)
+	}
+	if err := os.Remove(filepath.Join(dir, TokenFile)); err != nil {
+		t.Fatal(err)
+	}
+	a, created, err := OpenAccess(dir, false)
+	if err != nil || created || a.Token() != "" {
+		t.Fatalf("reopen: created=%v token=%q err=%v", created, a.Token(), err)
+	}
+	srv := peerServerAt(t, a, "192.168.1.7:5555", false)
+	if code, _, _ := do(t, nil, srv, call{method: "GET", path: "/api/status"}); code != 401 {
+		t.Errorf("lost token, LAN, no token: %d, want 401", code)
+	}
+	st, err := jobs.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	made, err := a.EnsureSetupToken(st)
+	if err != nil || !made || a.Token() == "" {
+		t.Fatalf("startup check: made=%v token=%q err=%v", made, a.Token(), err)
+	}
+	if code, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/status", bearer: a.Token()}); code != 200 {
+		t.Errorf("lost token, the made token, LAN: %d %s, want 200", code, body)
+	}
+}
+
+// An install upgraded while first-run is unfinished: a sign-in choice, no token. Startup (OpenAccess, then
+// EnsureSetupToken as main does) makes a token, and the LAN is still refused without it.
+func TestTokenlessInstallIsLockedUntilSetupIsDone(t *testing.T) {
+	dir := t.TempDir()
+	if err := writeSignin(dir, signinState{Mode: ModeHome}); err != nil {
+		t.Fatal(err)
+	}
+	a, created, err := OpenAccess(dir, false)
+	if err != nil || created || a.Token() != "" {
+		t.Fatalf("OpenAccess: created=%v token=%q err=%v", created, a.Token(), err)
+	}
+	st, err := jobs.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	if made, err := a.EnsureSetupToken(st); err != nil || !made || a.Token() == "" {
+		t.Fatalf("startup check: made=%v token=%q err=%v, want a token", made, a.Token(), err)
+	}
+	srv := peerServerAt(t, a, "192.168.1.7:5555", false)
+	if code, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/status"}); code != 401 {
+		t.Errorf("made token, setup unfinished, LAN, no token: %d %s, want 401", code, body)
+	}
+	if got := authState(t, srv, nil); got["open"] != false {
+		t.Errorf("open = %v, want false", got["open"])
+	}
+}
+
+// The guard itself holds the LAN closed before setup even with no token stored, which is the state
+// EnsureSetupToken exists to prevent. This pins the !s.setup clause in required() (without it the API opens).
+func TestSetupLockHoldsWithoutAToken(t *testing.T) {
+	dir := t.TempDir()
+	if err := writeSignin(dir, signinState{Mode: ModeHome}); err != nil {
+		t.Fatal(err)
+	}
+	a, _, err := OpenAccess(dir, false)
+	if err != nil || a.Token() != "" {
+		t.Fatalf("OpenAccess: token=%q err=%v, want no token", a.Token(), err)
+	}
+	srv := peerServerAt(t, a, "192.168.1.7:5555", false)
+	if code, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/status"}); code != 401 {
+		t.Errorf("no token, setup unfinished, LAN: %d %s, want 401", code, body)
+	}
+}
+
+// A finished install with no token and no password is not given one: that would change who gets in.
+func TestFinishedInstallWithoutTokenMintsNothing(t *testing.T) {
+	a := newAccess(t, false)
+	if err := a.save(signinState{Mode: ModeHome}); err != nil {
+		t.Fatal(err)
+	}
+	a.mu.Lock()
+	a.token = ""
+	a.mu.Unlock()
+	st, err := jobs.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	finishSetup(t, st)
+	if made, err := a.EnsureSetupToken(st); err != nil || made || a.Token() != "" {
+		t.Errorf("finished install: made=%v token=%q err=%v, want no token", made, a.Token(), err)
+	}
+}
+
+// Finishing setup (PATCH firstRunDone, as the last step does) lifts the lock: home mode then opens the LAN.
+func TestPatchFirstRunDoneOpensTheLAN(t *testing.T) {
+	a := newAccess(t, false)
+	tok := a.Token()
+	srv := peerServerAt(t, a, "192.168.1.7:5555", false)
+	if code, _, _ := do(t, nil, srv, call{method: "GET", path: "/api/status"}); code != 401 {
+		t.Fatalf("before setup, LAN, no token: %d, want 401", code)
+	}
+	if code, body, _ := do(t, nil, srv, call{method: "PATCH", path: "/api/settings", body: `{"firstRunDone":true}`, ctype: "application/json", bearer: tok}); code != 200 {
+		t.Fatalf("PATCH firstRunDone with the token: %d %s", code, body)
+	}
+	if code, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/status"}); code != 200 {
+		t.Errorf("after PATCH firstRunDone, home mode, LAN, no token: %d %s, want 200", code, body)
+	}
+}
+
+// After setup, both choices apply: home opens a LAN address; password does not.
+func TestSetupChoiceDecidesTheLAN(t *testing.T) {
+	a := newAccess(t, false)
+	srv := peerServerAt(t, a, "192.168.1.7:5555", true)
+	if code, _, _ := do(t, nil, srv, call{method: "GET", path: "/api/status"}); code != 200 {
+		t.Errorf("home choice, LAN after setup: %d, want 200", code)
+	}
+	a.save(signinState{Mode: ModePassword})
+	if code, _, _ := do(t, nil, srv, call{method: "GET", path: "/api/status"}); code != 401 {
+		t.Errorf("password choice, LAN after setup, no sign-in: %d, want 401", code)
+	}
+}
+
+// addressesHidden is true for a request from the default gateway (Docker hides the client behind it).
+func TestAddressesHiddenFromTheGateway(t *testing.T) {
+	defer func(f func() (netip.Addr, bool)) { defaultGateway = f }(defaultGateway)
+	defaultGateway = func() (netip.Addr, bool) { return netip.MustParseAddr("172.17.0.1"), true }
+	a := newAccess(t, false)
+	srv := peerServerAt(t, a, "172.17.0.1:5555", false)
+	if got := authState(t, srv, nil); got["addressesHidden"] != true {
+		t.Errorf("request from the gateway: addressesHidden = %v, want true", got["addressesHidden"])
+	}
+}
+
+// A request from a LAN client, with the gateway known, shows the real address: addressesHidden is false.
+func TestAddressesVisibleFromAClient(t *testing.T) {
+	defer func(f func() (netip.Addr, bool)) { defaultGateway = f }(defaultGateway)
+	defaultGateway = func() (netip.Addr, bool) { return netip.MustParseAddr("172.17.0.1"), true }
+	a := newAccess(t, false)
+	srv := peerServerAt(t, a, "192.168.1.7:5555", false)
+	if got := authState(t, srv, nil); got["addressesHidden"] != false {
+		t.Errorf("request from a LAN client: addressesHidden = %v, want false", got["addressesHidden"])
+	}
+}
+
+// When the settings cannot be read, setup counts as not finished: the lock holds, so a LAN address in home
+// mode needs the token.
+func TestUnreadableSettingsKeepTheLock(t *testing.T) {
+	st, err := jobs.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.SetPaused(false)
+	t.Cleanup(func() { st.Close() })
+	finishSetup(t, st)
+	if err := st.SetMeta(settingsKey, "{not json"); err != nil {
+		t.Fatal(err)
+	}
+	a := newAccess(t, false)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.RemoteAddr = "192.168.1.7:5555"
+		Handler(st, a, Engine{}).ServeHTTP(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	if code, _, _ := do(t, nil, srv, call{method: "GET", path: "/api/status"}); code != 401 {
+		t.Errorf("unreadable settings, LAN, home mode, no token: %d, want 401", code)
 	}
 }
