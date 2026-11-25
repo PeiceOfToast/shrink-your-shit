@@ -597,7 +597,10 @@ func walk(d Doc) (walked, bool) {
 		n := l.byID[c.ID]
 		w.nodes = append(w.nodes, n)
 		switch {
-		case IsQuestion(c.Type) && i == 0 && c.Type == TypeCheck && n.Enabled && ownedCheck(n) && c.Then.End == "leave" && len(c.Then.Actions) == 0 && c.Then.Side != "yes":
+		// Basic's own pair: first, only its conditions as numbers, its No leaving the file alone, and nothing
+		// else linking into the check or its End (review2-715 P2-2: a hand-made link into the pair would go with it)
+		case IsQuestion(c.Type) && i == 0 && c.Type == TypeCheck && n.Enabled && ownedCheck(n) && c.Then.End == "leave" && len(c.Then.Actions) == 0 && c.Then.Side != "yes" &&
+			l.in[c.ID] == 1 && l.in[l.out[[2]string{c.ID, "else"}]] == 1:
 			w.check, w.checkEnd = c.ID, l.out[[2]string{c.ID, "else"}]
 		case IsQuestion(c.Type):
 			if w.why == "" {
@@ -703,12 +706,17 @@ func (w walked) fail(why string) (walked, bool) {
 	return w, false
 }
 
-// ownedCheck says n has only the guide's conditions set.
+// ownedCheck says n has only the guide's conditions set, as numbers: a {{variable}} there is the steps'
+// own (review2-715 P2-1), never read as 0.
 func ownedCheck(n Node) bool {
 	for k, v := range n.Config {
 		switch k {
 		case "size", "resolution", "minMinutes":
-			continue
+			switch v.(type) {
+			case float64, int, nil:
+				continue
+			}
+			return false
 		}
 		switch x := v.(type) {
 		case string:
