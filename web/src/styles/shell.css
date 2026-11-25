@@ -1085,7 +1085,7 @@ nav.tabs[aria-label="Settings sections"]>a{display:flex;align-items:center;justi
   /* fix 2: at 390 the actions row wraps below the name, so the › is centred on the whole card, not on the first row (job cards too, M3c fix 2) */
   .lcard .lchev{display:inline;position:absolute;right:12px;top:50%;transform:translateY(-50%);margin:0;font-size:20px;line-height:1;color:var(--text-2);pointer-events:none}
   .lcard{padding-right:40px}
-  .ov .lcard .lname .ttl{overflow:visible;text-overflow:clip;white-space:normal} /* the dashboard's names never truncate: the facts drop under them */
+  .ov .lcard .lname .ttl{overflow:visible;text-overflow:clip;white-space:normal;overflow-wrap:anywhere} /* the dashboard's names never truncate: the facts drop under them */
   /* fix 3: reserve room on the right for the absolutely placed ›, so the tag chip and the favourite note end before it */
   .lcard.wfcard{padding-right:40px}
 }
