@@ -51,7 +51,7 @@ export function ThemeMenu() {
           </button>
         ))}
         <hr />
-        <Link className="it" role="menuitem" to="/settings/appearance" onClick={close}><Icon id="i-settings" />More appearance settings</Link>
+        <Link className="it" role="menuitem" to="/settings/general#appearance" onClick={close}><Icon id="i-settings" />More appearance settings</Link>
       </div>
     </details>
   );

@@ -5,7 +5,8 @@ import { openBeforeFirstRun } from "./firstRun";
 import { SignIn } from "./screens/SignIn";
 import sprite from "./icons.svg?raw";
 import { itemFor } from "./nav";
-import { AppearanceSettings, Coming, NotFound, PluginsPlanned } from "./pages";
+import { AppearanceSettings, Coming, NotFound, PluginsPlanned, SettingsPage } from "./pages";
+import { pathOf, settingsTarget } from "./settingsRoutes";
 import { Dashboard } from "./screens/Dashboard";
 import { HealthSettings } from "./screens/Doctor";
 import { Libraries, LibraryPage } from "./screens/Libraries";
@@ -26,7 +27,6 @@ import { Icon } from "./Icon";
 import { WorkerHome } from "./screens/Enroll";
 import { ConnectionsSettings } from "./screens/Connections";
 import { NotificationsSettings } from "./screens/Notifications";
-import { VariablesSettings } from "./screens/Variables";
 import { getSetup } from "./setupApi";
 import { useData } from "./useData";
 
@@ -34,17 +34,18 @@ let firstRunDone = false;
 export function App() {
   const raw = usePath();
   const p0 = raw.length > 1 ? raw.replace(/\/+$/, "") : raw; // "/settings/" is "/settings"
-  const path = p0 === "/settings/integrations" ? "/settings/connections" : p0; // the tab's old address (V9e)
-  useEffect(() => { if (p0 !== path) navigate(path, true); }, [p0, path]);
-  const settings = ["/settings", "/settings/general", "/settings/shares", "/settings/appearance", "/settings/processing", "/settings/safety", "/settings/connections", "/settings/notifications", "/settings/variables", "/settings/backup", "/settings/health", "/settings/about"].includes(path); // the tabs built so far
+  const moved = settingsTarget(p0); // an old Settings address (or a page that moved): where it lives now
+  useEffect(() => { if (moved && moved !== p0) navigate(moved, true); }, [moved, p0]);
+  const path = moved ? pathOf(moved) : p0;
+  const settings = ["/settings/general", "/settings/processing", "/settings/connections", "/settings/system"].includes(path);
   // Other pages' deeper paths (/workflows/42/graph) are their future routes; Settings' sub-pages are known, so any
   // other /settings/... is not found.
   const item = path.startsWith("/settings/") && !settings ? undefined : itemFor(path);
   const start = path === "/start", signin = path === "/signin"; // not in the menu (IA.md)
   // Sample data pill: built screens on the mock only; a page not built yet says so in its empty state (design, 00:02Z).
   // Screens on the real server (no Sample data pill): Dashboard, Libraries, first run, Workflows, the step list, Jobs.
-  const real = !MOCK && (start || signin || path === "/libraries" || path.startsWith("/libraries/") || path === "/workflows" || /^\/workflows\/[^/]+(\/graph)?$/.test(path) || path === "/jobs" || path === "/" || path === "/settings/variables" || path === "/workers" || /^\/workers\/[^/]+$/.test(path));
-  const title = settings ? "Settings" : start ? "Set up" : signin ? "Sign in" : item ? item.label : "Page not found";
+  const real = !MOCK && (start || signin || path === "/libraries" || path.startsWith("/libraries/") || path === "/workflows" || /^\/workflows\/[^/]+(\/graph)?$/.test(path) || path === "/jobs" || path === "/" || path === "/workers" || /^\/workers\/[^/]+$/.test(path));
+  const title = settings ? "Settings" : start ? "Set up" : signin ? "Sign in" : path === "/libraries/shares" ? "Network shares" : item ? item.label : "Page not found";
   // A computer that joined another server shows only its worker page, at every address but Settings (Change role).
   const su = useData(getSetup, []), joined = su.data?.role === "worker" && (!su.data.join || su.data.join.state === "allowed");
   useEffect(() => { document.title = title + " · Shrink Your Shit"; }, [title]);
@@ -77,7 +78,7 @@ export function App() {
     <>
       <div dangerouslySetInnerHTML={{ __html: sprite }} />
       <Shell title={title} proto={!real && (start || path === "/" || path === "/libraries" || path.startsWith("/libraries/") || path === "/workflows" || /^\/workflows\/[^/]+(\/graph)?$/.test(path) || path === "/jobs" || path === "/workers" || /^\/workers\/[^/]+$/.test(path))}>
-        {settings ? (path === "/settings/shares" ? <SharesSettings /> : path === "/settings/processing" ? <ProcessingSettings /> : path === "/settings/appearance" ? <AppearanceSettings /> : path === "/settings/safety" ? <SafetySettings /> : path === "/settings/connections" ? <ConnectionsSettings /> : path === "/settings/notifications" ? <NotificationsSettings /> : path === "/settings/variables" ? <VariablesSettings /> :path === "/settings/backup" ? <BackupSettings /> : path === "/settings/health" ? <HealthSettings /> : path === "/settings/about" ? <AboutSettings /> : <GeneralSettings />) : path === "/" ? <Dashboard /> : start ? <Start /> : path === "/jobs" ? <Jobs /> : path === "/workers" ? <Workers /> : /^\/workers\/[^/]+$/.test(path) ? <WorkerPage key={path} id={decodeURIComponent(path.split("/")[2])} /> : signin ? <SignIn /> : path === "/libraries" ? <Libraries /> : /^\/libraries\/[^/]+$/.test(path) ? <LibraryPage key={path} id={path.split("/")[2]} />: path === "/workflows" ? <Workflows /> : /^\/workflows\/[^/]+\/graph$/.test(path) ? <WorkflowGraph key={path} id={path.split("/")[2]} /> : path === "/workflows/new" ? <Workflows /> /* not a route (firstRun.ts): the list, and no stack, so no 404s for a workflow named "new" */ :/^\/workflows\/[^/]+$/.test(path) ? <WorkflowStack key={path} id={path.split("/")[2]} /> : path === "/plugins" ? <PluginsPlanned /> : item ? <Coming item={item} /> : <NotFound />}
+        {settings ? (path === "/settings/general" ? <SettingsPage at="general"><GeneralSettings /><AppearanceSettings /></SettingsPage> : path === "/settings/processing" ? <SettingsPage at="processing"><ProcessingSettings /><SafetySettings /></SettingsPage> : path === "/settings/connections" ? <SettingsPage at="connections"><ConnectionsSettings /><NotificationsSettings /></SettingsPage> : <SettingsPage at="system"><HealthSettings /><BackupSettings /><AboutSettings /></SettingsPage>) : path === "/" ? <Dashboard /> : start ? <Start /> : path === "/jobs" ? <Jobs /> : path === "/workers" ? <Workers /> : /^\/workers\/[^/]+$/.test(path) ? <WorkerPage key={path} id={decodeURIComponent(path.split("/")[2])} /> : signin ? <SignIn /> : path === "/libraries" ? <Libraries /> : path === "/libraries/shares" ? <SharesSettings /> : /^\/libraries\/[^/]+$/.test(path) ? <LibraryPage key={path} id={path.split("/")[2]} />: path === "/workflows" ? <Workflows /> : /^\/workflows\/[^/]+\/graph$/.test(path) ? <WorkflowGraph key={path} id={path.split("/")[2]} /> : path === "/workflows/new" ? <Workflows /> /* not a route (firstRun.ts): the list, and no stack, so no 404s for a workflow named "new" */ :/^\/workflows\/[^/]+$/.test(path) ? <WorkflowStack key={path} id={path.split("/")[2]} /> : path === "/plugins" ? <PluginsPlanned /> : item ? <Coming item={item} /> : <NotFound />}
       </Shell>
     </>
   );
