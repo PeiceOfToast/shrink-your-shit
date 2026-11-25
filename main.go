@@ -372,6 +372,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("access token: %v", err)
 	}
+	if made, err := access.EnsureSetupToken(store); err != nil { // an unfinished install always has a token to show
+		log.Fatalf("access token: %v", err)
+	} else if made {
+		created = true
+	}
 	proxies, err := web.ParseTrustedProxies(*trustedProxies)
 	if err != nil {
 		log.Fatalf("-trusted-proxies: %v", err)

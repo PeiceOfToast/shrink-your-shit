@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -101,6 +102,24 @@ func OpenAccess(dataDir string, exposed bool) (a *Access, created bool, err erro
 		created = true
 	}
 	return a, created, nil
+}
+
+// EnsureSetupToken makes a token for an install whose first-run setup is not finished and that has neither a
+// token nor a password: its token file was lost, or a start died between the sign-in choice and the token,
+// and then nothing could sign in. A finished install is left as it is, so this changes nothing after setup.
+// Unreadable settings count as not finished (fail closed). It reports whether it made a token.
+func (a *Access) EnsureSetupToken(store *jobs.Store) (bool, error) {
+	if a.Token() != "" || a.hash != "" {
+		return false, nil
+	}
+	s, err := LoadSettings(store)
+	if err == nil && s.FirstRunDone {
+		return false, nil
+	}
+	if _, err := a.rotate(); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // Token is the current token ("" when none is stored).

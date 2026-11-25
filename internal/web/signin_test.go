@@ -555,6 +555,72 @@ func TestNewInstallIsLockedUntilSetupIsDone(t *testing.T) {
 	}
 }
 
+// A new install whose token file is lost before setup reopens with no token; the startup check makes one,
+// and it works from the LAN. Without the check the LAN gets 401 and nothing shows the token.
+func TestLostTokenNewInstallStaysLockedFromTheLAN(t *testing.T) {
+	dir := t.TempDir()
+	if _, created, err := OpenAccess(dir, false); err != nil || !created {
+		t.Fatalf("first start: created=%v err=%v", created, err)
+	}
+	if err := os.Remove(filepath.Join(dir, TokenFile)); err != nil {
+		t.Fatal(err)
+	}
+	a, created, err := OpenAccess(dir, false)
+	if err != nil || created || a.Token() != "" {
+		t.Fatalf("reopen: created=%v token=%q err=%v", created, a.Token(), err)
+	}
+	srv := peerServerAt(t, a, "192.168.1.7:5555", false)
+	if code, _, _ := do(t, nil, srv, call{method: "GET", path: "/api/status"}); code != 401 {
+		t.Errorf("lost token, LAN, no token: %d, want 401", code)
+	}
+	st, err := jobs.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	made, err := a.EnsureSetupToken(st)
+	if err != nil || !made || a.Token() == "" {
+		t.Fatalf("startup check: made=%v token=%q err=%v", made, a.Token(), err)
+	}
+	if code, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/status", bearer: a.Token()}); code != 200 {
+		t.Errorf("lost token, the made token, LAN: %d %s, want 200", code, body)
+	}
+}
+
+// A finished install with no token and no password is not given one: that would change who gets in.
+func TestFinishedInstallWithoutTokenMintsNothing(t *testing.T) {
+	a := newAccess(t, false)
+	if err := a.save(signinState{Mode: ModeHome}); err != nil {
+		t.Fatal(err)
+	}
+	a.mu.Lock()
+	a.token = ""
+	a.mu.Unlock()
+	st, err := jobs.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	finishSetup(t, st)
+	if made, err := a.EnsureSetupToken(st); err != nil || made || a.Token() != "" {
+		t.Errorf("finished install: made=%v token=%q err=%v, want no token", made, a.Token(), err)
+	}
+}
+
+// Finishing setup (PATCH firstRunDone, as the last step does) lifts the lock: home mode then opens the LAN.
+func TestPatchFirstRunDoneOpensTheLAN(t *testing.T) {
+	a := newAccess(t, false)
+	tok := a.Token()
+	srv := peerServerAt(t, a, "192.168.1.7:5555", false)
+	if code, _, _ := do(t, nil, srv, call{method: "GET", path: "/api/status"}); code != 401 {
+		t.Fatalf("before setup, LAN, no token: %d, want 401", code)
+	}
+	if code, body, _ := do(t, nil, srv, call{method: "PATCH", path: "/api/settings", body: `{"firstRunDone":true}`, ctype: "application/json", bearer: tok}); code != 200 {
+		t.Fatalf("PATCH firstRunDone with the token: %d %s", code, body)
+	}
+	if code, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/status"}); code != 200 {
+		t.Errorf("after PATCH firstRunDone, home mode, LAN, no token: %d %s, want 200", code, body)
+	}
+}
+
 // After setup, both choices apply: home opens a LAN address; password does not.
 func TestSetupChoiceDecidesTheLAN(t *testing.T) {
 	a := newAccess(t, false)
