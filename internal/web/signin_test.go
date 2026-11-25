@@ -4,6 +4,7 @@ package web
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -295,5 +296,85 @@ func TestResetPasswordRefusesAShortOne(t *testing.T) {
 	}
 	if _, ok, _ := readSignin(dir); ok {
 		t.Error("a refused reset wrote the sign-in file")
+	}
+}
+
+// Behind a trusted proxy the client is the address the proxy appended: the rightmost X-Forwarded-For entry.
+// Entries before it are the client's own words, so a LAN first hop cannot make an internet client private.
+func TestHomeUsesTheProxysAppendedAddress(t *testing.T) {
+	a := newAccess(t, true) // a token exists, so home mode is a choice that needs the address to be private
+	if err := a.save(signinState{Mode: ModeHome}); err != nil {
+		t.Fatal(err)
+	}
+	srv := peerServer(t, a, "10.0.0.5:1234", "10.0.0.5")
+	c := &http.Client{}
+	if open := authState(t, srv, c)["open"]; open != false { // the proxy sent no client address: not private
+		t.Fatalf("no forwarded address from the proxy: open=%v", open)
+	}
+	cases := []struct {
+		xff  string
+		open bool
+	}{
+		{"192.168.1.20, 203.0.113.9", false}, // the proxy saw a public client; the LAN hop is the client's word
+		{"203.0.113.9, 192.168.1.20", true},  // the proxy appended a LAN address last
+	}
+	for _, k := range cases {
+		code, body, _ := do(t, c, srv, call{method: "GET", path: "/api/auth", forwardedFor: k.xff})
+		var out map[string]any
+		if code != 200 || json.Unmarshal([]byte(body), &out) != nil || out["open"] != k.open {
+			t.Errorf("X-Forwarded-For %q: open want %v, got %d %s", k.xff, k.open, code, body)
+		}
+	}
+}
+
+// Six wrong logins through one trusted proxy, each with a different first hop, still lock out: the limiter
+// keys on the appended address, which does not change.
+func TestRotatingFirstHopsStillLockOut(t *testing.T) {
+	a := newAccess(t, false)
+	if err := a.save(signinState{Mode: ModePassword}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ResetPassword(a.dir, "correct horse"); err != nil {
+		t.Fatal(err)
+	}
+	srv := peerServer(t, a, "10.0.0.5:1234", "10.0.0.5")
+	for i := 0; i < loginMaxFails; i++ {
+		k := call{method: "POST", path: "/api/login", body: `{"password":"nope nope nope"}`, ctype: "application/json",
+			forwardedFor: fmt.Sprintf("10.9.9.%d, 203.0.113.9", i+1)}
+		if code, body, _ := do(t, nil, srv, k); code != 401 || errCode(body) != "bad_password" {
+			t.Fatalf("try %d: %d %s", i+1, code, body)
+		}
+	}
+	code, body, _ := do(t, nil, srv, call{method: "POST", path: "/api/login", body: `{"password":"nope nope nope"}`,
+		ctype: "application/json", forwardedFor: "10.9.9.99, 203.0.113.9"})
+	if code != 429 || errCode(body) != "too_many_tries" {
+		t.Errorf("sixth try with a new first hop: %d %s, want 429", code, body)
+	}
+}
+
+// A request from an untrusted peer that carries a forwarding header is not private, whatever its address:
+// a LAN reverse proxy would show the internet's client that way (review P1). Without a header, the LAN peer is.
+func TestUntrustedForwardedRequestIsNotPrivate(t *testing.T) {
+	a := newAccess(t, true) // a token exists, so home mode admits by address
+	if err := a.save(signinState{Mode: ModeHome}); err != nil {
+		t.Fatal(err)
+	}
+	srv := peerServer(t, a, "192.168.1.20:5555")
+	c := &http.Client{}
+	if open := authState(t, srv, c)["open"]; open != true {
+		t.Fatalf("LAN peer without a header: open=%v", open)
+	}
+	code, body, _ := do(t, c, srv, call{method: "GET", path: "/api/auth", forwardedFor: "192.168.1.7"})
+	var out map[string]any
+	if code != 200 || json.Unmarshal([]byte(body), &out) != nil || out["open"] != false {
+		t.Errorf("forwarded from an untrusted peer: open want false, got %d %s", code, body)
+	}
+	for _, h := range []string{"X-Real-IP", "Forwarded"} {
+		req := httptest.NewRequest("GET", "/api/auth", nil)
+		req.RemoteAddr = "192.168.1.20:5555"
+		req.Header.Set(h, "203.0.113.9")
+		if (Transport{}).PrivateClient(req) {
+			t.Errorf("%s from an untrusted peer counts as private", h)
+		}
 	}
 }

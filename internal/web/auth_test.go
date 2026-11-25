@@ -51,6 +51,7 @@ func server(t *testing.T, exposed bool) (*httptest.Server, *Access, *jobs.Store)
 
 type call struct {
 	method, path, body, ctype, bearer, origin, fetchSite string
+	forwardedFor                                         string // X-Forwarded-For, as a proxy would send it
 }
 
 func do(t *testing.T, c *http.Client, srv *httptest.Server, k call) (int, string, *http.Response) {
@@ -71,6 +72,9 @@ func do(t *testing.T, c *http.Client, srv *httptest.Server, k call) (int, string
 	}
 	if k.fetchSite != "" {
 		req.Header.Set("Sec-Fetch-Site", k.fetchSite)
+	}
+	if k.forwardedFor != "" {
+		req.Header.Set("X-Forwarded-For", k.forwardedFor)
 	}
 	if c == nil {
 		c = http.DefaultClient

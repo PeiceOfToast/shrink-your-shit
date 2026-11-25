@@ -76,6 +76,20 @@ func private(a netip.Addr) bool {
 	return a.IsLoopback() || a.IsPrivate() || a.IsLinkLocalUnicast()
 }
 
+// forwardedFor is the client address the trusted proxy appended to X-Forwarded-For: the rightmost entry.
+// The entries before it are whatever the client sent, so only the proxy's own (last) one is believed.
+func forwardedFor(r *http.Request) (netip.Addr, bool) {
+	parts := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
+	a, err := netip.ParseAddr(strings.TrimSpace(parts[len(parts)-1]))
+	return a.Unmap(), err == nil
+}
+
+// forwardedByProxy reports whether r carries a proxy's signature (the forwarding headers). A proxy on this
+// host forwards the internet's address in them, so an untrusted peer that sends one is not a private client.
+func forwardedByProxy(r *http.Request) bool {
+	return r.Header.Get("X-Forwarded-For") != "" || r.Header.Get("X-Real-IP") != "" || r.Header.Get("Forwarded") != ""
+}
+
 // Allowed reports whether r may reach the worker API (or pairing).
 func (t Transport) Allowed(r *http.Request) bool {
 	peer, ok := peerAddr(r)
@@ -95,9 +109,9 @@ func (t Transport) Allowed(r *http.Request) bool {
 	if strings.EqualFold(strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-Proto"), ",")[0]), "https") {
 		return true
 	}
-	if f := strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-For"), ",")[0]); f != "" {
-		a, err := netip.ParseAddr(f)
-		return err == nil && private(a.Unmap())
+	if r.Header.Get("X-Forwarded-For") != "" {
+		a, ok := forwardedFor(r)
+		return ok && private(a)
 	}
 	return r.TLS != nil || private(peer)
 }
@@ -105,7 +119,9 @@ func (t Transport) Allowed(r *http.Request) bool {
 // PrivateClient reports whether r comes from a private address: the direct peer, or, through a trusted
 // proxy, the client address it reports, which must itself be private. A proxy's silence is not taken for
 // its own address (unlike Client): the real client is then unknown, so it is not private. From anyone
-// else X-Forwarded-For is ignored, so a public address cannot borrow a private one.
+// else X-Forwarded-For is ignored, so a public address cannot borrow a private one. And a request from an
+// untrusted peer that carries a forwarding header is not private: a reverse proxy on this LAN would show
+// the internet's client that way, and home mode must not admit it by address (review P1).
 func (t Transport) PrivateClient(r *http.Request) bool {
 	peer, ok := peerAddr(r)
 	if !ok {
@@ -118,10 +134,10 @@ func (t Transport) PrivateClient(r *http.Request) bool {
 		}
 	}
 	if !trusted {
-		return private(peer)
+		return private(peer) && !forwardedByProxy(r)
 	}
-	a, err := netip.ParseAddr(strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-For"), ",")[0]))
-	return err == nil && private(a.Unmap())
+	a, ok := forwardedFor(r)
+	return ok && private(a)
 }
 
 // Pairing tries (orch-lead 13:41Z): a failed pair waits PairFailDelay, as a wrong token does, and an
@@ -189,8 +205,8 @@ func (t Transport) Client(r *http.Request) netip.Addr {
 	peer, _ := peerAddr(r)
 	for _, p := range t.TrustedProxies {
 		if p.Contains(peer) {
-			if a, err := netip.ParseAddr(strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-For"), ",")[0])); err == nil {
-				return a.Unmap()
+			if a, ok := forwardedFor(r); ok {
+				return a
 			}
 		}
 	}
