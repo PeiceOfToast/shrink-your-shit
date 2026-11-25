@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { filesFoot, spaceFoot, spaceHeadline } from "./cardLines.ts";
+import { filesFoot, shrinkLine, spaceFoot, spaceHeadline } from "./cardLines.ts";
 
 const bytes = (n: number) => (n === 0 ? "0 B" : n >= 1e3 ? Math.round(n / 1e3) + " KB" : n + " B");
 const count = (n: number) => n.toLocaleString("en-US");
@@ -14,6 +14,15 @@ test("Space saved's headline is the freed bytes, or Nothing saved yet at zero", 
 test("the Space foot names the 30-day total", () => {
   assert.equal(spaceFoot(0, bytes), "0 B in 30 days");
   assert.equal(spaceFoot(2048, bytes), "2 KB in 30 days");
+});
+
+test("the average new file: smaller when it shrank, bigger when it grew, no line at zero", () => {
+  assert.equal(shrinkLine(38.4), "New files are 38% smaller on average");
+  assert.equal(shrinkLine(-16.2), "New files are 16% bigger on average");
+  assert.equal(shrinkLine(0), null);
+  assert.equal(shrinkLine(-0.3), null);
+  assert.equal(shrinkLine(null), null);
+  assert.equal(shrinkLine(undefined), null);
 });
 
 test("the Files foot counts done, skipped and failed with thousands separators", () => {

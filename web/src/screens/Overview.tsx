@@ -14,7 +14,7 @@ import { listLibrariesV2 } from "../libraryApi";
 import { convertedLine } from "../convertedLine";
 import { barPath } from "../sparkBars";
 import { dayLine, dayRows, keyTarget } from "../barKeys";
-import { filesFoot, spaceFoot, spaceHeadline } from "../cardLines";
+import { filesFoot, shrinkLine, spaceFoot, spaceHeadline } from "../cardLines";
 import { getStartedSteps, nextStep, showGetStarted } from "../getStarted";
 import { runFields, startedAt } from "../jobCards";
 import { filesFact, freshFact, lastDoneFact, nextScanFact, nothingFact, stateWord, workersFact, type Fact } from "../statusStrip";
@@ -87,12 +87,13 @@ function CardBars({ label, days, series, fmt, extra, quiet }: { label: string; d
   const y = (v: number) => ((base - top) * v) / max, d = at == null ? null : days[at];
   if (allZero) return <p className="muted quiet short">{quiet}</p>;
   return <div className="cbars sbars" aria-label={label} {...wrap}>
-    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label={label + ", last " + n + " days" + (notRec ? "; the first " + notRec + " not recorded" : "") + ". The table below has every day."}>
+    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label={"One bar per day" + (notRec ? "; the first " + notRec + " not recorded" : "") + ". The table below has every day."}>
       {[0, 0.5, 1].map((f) => <line key={f} x1="0" x2={W} y1={base - y(max * f)} y2={base - y(max * f)} stroke={f ? "var(--border)" : "var(--border-strong)"} strokeWidth="1" vectorEffect="non-scaling-stroke" />)}
       {at != null && <rect x={at * slot} y="0" width={slot} height={H} fill="var(--raised)" />}
       {days.map((dd, i) => { const x = i * slot + (slot - w) / 2;
         if (!dd.recorded) return <rect key={dd.day} x={x} y={base - 2} width={w} height={2} fill="var(--border)" />;
-        const parts = series.map((s) => ({ s, h: y(s.value(dd)) })).filter((p) => p.h > 0);
+        // a part with a value is drawn at least 1 unit tall, so a small one beside a big one (Failed 1 beside Done 4,000) still shows
+        const parts = series.filter((s) => s.value(dd) > 0).map((s) => ({ s, h: Math.max(1, y(s.value(dd))) }));
         let yy = base;
         return <g key={dd.day}>{parts.map((p, k) => { const bottom = k === 0, last = k === parts.length - 1, hh = bottom ? p.h : p.h - gap; yy -= p.h;
           return last ? <path key={k} d={barPath({ i, x, y: yy, w, h: hh })} fill={p.s.color} /> : <rect key={k} x={x} y={yy} width={w} height={hh} fill={p.s.color} />; })}</g>; })}
@@ -183,6 +184,7 @@ export function Overview() {
   const on = rows.filter((w) => w.status === "busy" || w.status === "online").length, fin = rows.filter((w) => w.status === "draining").length;
   const busy = rows.some((w) => w.jobs.length > 0), failed24 = sum.data && !failed(sum.data) ? sum.data.last24h.failed : null;
   const s24 = sum.data && !failed(sum.data) ? sum.data.last24h : null;
+  const last24 = s24 && <>last 24 h: {count(s24.completed)} done, {count(s24.skipped)} skipped, <Link to="/jobs?tab=failed">{count(s24.failed)} failed</Link></>;
   const slotUsed = rows.reduce((a, w) => a + slots(w).used, 0), slotTotal = rows.reduce((a, w) => a + slots(w).total, 0);
   const rec = v.daily.filter((d) => d.recorded), first = rec[0]?.day, add = (f: (d: Day) => number) => rec.reduce((a, d) => a + f(d), 0);
   const tot = { done: add((d) => d.completed), skipped: add((d) => d.skipped), failed: add((d) => d.failed), freed: add((d) => d.freedBytes), saved: add((d) => d.savedBytes ?? 0), waiting: add((d) => d.waitingBytes ?? 0), kept: add((d) => d.couldFreeBytes ?? 0) };
@@ -192,7 +194,8 @@ export function Overview() {
   const hasSaved = rec.some((d) => d.savedBytes != null), three = hasSaved && rec.some((d) => d.couldFreeBytes != null), kept = !three && h.couldFree > 0 && hasSaved, split = !kept && hasSaved;
   // design 11-19 (SCREENS.md:37): never "0 KB" in the note, only the parts there are; the legend keeps all three, kept is --chart-muted
   const freedPart = Math.max(0, tot.saved - tot.waiting - tot.kept), spaceNote = [freedPart > 0 ? bytes(freedPart) + " freed" : "nothing freed yet",
-    tot.waiting > 0 && <Link to="/jobs?tab=completed&kept=1">{bytes(tot.waiting) + " waiting in the trash"}</Link>, tot.kept > 0 && <Link to="/jobs?tab=completed&left=1">{bytes(tot.kept) + " in originals left in place"}</Link>]
+    tot.waiting > 0 && <Link to="/jobs?tab=completed&kept=1">{bytes(tot.waiting) + " waiting in the trash"}</Link>, tot.kept > 0 && <Link to="/jobs?tab=completed&left=1">{bytes(tot.kept) + " in originals left in place"}</Link>,
+    v.trash.bytes > 0 && <Link to="/settings/safety">{bytes(v.trash.bytes) + " in the trash"}</Link>]
     .filter(Boolean).map((p, i) => <Fragment key={i}>{i > 0 && " · "}{p}</Fragment>);
   // D3: the two cards' bar parts and table columns (the SCREENS V2 Space split rules, unchanged): Freed / Waiting in the trash /
   // Originals left in place when the server has them; one series "Smaller" when only the kept split is known; else "Freed"
@@ -291,9 +294,9 @@ export function Overview() {
             {more.length > 0 && <div>{more}</div>}
             {noLibs && h.freed <= 0 && <div><Link to="/libraries/new">Add a library</Link> to start.</div>}
             {/* design SCREENS V2 Space rules: neutral, on its own line, only when > 0; never added to or taken from the figures */}
+            {shrinkLine(v.averages.fileShrinkPercent) && <div>{shrinkLine(v.averages.fileShrinkPercent)}</div>}
             {(h.grew ?? 0) > 0 && <div>{bytes(h.grew!)} added by files that came out bigger</div>}
-            {v.averages.fileShrinkPercent != null && <div>New files are {Math.round(v.averages.fileShrinkPercent)}% smaller on average</div>}
-            {rec.length >= 2 && hasSaved && <div className={split ? "hide-phone" : undefined}>Last 30 days: {spaceNote}</div>}
+            {rec.length >= 2 && hasSaved && <div>Last 30 days: {spaceNote}</div>}
             {rec.length < 2 && <div>Charts start after two days of conversions.</div>}
           </div>
           {rec.length >= 2 && <>
@@ -308,7 +311,10 @@ export function Overview() {
           <span className="l">Files converted</span>
           <span className="v">{count(h.filesConverted)}<small>all time</small></span>
           <div className="d">
-            <div>{perDay != null ? <>{count(perDay)} per day lately{s24 && <> · last 24 h: {count(s24.completed)} done, {count(s24.skipped)} skipped, <Link to="/jobs?tab=failed">{count(s24.failed)} failed</Link></>}</> : "Charts start after two days of conversions."}</div>
+            {perDay != null ? <div>{count(perDay)} per day lately{s24 && <> · {last24}</>}</div> : <>
+              <div>Charts start after two days of conversions.</div>
+              {s24 && <div>{last24}</div>}
+            </>}
             {v.averages.secondsPerGB != null && <div>About {perGB(v.averages.secondsPerGB)} of converting per GB on this computer</div>}
           </div>
           {rec.length >= 2 && <>
