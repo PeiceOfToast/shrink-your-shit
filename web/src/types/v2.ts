@@ -1,6 +1,8 @@
 // The server's types from workshop's contract (missions/.../UI-API-CONTRACT-v2.md, draft 2), field names exactly.
 // Only the shapes the built screens use so far; the rest join with their screens. Mocks (../mock) use these types,
 // so swapping a mock for the real /api/v2 call changes no screen code.
+import type { Guide } from "../guide";
+
 export type ID = string;
 export type Time = string; // RFC 3339 UTC
 export type FileType = "video";
@@ -193,6 +195,7 @@ export interface WorkflowRevision {
   fileOn?: Record<ID, Record<string, "original" | "staged" | "saved" | "none">>; // per step, per port: what the file is at that port after the saves
   validation: ValidationIssue[];
   etag: string;
+  guide?: Guide; // the draft read as the guided builder's answers (the real server always sends it)
   createdAt: Time; publishedAt: Time | null;
 }
 export interface WorkflowDoc {
