@@ -95,7 +95,32 @@ func v2Workflows(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			c := rep.Libraries[l.ID]
 			log.Printf("empty trash: library %s: deleted %d kept original(s), freed %d bytes", l.Name, c.Deleted, c.FreedBytes)
 		}
-		writeJSON(w, map[string]any{"deletedFiles": rep.Deleted, "freedBytes": rep.FreedBytes, "skipped": skipped})
+		// U-B: what could not be reached and why; an empty list is sent as [], not null
+		unreachable := rep.Unreachable
+		if unreachable == nil {
+			unreachable = []worker.Unreachable{}
+		}
+		writeJSON(w, map[string]any{"deletedFiles": rep.Deleted, "freedBytes": rep.FreedBytes, "skipped": skipped, "unreachable": unreachable})
+	})
+	// U-B: give up a kept original whose file is gone for good (nothing is deleted); refused while the file is found
+	api.HandleFunc("POST /api/v2/originals/{id}/forget", func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+		if err != nil {
+			apiError(w, http.StatusNotFound, "original_not_found", "There is no such kept original. Nothing was changed.")
+			return
+		}
+		err = worker.Forget(store, id, time.Now())
+		var fe *worker.ForgetError
+		switch {
+		case errors.As(err, &fe):
+			apiError(w, http.StatusConflict, fe.Code, fe.Message)
+		case errors.Is(err, jobs.ErrNotFound):
+			apiError(w, http.StatusNotFound, "original_not_found", "There is no such kept original. Nothing was changed.")
+		case err != nil:
+			serverError(w, err)
+		default:
+			writeJSON(w, map[string]any{"forgotten": id})
+		}
 	})
 	// v1's settings, unchanged (first-run progress among them): the same handlers answer both paths
 	settingsV1 := func(w http.ResponseWriter, r *http.Request) {

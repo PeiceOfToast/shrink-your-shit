@@ -26,6 +26,9 @@ type Store interface {
 	SetKeptGone(id int64, at time.Time) error
 	PutFile(f jobs.File) error
 	ActivePaths() (map[string]bool, error)
+	Libraries() ([]jobs.Library, error)
+	MountRoots() ([]string, error)
+	RehomeOriginal(id int64, path, newPath, trash string) error
 }
 
 // RestoreError is a restore that was refused: Code for the API, Message in plain words (what
@@ -231,10 +234,11 @@ type PurgeCount struct {
 // PurgeReport is what a purge did: the totals, each library's share of them (by library ID; 0 for originals
 // with no library), and the lines for the log.
 type PurgeReport struct {
-	Deleted    int
-	FreedBytes int64
-	Libraries  map[int64]PurgeCount
-	Said       []string
+	Deleted     int
+	FreedBytes  int64
+	Libraries   map[int64]PurgeCount
+	Said        []string
+	Unreachable []Unreachable
 }
 
 // Purge deletes kept originals whose time is up: kept for days or more (the setting now, so a lower
@@ -253,6 +257,11 @@ func Purge(st Store, days int, now time.Time, waiting func(path string) bool, li
 	if err != nil {
 		rep.Said = []string{"cannot read the active jobs: " + err.Error()}
 		return rep
+	}
+	roots, err := searchRoots(st)
+	if err != nil {
+		// no search for moved originals this time: they are reported as not found, nothing is deleted
+		rep.Said = append(rep.Said, "cannot read the library and mount folders: "+err.Error())
 	}
 	for _, o := range rows {
 		if libraryID != 0 && o.LibraryID != libraryID {
@@ -275,16 +284,26 @@ func Purge(st Store, days int, now time.Time, waiting func(path string) bool, li
 				} else {
 					rep.Said = append(rep.Said, fmt.Sprintf("%s: its kept original %s was removed outside Shrink Your Shit", o.Path, o.Trash))
 				}
-			} else {
-				rep.Said = append(rep.Said, fmt.Sprintf("%s: its .syp-trash folder isn't there (disk not mounted?); left as kept", o.Path))
+				continue
 			}
-			continue
+			// U-B: the folder is gone too, as when a share is re-added at another mount. Its files may be at the new
+			// place: re-home the row if exactly one place proves to be ours; otherwise report it and leave it kept.
+			var u *Unreachable
+			o, u = rehomeOrReport(st, o, roots, &rep.Said)
+			if u != nil {
+				rep.Unreachable = append(rep.Unreachable, *u)
+				rep.Said = append(rep.Said, fmt.Sprintf("%s: its .syp-trash folder isn't there (disk not mounted?); left as kept", o.Path))
+				continue
+			}
+			fi, err = os.Lstat(o.Trash)
 		}
 		if now.Before(due) {
 			continue
 		}
 		if active[o.Path] {
 			rep.Said = append(rep.Said, fmt.Sprintf("%s: a queued or running job uses this file, so its kept original was left", o.Path))
+			rep.Unreachable = append(rep.Unreachable, Unreachable{ID: o.ID, Path: o.Path, Trash: o.Trash, Code: CodeInUse,
+				Reason: "a queued or running job uses this file, so its kept original was left."})
 			continue
 		}
 		switch {
