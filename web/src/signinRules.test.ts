@@ -2,11 +2,15 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { MIN_PASSWORD, TOO_MANY, WAIT_A_MINUTE, accessTokenWords, authWord, canSave, passwordProblem, tryAgainIn } from "./signinRules.ts";
 
-test("the access-token line: home devices are let in unless the addresses are hidden (Docker)", () => {
-  assert.equal(accessTokenWords(false, false), "Not needed on your home network. Needed to open the app from outside your home.");
-  assert.equal(accessTokenWords(false, true), "Needed to open the app from another device.");
-  assert.equal(accessTokenWords(true, false), "Needed to open the app from another device.");
-  assert.equal(accessTokenWords(true, true), "Needed to open the app from another device.");
+test("the access-token line: home mode lets home devices in unless the addresses are hidden (Docker)", () => {
+  const home = "Not needed on your home network. Needed to open the app from outside your home.";
+  const other = "Needed to open the app from another device.";
+  assert.equal(accessTokenWords("home", false), home);
+  assert.equal(accessTokenWords("home", true), other);
+  assert.equal(accessTokenWords("password", false), other);
+  assert.equal(accessTokenWords("password", true), other);
+  assert.equal(accessTokenWords(undefined, false), other);
+  assert.equal(accessTokenWords(undefined, true), other);
 });
 
 test("too many tries: the count reads in seconds, singular for one", () => {

@@ -228,7 +228,7 @@ function Access({ auth }: { auth: boolean }) {
   const make = async () => { setAsk(false); const r = await act(rotateToken(), setSaid); if (r) (setTok(r.token), setSaid("New token made. Use it to sign in on other devices.")); };
   const out = async () => { if (await act(signOut(), setSaid)) navigate("/signin"); };
   return (<>
-    <SettingRow title={<label htmlFor="tok">Access token</label>} desc={<span id="tok-h">{accessTokenWords(auth, !!mode.data?.addressesHidden)}</span>}>
+    <SettingRow title={<label htmlFor="tok">Access token</label>} desc={<span id="tok-h">{accessTokenWords(mode.data?.mode, !!mode.data?.addressesHidden)}</span>}>
       <input id="tok" className="input mono" readOnly value={tok ?? "••••••••••••"} aria-describedby="tok-h" style={{ width: 200, maxWidth: "100%", minWidth: 0 }} />
       <button className="btn" type="button" aria-controls="tok" onClick={show}>{tok ? "Hide" : "Show"}</button>
       {tok && navigator.clipboard && <button className="btn" type="button" onClick={() => navigator.clipboard.writeText(tok).then(() => setSaid("Copied."), () => {})}>Copy</button>}
