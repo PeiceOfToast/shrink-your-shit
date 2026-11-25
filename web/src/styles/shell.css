@@ -783,6 +783,10 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 @media (max-width:600px){
   nav.tabs[aria-label="Settings sections"]{display:grid;grid-template-columns:1fr 1fr;overflow:visible;row-gap:0} /* U-C: the four Settings tabs are a 2x2 grid below 600 px, each 44 px tall */
 nav.tabs[aria-label="Settings sections"]>a{display:flex;align-items:center;justify-content:center;min-height:44px;text-align:center}
+  .tabs.tabs3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));overflow:visible;row-gap:0} /* Workflows' three tabs: equal columns below 600 px; the underline spans its cell */
+  .tabs.tabs3>[role=tab]{justify-content:center;min-width:0;padding:0 6px;text-align:center}
+  .seg.seg2x2{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--border-strong)} /* Libraries' filter: a 2x2 grid of equal cells with dividers below 600 px */
+  .seg.seg2x2 button{border-right:0;min-height:44px;justify-content:center;text-align:center}
   .choice.prefs>.row{column-gap:8px;row-gap:0} /* pass 5 #4: at phone width the four Text size radios fit one row, so "130%" doesn't wrap alone. pass 6: no extra row gap either, so a wrapped Accent row sits 44 px from the next (the 44 px targets stay) */
 }
 @media (min-width:600px){.sumsel{max-width:320px}} /* pass 5 #4 (design): the summary select is full width on a phone, capped from 600 px up */
