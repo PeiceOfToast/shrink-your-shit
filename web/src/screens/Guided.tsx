@@ -76,10 +76,10 @@ function LanguagePicker({ codes, set, ticked, onTick, fromSettings }: { codes: s
           <option value="">Choose…</option>
           {rest.map(([c, n]) => <option key={c} value={c}>{n}</option>)}
         </select></div>}
+      <label className="row nw"><input type="checkbox" checked={ticked} onChange={(e) => onTick(e.target.checked)} /> Also use these as my languages everywhere</label>
       {ticked
         ? <p className="hint">These are your languages for every workflow. Changing them here changes them everywhere.{fromSettings && " Your languages from Settings > General are used until you change them here."}</p>
         : <p className="hint">Uses your languages from Settings &gt; General.</p>}
-      <label className="row"><input type="checkbox" checked={ticked} onChange={(e) => onTick(e.target.checked)} /> Also use these as my languages everywhere</label>
     </div>
   );
 }
@@ -344,7 +344,7 @@ export function Guided({ id }: { id?: string }) {
     <div className="stack guided">
       <PageHead icon="i-workflow" title={editing ? "Basic" : "New workflow"} sub="Answer the questions; the steps are made for you.">{null}</PageHead>
       {editing && <FlowTabs id={id!} on="basic" />}
-      {err && <p className="st bad" role="alert">{err}</p>}
+      {err && !done && <p className="st bad" role="alert">{err}</p>}
       {note && <p className="muted" role="status">{note}</p>}
       {done && <section className="card"><div className="bd stack"><p role="status">{name} is ready, but it isn't published yet: {err || "open it to see why."} <a href={"/workflows/" + done.id + "/basic"} onClick={(e) => (e.preventDefault(), navigate("/workflows/" + done.id + "/basic"))}>Open it</a></p></div></section>}
 
