@@ -70,7 +70,7 @@ func tokenCommand(args []string, out, errOut io.Writer) int {
 		fmt.Fprintf(errOut, "Cannot read the access token (%v).\nRun it as the user the service runs as, or with sudo: sudo shrink-your-shit token\n", denied)
 		return 1
 	}
-	fmt.Fprintln(errOut, "No access token is set. Sign-in may use a password instead, or none once setup is done and the sign-in choice is home.")
+	fmt.Fprintln(errOut, "No access token is set. Sign-in may use a password instead, or none once setup is done and no password is set.")
 	return 1
 }
 
