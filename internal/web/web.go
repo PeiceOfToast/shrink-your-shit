@@ -48,7 +48,8 @@ func Handler(store *jobs.Store, access *Access, eng Engine) http.Handler {
 	v2Summary(api, store, wv) // V3c: /api/v2/summary, processing and intake pauses
 	// the Dashboard and Libraries share one totals cache: one count, one answer
 	libTotals := &libraryTotals{}
-	v2Overview(api, store, wv, libTotals)   // user review 11-12 item 5: /api/v2/overview
+	// user review 11-12 item 5: /api/v2/overview
+	v2Overview(api, store, wv, libTotals, eng)
 	v2EventStream(api, store, wv)           // V3a: /api/v2/events (live updates)
 	v2Workers(api, wv)                      // V4a: /api/v2/workers
 	v2JoinRequests(api, wv)                 // E2: allow, deny or dismiss a join request
