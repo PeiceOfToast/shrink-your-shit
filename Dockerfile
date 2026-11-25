@@ -54,6 +54,9 @@ RUN chmod 0755 /usr/local/bin/docker-entrypoint.sh /usr/local/bin/run-as-syp
 # /config holds the database. Libraries are added on the web page (a mounted folder or a network share);
 # the image adds none by itself, so no media folder is needed. The web UI must listen on
 # all addresses inside the container; publish the port only to machines you trust.
+# A new install starts in home mode, except a new Docker install (SYP_INSTALL=docker), which starts in password
+# mode: Docker Desktop and rootless Docker show every client as private, and home mode admits private addresses.
+# A reverse proxy in front must be listed in -trusted-proxies and must append to X-Forwarded-For.
 # The container starts as root only so the entrypoint can run the network-share helper; the app
 # then runs as syp (uid 1000). Do not set USER here.
 # HOME=/config: the app keeps the key that encrypts share passwords in $HOME/.config, which must be

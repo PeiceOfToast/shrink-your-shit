@@ -82,7 +82,7 @@ func OpenAccess(dataDir string, exposed bool) (a *Access, created bool, err erro
 	}
 	if !ok { // a new install listens at home; an install from before the choice keeps its token sign-in
 		s = signinState{Mode: ModeHome}
-		if tok != "" {
+		if tok != "" || os.Getenv("SYP_INSTALL") == "docker" { // a new Docker install asks for sign-in (Docker shows every client as private)
 			s.Mode = ModePassword
 		}
 		if err := writeSignin(dataDir, s); err != nil {

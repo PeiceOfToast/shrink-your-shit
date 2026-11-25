@@ -83,6 +83,20 @@ func TestNewInstallListensAtHome(t *testing.T) {
 	}
 }
 
+// A new Docker install starts in password mode: its clients all look private, so home mode would admit them.
+func TestNewDockerInstallStartsInPassword(t *testing.T) {
+	t.Setenv("SYP_INSTALL", "docker")
+	a := newAccess(t, true)
+	srv := peerServer(t, a, "127.0.0.1:5555")
+	got := authState(t, srv, nil)
+	if got["mode"] != ModePassword || got["open"] != false {
+		t.Errorf("new Docker install: %v", got)
+	}
+	if code, _, _ := do(t, nil, srv, call{method: "GET", path: "/api/status"}); code != 401 {
+		t.Errorf("new Docker install without a sign-in: %d, want 401", code)
+	}
+}
+
 // An install from before the sign-in choice (a token file, no signin.json) keeps asking for the token.
 func TestExistingInstallStartsAsPasswordWithoutOne(t *testing.T) {
 	dir := t.TempDir()

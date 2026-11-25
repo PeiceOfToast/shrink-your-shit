@@ -133,9 +133,12 @@ lets other machines in; they sign in with the access token.
 
 The web page has two sign-in choices, set on the setup or settings page:
 
-- **Home** (a new install's choice): a computer on your home network uses the page with no sign-in.
+- **Home** (a new install's choice, except a new Docker install, which starts in password): a computer on your home network uses the page with no sign-in.
   Home network means this computer or a private address (such as 192.168.x.x or 10.x.x.x). Any other
-  address must sign in.
+  address must sign in. A request that carries `X-Forwarded-For`, `Forwarded` or `X-Real-IP` from a peer that
+  is not a trusted proxy is not admitted by address, so a reverse proxy on your LAN does not expose the page.
+  A proxy must be listed in `-trusted-proxies` and must append to `X-Forwarded-For`. Docker Desktop and rootless
+  Docker show every client as private, which is why a new Docker install starts in password mode.
 - **Password**: everyone signs in with the password, or with the access token.
 
 When the program listens beyond this computer (`-addr 0.0.0.0:8484`, the container, a Proxmox LXC), it
