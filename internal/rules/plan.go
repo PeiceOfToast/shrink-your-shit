@@ -1223,7 +1223,8 @@ func compileSelectors(p Plan, s Selectors, info media.Info, langs []string, basi
 	if container == "" && strings.Contains(info.Container, "mp4") {
 		container = "mp4"
 	}
-	p.Tracks, p.AllAudioKept, p.MainAudioUsed, p.SmallKept = planAudio(choice, onlyMine, langs, info, container)
+	audioLangs, subLangs := stepLangs(s, langs) // G2: each step's own list, else the person's
+	p.Tracks, p.AllAudioKept, p.MainAudioUsed, p.SmallKept = planAudio(choice, onlyMine, audioLangs, info, container)
 	// "Keep the file type" for a .webm whose new file WebM can't hold (video other than VP9 or AV1, audio
 	// other than Opus or Vorbis): MKV, which holds both (backlog after #93).
 	if p.Container == "" && info.Ext == ".webm" {
@@ -1248,7 +1249,7 @@ func compileSelectors(p Plan, s Selectors, info media.Info, langs []string, basi
 			}
 		}
 	}
-	p.Tracks = append(p.Tracks, planSubtitles(s.Subtitles, langs, info)...)
+	p.Tracks = append(p.Tracks, planSubtitles(s.Subtitles, subLangs, info)...)
 	p.Tracks = append(p.Tracks, movTextToSRT(p.Tracks, p.Container, info)...)
 	movText := textToMovText(p.Tracks, p.Container, info)
 	p.Tracks = append(p.Tracks, movText...)

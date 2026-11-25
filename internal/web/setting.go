@@ -62,7 +62,7 @@ var selectorFields = map[string]bool{"speed": true, "format": true, "resolution"
 // settingEcho are the fields a setting answer carries that a client may send back unchanged: ignored.
 var settingEcho = map[string]bool{"kind": true, "positions": true, "order": true, "availableformats": true, "availableaudio": true,
 	"availablesubtitles": true, "availablefiletypes": true, "warnings": true, "sharedflowchoice": true, "fitsbasic": true, "becomes": true, "bitrateladder": true, "notes": true, "minsavingpct": true, "skipsmall": true, "skiphdr": true, "editablehere": true, "reason": true,
-	"keepifbigger": true, "ratecontrol": true, "hardware": true}
+	"keepifbigger": true, "ratecontrol": true, "hardware": true, "audiolanguages": true, "subtitlelanguages": true}
 
 // unchangedFrom is the body without the fields whose values are the ones the setting shows now: a page that
 // saves back what GET showed has chosen none of those.
@@ -89,7 +89,10 @@ func readSelectors(body map[string]json.RawMessage, langs []string, kept *rules.
 	if err != nil {
 		return s, err
 	}
-	if (s.Audio == "as_is" && s.OnlyMyLanguages || s.Subtitles == "my_languages") && len(langs) == 0 { // "my languages, as it is" needs them
+	// "my languages" needs a list: the step's own (G2), else the Audio step's for subtitles, else the person's
+	audioNeeds := s.Audio == "as_is" && s.OnlyMyLanguages && len(s.AudioLangs) == 0 && len(langs) == 0
+	subsNeed := s.Subtitles == "my_languages" && len(s.SubLangs) == 0 && len(s.AudioLangs) == 0 && len(langs) == 0
+	if audioNeeds || subsNeed {
 		return s, &rules.SelectorError{Code: "languages_needed", Message: rules.LanguagesNeeded}
 	}
 	return s, nil
@@ -127,8 +130,9 @@ func readSelectorsBody(body map[string]json.RawMessage, kept *rules.Selectors) (
 	if !slices.Contains(rules.AvailableAudio, s.Audio) { // and 25b's audio values: design E's map, for one release
 		s.Audio, s.OnlyMyLanguages, _ = rules.StandardAudio(s.Audio, s.OnlyMyLanguages)
 	}
-	if kept != nil {
+	if kept != nil { // this page never sets these: the stored values stay, the step languages (G2) too
 		s.RateControl, s.Hardware, s.KeepIfBigger = kept.RateControl, kept.Hardware, kept.KeepIfBigger
+		s.AudioLangs, s.SubLangs = kept.AudioLangs, kept.SubLangs
 	}
 	return s, s.Validate()
 }
@@ -644,6 +648,12 @@ func changedEcho(body map[string]json.RawMessage, s *rules.Selectors) bool {
 		case "keepifbigger":
 			var x bool
 			same = json.Unmarshal(v, &x) == nil && x == cur.KeepIfBigger
+		case "audiolanguages": // G2: the step's own list, echoed; a changed list is refused, not dropped
+			var x []string
+			same = json.Unmarshal(v, &x) == nil && slices.Equal(x, cur.AudioLangs)
+		case "subtitlelanguages":
+			var x []string
+			same = json.Unmarshal(v, &x) == nil && slices.Equal(x, cur.SubLangs)
 		default:
 			continue
 		}
