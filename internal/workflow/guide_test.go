@@ -3,6 +3,7 @@
 package workflow
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -280,6 +281,65 @@ func TestGuideCheckNamesTheQuestion(t *testing.T) {
 			t.Errorf("%s has a languages key before G2", typ)
 		}
 	}
+}
+
+// review2-715: a {{variable}} in the guide's own conditions, or a hand-made link into the pair, means the
+// pair isn't the guide's: coverage is not full, and a save leaves it alone.
+func TestGuideLeavesAHandEditedPairAlone(t *testing.T) {
+	a := DefaultAnswers(GoalSmaller)
+	a.Skip = Skip{MinSizeGB: 2}
+	// a variable in the size condition, on a workflow validation accepts
+	d := Build(a)
+	d.Variables = []Variable{{Name: "least", Type: "number", Value: 2048, HasValue: true}}
+	check := nodeOf(d, TypeCheck)
+	for i := range d.Nodes {
+		if d.Nodes[i].ID == check.ID {
+			d.Nodes[i].Config["size"] = "{{least}}"
+		}
+	}
+	if r := Validate(d); r.Errors() {
+		t.Fatalf("%+v", r.Issues)
+	}
+	g := GuideOf(d)
+	if g.Coverage == CoverageFull || (g.Answers != nil && g.Answers.Skip != (Skip{})) {
+		t.Fatalf("a variable in the pair: %+v", g)
+	}
+	before := mustJSONOf(d)
+	if got := Apply(d, DefaultAnswers(GoalSmaller)); mustJSONOf(got) != before {
+		t.Errorf("a save changed the workflow")
+	}
+	// a hand-made error link from Convert video into the pair's End
+	d2 := Build(a)
+	end := nodeOf(d2, TypeEnd)
+	conv := nodeOf(d2, TypeConvert)
+	d2.Edges = append(d2.Edges, link(conv.ID, "error", end.ID))
+	if r := Validate(d2); r.Errors() {
+		t.Fatalf("%+v", r.Issues)
+	}
+	if g := GuideOf(d2); g.Coverage == CoverageFull || (g.Answers != nil && g.Answers.Skip != (Skip{})) {
+		t.Fatalf("a link into the pair's End: %+v", g)
+	}
+	off := DefaultAnswers(GoalSmaller) // conditions off: the pair and the link must stay
+	d3 := Apply(d2, off)
+	if nodeOf(d3, TypeCheck).ID != nodeOf(d2, TypeCheck).ID || !slices.ContainsFunc(d3.Edges, func(e Edge) bool { return e.From == conv.ID && e.FromPort == "error" && e.To == end.ID }) {
+		t.Errorf("the pair or the link went")
+	}
+	// a hand-made link into the check itself
+	d4 := Build(a)
+	tag := node(TypeTag, "", map[string]any{"add": "x"})
+	d4.Nodes = append(d4.Nodes, tag)
+	d4.Edges = append(d4.Edges, link(tag.ID, "success", nodeOf(d4, TypeCheck).ID))
+	if g := GuideOf(d4); g.Coverage == CoverageFull {
+		t.Errorf("a link into the check: %+v", g)
+	}
+	if got := Apply(d4, off); nodeOf(got, TypeCheck).ID != nodeOf(d4, TypeCheck).ID {
+		t.Errorf("the check went")
+	}
+}
+
+func mustJSONOf(d Doc) string {
+	b, _ := json.Marshal(d)
+	return string(b)
 }
 
 // review-715 P3-2 and P3-1: a Save the result step with no policy reads as beside the library, never

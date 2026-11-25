@@ -496,8 +496,10 @@ func walk(d Doc) (walked, bool) {
 	w.nodes = append(w.nodes, byID[input])
 	cur := succ[input]
 	// the guide's own pair: a check right after the input, with only the guide's conditions, whose No leaves the file alone
-	if n, ok := byID[cur]; ok && n.Type == TypeCheck && ownedCheck(n) {
-		if end, ok := byID[elseTo[n.ID]]; ok && end.Type == TypeEnd && succ[end.ID] == "" {
+	if n, ok := byID[cur]; ok && n.Type == TypeCheck && ownedCheck(n) && incoming(d, n.ID) == 1 {
+		// its End is the guide's only when nothing else leads into it (review2-715 P2-2): a hand-made link
+		// into the pair would go with it
+		if end, ok := byID[elseTo[n.ID]]; ok && end.Type == TypeEnd && succ[end.ID] == "" && incoming(d, end.ID) == 1 {
 			w.check, w.checkEnd = n.ID, end.ID
 			w.nodes = append(w.nodes, n)
 			cur = match[n.ID]
@@ -571,12 +573,28 @@ func (w walked) fail(why string) (walked, bool) {
 	return w, false
 }
 
-// ownedCheck says n has only the guide's conditions set.
+// incoming is how many links lead into id.
+func incoming(d Doc, id string) int {
+	n := 0
+	for _, e := range d.Edges {
+		if e.To == id {
+			n++
+		}
+	}
+	return n
+}
+
+// ownedCheck says n has only the guide's conditions set, as numbers: a {{variable}} there is the steps'
+// own (review2-715 P2-1), never read as 0.
 func ownedCheck(n Node) bool {
 	for k, v := range n.Config {
 		switch k {
 		case "size", "resolution", "minMinutes":
-			continue
+			switch v.(type) {
+			case float64, int, nil:
+				continue
+			}
+			return false
 		}
 		switch x := v.(type) {
 		case string:
