@@ -90,11 +90,12 @@ func goodOutput() spec {
 }
 
 type scenario struct {
-	t     *testing.T
-	store *jobs.Store
-	dir   string
-	src   string
-	id    int64
+	t      *testing.T
+	store  *jobs.Store
+	dbPath string // the store's file: a test may write a row the store has no setter for
+	dir    string
+	src    string
+	id     int64
 
 	srcSpec, outSpec       spec
 	outProbeRaw            string // if set, the new file's ffprobe answer is exactly this (to test garbage)
@@ -141,7 +142,8 @@ func newScenario(t *testing.T) *scenario { t.Helper(); return newScenarioNamed(t
 // newScenarioNamed is newScenario with the original named name (in the scenario's folder).
 func newScenarioNamed(t *testing.T, name string) *scenario {
 	t.Helper()
-	st, err := jobs.Open(filepath.Join(t.TempDir(), "t.db"))
+	dbPath := filepath.Join(t.TempDir(), "t.db")
+	st, err := jobs.Open(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +154,7 @@ func newScenarioNamed(t *testing.T, name string) *scenario {
 	os.WriteFile(src, []byte("original-bytes"), 0o644)
 	id, _ := st.Enqueue(jobs.Job{Library: dir, Path: src, DurationSec: scenarioDuration, SizeBefore: 14})
 	s := &scenario{
-		t: t, store: st, dir: dir, src: src, id: id,
+		t: t, store: st, dbPath: dbPath, dir: dir, src: src, id: id,
 		srcSpec: sourceSpec(), outSpec: goodOutput(),
 		srcPackets: 2500, outPackets: 2500, content: "new",
 		hasSSIM: true, ssimStderr: "[Parsed_ssim_0] SSIM Y:0.99 U:0.99 V:0.99 All:0.990000 (20.0)",
