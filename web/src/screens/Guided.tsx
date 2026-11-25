@@ -44,10 +44,10 @@ function Choice({ name, legend, value, options, onChange, hide }: { name: string
       <legend className={hide ? "sr" : "lab"}>{legend}</legend>
       {options.map(([v, label, hint]) => (
         <div className="radio" key={v}>
-          <input type="radio" id={name + "-" + v} name={name} checked={value === v} onChange={() => onChange(v)} />
+          <input type="radio" id={name + "-" + v} name={name} checked={value === v} onChange={() => onChange(v)} aria-describedby={hint ? name + "-" + v + "-h" : undefined} />
           <div style={{ minWidth: 0, flex: 1 }}>
             <label htmlFor={name + "-" + v}>{label}</label>
-            {hint && <div className="hint" style={{ fontSize: "var(--fs)" }}>{hint}</div>}
+            {hint && <div id={name + "-" + v + "-h"} className="hint" style={{ fontSize: "var(--fs)" }}>{hint}</div>}
           </div>
         </div>
       ))}
@@ -354,7 +354,7 @@ export function Guided({ id }: { id?: string }) {
           <div className="field"><label htmlFor="g-name">Name</label>
             <input id="g-name" ref={nameRef} className="input" value={name} aria-invalid={!!err && !name.trim()} onChange={(e) => (setName(e.target.value), setErr(""))} /></div>
           <Choice name="flow" legend="How do you want to build it?" value={flow}
-            options={[["basic", "Basic", "Answer a few questions. The steps are made for you."], ["advanced", "Advanced", "Open the steps and set each one yourself."]]} onChange={(v) => setFlow(v as "basic" | "advanced")} />
+            options={[["basic", "Basic", "A few short questions, with safe answers already chosen. For most people."], ["advanced", "Advanced", "Every setting of every step, and the conditions and actions around them. For a workflow that does something particular."]]} onChange={(v) => setFlow(v as "basic" | "advanced")} />
           <div className="row">
             <button className="btn primary" type="button" disabled={busy} onClick={next}>Next</button>
             <button className="btn ghost" type="button" onClick={() => navigate("/workflows")}>Cancel</button>
