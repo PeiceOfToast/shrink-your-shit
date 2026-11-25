@@ -11,7 +11,7 @@ test("too many tries: the count reads in seconds, singular for one", () => {
 
 test("a password must be at least the minimum and typed the same twice", () => {
   assert.equal(MIN_PASSWORD, 8);
-  assert.equal(passwordProblem("", ""), "Too short: use at least 8 characters.");
+  assert.equal(passwordProblem("", ""), "Type a password: at least 8 characters.");
   assert.equal(passwordProblem("1234567", "1234567"), "Too short: use at least 8 characters.");
   assert.equal(passwordProblem("12345678", "12345679"), "The two passwords don't match.");
   assert.equal(passwordProblem("12345678", "12345678"), null);

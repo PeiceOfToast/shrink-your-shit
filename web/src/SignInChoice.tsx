@@ -3,7 +3,8 @@ import { useState, type ReactNode } from "react";
 import { Icon } from "./Icon";
 import { MIN_PASSWORD, passwordProblem, type AuthMode } from "./signinRules";
 
-export function ModeChoice({ mode, onMode, children }: { mode: AuthMode; onMode: (m: AuthMode) => void; children?: ReactNode }) {
+// hideLegend: Settings has the card's heading already; the legend stays the fieldset's accessible name, read but not shown
+export function ModeChoice({ mode, onMode, children, hideLegend }: { mode: AuthMode; onMode: (m: AuthMode) => void; children?: ReactNode; hideLegend?: boolean }) {
   const opt = (v: AuthMode, title: string, hint: string, why?: string) => (
     <label className={"card radio enroll-card" + (mode === v ? " sel" : "")}>
       <input type="radio" name="signin-mode" value={v} checked={mode === v} onChange={() => onMode(v)} aria-describedby={"signin-" + v + "-d"} />
@@ -13,7 +14,7 @@ export function ModeChoice({ mode, onMode, children }: { mode: AuthMode; onMode:
     </label>);
   return (
     <fieldset className="stack" style={{ gap: 8, border: 0, padding: 0, margin: 0 }}>
-      <legend className="lab">Sign-in</legend>
+      <legend className={"lab" + (hideLegend ? " sr-only" : "")}>Sign-in</legend>
       {opt("home", "No sign-in on my home network", "Anyone on your home network can open Shrink Your Shit without signing in. From anywhere else it still asks for the access token.")}
       {opt("password", "Require sign-in", "Everyone signs in with a password, on your home network too.", "Pick this if this computer can be reached from the internet, for example through a forwarded port or a reverse proxy.")}
       {mode === "password" && children}

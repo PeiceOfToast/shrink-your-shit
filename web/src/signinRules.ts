@@ -7,7 +7,7 @@ export interface AuthState { mode: AuthMode; passwordSet: boolean; signedIn: boo
 
 // The field sentence for a password that can't be saved as typed (design's words).
 export const passwordProblem = (pw: string, again: string): string | null =>
-  pw.length < MIN_PASSWORD ? `Too short: use at least ${MIN_PASSWORD} characters.` : pw !== again ? "The two passwords don't match." : null;
+  pw === "" ? `Type a password: at least ${MIN_PASSWORD} characters.` : pw.length < MIN_PASSWORD ? `Too short: use at least ${MIN_PASSWORD} characters.` : pw !== again ? "The two passwords don't match." : null;
 
 // Save may go ahead. Home needs nothing. Password needs valid fields, unless the password stays as it is: one is set
 // already, or the mode is password now (an existing install keeps token sign-in with the fields empty).

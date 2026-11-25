@@ -202,7 +202,7 @@ function SignInForm({ cur, saved }: { cur: AuthState; saved: () => void }) {
   };
   return (<>
     <div className="bd stack" style={{ gap: 12, padding: 16 }}>
-      <ModeChoice mode={mode} onMode={(m) => (setMode(m), setBad(false), setSaid(""))}>
+      <ModeChoice mode={mode} hideLegend onMode={(m) => (setMode(m), setBad(false), setSaid(""))}>
         {mode === "password" && cur.passwordSet && !changing && (
           <div className="row" style={{ marginTop: 8 }}><button className="btn sm" type="button" onClick={() => (setChanging(true), setBad(false), setSaid(""))}>Change password</button></div>
         )}
@@ -237,7 +237,7 @@ function Access({ auth }: { auth: boolean }) {
     {ask && <div className="note" role="alertdialog" aria-labelledby="tok-ask" style={{ margin: "0 16px 12px" }}><Icon id="i-alert" /><div className="sp"><strong id="tok-ask">Make a new token?</strong> {auth ? "The old one stops working, so other devices must use the new one." : "This server doesn't ask for one now. Making one turns sign-in on for every browser and script, and they will need the token from then on."}</div>
       <button className="btn sm primary" type="button" onClick={make}>Make it</button><button className="btn sm ghost" type="button" onClick={() => setAsk(false)}>Cancel</button></div>}
     <p className="muted" role="status" style={{ margin: said ? "0 16px 12px" : 0 }}>{said || null}</p>
-    {auth && mode.data?.mode === "password" && <SettingRow title="Sign out of this browser" desc="Only shown when sign-in is by password.">
+    {auth && mode.data?.mode === "password" && <SettingRow title="Sign out of this browser" desc="You'll need the password to open the app in this browser again.">
       <button className="btn" type="button" aria-label="Sign out of this browser" onClick={out}>Sign out</button>
     </SettingRow>}
   </>);
