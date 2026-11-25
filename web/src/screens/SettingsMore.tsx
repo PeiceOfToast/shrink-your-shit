@@ -8,7 +8,7 @@ import { Icon } from "../Icon";
 import { PageHead } from "../PageHead";
 import { SettingRow, ValueChip } from "../SettingRow";
 import { SignedOut, failed, type Answer } from "../api";
-import { canForget, fileName, nextForgetId, unreachableLine } from "../unreachable";
+import { canForget, fileName, nextForgetId, reasonLine, unreachableLine } from "../unreachable";
 import { bytes, plural } from "../format";
 import { cancelUpdate, checkUpdate, getConverting, getHealth, getUpdate, installUpdate, forgetOriginal, purgeTrash, rollbackUpdate, type UpdateNotice, getSettings, getToken, getTrash, patchSettings, rotateToken, signOut } from "../libraryApi";
 import type { PurgeResult, Unreachable } from "../types/v2";
@@ -265,7 +265,7 @@ export function SafetySettings() {
                   {unreach.map((u, i) => <li key={u.id} style={{ display: "flex", flexWrap: "wrap", gap: "8px 11px", alignItems: "center", justifyContent: "space-between", borderTop: "1px solid var(--line, #ddd)", paddingTop: 8 }}>
                     <div style={{ minWidth: 0, flex: "1 1 220px" }}>
                       <div className="mono" style={{ overflowWrap: "anywhere" }}>{u.path}</div>
-                      <div className="muted" style={{ overflowWrap: "anywhere" }}>{u.reason}</div>
+                      <div className="muted" style={{ overflowWrap: "anywhere" }}>{reasonLine(u.reason)}</div>
                       {rowSaid[u.id] && <p className="st bad" role="alert" style={{ margin: "4px 0 0" }}><Icon id="i-alert" /><span>{rowSaid[u.id]}</span></p>}
                     </div>
                     {canForget(u) && <button id={"forget-" + u.id} className="btn" type="button" disabled={forgetting !== null} aria-label={`Forget ${fileName(u.path)}`} onClick={() => forget(u, i)}>Forget</button>}
