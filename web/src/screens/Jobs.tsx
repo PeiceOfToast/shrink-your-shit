@@ -25,6 +25,7 @@ import { closeMenuToSummary, menuEscape, useCloseOnOutside } from "../menuFocus"
 import { runFields, runningFor } from "../jobCards";
 import { keepShown, libraryOptions } from "../libraryList";
 import { cancelOnTab, selectOnTab } from "../jobTabActions";
+import { detailLibraryGone, libraryGone } from "../jobLibrary";
 
 const TABS: [Tab, string][] = [["waiting", "Waiting"], ["running", "Running"], ["completed", "Done"], ["skipped", "Skipped"], ["failed", "Failed"]];
 // G5: the Done filter for originals waiting in the trash. The words come from design (SCREENS V6); keep them here.
@@ -240,7 +241,7 @@ export function Jobs() {
             const gain = j.state === "completed" && !!j.beforeBytes && j.afterBytes != null && j.afterBytes < j.beforeBytes;
             // the facts chips: library, folder, pin, place, worker (the running card shows them above its five fields)
             const facts = (<div className="chips">
-              <span className="mchip">{j.library}</span>
+              <span className="mchip">{libraryGone(j.libraryId, libs.data) ? "Library removed" : j.library}</span>
               {j.folder !== "." && <span className="mchip">{j.folder}</span>}
               {j.pin && <span className="mchip prio">{j.pin === "first" ? "First" : "Last"}</span>}
               {tab === "waiting" && (j.position != null ? <span className="mchip">Place {j.position} in the queue</span> : <span className="mchip">Not taken now</span>)}
@@ -758,7 +759,7 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
             : reason && <section><h3>{whyHeading(j?.reason?.code ?? "", false)}</h3><p>{reason}</p>{ruleName(j?.workflow, rule?.name) && rule && <p className="sm">The rule is <a className="linkbtn" href={"/workflows/" + encodeURIComponent(rule.id)} onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); navigate("/workflows/" + encodeURIComponent(rule.id)); }}}>{rule.name}</a>.</p>}</section>}
           <section><h3>File</h3><dl className="kv">
             {(own?.path ?? j?.file?.path) && <><dt>Source</dt><dd className="mono sm">{slashWrap(own?.path ?? j?.file?.path ?? "")}</dd></>} {/* review 54ff228: no '-' when the server doesn't keep the path (a removed library's job) */}
-            {(j?.library || own) && <><dt>Library</dt><dd>{j?.library?.name ?? own?.library}</dd></>}
+            {(j?.library || own) && <><dt>Library</dt><dd>{detailLibraryGone(j, own?.libraryId) ? "Library removed" : j?.library?.name ?? own?.library}</dd></>}
             {own?.state === "completed" && <> {/* review 66edc3d P3: after a restore the file is the original again: no saving */}
               <dt>Original</dt><dd>{kept ? keptLine : own.originalState === "kept" ? keptWords(own.keptDaysLeft ?? 0) : own.originalState === "restored" ? "Put back in place. The smaller version was deleted." : own.originalState === "deleted" ? "Deleted. The new file replaced it." : own.originalState === "left_in_place" ? "Left where it was. The new file is in another folder." + freeNote : own.originalState === "kept_beside" ? "Kept next to the new file, in the same folder." + freeNote : "Left in place"}</dd></>}
             {!own && kept && <><dt>Original</dt><dd>{keptLine}</dd></>}
