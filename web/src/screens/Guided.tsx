@@ -346,7 +346,7 @@ export function Guided({ id }: { id?: string }) {
       {editing && <FlowTabs id={id!} on="basic" />}
       {err && <p className="st bad" role="alert">{err}</p>}
       {note && <p className="muted" role="status">{note}</p>}
-      {done && <section className="card"><div className="bd stack"><p role="status">{name} is ready, but it isn't published yet: {err || "open it to see why."} <a href={"/workflows/" + done.id} onClick={(e) => (e.preventDefault(), navigate("/workflows/" + done.id))}>Open it</a></p></div></section>}
+      {done && <section className="card"><div className="bd stack"><p role="status">{name} is ready, but it isn't published yet: {err || "open it to see why."} <a href={"/workflows/" + done.id + "/basic"} onClick={(e) => (e.preventDefault(), navigate("/workflows/" + done.id + "/basic"))}>Open it</a></p></div></section>}
 
       {step === "entry" && (
         <section className="card" aria-label="New workflow"><div className="bd stack">
