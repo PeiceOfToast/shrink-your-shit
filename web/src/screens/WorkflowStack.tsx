@@ -92,7 +92,7 @@ function RefPick({ fid, title, value, set, back, selectRef, none, s, wf }: { fid
         </select>
         <button className="btn sm ghost nowrap" type="button" onClick={back}>Type a value instead</button>
       </div>
-      <span className="hint" id={fid + "-ref"}>{mine.length === 0 && server.length === 0 ? "This workflow has no variables yet: add one in Variables above or in Settings, or pick one of the file's own values." : "The variable's value must fit the setting; one that won't is greyed and says why. A file value's kind is checked when you save; its value once the job has the file."}</span>
+      <span className="hint" id={fid + "-ref"}>{mine.length === 0 && server.length === 0 ? <>This workflow has no variables yet: add one in Variables above or on the Workflows page's <Link to="/workflows?tab=variables">Variables tab</Link>, or pick one of the file's own values.</> : "The variable's value must fit the setting; one that won't is greyed and says why. A file value's kind is checked when you save; its value once the job has the file."}</span>
     </div>);
 }
 

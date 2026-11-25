@@ -5,14 +5,13 @@
 // design 05:34Z). Not here: log retention (no setting on the server).
 import { useEffect, useId, useRef, useState, type Dispatch, type MouseEvent, type ReactNode, type SetStateAction } from "react";
 import { Icon } from "../Icon";
-import { PageHead } from "../PageHead";
 import { SettingRow, ValueChip } from "../SettingRow";
 import { SignedOut, failed, type Answer } from "../api";
+import { canForget, fileName, nextForgetId, reasonLine, unreachableLine } from "../unreachable";
 import { bytes, plural } from "../format";
-import { cancelUpdate, checkUpdate, getConverting, getHealth, getUpdate, installUpdate, purgeTrash, rollbackUpdate, type UpdateNotice, getSettings, getToken, getTrash, patchSettings, rotateToken, signOut } from "../libraryApi";
-import type { PurgeResult } from "../types/v2";
+import { cancelUpdate, checkUpdate, getConverting, getHealth, getUpdate, installUpdate, forgetOriginal, purgeTrash, rollbackUpdate, type UpdateNotice, getSettings, getToken, getTrash, patchSettings, rotateToken, signOut } from "../libraryApi";
+import type { PurgeResult, Unreachable } from "../types/v2";
 import type { FirstRunSettings } from "../types/v1";
-import { SettingsTabs } from "../pages";
 import { Link, navigate } from "../router";
 import { setRole } from "../setupApi";
 import { useSetup } from "./Enroll";
@@ -27,11 +26,9 @@ const day = (t: string) => new Date(t).toLocaleDateString([], { day: "numeric", 
 export function GeneralSettings() {
   const st = useData(getSettings, []);
   return (
-    <div className="stack">
-      <PageHead icon="i-settings" title="Settings" />
-      <SettingsTabs at="general" />
+    <section id="general" aria-labelledby="pc-h" className="stack settings-sec">
       {!st.data ? <div className="empty">{st.error?.message ?? "Loading…"}</div> : <General start={st.data.languages ?? []} auth={!!st.data.authRequired} saved={st.reload} />}
-    </div>);
+    </section>);
 }
 
 // The page's one Save (the design): it saves the languages; the rows above only change what is on the page until then.
@@ -50,7 +47,7 @@ function General({ start, auth, saved }: { start: string[]; auth: boolean; saved
     <div className="stack" style={{ gap: 8 }}>
       <p className={bad ? "st bad" : "muted"} role="status" style={{ margin: 0 }}>{said}</p>
       <div className="row" style={{ justifyContent: "flex-start", flexWrap: "wrap", gap: 12 }}>
-        <button className="btn primary" type="button" disabled={!dirty} onClick={save}>Save</button>
+        <button className="btn primary" type="button" aria-label="Save general settings" disabled={!dirty} onClick={save}>Save</button>
         <span className="muted">Languages are saved when you press Save.</span>
       </div>
     </div>
@@ -201,22 +198,42 @@ export function SafetySettings() {
   };
   // Empty trash now: deletes the kept originals before their keep time is up (a confirm first; the result lists any library skipped)
   const [ask, setAsk] = useState(false), [purging, setPurging] = useState(false), [gone, setGone] = useState<PurgeResult | null>(null), [purgeSaid, setPurgeSaid] = useState(""), purgeBtn = useRef<HTMLButtonElement>(null), freed = useRef<HTMLParagraphElement>(null);
+  // U-B: the kept originals the purge couldn't delete; Forget removes a record whose file is gone (a 409 keeps the row and says why)
+  const [unreach, setUnreach] = useState<Unreachable[] | null>(null), [rowSaid, setRowSaid] = useState<Record<number, string>>({}), [forgetting, setForgetting] = useState<number | null>(null), [forgotSaid, setForgotSaid] = useState(""), [focusAt, setFocusAt] = useState<number | null>(null), unreachLine = useRef<HTMLParagraphElement>(null);
   // Focus moves after the commit: to the result after a purge, back to the (enabled again) button after an error
   const [back, setBack] = useState(0);
   useEffect(() => { if (gone) freed.current?.focus(); }, [gone]);
   useEffect(() => { if (back) purgeBtn.current?.focus(); }, [back]);
+  // a failed Forget: the focused button was disabled while the request ran, so focus goes back to its row after the commit
+  const [retry, setRetry] = useState<{ id: number } | null>(null);
+  useEffect(() => { if (retry) document.getElementById("forget-" + retry.id)?.focus(); }, [retry]);
   const purge = async () => {
-    setPurging(true); setPurgeSaid(""); setGone(null);
+    setPurging(true); setPurgeSaid(""); setGone(null); setUnreach(null); setForgotSaid(""); setRowSaid({});
     const r = await act(purgeTrash(), setPurgeSaid);
     setPurging(false); setAsk(false);
-    if (r) (setGone(r), tr.reload());
+    if (r) (setGone(r), setUnreach(r.unreachable?.length ? r.unreachable : null), tr.reload());
     else setBack((b) => b + 1);
   };
+  const forget = async (u: Unreachable, idx: number) => {
+    setForgetting(u.id); setRowSaid((m) => ({ ...m, [u.id]: "" }));
+    let r: Answer<unknown>;
+    try { r = await forgetOriginal(u.id); } catch (e) { if (e instanceof SignedOut) return setForgetting(null); throw e; }
+    setForgetting(null);
+    if (failed(r)) return (setRowSaid((m) => ({ ...m, [u.id]: r.error.message })), setRetry({ id: u.id }));
+    setUnreach((list) => (list ?? []).filter((x) => x.id !== u.id));
+    setForgotSaid(`Forgot ${fileName(u.path)}. The file was not deleted.`);
+    setFocusAt(idx); tr.reload();
+  };
+  // after a forget, focus goes to the next Forget button, or to the warning line when none are left
+  useEffect(() => {
+    if (focusAt === null) return;
+    setFocusAt(null);
+    const id = nextForgetId(unreach ?? [], focusAt);
+    if (id !== null) document.getElementById("forget-" + id)?.focus(); else unreachLine.current?.focus();
+  }, [focusAt]); // eslint-disable-line react-hooks/exhaustive-deps
   const t = tr.data;
   return (
-    <div className="stack">
-      <PageHead icon="i-settings" title="Settings" />
-      <SettingsTabs at="safety" />
+    <section id="safety" aria-labelledby="keep-h" className="stack settings-sec">
       {!st.data ? <div className="empty">{st.error?.message ?? "Loading…"}</div> : <>
         <section className="card" aria-labelledby="keep-h"><div className="hd"><h2 id="keep-h">Keeping originals</h2></div>
           <div className="bd stack" style={{ padding: 0, gap: 0 }}>
@@ -231,13 +248,27 @@ export function SafetySettings() {
               <span className="mono">{st.data.trashPath.match(/called (\S+)/)?.[1] ?? st.data.trashPath}</span>
             </SettingRow>}
             <SettingRow title="Kept right now" descId="purge-h" desc={<span aria-live="polite">{!t ? (tr.error?.message ?? "") : t.files ? <><strong>Kept originals:</strong> {bytes(t.bytes)} · {plural(t.files, "file", "files")}.{t.nextDeleteAt && " The next ones go on " + day(t.nextDeleteAt) + "."}</> : "No originals are being kept right now."}</span>}>
-              {t && <button ref={purgeBtn} className="btn" type="button" disabled={!t.files || purging} aria-describedby={t.files ? undefined : "purge-h"} onClick={() => (setGone(null), setPurgeSaid(""), setAsk(true))}>
+              {t && <button ref={purgeBtn} className="btn" type="button" disabled={!t.files || purging} aria-describedby={t.files ? undefined : "purge-h"} onClick={() => (setGone(null), setUnreach(null), setPurgeSaid(""), setAsk(true))}>
                 {t.files ? `Empty trash now: ${plural(t.files, "file", "files")}, ${bytes(t.bytes)}` : "Empty trash now"}</button>}
             </SettingRow>
             {purgeSaid && <p className="st bad" role="alert" style={{ margin: "0 16px 12px" }}><Icon id="i-alert" /><span>{purgeSaid}</span></p>}
             {gone && <div aria-live="polite" className="stack" style={{ gap: 6, padding: "0 16px 12px" }}>
               <p ref={freed} tabIndex={-1} className={gone.deletedFiles ? "st ok" : "st warn"} style={{ margin: 0 }}><Icon id={gone.deletedFiles ? "i-check-c" : "i-alert"} /><span>{gone.deletedFiles ? `Freed ${bytes(gone.freedBytes)} (${plural(gone.deletedFiles, "file", "files")}).` : "Nothing was deleted."}</span></p>
               {gone.skipped.map((s, i) => <p key={i} className="st warn" style={{ margin: 0 }}><Icon id="i-alert" /><span>{`${s.library} was skipped. ${s.reason}`}</span></p>)}
+              {forgotSaid && <p role="status" className="st" style={{ margin: 0 }}><span>{forgotSaid}</span></p>}
+              {unreach && <div className="stack" style={{ gap: 8 }}>
+                <p ref={unreachLine} tabIndex={-1} className="st warn" style={{ margin: 0 }}><Icon id="i-alert" /><span>{unreach.length ? unreachableLine(unreach.length) : "Every original that couldn't be deleted has been forgotten."}</span></p>
+                {unreach.length > 0 && <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 8 }}>
+                  {unreach.map((u, i) => <li key={u.id} style={{ display: "flex", flexWrap: "wrap", gap: "8px 11px", alignItems: "center", justifyContent: "space-between", borderTop: "1px solid var(--line, #ddd)", paddingTop: 8 }}>
+                    <div style={{ minWidth: 0, flex: "1 1 220px" }}>
+                      <div className="mono" style={{ overflowWrap: "anywhere" }}>{u.path}</div>
+                      <div className="muted" style={{ overflowWrap: "anywhere" }}>{reasonLine(u.reason)}</div>
+                      {rowSaid[u.id] && <p className="st bad" role="alert" style={{ margin: "4px 0 0" }}><Icon id="i-alert" /><span>{rowSaid[u.id]}</span></p>}
+                    </div>
+                    {canForget(u) && <button id={"forget-" + u.id} className="btn" type="button" disabled={forgetting !== null} aria-label={`Forget ${fileName(u.path)}`} onClick={() => forget(u, i)}>Forget</button>}
+                  </li>)}
+                </ul>}
+              </div>}
             </div>}
           </div>
         </section>
@@ -246,14 +277,14 @@ export function SafetySettings() {
         <div className="stack" style={{ gap: 8 }}>
           <p className={bad ? "st bad" : "muted"} role="status" style={{ margin: 0 }}>{said}</p>
           <div className="row" style={{ justifyContent: "flex-start", flexWrap: "wrap", gap: 12 }}>
-            <button className="btn primary" type="button" disabled={days == null || Number(days) === st.data.keepOriginalsDays} onClick={save}>Save</button>
+            <button className="btn primary" type="button" aria-label="Save safety settings" disabled={days == null || Number(days) === st.data.keepOriginalsDays} onClick={save}>Save</button>
             <span className="muted">Saves the number of days only. Empty trash now applies at once.</span>
           </div>
         </div>
       </>}
       {ask && t && <Confirm title="Empty trash now?" body={`This deletes ${plural(t.files, "original file", "original files")} (${bytes(t.bytes)}), kept in case you need them back. It can't be undone.`}
         yes={purging ? "Deleting…" : "Delete " + plural(t.files, "file", "files")} no="Cancel" danger busy={purging} onYes={purge} onNo={() => (setAsk(false), purgeBtn.current?.focus())} />}
-    </div>);
+    </section>);
 }
 
 // Workflows may run commands (flow builder FB2b, the user's decision): the switch behind a workflow's "Run a command" step. Off
@@ -406,9 +437,7 @@ function Install({ d, reload, check }: { d: UpdateNotice; reload: () => void; ch
 export function AboutSettings() {
   const h = useData(getHealth, []);
   return (
-    <div className="stack">
-      <PageHead icon="i-settings" title="Settings" />
-      <SettingsTabs at="about" />
+    <section id="about" aria-labelledby="about-h" className="stack settings-sec">
       <section className="card" aria-labelledby="about-h"><div className="hd"><h2 id="about-h">About</h2></div>
         <div className="bd" style={{ padding: 0 }}>
           <SettingRow title="Version">{h.data?.version && <ValueChip>{h.data.version}</ValueChip>}</SettingRow>
@@ -417,5 +446,5 @@ export function AboutSettings() {
       <Updates />
       <section className="card" aria-labelledby="log-h"><div className="hd"><h2 id="log-h">Recent log lines</h2></div>
         <div className="bd"><pre className="mono sm" tabIndex={0} role="region" aria-labelledby="log-h" style={{ overflow: "auto", maxHeight: "16rem", margin: 0, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{h.data ? (h.data.logsTail.length ? h.data.logsTail.join("\n") : "Nothing has been logged yet.") : ""}</pre></div></section>
-    </div>);
+    </section>);
 }

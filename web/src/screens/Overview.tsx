@@ -197,7 +197,7 @@ export function Overview() {
       </PageHead>
       {said && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{said}</span></p>}
       {failedNow.length > 0 && failKey !== hidKey && <div className="note bad"><Icon id="i-alert" /><div style={{ flex: 1 }}>
-        <b>{failedNow.length === 1 ? "A health check failed" : plural(failedNow.length, "health check", "health checks") + " failed"}:</b> {failedNow[0].detail} <Link to="/settings/health">Open Health</Link>
+        <b>{failedNow.length === 1 ? "A health check failed" : plural(failedNow.length, "health check", "health checks") + " failed"}:</b> {failedNow[0].detail} <Link to="/settings/system#health">Open Health</Link>
       </div><button className="btn sm ghost" type="button" onClick={hideHealth}>Dismiss</button></div>}
       {v.encoderFallbacks?.map((f) => <div key={f.workerId} className="note warn"><Icon id="i-alert" /><div>
         <b>{f.worker}'s graphics encoder ({encoderName(f.encoder)}) failed {f.count === 1 ? "once" : plural(f.count, "time", "times")} today.</b>{" "}

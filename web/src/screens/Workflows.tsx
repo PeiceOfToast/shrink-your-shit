@@ -10,6 +10,8 @@ import { useData } from "../useData";
 import { createWorkflow, deleteWorkflow, duplicateWorkflow, getDraft, importWorkflow, listTemplates, listWorkflows, patchWorkflow } from "../workflowApi";
 import { importLines, type ReportLine } from "../importReport";
 import { shownWorkflows, wfFilterCounts, type WfFilter } from "../workflowList";
+import { getWorkflowVars } from "../workflowVarsApi";
+import { VariablesSettings } from "./Variables";
 import { Link, navigate, useSearch } from "../router";
 import type { Workflow } from "../types/v2";
 import { closeMenuToSummary, menuEscape } from "../menuFocus";
@@ -162,10 +164,10 @@ function WfCard({ w, hasTags, setSaid, reload }: { w: Workflow; hasTags: boolean
 }
 
 export function Workflows() {
-  const wfs = useData(listWorkflows, [], 10000), tpl = useData(listTemplates, []);
+  const wfs = useData(listWorkflows, [], 10000), tpl = useData(listTemplates, []), vars = useData(getWorkflowVars, []);
   const all = wfs.data ?? [], templates = tpl.data ?? [];
-  const tab = new URLSearchParams(useSearch()).get("tab") === "templates" ? "templates" : "workflows"; // in the URL: Back and reload keep it
-  const setTab = (t: string) => navigate("/workflows" + (t === "templates" ? "?tab=templates" : ""));
+  const tabParam = new URLSearchParams(useSearch()).get("tab"), tab = tabParam === "templates" || tabParam === "variables" ? tabParam : "workflows"; // in the URL: Back and reload keep it
+  const setTab = (t: string) => navigate("/workflows" + (t === "workflows" ? "" : "?tab=" + t));
   const [q, setQ] = useState(""), [tag, setTag] = useState(""), [fav, setFav] = useState(false), [filter, setFilter] = useState<WfFilter>("all"), [wizard, setWizard] = useState(false), [said, setSaid] = useState("");
   const tags = [...new Set(all.flatMap((w) => w.tags))].sort();
   // Pass 5 #3: with no tag on any workflow, the Tag filter is hidden and the card shows no tag chips. Based on the list the API returned, so filtering never hides them.
@@ -185,7 +187,7 @@ export function Workflows() {
     if (!r) return;
     const d = await getDraft(r.id);
     const secrets = failed(d) ? null : d.workflow.variables.filter((v) => v.type === "secret" && !v.hasValue).map((v) => v.name);
-    setImp({ id: r.id, name: r.name, lines: importLines(r.import, secrets, "Settings > Variables") });
+    setImp({ id: r.id, name: r.name, lines: importLines(r.import, secrets, "Workflows > Variables") });
     wfs.reload();
   };
   // A finished import moves focus to its result, so keyboard users land on what it says (a failure keeps focus on Import…; its alert speaks)
@@ -205,6 +207,7 @@ export function Workflows() {
       <div className="tabs" role="tablist">
         <button role="tab" type="button" aria-selected={tab === "workflows"} onClick={() => tab !== "workflows" && setTab("workflows")}>Workflows {wfs.data && <span className="n">{all.length}</span>}</button>
         <button role="tab" type="button" aria-selected={tab === "templates"} onClick={() => tab !== "templates" && setTab("templates")}>Templates {tpl.data && <span className="n">{templates.length}</span>}</button>
+        <button role="tab" type="button" aria-selected={tab === "variables"} onClick={() => tab !== "variables" && setTab("variables")}>Variables {vars.data && <span className="n">{vars.data.total}</span>}</button>
       </div>
       <p className="muted" role="status">{said}</p>
       {impErr && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{impErr}</span></p>}
@@ -216,7 +219,7 @@ export function Workflows() {
         </div>
         <div className="row"><button className="btn sm ghost" type="button" onClick={() => setImp(null)}>Dismiss</button></div>
       </div>}</div>
-      {tab === "templates" ? (tpl.error && !tpl.data ? <LoadFailed error={tpl.error} reload={tpl.reload} /> :
+      {tab === "variables" ? <VariablesSettings /> : tab === "templates" ? (tpl.error && !tpl.data ? <LoadFailed error={tpl.error} reload={tpl.reload} /> :
         <div className="list"><table className="tbl">
           <thead><tr><th>Template</th><th data-p="3">What it does</th><th data-p="4">Steps it uses</th><th className="stc">Changes originals</th></tr></thead>
           <tbody>{templates.map((t) => <tr key={t.id}><td className="idc"><span className="ttl">{t.name}</span><span className="sub phone">{t.description}</span></td>
