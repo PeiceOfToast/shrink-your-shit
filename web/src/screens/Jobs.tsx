@@ -24,6 +24,7 @@ import { stepLabel } from "../stepLabel";
 import { closeMenuToSummary, menuEscape, useCloseOnOutside } from "../menuFocus";
 import { runFields, runningFor } from "../jobCards";
 import { keepShown, libraryOptions } from "../libraryList";
+import { cancelOnTab, selectOnTab } from "../jobTabActions";
 
 const TABS: [Tab, string][] = [["waiting", "Waiting"], ["running", "Running"], ["completed", "Done"], ["skipped", "Skipped"], ["failed", "Failed"]];
 // G5: the Done filter for originals waiting in the trash. The words come from design (SCREENS V6); keep them here.
@@ -159,6 +160,8 @@ export function Jobs() {
   const picked = items.filter((j) => sel.includes(j.id)), none = !picked.length || busy;
   // Select mode keeps only the rows still shown: a tab, library or search change drops the rest (and their ticks)
   const shownKey = items.map((j) => j.id).join("\n");
+  // a tab that offers no Select (done) also drops select mode and its ticks, so coming back starts clean
+  useEffect(() => { if (!selectOnTab(tab)) { setSelecting(false); setSel([]); } }, [tab]);
   useEffect(() => setSel((s) => { const k = keepShown(s, items); return k.length === s.length ? s : k; }), [shownKey]);
   const run = async (a: JobAction) => {
     if (a === "cancel" && !window.confirm("Cancel " + plural(picked.length, "file", "files") + "? The files stay as they are. Nothing is deleted.")) return;
@@ -179,7 +182,7 @@ export function Jobs() {
     {/* one word per action (pass 5): Retry only on the Failed tab; a skip is Convert again */}
     {tab === "failed" && <button className="btn sm ghost" type="button" disabled={none} title={none ? "Select files first" : undefined} onClick={() => run("retry")}><Icon id="i-refresh" />Retry</button>}
     {tab === "skipped" && <button className="btn sm ghost" type="button" disabled={none} title={none ? "Select files first" : undefined} onClick={() => run("requeue")}><Icon id="i-arrow-r" />Convert again</button>}
-    <button className="btn sm ghost" type="button" disabled={none} title={none ? "Select files first" : undefined} onClick={() => run("cancel")}><Icon id="i-stop" />Cancel</button>
+    {cancelOnTab(tab) && <button className="btn sm ghost" type="button" disabled={none} title={none ? "Select files first" : undefined} onClick={() => run("cancel")}><Icon id="i-stop" />Cancel</button>}
     {tab === "waiting" && <span className="row nw" style={{ gap: 4 }}>
       <select className="input sm" aria-label="Priority" value={prio} onChange={(e) => setPrio(e.target.value as Pin | "none")}><option value="first">First</option><option value="none">Normal</option><option value="last">Last</option></select>
       <button className="btn sm ghost" type="button" disabled={none} onClick={() => run("reprioritize")}>Change priority</button></span>}
@@ -187,7 +190,7 @@ export function Jobs() {
   return (
     <div className="stack">
       <PageHead icon="i-jobs" title="Jobs" sub="Every file the workers look at: waiting, converting, done, skipped and failed.">
-        {!firstRun && <button className="btn sm ghost" type="button" aria-pressed={selecting} onClick={() => (selecting && setSel([]), setSelecting(!selecting))}>{selecting ? "Done" : "Select"}</button>}
+        {!firstRun && selectOnTab(tab) && <button className="btn sm ghost" type="button" aria-pressed={selecting} onClick={() => (selecting && setSel([]), setSelecting(!selecting))}>{selecting ? "Done" : "Select"}</button>}
       </PageHead>
       {off && <p className="st warn" role="status"><Icon id="i-alert" /><span>{off === "offline"
         ? <>No worker is connected. <Link to="/workers">See Workers.</Link></>
@@ -202,7 +205,7 @@ export function Jobs() {
       <div className="tabs" role="tablist" aria-label="Jobs">
         {TABS.map(([t, label]) => <button key={t} role="tab" type="button" aria-selected={tab === t} onClick={() => tab !== t && go(t)}>{label}{counts && <span className="n">{count(t === "completed" && (kept || left) && current ? current.total : counts[t])}</span>}</button>)}
       </div>
-      {!firstRun && (selecting || sel.length > 0) && <div className="ltools" role="toolbar" aria-label="Jobs selection">
+      {!firstRun && selectOnTab(tab) && (selecting || sel.length > 0) && <div className="ltools" role="toolbar" aria-label="Jobs selection">
         <label className="hit selall"><input type="checkbox" aria-label="Select all files" checked={items.length > 0 && sel.length === items.length} onChange={(e) => setSel(e.target.checked ? items.map((j) => j.id) : [])} /><span className="sm">All</span></label>
         <span className="desk">{actions}</span>
         {selecting && <details className="menu phone" ref={phoneMenu} onKeyDown={menuEscape}><summary className="btn sm icon ghost" aria-label="More actions"><Icon id="i-more" /></summary><div className="pop" role="menu" onClick={(e) => { if ((e.target as Element).closest("button")) closeMenuToSummary(e.currentTarget); }}>{actions}</div></details>}
