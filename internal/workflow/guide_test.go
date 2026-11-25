@@ -3,6 +3,7 @@
 package workflow
 
 import (
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -52,8 +53,9 @@ func TestGuideDefaultsAreSafeAndReadBack(t *testing.T) {
 // slower, every language, replace.
 func TestGuideRoundTripsEveryAnswer(t *testing.T) {
 	allFormats(t)
+	folder := filepath.Join(t.TempDir(), "shrunk") // a full path on every OS (CI Windows)
 	a := Answers{Goal: GoalBoth, Quality: 4, Slower: true, Resolution: "1080", Audio: "eac3_surround", AllLanguages: true,
-		Subtitles: "text_only", FileType: "mkv", Original: OriginalOneFolder, Folder: "/media/shrunk", IfBigger: "replace",
+		Subtitles: "text_only", FileType: "mkv", Original: OriginalOneFolder, Folder: folder, IfBigger: "replace",
 		Skip: Skip{MinSizeGB: 1.5, MinResolution: 1080, MinMinutes: 20}, IncludeDolbyVision: true,
 		After: After{MediaServer: true, Downloader: true, Notify: true, NotifyTarget: "Phone"}}
 	if iss := Check(a); len(iss) > 0 {
