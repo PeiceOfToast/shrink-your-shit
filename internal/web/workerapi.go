@@ -136,6 +136,12 @@ func (t Transport) Allowed(r *http.Request) bool {
 	return r.TLS != nil || private(peer)
 }
 
+// Loopback: the request comes from this computer itself, not through a proxy.
+func (t Transport) Loopback(r *http.Request) bool {
+	peer, ok := peerAddr(r)
+	return ok && peer.IsLoopback() && !forwardedByProxy(r)
+}
+
 // PrivateClient reports whether r comes from a private address: the direct peer, or, through a trusted
 // proxy, the client address it reports, which must itself be private. A proxy's silence is not taken for
 // its own address (unlike Client): the real client is then unknown, so it is not private. From anyone

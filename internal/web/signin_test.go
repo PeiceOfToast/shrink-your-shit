@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,12 +23,35 @@ import (
 // trusted names the proxies whose forwarded address is believed.
 func peerServer(t *testing.T, a *Access, peer string, trusted ...string) *httptest.Server {
 	t.Helper()
+	return peerServerAt(t, a, peer, true, trusted...)
+}
+
+// finishSetup marks first-run setup done, as its last step does (settings firstRunDone).
+func finishSetup(t *testing.T, st *jobs.Store) {
+	t.Helper()
+	ss := &settingsStore{store: st}
+	s, err := ss.load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.FirstRunDone = true
+	if err := ss.save(s); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// peerServerAt is peerServer; done says whether first-run setup is finished in its store.
+func peerServerAt(t *testing.T, a *Access, peer string, done bool, trusted ...string) *httptest.Server {
+	t.Helper()
 	st, err := jobs.Open(filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	st.SetPaused(false)
 	t.Cleanup(func() { st.Close() })
+	if done {
+		finishSetup(t, st)
+	}
 	proxies, err := ParseTrustedProxies(strings.Join(trusted, ","))
 	if err != nil {
 		t.Fatal(err)
@@ -501,5 +525,91 @@ func TestChainedProxiesKeyTheLimiterOnTheClient(t *testing.T) {
 	}
 	if code, body := wrong("198.51.100.1, 172.16.0.5"); code != 401 || errCode(body) != "bad_password" {
 		t.Errorf("another client behind the same inner proxy: %d %s, want 401 bad_password (not locked)", code, body)
+	}
+}
+
+// Before first-run setup is finished, a new install is locked: a LAN address needs the token, even in home
+// mode. This computer (loopback) stays open in home mode, as it is today. After setup, the choice applies.
+func TestNewInstallIsLockedUntilSetupIsDone(t *testing.T) {
+	a := newAccess(t, false)
+	tok := a.Token()
+	if tok == "" {
+		t.Fatal("a new install makes a token, so it can be signed in to during setup")
+	}
+	srv := peerServerAt(t, a, "192.168.1.7:5555", false)
+	for _, path := range []string{"/api/status", "/api/libraries"} {
+		if code, _, _ := do(t, nil, srv, call{method: "GET", path: path}); code != 401 {
+			t.Errorf("locked new install, LAN, no token: GET %s = %d, want 401", path, code)
+		}
+		if code, body, _ := do(t, nil, srv, call{method: "GET", path: path, bearer: tok}); code != 200 {
+			t.Errorf("locked new install, LAN, with the token: GET %s = %d %s, want 200", path, code, body)
+		}
+	}
+	if got := authState(t, srv, nil); got["open"] != false {
+		t.Errorf("locked LAN /api/auth open = %v, want false", got["open"])
+	}
+
+	loop := peerServerAt(t, a, "127.0.0.1:5555", false)
+	if code, _, _ := do(t, nil, loop, call{method: "GET", path: "/api/status"}); code != 200 {
+		t.Errorf("locked new install on this computer in home mode: %d, want 200 as today", code)
+	}
+}
+
+// After setup, both choices apply: home opens a LAN address; password does not.
+func TestSetupChoiceDecidesTheLAN(t *testing.T) {
+	a := newAccess(t, false)
+	srv := peerServerAt(t, a, "192.168.1.7:5555", true)
+	if code, _, _ := do(t, nil, srv, call{method: "GET", path: "/api/status"}); code != 200 {
+		t.Errorf("home choice, LAN after setup: %d, want 200", code)
+	}
+	a.save(signinState{Mode: ModePassword})
+	if code, _, _ := do(t, nil, srv, call{method: "GET", path: "/api/status"}); code != 401 {
+		t.Errorf("password choice, LAN after setup, no sign-in: %d, want 401", code)
+	}
+}
+
+// addressesHidden is true for a request from the default gateway (Docker hides the client behind it).
+func TestAddressesHiddenFromTheGateway(t *testing.T) {
+	defer func(f func() (netip.Addr, bool)) { defaultGateway = f }(defaultGateway)
+	defaultGateway = func() (netip.Addr, bool) { return netip.MustParseAddr("172.17.0.1"), true }
+	a := newAccess(t, false)
+	srv := peerServerAt(t, a, "172.17.0.1:5555", false)
+	if got := authState(t, srv, nil); got["addressesHidden"] != true {
+		t.Errorf("request from the gateway: addressesHidden = %v, want true", got["addressesHidden"])
+	}
+}
+
+// A request from a LAN client, with the gateway known, shows the real address: addressesHidden is false.
+func TestAddressesVisibleFromAClient(t *testing.T) {
+	defer func(f func() (netip.Addr, bool)) { defaultGateway = f }(defaultGateway)
+	defaultGateway = func() (netip.Addr, bool) { return netip.MustParseAddr("172.17.0.1"), true }
+	a := newAccess(t, false)
+	srv := peerServerAt(t, a, "192.168.1.7:5555", false)
+	if got := authState(t, srv, nil); got["addressesHidden"] != false {
+		t.Errorf("request from a LAN client: addressesHidden = %v, want false", got["addressesHidden"])
+	}
+}
+
+// When the settings cannot be read, setup counts as not finished: the lock holds, so a LAN address in home
+// mode needs the token.
+func TestUnreadableSettingsKeepTheLock(t *testing.T) {
+	st, err := jobs.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.SetPaused(false)
+	t.Cleanup(func() { st.Close() })
+	finishSetup(t, st)
+	if err := st.SetMeta(settingsKey, "{not json"); err != nil {
+		t.Fatal(err)
+	}
+	a := newAccess(t, false)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.RemoteAddr = "192.168.1.7:5555"
+		Handler(st, a, Engine{}).ServeHTTP(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	if code, _, _ := do(t, nil, srv, call{method: "GET", path: "/api/status"}); code != 401 {
+		t.Errorf("unreadable settings, LAN, home mode, no token: %d, want 401", code)
 	}
 }

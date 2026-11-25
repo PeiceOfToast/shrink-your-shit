@@ -31,7 +31,7 @@ func TestSettingsDefaultsAndFirstRun(t *testing.T) {
 	code, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/settings"})
 	m := settingsOf(t, body)
 	want := map[string]any{"firstRunDone": false, "firstRunStep": 1.0,
-		"keepOriginalsDays": 7.0, "parallelJobs": 1.0, "lowPriority": true, "scanSchedule": "02:00", "queueOrder": "newest", "authRequired": false}
+		"keepOriginalsDays": 7.0, "parallelJobs": 1.0, "lowPriority": true, "scanSchedule": "02:00", "queueOrder": "newest", "authRequired": true}
 	for k, v := range want {
 		if m[k] != v {
 			t.Errorf("%s = %v, want %v", k, m[k], v)
@@ -71,7 +71,7 @@ func TestPatchSettings(t *testing.T) {
 	m := settingsOf(t, body)
 	q, _ := m["quietHours"].(map[string]any)
 	if code != 200 || m["controlLevel"] != "advanced" || m["firstRunStep"] != 3.0 || q["from"] != "22:00" || q["to"] != "06:30" ||
-		m["queueOrder"] != "largest" || m["authRequired"] != false || strings.Contains(body, "ignored") {
+		m["queueOrder"] != "largest" || m["authRequired"] != true || strings.Contains(body, "ignored") { // authRequired is read-only: true with a token
 		t.Fatalf("%d %s", code, body)
 	}
 	_, body, _ = do(t, nil, srv, call{method: "GET", path: "/api/settings"})

@@ -49,6 +49,7 @@ type Access struct {
 
 	transport Transport   // who counts as a private address (set by Handler)
 	login     pairLimiter // failed sign-ins per address
+	setupDone func() bool // whether first-run setup is finished (set by Handler); nil counts as finished
 
 	// FailDelay is how long a wrong token or password waits before the answer, to slow down guessing.
 	FailDelay time.Duration
@@ -93,7 +94,7 @@ func OpenAccess(dataDir string, exposed bool) (a *Access, created bool, err erro
 	if a.stamp, err = stampOf(dataDir); err != nil {
 		return nil, false, err
 	}
-	if tok == "" && exposed {
+	if tok == "" && (exposed || !ok) { // a new install is locked until setup is done, so it needs a token to get in
 		if _, err := a.rotate(); err != nil {
 			return nil, false, err
 		}
