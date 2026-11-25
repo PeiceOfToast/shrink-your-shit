@@ -90,7 +90,7 @@ body.conn-lost .stale{color:var(--text-2)}
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:36px;padding:0 14px;border:1px solid var(--border-strong);border-radius:var(--radius-sm);background:var(--surface);color:var(--text);font:inherit;font-weight:500;cursor:pointer;text-decoration:none;white-space:nowrap}
 .btn:not(:disabled):hover{background:var(--raised)}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent);font-weight:var(--fw-strong)}
-.btn.primary:not(:disabled):hover{filter:brightness(1.08)}
+.btn.primary:not(:disabled):hover{background:var(--accent);filter:brightness(1.08)}
 /* M5e fix 1: a disabled button is dimmed and does not react to hover (the hover rules above skip :disabled) */
 .btn:disabled{opacity:.5;cursor:not-allowed}
 @media (max-width:640px){.wfedit{flex-basis:100%}} /* the Edit link takes its own line on a phone (Libraries workflow row) */
