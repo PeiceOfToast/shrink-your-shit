@@ -617,6 +617,10 @@ label.chk{cursor:pointer}
   input.switch{width:46px;height:28px;border-radius:14px}
   input.switch::after{width:20px;height:20px;top:3px;left:3px}
   input.switch:checked::after{left:21px}
+  .guided .choice .radio>div>label{display:flex;align-items:center;min-height:44px}
+  .guided label.row{min-height:44px}
+  .guided input[type=range]{height:44px}
+  .guided .mchip.removable>.btn{width:44px;height:44px;min-width:44px;min-height:44px}
 }
 /* M7 findings: links that are targets get 44 px on touch; phone rows stop at 3 lines (the full text as a tooltip) */
 @media (pointer:coarse){
@@ -861,7 +865,16 @@ nav.tabs[aria-label="Settings sections"]>a{display:flex;align-items:center;justi
 @media (pointer:coarse){.gfold>summary{min-height:44px;display:flex;align-items:center}.gpi{min-height:44px}}
 .fieldbad>.field .input,.fieldbad>.field select,.fieldbad>.field input.switch,.fieldbad>fieldset{border-color:var(--error);box-shadow:0 0 0 1px var(--error)} /* #165: a setting with a value it cannot use */
 /* user item 5 (design 7.3): the Dashboard as an overview: stat tiles with sparklines (U6), flat sections, two small day charts */
-.ov .tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--s4)}
+/* Status strip (dashboard cards §1): the state word and its facts on the left, the Workers switch and Scan on the right; on a phone the actions wrap to their own line */
+.ov .status{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--s3) var(--s4);background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:var(--s4)}
+.ov .status-main{min-width:0;flex:1 1 320px}
+.ov .status-state{margin:0;display:flex;align-items:center;gap:8px;font-size:var(--fs-lg)}
+.ov .status-dot{width:10px;height:10px;border-radius:50%;background:var(--text-2);flex:none}
+.ov .status-dot.ok{background:var(--success)}.ov .status-dot.warn{background:var(--warning)}.ov .status-dot.bad{background:var(--error)}
+.ov .status-facts{margin:4px 0 0;color:var(--text-2);font-size:var(--fs-sm);overflow-wrap:anywhere}
+.ov .status-facts a{color:var(--text)}
+.ov .status-acts{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2)}
+.ov .tiles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s4)}
 .ov .tiles .tile{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:var(--s4);display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-rows:auto auto auto;gap:4px var(--s3);align-content:start;min-width:0}
 .ov .tiles .tile .l{grid-column:1;color:var(--text-2);font-size:var(--fs-sm);font-weight:var(--fw-strong)}
 .ov .tiles .tile .v{grid-column:1;font-size:var(--fs-display);font-weight:var(--fw-strong);line-height:1.1;letter-spacing:-.01em;overflow-wrap:anywhere}
@@ -893,6 +906,11 @@ nav.tabs[aria-label="Settings sections"]>a{display:flex;align-items:center;justi
 .ov .daychart{width:100%;height:auto;display:block;overflow:visible}
 .ov .tip{position:absolute;top:44px;transform:translateX(-50%);pointer-events:none;z-index:5;display:grid;gap:3px;min-width:150px;padding:8px 10px;background:var(--raised);border:1px solid var(--border-strong);border-radius:var(--radius);font-size:var(--fs-sm);white-space:nowrap;box-shadow:0 8px 24px rgb(0 0 0/.25)}
 .ov .tip span{display:flex;align-items:center}.ov .tip em{font-style:normal;margin-left:auto;padding-left:16px;font-variant-numeric:tabular-nums;font-weight:var(--fw-strong)}
+/* the tile's bars: the wrapper is the tip's frame (it sizes like the old line), the tip sits just above the chart */
+.ov .sbars{position:relative}
+.ov .sbars svg{width:100%;height:100%;display:block;overflow:visible;cursor:default}
+.ov .sbars:focus-visible{outline:2px solid var(--focus);outline-offset:2px;border-radius:2px}
+.ov .sbars .tip{top:0;transform:translate(-50%,calc(-100% - 6px))}
 .ov .chartfoot{display:flex;flex-wrap:wrap;gap:8px 32px;align-items:baseline;margin-top:12px;color:var(--text-2);font-size:var(--fs-sm)}
 .ov .chartfoot b{color:var(--text);margin-left:6px}.ov .chartfoot details{margin-left:auto}.ov .chartfoot details[open]{flex-basis:100%;margin-left:0;min-width:0/* a flex item is as wide as its table otherwise, so .daytbl never scrolls and the page does (390 px) */}
 .ov .quiet{margin:0;display:flex;align-items:center;justify-content:center;text-align:center;min-height:160px;padding:12px;border:1px solid var(--border);border-radius:var(--radius)}.ov .quiet.short{min-height:80px}

@@ -31,6 +31,7 @@ func Handler(store *jobs.Store, access *Access, eng Engine) http.Handler {
 	mux.Handle("/api/", access.guard(api))
 	joins := newJoinBook(store)                                                             // E2: join requests from new workers
 	mux.Handle("/api/worker/v1/", workerAPI(store, eng.Transport, eng.Version, eng, joins)) // V7b1: remote workers, their own tokens
+	access.transport = eng.Transport                                                        // who is private (home mode)
 	access.routes(api)
 	libraryRoutes(api, store, eng)
 	systemRoutes(api, store, eng)

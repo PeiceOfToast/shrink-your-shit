@@ -11,7 +11,7 @@ import { Dashboard } from "./screens/Dashboard";
 import { HealthSettings } from "./screens/Doctor";
 import { Libraries, LibraryPage } from "./screens/Libraries";
 import { ProcessingSettings } from "./screens/Processing";
-import { AboutSettings, GeneralSettings, SafetySettings } from "./screens/SettingsMore";
+import { AboutSettings, GeneralSettings, SafetySettings, SignInSettings } from "./screens/SettingsMore";
 import { BackupSettings } from "./screens/Backup";
 import { SharesSettings } from "./screens/Shares";
 import { Start } from "./screens/Start";
@@ -19,6 +19,7 @@ import { Jobs } from "./screens/Jobs";
 import { WorkerPage, Workers } from "./screens/Workers";
 import { Workflows } from "./screens/Workflows";
 import { WorkflowStack } from "./screens/WorkflowStack";
+import { Guided } from "./screens/Guided";
 import { WorkflowGraph } from "./screens/WorkflowGraph";
 import { Link, navigate, useSearch, usePath } from "./router";
 import { SampleDataPage, ScreenGuard } from "./PageHead";
@@ -79,7 +80,7 @@ export function App() {
     <>
       <div dangerouslySetInnerHTML={{ __html: sprite }} />
       <Shell title={title} proto={!real && (start || path === "/" || path === "/libraries" || path.startsWith("/libraries/") || path === "/workflows" || /^\/workflows\/[^/]+(\/graph)?$/.test(path) || path === "/jobs" || path === "/workers" || /^\/workers\/[^/]+$/.test(path))}>
-        {settings ? (path === "/settings/general" ? <SettingsPage at="general"><GeneralSettings /><AppearanceSettings /></SettingsPage> : path === "/settings/processing" ? <SettingsPage at="processing"><ProcessingSettings /><SafetySettings /></SettingsPage> : path === "/settings/connections" ? <SettingsPage at="connections"><ConnectionsSettings /><NotificationsSettings /></SettingsPage> : <SettingsPage at="system"><HealthSettings /><BackupSettings /><AboutSettings /></SettingsPage>) : path === "/" ? <Dashboard /> : start ? <Start /> : path === "/jobs" ? <Jobs /> : path === "/workers" ? <Workers /> : /^\/workers\/[^/]+$/.test(path) ? <WorkerPage key={path} id={decodeURIComponent(path.split("/")[2])} /> : signin ? <SignIn /> : path === "/libraries" ? <Libraries /> : path === "/libraries/shares" ? <SharesSettings /> : /^\/libraries\/[^/]+$/.test(path) ? <LibraryPage key={path} id={path.split("/")[2]} />: path === "/workflows" ? <Workflows /> : /^\/workflows\/[^/]+\/graph$/.test(path) ? <WorkflowGraph key={path} id={path.split("/")[2]} /> : path === "/workflows/new" ? <Workflows /> /* not a route (firstRun.ts): the list, and no stack, so no 404s for a workflow named "new" */ :/^\/workflows\/[^/]+$/.test(path) ? <WorkflowStack key={path} id={path.split("/")[2]} /> : path === "/plugins" ? <PluginsPlanned /> : item ? <Coming item={item} /> : <NotFound />}
+        {settings ? (path === "/settings/general" ? <SettingsPage at="general"><GeneralSettings /><SignInSettings /><AppearanceSettings /></SettingsPage> : path === "/settings/processing" ? <SettingsPage at="processing"><ProcessingSettings /><SafetySettings /></SettingsPage> : path === "/settings/connections" ? <SettingsPage at="connections"><ConnectionsSettings /><NotificationsSettings /></SettingsPage> : <SettingsPage at="system"><HealthSettings /><BackupSettings /><AboutSettings /></SettingsPage>) : path === "/" ? <Dashboard /> : start ? <Start /> : path === "/jobs" ? <Jobs /> : path === "/workers" ? <Workers /> : /^\/workers\/[^/]+$/.test(path) ? <WorkerPage key={path} id={decodeURIComponent(path.split("/")[2])} /> : signin ? <SignIn /> : path === "/libraries" ? <Libraries /> : path === "/libraries/shares" ? <SharesSettings /> : /^\/libraries\/[^/]+$/.test(path) ? <LibraryPage key={path} id={path.split("/")[2]} />: path === "/workflows" ? <Workflows /> : /^\/workflows\/[^/]+\/graph$/.test(path) ? <WorkflowGraph key={path} id={path.split("/")[2]} /> : path === "/workflows/guided" ? <Guided /> : /^\/workflows\/[^/]+\/basic$/.test(path) ? <Guided key={path} id={path.split("/")[2]} /> : path === "/workflows/new" ? <Workflows /> /* not a route (firstRun.ts): the list, and no stack, so no 404s for a workflow named "new" */ :/^\/workflows\/[^/]+$/.test(path) ? <WorkflowStack key={path} id={path.split("/")[2]} /> : path === "/plugins" ? <PluginsPlanned /> : item ? <Coming item={item} /> : <NotFound />}
       </Shell>
     </>
   );
