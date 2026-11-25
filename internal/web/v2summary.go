@@ -72,8 +72,8 @@ func v2Summary(api *http.ServeMux, store *jobs.Store, wv *workerView) {
 		if s, err := LoadSettings(store); err == nil {
 			days = s.KeepOriginalsDays
 		}
-		list := func(card string, limit int) ([]map[string]any, map[string]int, error) {
-			rows, _, counts, err := store.FileList(jobs.FileFilter{Show: card, Limit: limit})
+		list := func(card string, limit int, live bool) ([]map[string]any, map[string]int, error) {
+			rows, _, counts, err := store.FileList(jobs.FileFilter{Show: card, Limit: limit, LiveLibraries: live})
 			if err != nil {
 				return nil, nil, err
 			}
@@ -83,12 +83,12 @@ func v2Summary(api *http.ServeMux, store *jobs.Store, wv *workerView) {
 			}
 			return items, counts, nil
 		}
-		active, counts, err := list(jobs.CardProcessing, 50)
+		active, counts, err := list(jobs.CardProcessing, 50, false)
 		if err != nil {
 			serverError(w, err)
 			return
 		}
-		failures, _, err := list(jobs.CardFailed, 5)
+		failures, _, err := list(jobs.CardFailed, 5, true)
 		if err != nil {
 			serverError(w, err)
 			return
