@@ -378,7 +378,7 @@ export function Overview() {
               const nextFreeDay = h.nextFreeAt ? dayName(h.nextFreeAt.slice(0, 10)) : null;
               const lib = libOf.get(String(l.id)); // the Libraries page's workflow and scan figures
               const facts = [l.saved === 0 && l.waitingToFree > 0 ? bytes(l.waitingToFree) + " smaller" + frees : null, l.saved > 0 && l.waitingToFree > 0 ? bytes(l.waitingToFree) + " more" + frees : null, (l.grew ?? 0) > 0 ? bytes(l.grew!) + " added by bigger files" : null].filter(Boolean);
-              const files = l.counts.done + l.counts.waiting + l.counts.skipped + l.counts.failed;
+              const files = l.counts.done + l.counts.waiting + l.counts.skipped + l.counts.failed, right = libraryRight(l, nextFreeDay, bytes);
               return <li key={l.id} className="lcard">
                 <span className="ltile" aria-hidden="true"><Icon id="i-library" /></span>
                 <div className="lmain">
@@ -386,7 +386,7 @@ export function Overview() {
                   <div className="chips"><span className="mchip">{count(l.counts.waiting)} waiting</span><span className="mchip">{plural(files, "file", "files")}</span>{lib?.workflowName && <span className="mchip"><Icon id="i-workflow" />{lib.workflowName}</span>}{lib && <span className="mchip">{lib.scan.lastScanAt ? "scanned " + lastScan(lib.scan.lastScanAt) : "not scanned yet"}</span>}{facts.map((f) => <span key={f} className="mchip">{f}</span>)}</div>
                 </div>
                 <div className="lside">
-                  <span className={l.saved > 0 ? "saved nowrap" : "sm nowrap"}>{libraryRight(l, nextFreeDay, bytes)}</span>
+                  <span className={l.saved > 0 ? "saved nowrap" : "sm nowrap"}>{right.gain && <b className="gain">{right.gain}</b>}{right.rest}</span>
                   <span className="lnote">
                     {l.counts.failed > 0 && <Link className="over" to={"/jobs?tab=failed&libraryId=" + encodeURIComponent(String(l.id))}>{count(l.counts.failed)} failed</Link>}
                     {l.couldFree > 0 && l.saved === 0 && <Link to={"/jobs?tab=completed&left=1&libraryId=" + encodeURIComponent(String(l.id))}>{"could free " + bytes(l.couldFree)}</Link>}
