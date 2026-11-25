@@ -6,7 +6,7 @@ import { SignedOut, failed, type Answer } from "../api";
 import { Icon } from "../Icon";
 import { onLive } from "../live";
 import { getSetup, listServers, setRole } from "../setupApi";
-import { setAuthMode } from "../signinApi";
+import { getAuth, setAuthMode } from "../signinApi";
 import { ModeChoice, PasswordFields } from "../SignInChoice";
 import { MIN_PASSWORD, authWord, passwordProblem, type AuthMode } from "../signinRules";
 import type { FoundServer, RoleBody, Setup } from "../types/v2";
@@ -41,6 +41,9 @@ export function Enroll({ setup, reload, noMain }: { setup: Setup; reload: () => 
   const [addr, setAddr] = useState(""), [code, setCode] = useState("");
   // the sign-in choice for a main server (no sign-in is the server's default, so only a password is saved)
   const [signMode, setSignMode] = useState<AuthMode>("home"), [pw, setPw] = useState(""), [again, setAgain] = useState("");
+  // behind Docker's bridge the home choice can't be trusted: Require sign-in is the starting value, until the person picks
+  const [hidden, setHidden] = useState(false), picked = useRef(false);
+  useEffect(() => { getAuth().then((a) => { if (!failed(a) && a.addressesHidden) { setHidden(true); if (!picked.current) setSignMode("password"); } }).catch(() => {}); }, []);
   const [err, setErr] = useState(""), [busy, setBusy] = useState(false), [problem, setProblem] = useState<Problem | null>(null);
   const [, setNow] = useState(0);
   const me = useData(listWorkers, []), mine = me.data?.find((w) => w.kind === "local")?.appVersion;
@@ -156,7 +159,7 @@ export function Enroll({ setup, reload, noMain }: { setup: Setup; reload: () => 
           s.matchesVersion ? undefined : s.name + " runs version " + s.version + (mine ? " and this is " + mine : "") + ". Update one of them so they match."))}
         {card("other", "Join another server", "Type its address")}
       </div>
-      {pick === "main" && <ModeChoice mode={signMode} onMode={(m) => (setSignMode(m), setErr(""))}><PasswordFields pw={pw} again={again} onPw={(v) => (setPw(v), setErr(""))} onAgain={(v) => (setAgain(v), setErr(""))} /></ModeChoice>}
+      {pick === "main" && <ModeChoice mode={signMode} addressesHidden={hidden} onMode={(m) => (picked.current = true, setSignMode(m), setErr(""))}><PasswordFields pw={pw} again={again} onPw={(v) => (setPw(v), setErr(""))} onAgain={(v) => (setAgain(v), setErr(""))} /></ModeChoice>}
       {pick === "other" && <label className="field"><span className="lab">Address</span>
         <input className="input" autoFocus placeholder="192.168.1.10 or nas.local" value={addr} onChange={(e) => setAddr(e.target.value)} />
         <span className="hint">Find it in the address bar when you open Shrink Your Shit on that computer.</span></label>}

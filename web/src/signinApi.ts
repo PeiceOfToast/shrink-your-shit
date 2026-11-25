@@ -15,6 +15,7 @@ let mock: AuthState = {
   passwordSet: q.get("passwordSet") !== "false",
   signedIn: true,
   open: q.get("open") !== "false",
+  addressesHidden: q.get("addressesHidden") === "true",
 };
 const M = <T,>(v: T) => Promise.resolve(v);
 const fail = (code: string, extra: Partial<SignInError> = {}): { error: SignInError } => ({ error: { code, message: authWord(code, code), ...extra } });
