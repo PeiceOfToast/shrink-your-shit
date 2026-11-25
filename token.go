@@ -83,7 +83,7 @@ func tokenFromFolder(dir, addr string, out, errOut io.Writer) int {
 		fmt.Fprintf(errOut, "Cannot read the access token in %s (%v).\nRun it as the user the service runs as, or with sudo: sudo shrink-your-shit token -data %s\n", dir, err, dir)
 		return 1
 	case errors.Is(err, fs.ErrNotExist):
-		fmt.Fprintf(errOut, "No access token in %s: there is no %s there. A service started with this folder makes one for a new folder, or when it listens beyond this computer.\n", dir, web.TokenFile)
+		fmt.Fprintf(errOut, "No access token in %s: there is no %s there. A service started with this folder makes one when it starts while setup is not finished and no password is set, or when it listens beyond this computer.\n", dir, web.TokenFile)
 		return 1
 	case err != nil:
 		fmt.Fprintf(errOut, "Cannot read the access token in %s: %v\n", dir, err)
