@@ -457,7 +457,7 @@ func main() {
 	case created: // the only time the token is logged
 		log.Printf("A new access token was made. Sign in at %s (to see it again: shrink-your-shit token)", signInURL(*addr, access.Token()))
 	case access.Required():
-		log.Print("The web page needs a sign-in: the access token, or a password if one is set. To see the access token, if one is set: shrink-your-shit token.")
+		log.Print("A browser may need a sign-in, depending on the sign-in choice and where it connects from: the access token, or a password if one is set. To see the access token, if one is set: shrink-your-shit token.")
 	}
 	if exposedToNetwork(*addr) {
 		log.Print("The web page is reachable from other machines (with the access token). There is no HTTPS: use it on a network you trust, never on the internet.")
