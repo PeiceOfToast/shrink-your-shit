@@ -317,3 +317,41 @@ func nodeByIDOf(d Doc, id string) Node {
 	n, _ := nodeByID(d, id)
 	return n
 }
+
+// review-716 delta (M2): a step in front of the conversion that two links lead into is something a tree
+// can't show; without the guard the second link would be dropped silently while coverage said full.
+func TestGuideAdvancedRefusesAJoinInFront(t *testing.T) {
+	a := DefaultAnswers(GoalSmaller)
+	a.Before = []Card{{Type: TypeNote, Config: map[string]any{"text": "hi"}}}
+	d := Build(a)
+	tag := node(TypeTag, "", map[string]any{"add": "x"}) // hand-made, leads into the note as well
+	d.Nodes = append(d.Nodes, tag)
+	d.Edges = append(d.Edges, link(tag.ID, "success", nodeOf(d, TypeNote).ID))
+	g := GuideOf(d)
+	if g.Advanced != CoverageNone || !strings.Contains(g.AdvancedWhy, "its links join at 'Add a note to the log'") {
+		t.Fatalf("%+v", g)
+	}
+	before := mustJSON(d)
+	if got := Apply(d, Answers{Flow: FlowAdvanced, Before: []Card{{Type: TypeNote, Config: map[string]any{"text": "changed"}}}}); mustJSON(got) != before {
+		t.Errorf("a save changed a workflow it can't read")
+	}
+}
+
+// review-716 delta (M4): a question after the save with a link off a port the questions don't read is
+// hand-made; without the guard that link would be dropped silently while coverage said full.
+func TestGuideAdvancedRefusesAStrayLinkOnAQuestionAfterTheSave(t *testing.T) {
+	a := DefaultAnswers(GoalSmaller)
+	a.AfterCards = []Card{{Type: TypeCheckResult, Config: map[string]any{"test": "saved_at_least", "percent": 50}, Yes: []Card{{Type: TypeNotify, Config: map[string]any{"kind": "good", "text": "done"}}}}}
+	d := Build(a)
+	end := node(TypeEnd, "", map[string]any{"reason": "hand-made"})
+	d.Nodes = append(d.Nodes, end)
+	d.Edges = append(d.Edges, link(nodeOf(d, TypeCheckResult).ID, "error", end.ID))
+	g := GuideOf(d)
+	if g.Advanced != CoverageNone || !strings.Contains(g.AdvancedWhy, "'Compare the result' has a link the questions don't show") {
+		t.Fatalf("%+v", g)
+	}
+	before := mustJSON(d)
+	if got := Apply(d, Answers{Flow: FlowAdvanced, AfterCards: []Card{}}); mustJSON(got) != before {
+		t.Errorf("a save changed a workflow it can't read")
+	}
+}
