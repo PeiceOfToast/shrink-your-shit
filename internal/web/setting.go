@@ -89,7 +89,10 @@ func readSelectors(body map[string]json.RawMessage, langs []string, kept *rules.
 	if err != nil {
 		return s, err
 	}
-	if (s.Audio == "as_is" && s.OnlyMyLanguages || s.Subtitles == "my_languages") && len(langs) == 0 { // "my languages, as it is" needs them
+	// "my languages" needs a list: the step's own (G2), else the Audio step's for subtitles, else the person's
+	audioNeeds := s.Audio == "as_is" && s.OnlyMyLanguages && len(s.AudioLangs) == 0 && len(langs) == 0
+	subsNeed := s.Subtitles == "my_languages" && len(s.SubLangs) == 0 && len(s.AudioLangs) == 0 && len(langs) == 0
+	if audioNeeds || subsNeed {
 		return s, &rules.SelectorError{Code: "languages_needed", Message: rules.LanguagesNeeded}
 	}
 	return s, nil
@@ -127,8 +130,9 @@ func readSelectorsBody(body map[string]json.RawMessage, kept *rules.Selectors) (
 	if !slices.Contains(rules.AvailableAudio, s.Audio) { // and 25b's audio values: design E's map, for one release
 		s.Audio, s.OnlyMyLanguages, _ = rules.StandardAudio(s.Audio, s.OnlyMyLanguages)
 	}
-	if kept != nil {
+	if kept != nil { // this page never sets these: the stored values stay, the step languages (G2) too
 		s.RateControl, s.Hardware, s.KeepIfBigger = kept.RateControl, kept.Hardware, kept.KeepIfBigger
+		s.AudioLangs, s.SubLangs = kept.AudioLangs, kept.SubLangs
 	}
 	return s, s.Validate()
 }
