@@ -52,3 +52,8 @@ export function keepShown<T extends { id: string }>(sel: string[], shown: T[]): 
   const ids = new Set(shown.map((l) => l.id));
   return sel.filter((id) => ids.has(id));
 }
+
+// U-A: the Jobs library select's options, by name ("Library 2" before "Library 10"; case and accents don't count)
+export function libraryOptions<T extends { name: string }>(ls: T[]): T[] {
+  return [...ls].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }));
+}

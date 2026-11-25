@@ -1037,6 +1037,10 @@ p.st{white-space:normal} /* a status sentence (an error line) wraps on a phone; 
 .lfilt .seg button{font-size:var(--fs-sm)}
 .lfilt .find{width:240px;max-width:100%;min-height:32px;font-size:var(--fs-sm)}
 @media (max-width:640px){.lfilt .find{width:100%;min-height:44px}}
+/* U-A: the Jobs library filter is one select; at 390 it takes a full line with its label above (44px tall) */
+.libsel{display:inline-flex;align-items:center;gap:8px;min-width:0}
+.libsel select{width:280px;max-width:100%;text-overflow:ellipsis}
+@media (max-width:640px){.lfilt .libsel{display:flex;flex-direction:column;align-items:stretch;gap:4px;width:100%}.libsel select{width:100%}}
 .lside{flex:none;display:flex;flex-direction:column;align-items:flex-end;gap:4px;text-align:right;max-width:50%}
 .lnote{display:flex;flex-direction:column;align-items:flex-end;gap:2px;font-size:var(--fs-sm);color:var(--text-2)}
 .lbar{position:absolute;left:0;right:0;bottom:0;height:3px;background:var(--raised)}
