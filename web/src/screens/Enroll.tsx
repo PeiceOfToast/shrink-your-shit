@@ -6,6 +6,9 @@ import { SignedOut, failed, type Answer } from "../api";
 import { Icon } from "../Icon";
 import { onLive } from "../live";
 import { getSetup, listServers, setRole } from "../setupApi";
+import { setAuthMode } from "../signinApi";
+import { ModeChoice, PasswordFields } from "../SignInChoice";
+import { MIN_PASSWORD, authWord, passwordProblem, type AuthMode } from "../signinRules";
 import type { FoundServer, RoleBody, Setup } from "../types/v2";
 import { useData } from "../useData";
 import { listWorkers } from "../workersApi";
@@ -36,6 +39,8 @@ export function Enroll({ setup, reload, noMain }: { setup: Setup; reload: () => 
   const [found, setFound] = useState<FoundServer[] | null>(null);
   const [pick, setPick] = useState(noMain ? "other" : "main"); // "main", "other" or a found server's url
   const [addr, setAddr] = useState(""), [code, setCode] = useState("");
+  // the sign-in choice for a main server (no sign-in is the server's default, so only a password is saved)
+  const [signMode, setSignMode] = useState<AuthMode>("home"), [pw, setPw] = useState(""), [again, setAgain] = useState("");
   const [err, setErr] = useState(""), [busy, setBusy] = useState(false), [problem, setProblem] = useState<Problem | null>(null);
   const [, setNow] = useState(0);
   const me = useData(listWorkers, []), mine = me.data?.find((w) => w.kind === "local")?.appVersion;
@@ -81,6 +86,18 @@ export function Enroll({ setup, reload, noMain }: { setup: Setup; reload: () => 
   const go = async () => {
     setErr("");
     if (pick === "main") {
+      const bad = signMode === "password" ? passwordProblem(pw, again) : null;
+      if (bad) {
+        // PasswordFields shows the problem beside the fields once either has text; with both empty it shows none, so this line says it
+        if (pw === "" && again === "") { setErr(bad); return document.getElementById("signin-pw")?.focus(); }
+        return document.getElementById(pw.length < MIN_PASSWORD ? "signin-pw" : "signin-again")?.focus();
+      }
+      if (signMode === "password") {
+        setBusy(true);
+        const a = await setAuthMode({ mode: "password", password: pw }).catch((e) => { if (e instanceof SignedOut) return null; throw e; });
+        setBusy(false);
+        if (a && failed(a)) return setErr(authWord(a.error.code, a.error.message));
+      }
       setBusy(true); const r = await send({ role: "server" }); setBusy(false);
       if (failed(r)) return r.error.code !== "signed_out" && setErr(r.error.message);
       return reload();
@@ -139,6 +156,7 @@ export function Enroll({ setup, reload, noMain }: { setup: Setup; reload: () => 
           s.matchesVersion ? undefined : s.name + " runs version " + s.version + (mine ? " and this is " + mine : "") + ". Update one of them so they match."))}
         {card("other", "Join another server", "Type its address")}
       </div>
+      {pick === "main" && <ModeChoice mode={signMode} onMode={(m) => (setSignMode(m), setErr(""))}><PasswordFields pw={pw} again={again} onPw={(v) => (setPw(v), setErr(""))} onAgain={(v) => (setAgain(v), setErr(""))} /></ModeChoice>}
       {pick === "other" && <label className="field"><span className="lab">Address</span>
         <input className="input" autoFocus placeholder="192.168.1.10 or nas.local" value={addr} onChange={(e) => setAddr(e.target.value)} />
         <span className="hint">Find it in the address bar when you open Shrink Your Shit on that computer.</span></label>}
