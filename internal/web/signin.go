@@ -3,13 +3,17 @@
 package web
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"io/fs"
 	"log"
 	"net/http"
+	"net/netip"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -131,13 +135,15 @@ func handToFolderOwner(dataDir string) error {
 	return nil
 }
 
-// signinNow is what the sign-in choice says for one request.
+// signinNow is what the sign-in choice says for one request. setup is whether first-run setup is finished:
+// until it is, nothing is open (a new install is locked, as it is with a token).
 type signinNow struct {
 	mode, hash, tok string
+	setup           bool
 }
 
-// required: a token or a password is set, so /api/* needs one from some address.
-func (s signinNow) required() bool { return s.tok != "" || s.hash != "" }
+// required: a token or a password is set, or setup is not finished, so /api/* needs a sign-in from some address.
+func (s signinNow) required() bool { return s.tok != "" || s.hash != "" || !s.setup }
 
 func (s signinNow) cookieOK(r *http.Request) bool {
 	c, err := r.Cookie(sessionCookie)
@@ -151,9 +157,13 @@ func (s signinNow) signedIn(r *http.Request) bool {
 	return s.cookieOK(r)
 }
 
-// open: this request may use the app without signing in: nothing is set to sign in to, or home mode
-// and a private address (see Transport.PrivateClient).
+// open: this request may use the app without signing in. Before setup is finished only this computer, in
+// home mode, may (a new install's own browser); after it, nothing is set to sign in to, or home mode and a
+// private address (see Transport.PrivateClient).
 func (s signinNow) open(r *http.Request, t Transport) bool {
+	if !s.setup {
+		return s.mode == ModeHome && t.Loopback(r)
+	}
 	return !s.required() || (s.mode == ModeHome && t.PrivateClient(r))
 }
 
@@ -161,8 +171,12 @@ func (s signinNow) open(r *http.Request, t Transport) bool {
 func (a *Access) current() signinNow {
 	a.refresh()
 	a.mu.RLock()
-	defer a.mu.RUnlock()
-	return signinNow{a.mode, a.hash, a.token}
+	now := signinNow{a.mode, a.hash, a.token, true}
+	a.mu.RUnlock()
+	if a.setupDone != nil {
+		now.setup = a.setupDone()
+	}
+	return now
 }
 
 func (a *Access) refresh() {
@@ -205,14 +219,53 @@ func (a *Access) save(s signinState) error {
 	return nil
 }
 
+// defaultGateway is the container's default gateway: the address a Docker bridge gives the host, which is
+// what a request arrives from when Docker hides the client's own address. A seam for tests.
+var defaultGateway = gatewayFromProc
+
+// gatewayFromProc reads the default route's gateway from /proc/net/route (Linux only; false elsewhere).
+func gatewayFromProc() (netip.Addr, bool) {
+	b, err := os.ReadFile("/proc/net/route")
+	if err != nil {
+		return netip.Addr{}, false
+	}
+	for _, line := range strings.Split(string(b), "\n")[1:] {
+		f := strings.Fields(line)
+		if len(f) < 4 || f[1] != "00000000" {
+			continue
+		}
+		flags, err := strconv.ParseUint(f[3], 16, 32)
+		if err != nil || flags&0x2 == 0 { // RTF_GATEWAY
+			continue
+		}
+		gw, err := strconv.ParseUint(f[2], 16, 32)
+		if err != nil {
+			continue
+		}
+		var o [4]byte
+		binary.LittleEndian.PutUint32(o[:], uint32(gw)) // /proc writes the address in host byte order
+		return netip.AddrFrom4(o), true
+	}
+	return netip.Addr{}, false
+}
+
+// addressesHidden says the request came from the default gateway, so the server cannot see the client's own
+// address (Docker's network hides it): device-at-home checks would then admit the internet.
+func addressesHidden(r *http.Request) bool {
+	peer, ok := peerAddr(r)
+	gw, ok2 := defaultGateway()
+	return ok && ok2 && peer == gw
+}
+
 // view is the body of GET /api/auth (and of a mode change, where the caller has just signed in).
 func (a *Access) view(r *http.Request, justSignedIn bool) map[string]any {
 	now := a.current()
 	return map[string]any{
-		"mode":        now.mode,
-		"passwordSet": now.hash != "",
-		"signedIn":    justSignedIn || now.signedIn(r),
-		"open":        now.open(r, a.transport),
+		"mode":            now.mode,
+		"passwordSet":     now.hash != "",
+		"signedIn":        justSignedIn || now.signedIn(r),
+		"open":            now.open(r, a.transport),
+		"addressesHidden": addressesHidden(r),
 	}
 }
 

@@ -101,8 +101,20 @@ func jar(t *testing.T) *http.Client {
 	return &http.Client{Jar: j}
 }
 
+// A new install makes a token at once: it is locked until first-run is done, and the token is how to get in.
+func TestNewInstallMakesAToken(t *testing.T) {
+	a, created, err := OpenAccess(t.TempDir(), false)
+	if err != nil || !created || len(a.Token()) != 43 || !a.Required() {
+		t.Fatalf("new install: created=%v required=%v err=%v", created, a.Required(), err)
+	}
+}
+
 func TestOpenAccessMakesATokenOnlyWhenExposed(t *testing.T) {
 	dir := t.TempDir()
+	// an install that already has its sign-in choice but no token: loopback makes none, exposing it does
+	if err := writeSignin(dir, signinState{Mode: ModeHome}); err != nil {
+		t.Fatal(err)
+	}
 	a, created, err := OpenAccess(dir, false)
 	if err != nil || created || a.Required() {
 		t.Fatalf("loopback must not make a token: %v %v %v", created, a.Required(), err)
@@ -231,11 +243,12 @@ func TestLoopbackWithoutTokenIsOpen(t *testing.T) {
 	if code, _, _ := do(t, nil, srv, call{method: "GET", path: "/api/status"}); code != 200 {
 		t.Errorf("status: %d", code)
 	}
-	if code, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/settings"}); code != 200 || !strings.Contains(body, `"authRequired":false`) {
+	// a new install has a token (it is locked until setup is done), so authRequired is true; loopback is still open
+	if code, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/settings"}); code != 200 || !strings.Contains(body, `"authRequired":true`) {
 		t.Errorf("settings: %d %s", code, body)
 	}
-	if code, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/settings/token"}); code != 404 || errCode(body) != "no_token" {
-		t.Errorf("token with none set: %d %s", code, body)
+	if code, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/settings/token"}); code != 200 || !strings.Contains(body, `"token"`) {
+		t.Errorf("token of a new install, read from loopback: %d %s", code, body)
 	}
 	// writes still have to come from this site: a page on another site could otherwise reach 127.0.0.1
 	if code, _, _ := do(t, nil, srv, call{method: "POST", path: "/api/jobs/1/retry", body: "{}", ctype: "application/json", origin: "http://evil.example"}); code != 403 {
