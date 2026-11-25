@@ -447,3 +447,59 @@ func TestUntrustedForwardedRequestIsNotPrivate(t *testing.T) {
 		}
 	}
 }
+
+// Two trusted proxies in a chain (the peer 10.0.0.5, then 172.16.0.5): the client is the first entry from the
+// right that is not a trusted proxy, so a public client behind the inner one is not private, and a LAN client is.
+func TestChainedTrustedProxiesReadTheClient(t *testing.T) {
+	a := newAccess(t, true) // a token exists, so home mode is a choice that needs the address to be private
+	if err := a.save(signinState{Mode: ModeHome}); err != nil {
+		t.Fatal(err)
+	}
+	srv := peerServer(t, a, "10.0.0.5:1234", "10.0.0.5", "172.16.0.5")
+	c := &http.Client{}
+	cases := []struct {
+		xff  string
+		open bool
+	}{
+		{"203.0.113.9, 172.16.0.5", false},              // a public client, then the inner proxy's hop
+		{"192.168.1.20, 172.16.0.5", true},              // a LAN client, then the inner proxy's hop
+		{"203.0.113.9, 192.168.1.20, 172.16.0.5", true}, // the first hop from the right that is not a proxy is the LAN client; the public entry before it is the client's own word
+		{"172.16.0.5", false},                           // every hop is a trusted proxy: no client, not private
+	}
+	for _, k := range cases {
+		code, body, _ := do(t, c, srv, call{method: "GET", path: "/api/auth", forwardedFor: k.xff})
+		var out map[string]any
+		if code != 200 || json.Unmarshal([]byte(body), &out) != nil || out["open"] != k.open {
+			t.Errorf("X-Forwarded-For %q: open want %v, got %d %s", k.xff, k.open, code, body)
+		}
+	}
+}
+
+// The limiter is keyed on the client behind the chain: one public client's failures lock it out, and another
+// public client behind the same inner proxy is not locked with it.
+func TestChainedProxiesKeyTheLimiterOnTheClient(t *testing.T) {
+	a := newAccess(t, false)
+	if err := a.save(signinState{Mode: ModePassword}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ResetPassword(a.dir, "correct horse"); err != nil {
+		t.Fatal(err)
+	}
+	srv := peerServer(t, a, "10.0.0.5:1234", "10.0.0.5", "172.16.0.5")
+	wrong := func(xff string) (int, string) {
+		code, body, _ := do(t, nil, srv, call{method: "POST", path: "/api/login", body: `{"password":"nope nope nope"}`,
+			ctype: "application/json", forwardedFor: xff})
+		return code, body
+	}
+	for i := 0; i < loginMaxFails; i++ {
+		if code, body := wrong("203.0.113.9, 172.16.0.5"); code != 401 || errCode(body) != "bad_password" {
+			t.Fatalf("try %d: %d %s", i+1, code, body)
+		}
+	}
+	if code, body := wrong("203.0.113.9, 172.16.0.5"); code != 429 || errCode(body) != "too_many_tries" {
+		t.Errorf("the locked client: %d %s, want 429", code, body)
+	}
+	if code, body := wrong("198.51.100.1, 172.16.0.5"); code != 401 || errCode(body) != "bad_password" {
+		t.Errorf("another client behind the same inner proxy: %d %s, want 401 bad_password (not locked)", code, body)
+	}
+}

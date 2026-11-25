@@ -76,12 +76,32 @@ func private(a netip.Addr) bool {
 	return a.IsLoopback() || a.IsPrivate() || a.IsLinkLocalUnicast()
 }
 
-// forwardedFor is the client address the trusted proxy appended to X-Forwarded-For: the rightmost entry.
-// The entries before it are whatever the client sent, so only the proxy's own (last) one is believed.
-func forwardedFor(r *http.Request) (netip.Addr, bool) {
+// forwardedFor is the client address behind the trusted proxies: X-Forwarded-For read from the right, past
+// every hop a trusted proxy appended, so a chain of trusted proxies still gives the client. The first entry
+// that is not a trusted proxy is the client; the entries before it are whatever the client sent, and are not
+// believed. ok is false when every entry is a trusted proxy, or an entry is not an address.
+func (t Transport) forwardedFor(r *http.Request) (netip.Addr, bool) {
 	parts := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
-	a, err := netip.ParseAddr(strings.TrimSpace(parts[len(parts)-1]))
-	return a.Unmap(), err == nil
+	for i := len(parts) - 1; i >= 0; i-- {
+		a, err := netip.ParseAddr(strings.TrimSpace(parts[i]))
+		if err != nil {
+			return netip.Addr{}, false
+		}
+		if a = a.Unmap(); !t.trusted(a) {
+			return a, true
+		}
+	}
+	return netip.Addr{}, false
+}
+
+// trusted reports whether a is one of the trusted proxies' addresses.
+func (t Transport) trusted(a netip.Addr) bool {
+	for _, p := range t.TrustedProxies {
+		if p.Contains(a) {
+			return true
+		}
+	}
+	return false
 }
 
 // forwardedByProxy reports whether r carries a proxy's signature (the forwarding headers). A proxy on this
@@ -110,7 +130,7 @@ func (t Transport) Allowed(r *http.Request) bool {
 		return true
 	}
 	if r.Header.Get("X-Forwarded-For") != "" {
-		a, ok := forwardedFor(r)
+		a, ok := t.forwardedFor(r)
 		return ok && private(a)
 	}
 	return r.TLS != nil || private(peer)
@@ -136,7 +156,7 @@ func (t Transport) PrivateClient(r *http.Request) bool {
 	if !trusted {
 		return private(peer) && !forwardedByProxy(r)
 	}
-	a, ok := forwardedFor(r)
+	a, ok := t.forwardedFor(r)
 	return ok && private(a)
 }
 
@@ -205,7 +225,7 @@ func (t Transport) Client(r *http.Request) netip.Addr {
 	peer, _ := peerAddr(r)
 	for _, p := range t.TrustedProxies {
 		if p.Contains(peer) {
-			if a, ok := forwardedFor(r); ok {
+			if a, ok := t.forwardedFor(r); ok {
 				return a
 			}
 		}
