@@ -195,12 +195,36 @@ func TestWorkflowListTagsFollowTheQuestions(t *testing.T) {
 	if flow, tag := item(id); flow != "basic" || tag != "Basic · Plays everywhere" {
 		t.Errorf("basic: %q %q", flow, tag)
 	}
+	// the other two goals' words (review-726: the words per goal are pinned, not just one)
+	for goal, want := range map[string]string{"smaller": "Basic · Smaller files", "both": "Basic · Small, plays on most"} {
+		_, b := send("POST", "/api/v2/workflows", `{"name":"Goal `+goal+`","answers":{"goal":"`+goal+`"}}`, "")
+		gid := decode[map[string]any](t, b)["id"].(string)
+		publish(gid)
+		if flow, tag := item(gid); flow != "basic" || tag != want {
+			t.Errorf("%s: %q %q", goal, flow, tag)
+		}
+	}
 	// an Advanced one: a condition in front
 	_, body = send("POST", "/api/v2/workflows", `{"name":"Samples out","answers":{"flow":"advanced","before":[{"type":"check.name","config":{"pattern":"sample"},"then":{"side":"yes","end":"leave"}}]}}`, "")
 	id2 := decode[map[string]any](t, body)["id"].(string)
 	publish(id2)
 	if flow, tag := item(id2); flow != "advanced" || tag != "Advanced" {
 		t.Errorf("advanced: %q %q", flow, tag)
+	}
+	// the list carries the same fields as the single GET (review-726)
+	_, body = send("GET", "/api/v2/workflows", "", "")
+	var list struct {
+		Items []struct {
+			ID, GuideFlow, SummaryTag string
+		}
+	}
+	json.Unmarshal([]byte(body), &list)
+	found := map[string][2]string{}
+	for _, it := range list.Items {
+		found[it.ID] = [2]string{it.GuideFlow, it.SummaryTag}
+	}
+	if found[id] != [2]string{"basic", "Basic · Plays everywhere"} || found[id2] != [2]string{"advanced", "Advanced"} {
+		t.Errorf("list: %v %v", found[id], found[id2])
 	}
 	// custom: the published document has a question whose both sides go on
 	_, body = send("GET", "/api/v2/workflows/"+id2+"/draft", "", "")
