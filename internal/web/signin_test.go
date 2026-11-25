@@ -586,6 +586,50 @@ func TestLostTokenNewInstallStaysLockedFromTheLAN(t *testing.T) {
 	}
 }
 
+// An install upgraded while first-run is unfinished: a sign-in choice, no token. Startup (OpenAccess, then
+// EnsureSetupToken as main does) makes a token, and the LAN is still refused without it.
+func TestTokenlessInstallIsLockedUntilSetupIsDone(t *testing.T) {
+	dir := t.TempDir()
+	if err := writeSignin(dir, signinState{Mode: ModeHome}); err != nil {
+		t.Fatal(err)
+	}
+	a, created, err := OpenAccess(dir, false)
+	if err != nil || created || a.Token() != "" {
+		t.Fatalf("OpenAccess: created=%v token=%q err=%v", created, a.Token(), err)
+	}
+	st, err := jobs.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if made, err := a.EnsureSetupToken(st); err != nil || !made || a.Token() == "" {
+		t.Fatalf("startup check: made=%v token=%q err=%v, want a token", made, a.Token(), err)
+	}
+	srv := peerServerAt(t, a, "192.168.1.7:5555", false)
+	if code, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/status"}); code != 401 {
+		t.Errorf("made token, setup unfinished, LAN, no token: %d %s, want 401", code, body)
+	}
+	if got := authState(t, srv, nil); got["open"] != false {
+		t.Errorf("open = %v, want false", got["open"])
+	}
+}
+
+// The guard itself holds the LAN closed before setup even with no token stored, which is the state
+// EnsureSetupToken exists to prevent. This pins the !s.setup clause in required() (without it the API opens).
+func TestSetupLockHoldsWithoutAToken(t *testing.T) {
+	dir := t.TempDir()
+	if err := writeSignin(dir, signinState{Mode: ModeHome}); err != nil {
+		t.Fatal(err)
+	}
+	a, _, err := OpenAccess(dir, false)
+	if err != nil || a.Token() != "" {
+		t.Fatalf("OpenAccess: token=%q err=%v, want no token", a.Token(), err)
+	}
+	srv := peerServerAt(t, a, "192.168.1.7:5555", false)
+	if code, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/status"}); code != 401 {
+		t.Errorf("no token, setup unfinished, LAN: %d %s, want 401", code, body)
+	}
+}
+
 // A finished install with no token and no password is not given one: that would change who gets in.
 func TestFinishedInstallWithoutTokenMintsNothing(t *testing.T) {
 	a := newAccess(t, false)

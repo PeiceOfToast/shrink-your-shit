@@ -65,9 +65,10 @@ func ReadToken(dataDir string) (string, error) {
 	return strings.TrimSpace(string(b)), nil
 }
 
-// OpenAccess loads the token and the sign-in choice stored in dataDir. When exposed (listening beyond
-// loopback) and no token is stored, it makes and stores one and reports created, so the caller can show
-// the sign-in address once.
+// OpenAccess loads the token and the sign-in choice stored in dataDir. It makes and stores a token when no
+// token is stored and either the install is exposed (listening beyond loopback) or it is new (no sign-in
+// choice yet), and reports created, so the caller can show the sign-in address once. An unfinished install
+// with a choice and no token gets one from EnsureSetupToken at startup.
 func OpenAccess(dataDir string, exposed bool) (a *Access, created bool, err error) {
 	if err := os.MkdirAll(dataDir, 0o755); err != nil { // the sign-in choice is written here at once
 		return nil, false, err
@@ -312,7 +313,7 @@ func (a *Access) routes(api *http.ServeMux) {
 	api.HandleFunc("GET /api/settings/token", func(w http.ResponseWriter, r *http.Request) {
 		tok := a.Token()
 		if tok == "" {
-			apiError(w, http.StatusNotFound, "no_token", "No access token is set: this server only listens on this computer, so it needs none.")
+			apiError(w, http.StatusNotFound, "no_token", "No access token is set, so there is none to show. Sign-in may use a password instead, or none while the server is open only on this computer.")
 			return
 		}
 		writeJSON(w, map[string]string{"token": tok})
