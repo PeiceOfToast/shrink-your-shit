@@ -131,12 +131,18 @@ lets other machines in; they sign in with the access token.
 
 ## Signing in
 
-On this computer only (the default, `127.0.0.1`) there is nothing to sign in to. As soon as the
-program listens beyond this computer (`-addr 0.0.0.0:8484`, the container, a Proxmox LXC), it makes a
-random access token, keeps it in its data folder (file `access-token`, readable only by the user it
-runs as), and asks for it on every page that shows or changes anything. The installer ends by
-printing a sign-in address with the token in it; opening it signs that browser in. To see the token
-and address again:
+The web page has two sign-in choices, set on the setup or settings page:
+
+- **Home** (a new install's choice): a computer on your home network uses the page with no sign-in.
+  Home network means this computer or a private address (such as 192.168.x.x or 10.x.x.x). Any other
+  address must sign in.
+- **Password**: everyone signs in with the password, or with the access token.
+
+When the program listens beyond this computer (`-addr 0.0.0.0:8484`, the container, a Proxmox LXC), it
+makes a random access token and keeps it in its data folder (file `access-token`, readable only by the
+user it runs as). The installer ends by printing a sign-in address with the token in it; opening it signs
+that browser in. An install from before this choice keeps asking for the token until a password is set.
+To see the token and address again:
 
 | Where it runs | Command |
 |---|---|
@@ -144,6 +150,10 @@ and address again:
 | macOS | `shrink-your-shit token` |
 | Docker | `docker exec <container name> shrink-your-shit token` |
 | Windows | `shrink-your-shit token` |
+
+Forgot the password? On the computer itself, as the user the service runs as (or with sudo), run
+`shrink-your-shit reset-password`. It asks for the new password twice without showing it, and signs out
+every browser that was signed in with the old one. A running server uses the new password straight away.
 
 Settings can make a new token, which signs out every other browser. Scripts send the token as
 `Authorization: Bearer <token>`. There is no HTTPS, so the token crosses the network in plain text:

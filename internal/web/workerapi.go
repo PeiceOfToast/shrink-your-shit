@@ -102,6 +102,28 @@ func (t Transport) Allowed(r *http.Request) bool {
 	return r.TLS != nil || private(peer)
 }
 
+// PrivateClient reports whether r comes from a private address: the direct peer, or, through a trusted
+// proxy, the client address it reports, which must itself be private. A proxy's silence is not taken for
+// its own address (unlike Client): the real client is then unknown, so it is not private. From anyone
+// else X-Forwarded-For is ignored, so a public address cannot borrow a private one.
+func (t Transport) PrivateClient(r *http.Request) bool {
+	peer, ok := peerAddr(r)
+	if !ok {
+		return false
+	}
+	trusted := false
+	for _, p := range t.TrustedProxies {
+		if p.Contains(peer) {
+			trusted = true
+		}
+	}
+	if !trusted {
+		return private(peer)
+	}
+	a, err := netip.ParseAddr(strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-For"), ",")[0]))
+	return err == nil && private(a.Unmap())
+}
+
 // Pairing tries (orch-lead 13:41Z): a failed pair waits PairFailDelay, as a wrong token does, and an
 // address with PairMaxFails failures within PairWindow gets 429 until the window has passed, so guessing
 // a 40-bit code stays impractical. The wait holds no lock: other requests go on meanwhile.
@@ -112,15 +134,25 @@ var (
 )
 
 type pairLimiter struct {
-	mu    sync.Mutex
-	fails map[netip.Addr][]time.Time
+	mu     sync.Mutex
+	fails  map[netip.Addr][]time.Time
+	max    int           // failures allowed in the window; 0 = PairMaxFails
+	window time.Duration // 0 = PairWindow
+}
+
+func (l *pairLimiter) limits() (int, time.Duration) {
+	if l.max == 0 {
+		return PairMaxFails, PairWindow
+	}
+	return l.max, l.window
 }
 
 // recent drops failures older than the window and returns those left.
 func (l *pairLimiter) recent(a netip.Addr, now time.Time) []time.Time {
+	_, window := l.limits()
 	kept := l.fails[a][:0]
 	for _, at := range l.fails[a] {
-		if now.Sub(at) < PairWindow {
+		if now.Sub(at) < window {
 			kept = append(kept, at)
 		}
 	}
@@ -137,8 +169,8 @@ func (l *pairLimiter) locked(a netip.Addr, now time.Time) (bool, time.Time) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	f := l.recent(a, now)
-	if len(f) >= PairMaxFails {
-		return true, f[0].Add(PairWindow)
+	if max, window := l.limits(); len(f) >= max {
+		return true, f[0].Add(window)
 	}
 	return false, time.Time{}
 }
