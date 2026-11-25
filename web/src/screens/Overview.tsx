@@ -2,7 +2,7 @@
 // GET /api/v2/overview (#177): the headline (space saved, NET, never added to the trash's GROSS bytes), the workers,
 // what is converting now, the libraries (the Libraries page's own figures) and the last 30 days. Live: job.progress
 // moves the bars in place; a job, library or worker change refetches. Every number comes from the server.
-import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Icon } from "../Icon";
 import { MOCK, SignedOut, failed, type Answer } from "../api";
 import { bytes, clock, count, dayClock, encoderName, lastScan, plural } from "../format";
@@ -12,6 +12,7 @@ import { listJobs } from "../jobsApi";
 import { listWorkflows } from "../workflowApi";
 import { listLibrariesV2 } from "../libraryApi";
 import { convertedLine } from "../convertedLine";
+import { barPath, sparkBars, sparkValue } from "../sparkBars";
 import { getStartedSteps, nextStep, showGetStarted } from "../getStarted";
 import { runFields, startedAt } from "../jobCards";
 const HEALTH_HIDDEN = "syp-health-dismissed"; // the failed checks the Dismiss was for
@@ -77,21 +78,54 @@ function DayBars({ title, note, days, series, fmt, tick = true, extra, quiet }: 
   </figure>;
 }
 
-// U6: a tile's sparkline, drawn from daily[] only. A day not recorded is a short baseline tick, a gap, never a zero
-function Spark({ values, label, color }: { values: (number | null)[]; label: string; color: string }) {
-  const W = 128, H = 56, n = values.length, max = Math.max(1, ...values.map((v) => v ?? 0));
-  const x = (i: number) => (n > 1 ? (i * W) / (n - 1) : W / 2), y = (v: number) => H - 6 - ((H - 12) * v) / max;
-  const runs: string[] = [];
-  let cur = "";
-  // a run of one point gets a zero-length segment ("M p L p"), so the round cap draws a dot instead of nothing
-  const end = () => { if (cur) runs.push(cur.includes("L") ? cur : cur + "L" + cur.slice(1)); cur = ""; };
-  values.forEach((v, i) => { if (v == null) end(); else cur += (cur ? "L" : "M") + x(i).toFixed(1) + "," + y(v).toFixed(1); });
-  end();
-  return <svg className="spark" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label={label + (values.some((v) => v == null) ? "; the days not recorded are left blank" : "")}>
-    <line x1="0" x2={W} y1={H - 2} y2={H - 2} stroke="var(--border-strong)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
-    {runs.map((d) => <path key={d} d={d} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />)}
-    {values.map((v, i) => (v == null ? <rect key={i} x={x(i) - 1} y={H - 3} width="2" height="2" fill="var(--border-strong)" /> : null))}
-  </svg>;
+// A tile's bars, one per day, drawn from daily[] only (user 11-25: bars, not a line). A day not recorded is a short
+// baseline tick, never a zero bar. Hover, a tap, or keyboard focus (Left/Right between days) shows that day's date and
+// number in the daily charts' tip. The tile's aria-label still names the value; the table below has every day.
+function Spark({ values, days, label, color, text }: { values: (number | null)[]; days: string[]; label: string; color: string; text: (n: number) => string }) {
+  const W = 128, H = 56, n = values.length, [at, setAt] = useState<number | null>(null), [said, setSaid] = useState(""), ref = useRef<HTMLDivElement>(null), tipRef = useRef<HTMLDivElement>(null);
+  const { bars, ticks } = sparkBars(values, W, H), slot = W / n;
+  const spoken = (i: number) => days[i] + ", " + sparkValue(values[i], text);
+  // the tip is centred on its day, but a phone tile is narrower than the tip: shift it back inside the tile
+  useLayoutEffect(() => {
+    const tip = tipRef.current, tile = ref.current?.closest(".tile")?.getBoundingClientRect();
+    if (!tip || !tile) return;
+    tip.style.marginLeft = "0px";
+    const r = tip.getBoundingClientRect(), pad = 4;
+    const dx = Math.max(0, tile.left + pad - r.left) - Math.max(0, r.right - (tile.right - pad));
+    if (dx) tip.style.marginLeft = dx + "px";
+  }, [at]);
+  // a tap outside the chart clears its tip (a touch never sends pointerleave, so this is the only way off a phone)
+  useEffect(() => {
+    if (at == null) return;
+    const outside = (e: PointerEvent) => { if (!ref.current?.contains(e.target as Node)) setAt(null); };
+    document.addEventListener("pointerdown", outside);
+    return () => document.removeEventListener("pointerdown", outside);
+  }, [at != null]);
+  // one Tab stop: the wrapper. Left/Right move a day, Home/End jump to the ends, Escape hides the tip and keeps focus.
+  // The live region speaks on arrow keys only, not on hover.
+  const onKey = (e: KeyboardEvent) => {
+    const cur = at ?? n - 1;
+    const next = e.key === "ArrowRight" ? cur + 1 : e.key === "ArrowLeft" ? cur - 1 : e.key === "Home" ? 0 : e.key === "End" ? n - 1 : null;
+    if (e.key === "Escape") return setAt(null);
+    if (next == null) return;
+    e.preventDefault();
+    const i = Math.min(n - 1, Math.max(0, next));
+    setAt(i); setSaid(spoken(i));
+  };
+  return <div ref={ref} className="spark sbars" role="group" aria-label={label} tabIndex={0} onFocus={() => setAt((a) => a ?? n - 1)} onBlur={() => setAt(null)} onKeyDown={onKey}
+    onPointerLeave={(e) => e.pointerType === "mouse" && setAt(null)}>
+    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label={label + (ticks.length ? "; the days not recorded are left blank" : "")}>
+      <line x1="0" x2={W} y1={H - 2} y2={H - 2} stroke="var(--border-strong)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+      {at != null && <rect x={at * slot} y="0" width={slot} height={H} fill="var(--border)" />}
+      {bars.map((b) => <path key={b.i} d={barPath(b)} fill={color} />)}
+      {ticks.map((i) => <rect key={"t" + i} x={i * slot + slot / 2 - 1} y={H - 3} width="2" height="2" fill="var(--border-strong)" />)}
+      {values.map((_, i) => <rect key={"h" + i} x={i * slot} y="0" width={slot} height={H} fill="transparent"
+        onPointerEnter={(e) => e.pointerType === "mouse" && setAt(i)}
+        onPointerDown={(e) => setAt((a) => (a === i && e.pointerType !== "mouse" ? null : i))} />)}
+    </svg>
+    {at != null && <div ref={tipRef} className="tip" style={{ left: `${((at + 0.5) / n) * 100}%` }}><span><b>{days[at]}</b><em>{sparkValue(values[at], text)}</em></span></div>}
+    <span aria-live="polite" style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" }}>{said}</span>
+  </div>;
 }
 
 export function Overview() {
@@ -216,13 +250,13 @@ export function Overview() {
             {rec.length >= 2 && hasSaved && <div className={split ? "hide-phone" : undefined}>Last 30 days: {spaceNote}</div>}
             {rec.length < 2 && <div>Charts start after two days of conversions.</div>}
           </div>
-          {rec.length >= 2 && <Spark label={(kept ? "Files made smaller per day" : "Space saved per day") + ", last " + v.daily.length + " days"} color="var(--success)" values={v.daily.map((d) => (d.recorded ? (hasSaved ? d.savedBytes : d.freedBytes) ?? 0 : null))} />}
+          {rec.length >= 2 && <Spark label={(kept ? "Files made smaller per day" : "Space saved per day") + ", last " + v.daily.length + " days"} color="var(--success)" days={v.daily.map((d) => dayName(d.day))} text={(n) => bytes(n) + (kept ? " smaller" : hasSaved ? " saved" : " freed")} values={v.daily.map((d) => (d.recorded ? (hasSaved ? d.savedBytes : d.freedBytes) ?? 0 : null))} />}
         </div>
         <div className="tile">
           <span className="l">Files converted</span>
           <span className="v">{count(h.filesConverted)}</span>
           <div className="d"><div>{perDay != null ? <>{count(perDay)} per day{s24 && <> · last 24 h {count(s24.completed)} done, {count(s24.skipped)} skipped</>}</> : "Charts start after two days of conversions."}</div></div>
-          {rec.length >= 2 && <Spark label={"Files converted per day, last " + v.daily.length + " days"} color="var(--accent)" values={v.daily.map((d) => (d.recorded ? d.completed : null))} />}
+          {rec.length >= 2 && <Spark label={"Files converted per day, last " + v.daily.length + " days"} color="var(--accent)" days={v.daily.map((d) => dayName(d.day))} text={(n) => plural(n, "file converted", "files converted")} values={v.daily.map((d) => (d.recorded ? d.completed : null))} />}
         </div>
         <div className="tile rt-desk">
           <span className="l">Right now</span>
