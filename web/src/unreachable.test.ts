@@ -29,8 +29,15 @@ test("the next Forget button is the first forgettable row after the removed one"
   assert.equal(nextForgetId(list, 0), 1);
 });
 
-test("no forgettable row after the given index gives null, so focus goes to the warning line", () => {
-  const list = [row(1, "not_found"), row(2, "in_use")];
+// #708 fix 2: forgetting the last forgettable row must not send focus to the warning line while an earlier Forget is on screen
+test("with none after the removed row, focus goes to the first forgettable row before it", () => {
+  const list = [row(7, "not_found"), row(9, "in_use")]; // list after forgetting 8, which sat at index 2
+  assert.equal(nextForgetId(list, 2), 7);
+  assert.equal(nextForgetId([row(1, "not_found"), row(2, "in_use")], 1), 1);
+});
+
+test("null only when no forgettable row is left anywhere, so focus goes to the warning line", () => {
+  const list = [row(1, "in_use"), row(2, "changed")];
   assert.equal(nextForgetId(list, 1), null);
   assert.equal(nextForgetId(list, 5), null);
   assert.equal(nextForgetId([], 0), null);

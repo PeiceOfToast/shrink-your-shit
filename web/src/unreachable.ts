@@ -5,5 +5,7 @@ import type { Unreachable } from "./types/v2.ts";
 export const canForget = (u: Unreachable) => u.code === "not_found";
 export const fileName = (path: string) => path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 export const unreachableLine = (n: number) => `${n} kept ${n === 1 ? "original" : "originals"} couldn't be deleted.`;
-// the id of the first row at or after `from` that can be forgotten, or null when none is left
-export const nextForgetId = (list: Unreachable[], from: number): number | null => list.slice(from).find(canForget)?.id ?? null;
+// the id of the first forgettable row at or after `from` (the list is already without the removed row), else the first one
+// before it, so focus never jumps to the warning line while a Forget button is still on screen; null only when none is left
+export const nextForgetId = (list: Unreachable[], from: number): number | null =>
+  (list.slice(from).find(canForget) ?? list.slice(0, from).find(canForget))?.id ?? null;
