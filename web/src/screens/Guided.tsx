@@ -7,7 +7,7 @@ import { failed, SignedOut, type Answer } from "../api";
 import { useData } from "../useData";
 import { navigate } from "../router";
 import { createWorkflow, getDraft, getGuideInfo, previewGuide, publish, saveAnswers } from "../workflowApi";
-import { applyGoal, basicDoesntAsk, basicSave, canBasic, languagesSent, questionCount, QUESTION_OF_FIELD, skipOn, subtitleChoices, type Answers, type Goal, type GuideInfo } from "../guide";
+import { applyGoal, basicDoesntAsk, basicSave, canBasic, GOAL_FIELDS, languagesSent, questionCount, QUESTION_OF_FIELD, skipOn, subtitleChoices, type Answers, type Goal, type GuideInfo } from "../guide";
 import type { Issue } from "../types/v1";
 import type { ValidationIssue, WorkflowRevision } from "../types/v2";
 
@@ -97,7 +97,6 @@ export function FlowTabs({ id, on }: { id: string; on: "basic" | "advanced" }) {
           onClick={() => can && on !== "basic" && navigate("/workflows/" + id + "/basic")}>Basic</button>
         <button role="tab" type="button" aria-selected={on === "advanced"} onClick={() => on !== "advanced" && navigate("/workflows/" + id)}>Advanced</button>
       </div>
-      {!can && g?.why && <p className="hint">Basic can't show this workflow. {g.why}</p>}
     </div>
   );
 }
@@ -136,12 +135,16 @@ export function Guided({ id }: { id?: string }) {
   const started = a != null;
   const [ticked, setTicked] = useState<boolean | null>(null); // the languages box; null = not touched yet
   const [focusAt, setFocusAt] = useState<{ field?: string } | null>(null); // a refusal's focus request (a new object each time)
+  const [touched, setTouched] = useState<ReadonlySet<string>>(new Set()); // the answers the person changed; Q1 keeps them
+  const [fromSummary, setFromSummary] = useState(false); // "Change n" was pressed: Next returns to the summary
+  const [madeId, setMadeId] = useState<string | null>(null); // the workflow "Create and use it" made; a retry reuses it
 
   // Start the answers: a new workflow with the Simple goal's defaults; an existing one as its draft reads.
+  // An opened workflow's answers count as touched, so a goal change on it keeps them.
   useEffect(() => {
     if (!loaded || a || !info.data) return;
     if (!editing) return setA({ ...info.data.defaults.smaller, languages: info.data.languages });
-    if (g?.answers && canBasic(g) && draft.data) { setA(g.answers); setReadBack(g.answers); setEtag(draft.data.etag); }
+    if (g?.answers && canBasic(g) && draft.data) { setA(g.answers); setReadBack(g.answers); setEtag(draft.data.etag); setTouched(new Set(GOAL_FIELDS)); }
   }, [loaded, a, info.data, draft.data, editing, g]);
 
   // Focus the step when it changes, or once the answers load. Not on every edit: a field being typed in keeps focus.
@@ -167,8 +170,8 @@ export function Guided({ id }: { id?: string }) {
   const settingsLangs = info.data?.languages ?? [];
   const everywhere = ticked ?? settingsLangs.length === 0; // unticked by default when Settings already has a list
   const payload = (): Answers => ({ ...basicSave(readBack, a!), ...languagesSent(a!, settingsLangs, everywhere) });
-  const set = (p: Partial<Answers>) => setA((cur) => (cur ? { ...cur, ...p } : cur));
-  const goTo = (s: Step) => { setStep(s); setErr(""); setNote(""); };
+  const set = (p: Partial<Answers>) => { setA((cur) => (cur ? { ...cur, ...p } : cur)); setTouched((t) => new Set([...t, ...Object.keys(p)])); };
+  const goTo = (s: Step) => { setStep(s); setErr(""); setNote(""); if (s === "summary") setFromSummary(false); };
 
   // A refusal says what is wrong, and opens the question it belongs to.
   const ask = async <T,>(p: Promise<Answer<T>>): Promise<T | null> => {
@@ -191,9 +194,11 @@ export function Guided({ id }: { id?: string }) {
   const next = () => {
     if (step === "entry") return flow === "advanced" ? makeAdvanced() : goTo(1);
     if (typeof step !== "number") return;
+    if (fromSummary) return goTo("summary");
     goTo(step < total ? step + 1 : "summary");
   };
   const back = () => {
+    setFromSummary(false);
     if (step === "summary") return goTo(total);
     if (step === 1) return goTo(editing ? "summary" : "entry");
     if (typeof step === "number") return goTo(step - 1);
@@ -208,18 +213,23 @@ export function Guided({ id }: { id?: string }) {
     if (w) navigate("/workflows/" + w.id);
   };
 
-  // New workflow from the answers. "Create and use it" publishes it; "Save as a draft" stops at the draft.
+  // New workflow from the answers. "Create and use it" publishes it and opens it in Basic; "Save as a draft" stops at the
+  // draft. A retry after a failed publish reuses the draft made the first time (madeId), so it never makes a second one.
   const make = async (then: "use" | "draft") => {
     if (!name.trim()) { setErr("Give the workflow a name."); return nameRef.current?.focus(); }
     setBusy(true); setErr("");
-    const w = await ask(createWorkflow(name.trim(), "", payload()));
-    if (!w) return setBusy(false);
-    if (then === "draft") return navigate("/workflows/" + w.id);
-    const d = await ask(getDraft(w.id));
-    const p = d ? await ask(publish(w.id, d.etag)) : null;
+    let made = madeId;
+    if (!made) {
+      const w = await ask(createWorkflow(name.trim(), "", payload()));
+      if (!w) return setBusy(false);
+      made = w.id; setMadeId(made);
+    }
+    if (then === "draft") return navigate("/workflows/" + made);
+    const d = await ask(getDraft(made));
+    const p = d ? await ask(publish(made, d.etag)) : null;
     setBusy(false);
-    if (p) return navigate("/workflows/" + w.id);
-    setDone({ id: w.id }); // the draft exists; the message says why it isn't published
+    if (p) return navigate("/workflows/" + made + "/basic");
+    setDone({ id: made }); // the draft exists; the message says why it isn't published
   };
 
   // Edit: the answers into the draft, with its etag. A draft changed elsewhere is refused (its message says so).
@@ -253,7 +263,7 @@ export function Guided({ id }: { id?: string }) {
   const questionBody = (n: number): ReactNode => {
     const av = info.data!.available;
     switch (n) {
-      case 1: return <Choice name="goal" legend="What do you want?" hide value={a.goal} onChange={(v) => setA((cur) => applyGoal(cur!, v as Goal, info.data!))}
+      case 1: return <Choice name="goal" legend="What do you want?" hide value={a.goal} onChange={(v) => setA((cur) => applyGoal(cur!, v as Goal, info.data!, touched))}
         options={GOALS.map(([v, l]) => [v, l, GOAL_HINT[v] || undefined] as Pick)} />;
       case 2: return (
         <fieldset className="stack" style={FS}><legend className="sr">How much quality for how much space?</legend>
@@ -332,7 +342,7 @@ export function Guided({ id }: { id?: string }) {
   const heading = (text: string) => <h2 ref={headRef} tabIndex={-1} style={{ outline: "none" }}>{text}</h2>;
 
   return (
-    <div className="stack">
+    <div className="stack guided">
       <PageHead icon="i-workflow" title={editing ? "Basic" : "New workflow"} sub="Answer the questions; the steps are made for you.">{null}</PageHead>
       {editing && <FlowTabs id={id!} on="basic" />}
       {err && <p className="st bad" role="alert">{err}</p>}
@@ -369,12 +379,11 @@ export function Guided({ id }: { id?: string }) {
         <section className="card" aria-label="Summary"><div className="bd stack">
           {heading("This will…")}
           {extra.length > 0 && <p className="hint">Basic doesn't ask about: {extra.join(", ")}. They stay as they are.</p>}
-          {g?.coverage === "partial" && <p className="hint">This workflow also has: {g.extra.join(", ")}. They are kept as they are; change them in the steps.</p>}
           {lines.length > 0 ? <ul className="stack" style={{ gap: 4 }}>{lines.map((l, i) => <li key={i}>{l}</li>)}</ul> : <p className="muted">Working out the sentences…</p>}
           {issues.length > 0 && <ul>{issues.map((x, i) => <li key={i} className="bad">{x.message}</li>)}</ul>}
           <div className="row" style={{ flexWrap: "wrap" }} aria-label="Change an answer">
             {Array.from({ length: total }, (_, i) => i + 1).map((n) => (
-              <button key={n} className="btn sm ghost" type="button" onClick={() => goTo(n)}>Change {n}</button>))}
+              <button key={n} className="btn sm ghost" type="button" onClick={() => { setFromSummary(true); goTo(n); }}>Change {n}</button>))}
           </div>
           <div className="row" style={{ flexWrap: "wrap", alignItems: "flex-end" }}>
             {editing ? (

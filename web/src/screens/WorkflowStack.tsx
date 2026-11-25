@@ -1011,11 +1011,6 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
         <span className="pill">{w.version == null || w.draftDiffers || dirty ? "Draft" : "Published"}</span>
         <span className="muted nowrap desk edver">{w.version == null ? "Not published yet" : "v" + w.version + " published" + (w.draftDiffers || dirty ? " · v" + (w.version + 1) + " draft" : "")}</span>
         <div className="mid">
-          <div className="edsegs" role="group" aria-label="View">
-            {simple ? <Link to={"/workflows/" + id}>Steps</Link> : <span aria-current="page">Steps</span>}
-            {simple ? <span aria-current="page">Simple</span> : <Link to={"/workflows/" + id + "?view=simple"}>Simple</Link>}
-            <Link to={"/workflows/" + id + "/graph"}>Graph</Link>
-          </div>
           {canStack && <><span className="vr" aria-hidden="true" />{undoRedo}</>}
         </div>
         {canStack && tools}

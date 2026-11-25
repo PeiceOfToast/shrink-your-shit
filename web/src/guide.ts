@@ -55,16 +55,18 @@ export const questionCount = (info: GuideInfo) => (hasAfter(info.available.after
 // Basic can open a workflow only when the server could read it as answers.
 export const canBasic = (g: Guide) => g.coverage !== "none" && g.answers != null;
 
-// Choosing a goal sets the defaults of Q2-Q8 (the plan's Q1 table). The person's languages, folder, Advanced settings,
-// Q9 and Q10 stay as they are; so does everything when the goal is the one already chosen.
-export function applyGoal(cur: Answers, goal: Goal, info: GuideInfo): Answers {
+// The answers Q1's goal sets the defaults of (the plan's Q1 table).
+export const GOAL_FIELDS = ["quality", "slower", "format", "resolution", "audio", "subtitles", "fileType", "original", "ifBigger"] as const;
+
+// Choosing a goal sets the defaults of Q2-Q8 that the person has not touched (`touched` = the answer keys they changed).
+// The person's answers on those questions, languages, folder, Advanced settings, Q9 and Q10 stay as they are; so does
+// everything when the goal is the one already chosen.
+export function applyGoal(cur: Answers, goal: Goal, info: GuideInfo, touched: ReadonlySet<string> = new Set()): Answers {
   if (goal === cur.goal) return cur;
   const d = info.defaults[goal];
-  return {
-    ...cur, goal,
-    quality: d.quality, slower: d.slower, format: d.format, resolution: d.resolution, audio: d.audio,
-    subtitles: d.subtitles, fileType: d.fileType, original: d.original, ifBigger: d.ifBigger,
-  };
+  const next: Answers = { ...cur, goal };
+  for (const f of GOAL_FIELDS) if (!touched.has(f)) Object.assign(next, { [f]: d[f] });
+  return next;
 }
 
 // A Basic save: the answers the screen shows, with the Advanced settings the screen read back. Nothing else is added.

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { applyGoal, basicDoesntAsk, basicSave, canBasic, hasAfter, languagesSent, questionCount, skipOn, subtitleChoices, QUESTION_OF_FIELD } from "./guide.ts";
+import { applyGoal, GOAL_FIELDS, basicDoesntAsk, basicSave, canBasic, hasAfter, languagesSent, questionCount, skipOn, subtitleChoices, QUESTION_OF_FIELD } from "./guide.ts";
 import { GUIDE_INFO } from "./mock/guide.ts";
 
 const info = GUIDE_INFO;
@@ -35,6 +35,19 @@ test("choosing a goal sets its defaults and keeps the person's languages, folder
   assert.equal(next.folder, "/media/out");
   assert.deepEqual(next.more, cur.more);
   assert.deepEqual(next.skip, cur.skip);
+});
+
+test("a goal change keeps the answers the person touched on Q2-Q8 and takes the new default for the rest", () => {
+  const cur = { ...info.defaults.smaller, quality: 5, format: "av1" };
+  const touched = new Set(["quality", "format"]);
+  const next = applyGoal(cur, "every_device", info, touched);
+  assert.equal(next.goal, "every_device");
+  assert.equal(next.quality, 5);
+  assert.equal(next.format, "av1");
+  assert.equal(next.fileType, info.defaults.every_device.fileType);
+  assert.equal(next.subtitles, info.defaults.every_device.subtitles);
+  assert.equal(next.audio, info.defaults.every_device.audio);
+  assert.deepEqual(GOAL_FIELDS.filter((f) => !touched.has(f)).map((f) => next[f]), GOAL_FIELDS.filter((f) => !touched.has(f)).map((f) => info.defaults.every_device[f]));
 });
 
 test("choosing the goal already chosen changes nothing", () => {
