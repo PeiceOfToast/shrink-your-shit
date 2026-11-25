@@ -1,4 +1,5 @@
 // D: network shares API (D-API-SHAPE.md, workshop 11-13 02:20Z). Mock only (the engine isn't on dev yet).
+import { useEffect, useState } from "react";
 import { call, MOCK, type Answer } from "./api";
 import { mockState } from "./mock";
 import type { Share, SharesResponse, ShareCreateInput, ShareTestInput, ShareTestResult } from "./types/shares";
@@ -12,6 +13,13 @@ export async function sharesSupported(): Promise<boolean> {
   const code = "error" in r ? (r as { error: { code: string } }).error.code : "";
   supportsShares = !(code === "http_404" || code === "not_found");
   return supportsShares;
+}
+
+// Libraries' Network shares button shows only when the server has the shares API
+export function useSharesSupported(): boolean {
+  const [ok, setOk] = useState(MOCK);
+  useEffect(() => { void sharesSupported().then(setOk); }, []);
+  return ok;
 }
 
 export async function getShares(): Promise<Answer<SharesResponse>> {

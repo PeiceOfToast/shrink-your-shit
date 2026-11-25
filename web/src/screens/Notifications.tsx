@@ -3,8 +3,6 @@
 import { useState } from "react";
 import { Icon } from "../Icon";
 import { failed, type Answer } from "../api";
-import { PageHead } from "../PageHead";
-import { SettingsTabs } from "../pages";
 import { SettingRow, ValueChip } from "../SettingRow";
 import { useData } from "../useData";
 import { clock } from "../format";
@@ -115,7 +113,7 @@ function TargetForm({ t, reload, onDone, onCancel }: { t?: NotifyTarget; reload:
       <div aria-live="polite">{result && <NoteLine tone={result.tone} text={result.text} />}{error && <p className="st bad" role="alert" style={{ margin: 0 }}><Icon id="i-alert" /><span>{error}</span></p>}</div>
       <div className="row" style={{ gap: 8 }}>
         <button className="btn" type="button" disabled={busy || ((!t || changeUrl) && !url.trim())} onClick={test}>Send a test</button>
-        <button className="btn primary" type="submit" disabled={busy || !name.trim() || (!t && !url.trim())}>{busy ? "Working…" : "Save"}</button>
+        <button className="btn primary" type="submit" aria-label="Save destination" disabled={busy || !name.trim() || (!t && !url.trim())}>{busy ? "Working…" : "Save"}</button>
         <button className="btn ghost" type="button" onClick={onCancel} disabled={busy}>Cancel</button>
       </div>
     </form>);
@@ -199,7 +197,7 @@ function SummaryCard({ s, reload, said }: { s: NotifySummary; reload: () => void
       </SettingRow>
       <div style={{ padding: "0 var(--pad) 12px", display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end" }}>
         {error && <p className="st bad" role="alert" style={{ margin: 0, alignSelf: "stretch" }}><Icon id="i-alert" /><span>{error}</span></p>}
-        <button className="btn" type="submit" disabled={busy}>{busy ? "Saving…" : "Save"}</button>
+        <button aria-label="Save summary" className="btn" type="submit" disabled={busy}>{busy ? "Saving…" : "Save"}</button>
       </div>
     </form>);
 }
@@ -223,7 +221,7 @@ function LinksCard({ linkBase, reload, said }: { linkBase: string | null; reload
       </SettingRow>
       <div style={{ padding: "0 var(--pad) 12px", display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end" }}>
         {error && <p className="st bad" role="alert" style={{ margin: 0, alignSelf: "stretch" }}><Icon id="i-alert" /><span>{error}</span></p>}
-        <button className="btn" type="submit" disabled={busy}>{busy ? "Saving…" : "Save"}</button>
+        <button aria-label="Save links" className="btn" type="submit" disabled={busy}>{busy ? "Saving…" : "Save"}</button>
       </div>
     </form>);
 }
@@ -232,9 +230,7 @@ export function NotificationsSettings() {
   const d = useData(getNotifications, []), [said, setSaid] = useState("");
   const notHere = d.error && (d.error.code === "http_404" || d.error.code === "not_found");
   return (
-    <div className="stack">
-      <PageHead icon="i-settings" title="Settings" />
-      <SettingsTabs at="notifications" />
+    <section id="notifications" aria-labelledby="h-where" className="stack settings-sec">
       <p className="muted" style={{ margin: 0 }}>Get a message when files finish or something needs you. Nothing is sent until you add a place to send it.</p>
       <p className="muted" role="status" style={{ margin: 0 }}>{said}</p>
       {notHere ? <p className="muted">This server can't send notifications yet.</p>
@@ -259,5 +255,5 @@ export function NotificationsSettings() {
                   <LinksCard key={d.data.linkBase ?? "none"} linkBase={d.data.linkBase} reload={d.reload} said={setSaid} />
                 </section>
               </>)}
-    </div>);
+    </section>);
 }

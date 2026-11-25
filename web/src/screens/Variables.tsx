@@ -3,8 +3,6 @@
 import { useEffect, useState } from "react";
 import { Icon } from "../Icon";
 import { failed, type Answer } from "../api";
-import { PageHead } from "../PageHead";
-import { SettingsTabs } from "../pages";
 import { SettingRow, ValueChip } from "../SettingRow";
 import { useData } from "../useData";
 import { getWorkflowVars, saveWorkflowVars, type VarIssue, type VarKind, type VarSave, type WorkflowVar } from "../workflowVarsApi";
@@ -64,8 +62,6 @@ export function VariablesSettings() {
   const notHere = d.error && (d.error.code === "http_404" || d.error.code === "not_found");
   return (
     <div className="stack">
-      <PageHead icon="i-settings" title="Settings" />
-      <SettingsTabs at="variables" />
       <p className="muted" role="status" style={{ margin: 0 }}>{said}</p>
       {notHere ? <p className="muted">This server can't keep variables yet.</p>
         : d.error && !d.data ? <p className="st bad" role="alert"><Icon id="i-alert" /><span>{d.error.message}</span></p>
@@ -172,12 +168,12 @@ function VariablesCard({ items, reload, said }: { items: WorkflowVar[]; reload: 
             ? <div className="stack" role="group" aria-label="Confirm the save">
               <p role="status" style={{ margin: 0 }}>This change affects {plural(phase.workflows.length, "workflow", "workflows")} and {plural(phase.libraries, "library", "libraries")}.</p>
               <div className="row" style={{ gap: 8 }}>
-                <button className="btn primary" type="button" disabled={busy} onClick={() => send(false)}>{busy ? "Saving…" : "Save"}</button>
+                <button className="btn primary" type="button" aria-label="Save variables" disabled={busy} onClick={() => send(false)}>{busy ? "Saving…" : "Save"}</button>
                 <button className="btn ghost" type="button" disabled={busy} onClick={() => setPhase(null)}>Cancel</button>
               </div>
             </div>
             : <div className="row" style={{ gap: 8 }}>
-              <button className="btn primary" type="button" disabled={busy || !dirty} onClick={() => send(true)}>{busy ? "Checking…" : "Save"}</button>
+              <button className="btn primary" type="button" aria-label="Save variables" disabled={busy || !dirty} onClick={() => send(true)}>{busy ? "Checking…" : "Save"}</button>
             </div>}
         </div>
       </div>
