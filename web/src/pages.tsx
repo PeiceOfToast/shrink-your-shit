@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Empty, PageHead } from "./PageHead";
 import type { NavItem } from "./nav";
 import { ACCENTS, DEFAULTS, DENSITIES, MOTIONS, TEXT_SIZES, THEMES, keep, preview, useAppearance, type Appearance } from "./prefs";
-import { Link, onLeave } from "./router";
+import { Link, onLeave, useHash } from "./router";
 import { SettingRow } from "./SettingRow";
 
 // What each page will hold (spec 4-9). Until its step lands it says so and offers nothing that looks like it works.
@@ -97,25 +97,52 @@ export function SettingsTabs({ at }: { at: SettingsTab }) {
 // A tab page: the head, the tab row, then its sections. Arriving on #anchor scrolls that section below the sticky bar
 // and moves focus to its heading (no smooth scroll under reduced motion).
 export function SettingsPage({ at, children }: { at: SettingsTab; children: ReactNode }) {
-  const hash = decodeURIComponent(location.hash.slice(1));
+  const hash = decodeURIComponent(useHash().slice(1));
   useEffect(() => {
     if (!hash) return;
+    // The landing holds while the page settles: a section above the target can grow after it lands (its data loads),
+    // so each resize re-lands at once, until 800 ms pass with no change, or the person scrolls or presses a key.
+    const USER = ["wheel", "touchstart", "keydown", "pointerdown"] as const;
+    const reduced = document.documentElement.dataset.motion === "reduced";
+    let tries = 0, look = 0, settle = 0, done = false, sec: HTMLElement | null = null, bodyH = -1;
+    const end = () => {
+      done = true;
+      window.clearTimeout(look);
+      window.clearTimeout(settle);
+      resized.disconnect();
+      USER.forEach((t) => window.removeEventListener(t, end));
+    };
+    const hold = () => {
+      window.clearTimeout(settle);
+      settle = window.setTimeout(end, 800);
+    };
+    const resized = new ResizeObserver(() => {
+      const h = document.body.getBoundingClientRect().height;
+      if (!sec || done || h === bodyH) return; // the first call only reports the size we started from
+      bodyH = h;
+      sec.scrollIntoView({ block: "start", behavior: "auto" }); // corrections are instant: no smooth scroll fighting a growing page
+      hold();
+    });
     // the section can render after its data loads, so look for it for a moment; an h2 takes focus only with tabIndex
-    let tries = 0;
-    let timer = 0;
     const land = () => {
-      const sec = document.getElementById(hash);
-      const h = sec?.querySelector<HTMLElement>("h2");
-      if (!sec || !h) {
-        if (tries++ < 40) timer = window.setTimeout(land, 50);
+      if (done) return;
+      const s = document.getElementById(hash);
+      const h = s?.querySelector<HTMLElement>("h2");
+      if (!s || !h) {
+        if (tries++ < 40) look = window.setTimeout(land, 50);
         return;
       }
-      sec.scrollIntoView({ block: "start", behavior: document.documentElement.dataset.motion === "reduced" ? "auto" : "smooth" });
+      sec = s;
+      s.scrollIntoView({ block: "start", behavior: reduced ? "auto" : "smooth" });
       h.tabIndex = -1;
       h.focus({ preventScroll: true });
+      bodyH = document.body.getBoundingClientRect().height;
+      resized.observe(document.body);
+      hold();
     };
+    USER.forEach((t) => window.addEventListener(t, end, { passive: true }));
     land();
-    return () => window.clearTimeout(timer);
+    return end;
   }, [hash]);
   return (
     <div className="stack">
