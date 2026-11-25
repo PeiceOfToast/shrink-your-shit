@@ -865,15 +865,15 @@ nav.tabs[aria-label="Settings sections"]>a{display:flex;align-items:center;justi
 @media (pointer:coarse){.gfold>summary{min-height:44px;display:flex;align-items:center}.gpi{min-height:44px}}
 .fieldbad>.field .input,.fieldbad>.field select,.fieldbad>.field input.switch,.fieldbad>fieldset{border-color:var(--error);box-shadow:0 0 0 1px var(--error)} /* #165: a setting with a value it cannot use */
 /* user item 5 (design 7.3): the Dashboard as an overview: stat tiles with sparklines (U6), flat sections, two small day charts */
-.ov .tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--s4)}
-.ov .tiles .tile{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:var(--s4);display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-rows:auto auto auto;gap:4px var(--s3);align-content:start;min-width:0}
-.ov .tiles .tile .l{grid-column:1;color:var(--text-2);font-size:var(--fs-sm);font-weight:var(--fw-strong)}
-.ov .tiles .tile .v{grid-column:1;font-size:var(--fs-display);font-weight:var(--fw-strong);line-height:1.1;letter-spacing:-.01em;overflow-wrap:anywhere}
-.ov .tiles .tile .v small{font-size:var(--fs-lg);font-weight:400;color:var(--text-2);letter-spacing:0;margin-left:6px}
-.ov .tiles .tile .v.ok{color:var(--success-text)}
-.ov .tiles .tile .d{grid-column:1;color:var(--text-2);font-size:var(--fs-sm);overflow-wrap:anywhere}
-.ov .tiles .tile .d a{color:var(--text)}.ov .tiles .tile .d a.bad{color:var(--error-text)}
-.ov .tiles .tile .spark{grid-column:2;grid-row:1/4;width:128px;height:56px;align-self:end;overflow:visible}
+/* Status strip (dashboard cards §1): the state word and its facts on the left, the Workers switch and Scan on the right; on a phone the actions wrap to their own line */
+.ov .status{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--s3) var(--s4);background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:var(--s4)}
+.ov .status-main{min-width:0;flex:1 1 320px}
+.ov .status-state{margin:0;display:flex;align-items:center;gap:8px;font-size:var(--fs-lg)}
+.ov .status-dot{width:10px;height:10px;border-radius:50%;background:var(--text-2);flex:none}
+.ov .status-dot.ok{background:var(--success)}.ov .status-dot.warn{background:var(--warning)}.ov .status-dot.bad{background:var(--error)}
+.ov .status-facts{margin:4px 0 0;color:var(--text-2);font-size:var(--fs-sm);overflow-wrap:anywhere}
+.ov .status-facts a{color:var(--text)}
+.ov .status-acts{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2)}
 .ov .sec>h2{font-size:var(--fs-lg);font-weight:var(--fw-strong);margin:0 0 10px;display:flex;align-items:baseline;gap:12px}
 .ov .sec>h2 .more{margin-left:auto;font-size:var(--fs);font-weight:400;color:var(--text-2)}
 .ov .sec+.sec{margin-top:20px}
@@ -887,33 +887,17 @@ nav.tabs[aria-label="Settings sections"]>a{display:flex;align-items:center;justi
 .ov .fname{display:block;overflow-wrap:anywhere}
 .ov .sub.live>span{white-space:nowrap} /* each stat stays on one line: a wrapped Speed box used to cover Time left */
 @media (min-width:901px){.ov .list .tbl td.sizec{min-width:9rem}} /* the saving cell keeps its width without nowrap (Dashboard only; Jobs keeps its own) */
-/* pass 1 (row e8c7e61d): the day charts lead the page, two side by side; dataviz marks (see DayBars) */
-.ov .charts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:32px}
-.ov .dchart{margin:0;position:relative;min-width:0}
-.ov .dchart h3.ch{font-size:var(--fs);font-weight:var(--fw-strong);margin:4px 0 6px;display:flex;flex-wrap:wrap;gap:4px 8px;align-items:baseline}
-.ov .dchart h3.ch .muted{font-weight:400;font-size:var(--fs-sm)}
 .ov .legend{display:flex;flex-wrap:wrap;gap:4px 16px;list-style:none;margin:0 0 6px;padding:0;font-size:var(--fs-sm);color:var(--text-2)}
 .ov .legend i,.ov .tip i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}
-.ov .daychart{width:100%;height:auto;display:block;overflow:visible}
 .ov .tip{position:absolute;top:44px;transform:translateX(-50%);pointer-events:none;z-index:5;display:grid;gap:3px;min-width:150px;padding:8px 10px;background:var(--raised);border:1px solid var(--border-strong);border-radius:var(--radius);font-size:var(--fs-sm);white-space:nowrap;box-shadow:0 8px 24px rgb(0 0 0/.25)}
 .ov .tip span{display:flex;align-items:center}.ov .tip em{font-style:normal;margin-left:auto;padding-left:16px;font-variant-numeric:tabular-nums;font-weight:var(--fw-strong)}
-/* the tile's bars: the wrapper is the tip's frame (it sizes like the old line), the tip sits just above the chart */
 .ov .sbars{position:relative}
 .ov .sbars svg{width:100%;height:100%;display:block;overflow:visible;cursor:default}
 .ov .sbars:focus-visible{outline:2px solid var(--focus);outline-offset:2px;border-radius:2px}
 .ov .sbars .tip{top:0;transform:translate(-50%,calc(-100% - 6px))}
-.ov .chartfoot{display:flex;flex-wrap:wrap;gap:8px 32px;align-items:baseline;margin-top:12px;color:var(--text-2);font-size:var(--fs-sm)}
-.ov .chartfoot b{color:var(--text);margin-left:6px}.ov .chartfoot details{margin-left:auto}.ov .chartfoot details[open]{flex-basis:100%;margin-left:0;min-width:0/* a flex item is as wide as its table otherwise, so .daytbl never scrolls and the page does (390 px) */}
 .ov .quiet{margin:0;display:flex;align-items:center;justify-content:center;text-align:center;min-height:160px;padding:12px;border:1px solid var(--border);border-radius:var(--radius)}.ov .quiet.short{min-height:80px}
 
-/* U6 review2: at 901-1280 px the sparkline sits under the text, full tile width, so the figure keeps the whole tile */
-@media (min-width:901px) and (max-width:1280px){
-  .ov .tiles .tile{grid-template-columns:minmax(0,1fr)}.ov .tiles .tile .spark{grid-column:1 / -1;grid-row:auto;width:100%;height:40px;align-self:auto}
-}
 @media (max-width:900px){
-  .ov .tiles{grid-template-columns:minmax(0,1fr)}.ov .tiles .tile{grid-template-columns:minmax(0,1fr) 96px}.ov .tiles .tile .spark{width:96px;height:40px}
-  .ov .charts{grid-template-columns:minmax(0,1fr);gap:24px}
-  .ov .legend.ph{display:none}
   .ov .ovt,.ov .ovt tbody{display:block}.ov .ovt thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
   .ov .ovt tr{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;padding:10px 0;border-bottom:1px solid var(--border)}
   .ov .ovt td{display:block;border:0;height:auto;padding:0;text-align:left}
@@ -922,20 +906,31 @@ nav.tabs[aria-label="Settings sections"]>a{display:flex;align-items:center;justi
   .ov .ovt td[data-l]:empty{display:none}
   .ov .savebar{margin-left:0}
 }
+/* D3: Space saved and Files converted are two cards in a grid (12 px gap; one column under 900 px), their 30 days as bars */
+.ov .cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.ov .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:var(--s4);display:flex;flex-direction:column;gap:4px;min-width:0}
+.ov .card .l{color:var(--text-2);font-size:var(--fs-sm);font-weight:var(--fw-strong)}
+.ov .card .v{font-size:var(--fs-display);font-weight:var(--fw-strong);line-height:1.1;letter-spacing:-.01em;overflow-wrap:anywhere}
+.ov .card .v small{font-size:var(--fs-lg);font-weight:400;color:var(--text-2);letter-spacing:0;margin-left:6px}
+.ov .card .v.ok{color:var(--success-text)}
+.ov .card .d{color:var(--text-2);font-size:var(--fs-sm);overflow-wrap:anywhere}
+.ov .card .d a{color:var(--text)}.ov .card .d a.bad{color:var(--error-text)}
+.ov .card .legend{margin:12px 0 0}
+.ov .cbars{margin-top:12px}
+.ov .cbars svg{width:100%;height:120px;display:block;overflow:visible;cursor:default}
+.ov .cbar-axis{display:flex;justify-content:space-between;color:var(--text-2);font-size:var(--fs-sm);margin-top:2px}
+.ov .cardfoot{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:baseline;margin-top:auto;padding-top:12px;color:var(--text-2);font-size:var(--fs-sm)}
+.ov .cardfoot details{margin-left:auto}.ov .cardfoot details[open]{flex-basis:100%;margin-left:0;min-width:0}
+@media (max-width:900px){.ov .cards{grid-template-columns:minmax(0,1fr)}}
 /* overview at phone widths (m7, overview-mock): the day table scrolls in its own box; links and the failed count are 44 px targets on touch */
 .ov .daytbl{overflow-x:auto;max-width:100%}.ov .daytbl td,.ov .daytbl th{white-space:nowrap}/* it scrolls now, so "567 MB" stays on one line */
-@media (pointer:coarse){.ov .sec>h2 .more,.ov .tiles .tile .d a,.ov a.fname,.ov td.nm a,.ov details>summary{display:inline-flex;align-items:center;min-height:44px}}
+@media (pointer:coarse){.ov .sec>h2 .more,.ov .card .d a,.ov a.fname,.ov td.nm a,.ov details>summary{display:inline-flex;align-items:center;min-height:44px}}
 .ov .kv{grid-template-columns:auto minmax(0,1fr)} /* the 30-day totals keep label and figure on one line on phones */
 /* U13 (C12), revised for M5c fix 1 (busy-5, the design's 390 shot): phones (599 px and below) stack the three stat cards in one
    column, each with its sparkline, and the "Last 30 days" block is a closed disclosure. */
 @media (max-width:599px){
-  .ov .tiles{grid-template-columns:minmax(0,1fr)}
-  .ov .tiles .tile .v{font-size:var(--fs-xl)}
   .ov .hide-phone{display:none}
 }
-.ov details.lastdays>summary{display:list-item;min-height:44px;cursor:pointer;align-items:center}
-.ov details.lastdays>summary>h2{display:inline;margin:0;font-size:var(--fs-lg);font-weight:var(--fw-strong)}
-.ov details.lastdays[open]>summary{margin-bottom:10px}
 /* Settings > Connections (V9e): a folder row is "<app> sees" -> "Shrink Your Shit sees" x; at phone widths the two fields stack */
 .cfold>summary{cursor:pointer;overflow-wrap:anywhere}
 .cmap{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr) auto;gap:8px;align-items:end}

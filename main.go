@@ -64,6 +64,9 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "restore" {
 		os.Exit(restoreCommand(os.Args[2:], os.Stdout, os.Stderr))
 	}
+	if len(os.Args) > 1 && os.Args[1] == "reset-password" { // forgotten sign-in password: set a new one on this computer
+		os.Exit(resetPasswordCommand(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))
+	}
 	logs := &doctor.LogTail{} // the last log lines, for the health report
 	log.SetOutput(io.MultiWriter(os.Stderr, logs))
 	var libs libFlag
@@ -369,6 +372,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("access token: %v", err)
 	}
+	if made, err := access.EnsureSetupToken(store); err != nil { // an unfinished install always has a token to show
+		log.Fatalf("access token: %v", err)
+	} else if made {
+		created = true
+	}
 	proxies, err := web.ParseTrustedProxies(*trustedProxies)
 	if err != nil {
 		log.Fatalf("-trusted-proxies: %v", err)
@@ -449,7 +457,7 @@ func main() {
 	case created: // the only time the token is logged
 		log.Printf("A new access token was made. Sign in at %s (to see it again: shrink-your-shit token)", signInURL(*addr, access.Token()))
 	case access.Required():
-		log.Print("The web page needs the access token. To see it: shrink-your-shit token")
+		log.Print("A browser may need a sign-in, depending on the sign-in choice and where it connects from: the password if one is set, or the access token if one is set. To see the access token, if one is set: shrink-your-shit token.")
 	}
 	if exposedToNetwork(*addr) {
 		log.Print("The web page is reachable from other machines (with the access token). There is no HTTPS: use it on a network you trust, never on the internet.")

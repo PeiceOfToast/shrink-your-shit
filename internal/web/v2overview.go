@@ -22,7 +22,7 @@ import (
 // and averages. Live: the page fetches it again on /api/v2/events' messages. Nothing is estimated
 // except a converting file's saving, which the person asked for (expectedSavingBytes): what isn't
 // recorded is null, or a day with recorded false.
-func v2Overview(api *http.ServeMux, store *jobs.Store, wv *workerView, libTotals *libraryTotals) {
+func v2Overview(api *http.ServeMux, store *jobs.Store, wv *workerView, libTotals *libraryTotals, eng Engine) {
 	overviewStats := &statsCache{} // this server's store's
 	if store != nil {              // so the first page view after start is not the slow one (setup tests run with no store)
 		overviewStats.warm(store)
@@ -201,9 +201,16 @@ func v2Overview(api *http.ServeMux, store *jobs.Store, wv *workerView, libTotals
 		}
 		converted := st.converted
 		zone := zoneName(now)
+		var nextScanAt any // null until the scanner has a next pass
+		if eng.NextScan != nil {
+			if t := eng.NextScan(); !t.IsZero() {
+				nextScanAt = t.UTC().Format(time.RFC3339)
+			}
+		}
 		writeJSON(w, map[string]any{
 			"headline": map[string]any{"freed": a.FreedBytes, "waitingToFree": a.WaitingBytes, "nextFreeAt": trash.NextDeleteAt,
-				"couldFree": a.CouldFreeBytes, "grew": a.GrewBytes, "filesConverted": converted, "filesWaiting": a.WaitingFiles}, // NET
+				"couldFree": a.CouldFreeBytes, "grew": a.GrewBytes, "filesConverted": converted, "filesWaiting": a.WaitingFiles, "lastDoneAt": nilIfEmpty(st.lastSaved)}, // NET
+			"nextScanAt":       nextScanAt,
 			"trash":            trash, // GROSS (the originals' own size): never added to the headline
 			"workers":          workers,
 			"active":           active,
@@ -375,6 +382,7 @@ type stats struct {
 	saving, perGB    float64
 	savingOK, timeOK bool
 	converted        int
+	lastSaved        string // when a file was last converted ("" when none)
 }
 
 func (c *statsCache) get(store *jobs.Store) (*stats, error) {
@@ -424,6 +432,9 @@ func takeStats(store *jobs.Store, now time.Time) (*stats, error) {
 		return nil, err
 	}
 	if st.converted, err = store.DoneCount(); err != nil {
+		return nil, err
+	}
+	if st.lastSaved, err = store.LastSavedAt(); err != nil {
 		return nil, err
 	}
 	return st, nil

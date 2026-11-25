@@ -21,3 +21,22 @@ func CanonLang(code string) string {
 	}
 	return iso6392T2B[c]
 }
+
+// MaxStepLanguages is how many languages one Audio or Subtitles step can list (G2).
+const MaxStepLanguages = 20
+
+// stepLangs are the languages the Audio step and the Subtitles step keep by (G2). Audio: its own list, else
+// the person's (langs, from Settings > General). Subtitles: its own, else the Audio step's, else the person's.
+func stepLangs(s Selectors, langs []string) (audio, subs []string) {
+	audio, subs = langs, langs
+	if len(s.AudioLangs) > 0 {
+		audio = s.AudioLangs
+	}
+	switch {
+	case len(s.SubLangs) > 0:
+		subs = s.SubLangs
+	case len(s.AudioLangs) > 0:
+		subs = s.AudioLangs
+	}
+	return audio, subs
+}

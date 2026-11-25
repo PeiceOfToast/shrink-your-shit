@@ -686,12 +686,16 @@ func workflowViewWith(store *jobs.Store, id int64, libs []jobs.Library) (map[str
 		"libraries": used, "activeJobs": runs.Active, "createdAt": f.Created, "changedAt": f.Changed,
 		"lastRun":          map[string]any{"at": nilIfEmpty(runs.LastAt), "completed": runs.Completed, "failed": runs.Failed, "skipped": runs.Skipped},
 		"changesOriginals": false}
+	v["guideFlow"] = "" // contract-g1c-tags: the questions' reading of the published revision; "" while unpublished
 	if latest.ID != 0 {
 		v["publishedRevisionId"], v["version"] = strconv.FormatInt(latest.ID, 10), latest.Number
 		v["draftDiffers"] = !fresh && draft.LogicHash != latest.LogicHash
 		v["changesOriginals"] = commitPolicy(latest.Doc, sc) == "replace"
 		if types := stepTypes(latest.Doc); slices.Equal(types, workflow.PresetOrder) {
 			v["presetId"] = "shrink_videos" // still the preset's steps (lead, Q3: detached once edited away)
+		}
+		if flow, tag := guideTag(latest.Doc); flow != "" {
+			v["guideFlow"], v["summaryTag"] = flow, tag
 		}
 	} else { // never published: the same fields, from its draft (review 109)
 		v["draftDiffers"] = true
@@ -718,6 +722,25 @@ func revisionView(r jobs.Revision, sc workflow.Scopes) map[string]any {
 		"workflow": workflow.Masked(r.Doc), "layout": r.Layout, "logicHash": r.LogicHash, "stackable": res.Stackable,
 		"stepSummaries": res.StepSummaries, "fileOn": res.FileOn, "validation": res.Issues, "etag": r.Etag, "createdAt": r.Created, "publishedAt": r.Published,
 		"guide": workflow.GuideOf(r.Doc)} // slice 12: the questions' reading of the draft
+}
+
+// guideTag is the published document as the questions read it (contract-g1c-tags): basic with the goal's
+// words, advanced, or custom; "" for a document that keeps an earlier install's settings, whose tag stays
+// the engine's.
+func guideTag(d workflow.Doc) (flow, tag string) {
+	for _, n := range d.Nodes {
+		if n.Type == workflow.TypeLegacy {
+			return "", ""
+		}
+	}
+	g := workflow.GuideOf(d)
+	switch {
+	case g.Coverage == workflow.CoverageFull && g.Answers != nil:
+		return "basic", "Basic · " + map[string]string{workflow.GoalSmaller: "Smaller files", workflow.GoalEveryDevice: "Plays everywhere", workflow.GoalBoth: "Small, plays on most"}[g.Answers.Goal]
+	case g.Advanced == workflow.CoverageFull:
+		return "advanced", "Advanced"
+	}
+	return "custom", "Custom"
 }
 
 func stepTypes(d workflow.Doc) []string {

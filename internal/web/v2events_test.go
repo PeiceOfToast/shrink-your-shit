@@ -133,7 +133,8 @@ func TestV2EventStreamHelloHasID(t *testing.T) {
 
 // The stream is behind the same sign-in as the rest of /api.
 func TestV2EventStreamNeedsSignIn(t *testing.T) {
-	srv, _, _, _ := libServer(t, true)
+	srv, _, a, _ := libServer(t, true)
+	passwordMode(t, a)
 	if code, _, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/events"}); code != http.StatusUnauthorized {
 		t.Errorf("signed out: %d", code)
 	}

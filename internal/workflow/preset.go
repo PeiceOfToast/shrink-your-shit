@@ -38,7 +38,7 @@ func FromTemplate(t rules.Template, prev *Doc) Doc {
 			node(TypeSkips, map[string]any{"includeDolbyVision": s.IncludeDolbyVision}),
 			node(TypeConvert, convertConfig(s)),
 			node(TypeAudio, audioConfig(s)),
-			node(TypeSubtitles, map[string]any{"subtitles": s.Subtitles}),
+			node(TypeSubtitles, subtitlesConfig(s)),
 			node(TypeContainer, map[string]any{"fileType": s.FileType}),
 			node(TypeVerify, map[string]any{}),
 			node(TypeCommit, commitConfig(s)),
@@ -255,13 +255,15 @@ func selectorsOf(order []Node, leaveFile bool) (rules.Selectors, []Issue) {
 	if a := by[TypeAudio]; a.Enabled {
 		s.Audio, s.OnlyMyLanguages = strOf(a.Config, "audio", s.Audio), boolOf(a.Config, "onlyMyLanguages", s.OnlyMyLanguages)
 		s.EvenLoudness = boolOf(a.Config, "evenLoudness", false) // F5: off unless the step asks for it
+		s.AudioLangs = stepLanguages(a.Config)                   // G2: the step's own list, none = the person's
 	} else {
-		s.Audio, s.OnlyMyLanguages = "as_is", false
+		s.Audio, s.OnlyMyLanguages, s.AudioLangs = "as_is", false, nil
 	}
 	if sub := by[TypeSubtitles]; sub.Enabled {
 		s.Subtitles = strOf(sub.Config, "subtitles", s.Subtitles)
+		s.SubLangs = stepLanguages(sub.Config)
 	} else {
-		s.Subtitles = "keep_all"
+		s.Subtitles, s.SubLangs = "keep_all", nil
 	}
 	if c := by[TypeContainer]; c.Enabled {
 		s.FileType = strOf(c.Config, "fileType", s.FileType)
@@ -572,7 +574,30 @@ func audioConfig(s rules.Selectors) map[string]any {
 	if s.EvenLoudness {
 		c["evenLoudness"] = true
 	}
+	if len(s.AudioLangs) > 0 { // G2: only when the step has its own list
+		c["languages"] = s.AudioLangs
+	}
 	return c
+}
+
+// subtitlesConfig is the Subtitles step's config for s; its own languages only when it has a list (G2).
+func subtitlesConfig(s rules.Selectors) map[string]any {
+	c := map[string]any{"subtitles": s.Subtitles}
+	if len(s.SubLangs) > 0 {
+		c["languages"] = s.SubLangs
+	}
+	return c
+}
+
+// stepLanguages is a step's own languages from its config, as canonical codes, each once; nil when it has none.
+func stepLanguages(c map[string]any) []string {
+	var out []string
+	for _, l := range listOf(c, "languages") {
+		if code := rules.CanonLang(l); code != "" && !slices.Contains(out, code) {
+			out = append(out, code)
+		}
+	}
+	return out
 }
 
 // convertConfig is the Convert video step's config for s; the rate control keys only when it is not the default.

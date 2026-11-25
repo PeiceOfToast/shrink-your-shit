@@ -40,11 +40,15 @@ type Selectors struct {
 	Notices []Notice `json:"notices,omitempty"`
 	Audio   string   `json:"audio"` // AvailableAudio (S6: design E's six choices)
 	// OnlyMyLanguages keeps only the audio in the person's languages, and tracks with none (S6; on by default).
-	OnlyMyLanguages bool   `json:"onlyMyLanguages"`
-	Subtitles       string `json:"subtitles"`           // AvailableSubtitles
-	FileType        string `json:"fileType"`            // mkv | mp4 | webm | keep (AvailableFileTypes)
-	AfterConverting string `json:"afterConverting"`     // replace | beside | folder (S6: with OutputDir)
-	OutputDir       string `json:"outputDir,omitempty"` // folder: where the new files go (design E)
+	OnlyMyLanguages bool `json:"onlyMyLanguages"`
+	// AudioLangs and SubLangs are the Audio and Subtitles steps' own languages (G2, ISO 639-2 codes, at most
+	// MaxStepLanguages). Empty: the step uses the person's languages (Settings > General). See stepLangs.
+	AudioLangs      []string `json:"audioLanguages,omitempty"`
+	SubLangs        []string `json:"subtitleLanguages,omitempty"`
+	Subtitles       string   `json:"subtitles"`           // AvailableSubtitles
+	FileType        string   `json:"fileType"`            // mkv | mp4 | webm | keep (AvailableFileTypes)
+	AfterConverting string   `json:"afterConverting"`     // replace | beside | folder (S6: with OutputDir)
+	OutputDir       string   `json:"outputDir,omitempty"` // folder: where the new files go (design E)
 	// KeepIfBigger (R8, "Save the result"): a new file bigger than its original is not saved; the original
 	// stays. False (the default for flows without a workflow, and a workflow's "replace") saves it anyway.
 	KeepIfBigger bool `json:"keepIfBigger,omitempty"`
@@ -119,6 +123,16 @@ func (s Selectors) Validate() error {
 	notYet := func(msg string) error { return &SelectorError{"not_available", msg + " Nothing was changed."} }
 	if _, ok := SliderAt(s.Quality); !ok {
 		return &SelectorError{"invalid_quality", "quality must be a slider position from 1 to 5. Nothing was changed."}
+	}
+	for _, list := range [][]string{s.AudioLangs, s.SubLangs} {
+		if len(list) > MaxStepLanguages {
+			return &SelectorError{"invalid", fmt.Sprintf("A step can have at most %d languages. Nothing was changed.", MaxStepLanguages)}
+		}
+		for _, l := range list {
+			if CanonLang(l) == "" {
+				return &SelectorError{"invalid", fmt.Sprintf("%q is not a language code (use codes like eng, fre, ger, or en, fr, de). Nothing was changed.", l)}
+			}
+		}
 	}
 	if _, ok := SpeedPresets[s.Speed]; !ok {
 		return invalid("speed", s.Speed)

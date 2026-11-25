@@ -265,22 +265,23 @@ func TestGuideCheckNamesTheQuestion(t *testing.T) {
 	if iss[1].Message != "'mpeg2' is not a choice here." {
 		t.Errorf("%q", iss[1].Message)
 	}
-	// review-715 P2-1: until G2, languages chosen here can only go to Settings, so the preview and the save agree
-	if iss := Check(Answers{Languages: []string{"eng"}}); len(iss) != 1 || iss[0].Field != "languages" || !strings.Contains(iss[0].Message, "apply everywhere") {
-		t.Errorf("languages without everywhere: %+v", iss)
+	// G2 (review-715 P2-1 was for before G2): each step keeps its own list, so a choice here is accepted
+	if iss := Check(Answers{Languages: []string{"eng"}}); len(iss) != 0 {
+		t.Errorf("audio languages without everywhere, under G2: %+v", iss)
 	}
 	if iss := Check(Answers{Languages: []string{"eng"}, LanguagesEverywhere: true}); len(iss) != 0 {
 		t.Errorf("languages everywhere: %+v", iss)
 	}
-	if iss := Check(Answers{SubtitleLanguages: []string{"eng"}}); len(iss) != 1 || iss[0].Field != "subtitleLanguages" {
-		t.Errorf("subtitle languages: %+v", iss)
+	if iss := Check(Answers{SubtitleLanguages: []string{"eng"}}); len(iss) != 0 {
+		t.Errorf("subtitle languages, under G2: %+v", iss)
 	}
-	// review-715 P3-2: a built workflow carries no languages key before G2
+	// G2: the audio list is on the audio step; subtitles carry none unless the person sets some
 	d := Build(Answers{Languages: []string{"eng"}, LanguagesEverywhere: true})
-	for _, typ := range []string{TypeAudio, TypeSubtitles} {
-		if _, has := guideConfig(d, typ)["languages"]; has {
-			t.Errorf("%s has a languages key before G2", typ)
-		}
+	if _, has := guideConfig(d, TypeAudio)["languages"]; !has {
+		t.Error("the audio step has no languages key under G2")
+	}
+	if _, has := guideConfig(d, TypeSubtitles)["languages"]; has {
+		t.Error("the subtitles step has a languages key it was not given")
 	}
 }
 

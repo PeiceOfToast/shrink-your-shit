@@ -99,9 +99,9 @@ func TestGuidedBuilderAPI(t *testing.T) {
 	if set, _ := LoadSettings(st); strings.Join(set.Languages, ",") != "eng,ger" {
 		t.Errorf("languages everywhere: %v", set.Languages)
 	}
-	// G2's key is not there yet, so the per-workflow list stays out of the draft and reads back empty
-	if len(a.Languages) != 0 || strings.Contains(body, `"languages":["eng"`) {
-		t.Errorf("the languages key must wait for G2: %s", body)
+	// G2: the audio step carries the languages, and the guide reads them back from it
+	if strings.Join(a.Languages, ",") != "eng,ger" {
+		t.Errorf("the audio step's languages must read back from the draft: %v", a.Languages)
 	}
 	// answers saved into the draft: only the owned steps change; a stale version is refused
 	code, body = send("PUT", "/api/v2/workflows/"+id+"/answers", `{"answers":{"goal":"both","quality":2,"after":{}}}`, rev.Etag)
@@ -142,5 +142,136 @@ func TestGuidedBuilderAPI(t *testing.T) {
 	}
 	if code, b := send("PUT", "/api/v2/workflows/"+strconv.FormatInt(f.ID, 10)+"/answers", `{"answers":{}}`, rev.Etag); code != 409 || errCode(b) != "not_guided" {
 		t.Errorf("not guided: %d %s", code, b)
+	}
+}
+
+// contract-g1c-tags: the list's guideFlow and summaryTag follow the questions' reading of the published
+// revision: basic with the goal's words, advanced, custom; "" while unpublished or for an earlier
+// install's settings, whose tag stays the engine's.
+func TestWorkflowListTagsFollowTheQuestions(t *testing.T) {
+	rules.SetAvailableFormats(map[string]bool{"libx265": true, "libx264": true, "aac": true})
+	defer rules.SetAvailableFormats(nil)
+	srv, st, _, _ := libServer(t, false)
+	send := func(method, path, body, ifMatch string) (int, string) {
+		t.Helper()
+		req, _ := http.NewRequest(method, srv.URL+path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		if ifMatch != "" {
+			req.Header.Set("If-Match", ifMatch)
+		}
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		b, _ := io.ReadAll(res.Body)
+		return res.StatusCode, string(b)
+	}
+	item := func(id string) (flow, tag string) {
+		t.Helper()
+		_, body := send("GET", "/api/v2/workflows/"+id, "", "")
+		var v struct {
+			GuideFlow  string
+			SummaryTag string
+		}
+		json.Unmarshal([]byte(body), &v)
+		return v.GuideFlow, v.SummaryTag
+	}
+	publish := func(id string) {
+		t.Helper()
+		_, body := send("GET", "/api/v2/workflows/"+id+"/draft", "", "")
+		etag := decode[map[string]any](t, body)["etag"].(string)
+		if code, b := send("POST", "/api/v2/workflows/"+id+"/publish", `{"etag":"`+etag+`"}`, ""); code != 200 {
+			t.Fatalf("publish: %d %s", code, b)
+		}
+	}
+	// a Basic workflow: "" until it is published, then Basic with its goal's words
+	_, body := send("POST", "/api/v2/workflows", `{"name":"Phones","answers":{"goal":"every_device"}}`, "")
+	id := decode[map[string]any](t, body)["id"].(string)
+	if flow, _ := item(id); flow != "" {
+		t.Errorf("unpublished: %q", flow)
+	}
+	publish(id)
+	if flow, tag := item(id); flow != "basic" || tag != "Basic · Plays everywhere" {
+		t.Errorf("basic: %q %q", flow, tag)
+	}
+	// the other two goals' words (review-726: the words per goal are pinned, not just one)
+	for goal, want := range map[string]string{"smaller": "Basic · Smaller files", "both": "Basic · Small, plays on most"} {
+		_, b := send("POST", "/api/v2/workflows", `{"name":"Goal `+goal+`","answers":{"goal":"`+goal+`"}}`, "")
+		gid := decode[map[string]any](t, b)["id"].(string)
+		publish(gid)
+		if flow, tag := item(gid); flow != "basic" || tag != want {
+			t.Errorf("%s: %q %q", goal, flow, tag)
+		}
+	}
+	// an Advanced one: a condition in front
+	_, body = send("POST", "/api/v2/workflows", `{"name":"Samples out","answers":{"flow":"advanced","before":[{"type":"check.name","config":{"pattern":"sample"},"then":{"side":"yes","end":"leave"}}]}}`, "")
+	id2 := decode[map[string]any](t, body)["id"].(string)
+	publish(id2)
+	if flow, tag := item(id2); flow != "advanced" || tag != "Advanced" {
+		t.Errorf("advanced: %q %q", flow, tag)
+	}
+	// the list carries the same fields as the single GET (review-726)
+	_, body = send("GET", "/api/v2/workflows", "", "")
+	var list struct {
+		Items []struct {
+			ID, GuideFlow, SummaryTag string
+		}
+	}
+	json.Unmarshal([]byte(body), &list)
+	found := map[string][2]string{}
+	for _, it := range list.Items {
+		found[it.ID] = [2]string{it.GuideFlow, it.SummaryTag}
+	}
+	if found[id] != [2]string{"basic", "Basic · Plays everywhere"} || found[id2] != [2]string{"advanced", "Advanced"} {
+		t.Errorf("list: %v %v", found[id], found[id2])
+	}
+	// custom: the published document has a question whose both sides go on
+	_, body = send("GET", "/api/v2/workflows/"+id2+"/draft", "", "")
+	var rev struct {
+		Workflow workflow.Doc
+		Layout   workflow.Layout
+		Etag     string
+	}
+	json.Unmarshal([]byte(body), &rev)
+	doc := rev.Workflow
+	var q, skips string
+	for _, n := range doc.Nodes {
+		if n.Type == workflow.TypeCheckName {
+			q = n.ID
+		}
+		if n.Type == workflow.TypeSkips {
+			skips = n.ID
+		}
+	}
+	for i := range doc.Edges { // the Yes side goes on too
+		if doc.Edges[i].From == q && doc.Edges[i].FromPort == "match" {
+			doc.Edges[i].To = skips
+		}
+	}
+	put, _ := json.Marshal(map[string]any{"workflow": doc, "layout": rev.Layout})
+	if code, b := send("PUT", "/api/v2/workflows/"+id2+"/draft", string(put), rev.Etag); code != 200 {
+		t.Fatalf("hand edit: %d %s", code, b)
+	}
+	if flow, tag := item(id2); flow != "advanced" || tag != "Advanced" {
+		t.Errorf("a draft edit must not change the published reading: %q %q", flow, tag)
+	}
+	publish(id2)
+	if flow, tag := item(id2); flow != "custom" || tag != "Custom" {
+		t.Errorf("custom: %q %q", flow, tag)
+	}
+	// an earlier install's settings keep the engine's tag
+	f, err := st.AddWorkflow("Old", workflow.FromTemplate(rules.Template{Kind: rules.KindLegacy}, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := strconv.FormatInt(f.ID, 10)
+	if d, _, err := st.Draft(f.ID); err != nil { // the API refuses to publish an earlier install's settings; the store can
+		t.Fatal(err)
+	} else if _, err := st.Publish(f.ID, d.Etag, rules.Template{Kind: rules.KindLegacy}); err != nil {
+		t.Fatal(err)
+	}
+	if flow, tag := item(old); flow != "" || tag != "Earlier install" {
+		t.Errorf("earlier install: %q %q", flow, tag)
 	}
 }

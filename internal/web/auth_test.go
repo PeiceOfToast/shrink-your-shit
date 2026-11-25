@@ -51,6 +51,7 @@ func server(t *testing.T, exposed bool) (*httptest.Server, *Access, *jobs.Store)
 
 type call struct {
 	method, path, body, ctype, bearer, origin, fetchSite string
+	forwardedFor                                         string // X-Forwarded-For, as a proxy would send it
 }
 
 func do(t *testing.T, c *http.Client, srv *httptest.Server, k call) (int, string, *http.Response) {
@@ -71,6 +72,9 @@ func do(t *testing.T, c *http.Client, srv *httptest.Server, k call) (int, string
 	}
 	if k.fetchSite != "" {
 		req.Header.Set("Sec-Fetch-Site", k.fetchSite)
+	}
+	if k.forwardedFor != "" {
+		req.Header.Set("X-Forwarded-For", k.forwardedFor)
 	}
 	if c == nil {
 		c = http.DefaultClient
@@ -97,8 +101,20 @@ func jar(t *testing.T) *http.Client {
 	return &http.Client{Jar: j}
 }
 
+// A new install makes a token at once: it is locked until first-run is done, and the token is how to get in.
+func TestNewInstallMakesAToken(t *testing.T) {
+	a, created, err := OpenAccess(t.TempDir(), false)
+	if err != nil || !created || len(a.Token()) != 43 || !a.Required() {
+		t.Fatalf("new install: created=%v required=%v err=%v", created, a.Required(), err)
+	}
+}
+
 func TestOpenAccessMakesATokenOnlyWhenExposed(t *testing.T) {
 	dir := t.TempDir()
+	// an install that already has its sign-in choice but no token: loopback makes none, exposing it does
+	if err := writeSignin(dir, signinState{Mode: ModeHome}); err != nil {
+		t.Fatal(err)
+	}
 	a, created, err := OpenAccess(dir, false)
 	if err != nil || created || a.Required() {
 		t.Fatalf("loopback must not make a token: %v %v %v", created, a.Required(), err)
@@ -122,8 +138,18 @@ func TestOpenAccessMakesATokenOnlyWhenExposed(t *testing.T) {
 	}
 }
 
+// passwordMode puts the server in password mode. These tests are about the token: in home mode a request
+// from loopback needs no sign-in at all, so they must choose the mode that asks for it.
+func passwordMode(t *testing.T, a *Access) {
+	t.Helper()
+	if err := a.save(signinState{Mode: ModePassword}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestNoAuthIs401(t *testing.T) {
-	srv, _, _ := server(t, true)
+	srv, a, _ := server(t, true)
+	passwordMode(t, a)
 	for _, k := range []call{
 		{method: "GET", path: "/api/status"},
 		{method: "GET", path: "/api/settings"},
@@ -140,13 +166,14 @@ func TestNoAuthIs401(t *testing.T) {
 
 func TestCookieLogin(t *testing.T) {
 	srv, a, _ := server(t, true)
+	passwordMode(t, a)
 	c := jar(t)
 	code, body, _ := do(t, c, srv, call{method: "POST", path: "/api/login", body: `{"token":"wrong"}`, ctype: "application/json"})
 	if code != 401 || errCode(body) != "bad_token" {
 		t.Fatalf("wrong token: %d %s", code, body)
 	}
 	code, _, resp := do(t, c, srv, call{method: "POST", path: "/api/login", body: `{"token":"` + a.Token() + `"}`, ctype: "application/json"})
-	if code != 200 {
+	if code != 204 {
 		t.Fatalf("login: %d", code)
 	}
 	ck := resp.Cookies()
@@ -164,6 +191,7 @@ func TestCookieLogin(t *testing.T) {
 
 func TestBearer(t *testing.T) {
 	srv, a, _ := server(t, true)
+	passwordMode(t, a)
 	if code, _, _ := do(t, nil, srv, call{method: "GET", path: "/api/status", bearer: a.Token()}); code != 200 {
 		t.Errorf("bearer: %d", code)
 	}
@@ -215,11 +243,12 @@ func TestLoopbackWithoutTokenIsOpen(t *testing.T) {
 	if code, _, _ := do(t, nil, srv, call{method: "GET", path: "/api/status"}); code != 200 {
 		t.Errorf("status: %d", code)
 	}
-	if code, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/settings"}); code != 200 || !strings.Contains(body, `"authRequired":false`) {
+	// a new install has a token (it is locked until setup is done), so authRequired is true; loopback is still open
+	if code, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/settings"}); code != 200 || !strings.Contains(body, `"authRequired":true`) {
 		t.Errorf("settings: %d %s", code, body)
 	}
-	if code, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/settings/token"}); code != 404 || errCode(body) != "no_token" {
-		t.Errorf("token with none set: %d %s", code, body)
+	if code, body, _ := do(t, nil, srv, call{method: "GET", path: "/api/settings/token"}); code != 200 || !strings.Contains(body, `"token"`) {
+		t.Errorf("token of a new install, read from loopback: %d %s", code, body)
 	}
 	// writes still have to come from this site: a page on another site could otherwise reach 127.0.0.1
 	if code, _, _ := do(t, nil, srv, call{method: "POST", path: "/api/jobs/1/retry", body: "{}", ctype: "application/json", origin: "http://evil.example"}); code != 403 {
@@ -243,6 +272,7 @@ func TestStoredTokenIsEnforcedOnLoopback(t *testing.T) {
 
 func TestRotateEndsSessions(t *testing.T) {
 	srv, a, _ := server(t, true)
+	passwordMode(t, a)
 	old := a.Token()
 	me, other := jar(t), jar(t)
 	for _, c := range []*http.Client{me, other} {
