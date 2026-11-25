@@ -3,6 +3,7 @@
 package worker
 
 import (
+	"database/sql"
 	"errors"
 	"os"
 	"path/filepath"
@@ -199,6 +200,47 @@ func TestForgetMarksAGoneOriginal(t *testing.T) {
 	var fe *ForgetError
 	if !errors.As(err, &fe) || fe.Code != "not_kept" {
 		t.Errorf("a second forget: %v, want not_kept", err)
+	}
+}
+
+// U-B live shape (CT 124): the library keeps its old path, the old root is gone, and only share_mounts names the
+// new root. The purge must find the original through MountRoots, re-home it, and delete it once its day is up.
+func TestEmptyTrashFindsAMovedOriginalByMountOnly(t *testing.T) {
+	s, o := keptOne(t)
+	newRoot := filepath.Join(t.TempDir(), "mnt", "ssd", "Shows", "Arcane")
+	if err := os.MkdirAll(filepath.Dir(newRoot), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(s.dir, newRoot); err != nil {
+		t.Fatal(err)
+	}
+	sh, err := s.store.SaveShare(jobs.Share{Type: "smb", Address: "//h/x", Name: "ssd", Guest: true}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.SetShareMountStatus(sh.ID, "linux", "connected", ""); err != nil {
+		t.Fatal(err)
+	}
+	// The store has no setter for mount_path; write it the way the share daemon records it.
+	db, err := sql.Open("sqlite", s.dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`UPDATE share_mounts SET mount_path=? WHERE share_id=?`, newRoot, sh.ID); err != nil {
+		t.Fatal(err)
+	}
+	movedTrash := filepath.Join(newRoot, TrashDir, filepath.Base(o.Trash))
+	rep := Purge(s.store, 0, later(t, o), nil, 0)
+	if rep.Deleted != 1 {
+		t.Fatalf("deleted %d, want 1; said %q; unreachable %+v", rep.Deleted, rep.Said, rep.Unreachable)
+	}
+	if _, err := os.Stat(movedTrash); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the moved original is still there: %v", err)
+	}
+	r, _ := s.store.OriginalByID(o.ID)
+	if r.State != jobs.OriginalPurged {
+		t.Errorf("row %s, want purged", r.State)
 	}
 }
 
