@@ -211,7 +211,7 @@ export function Overview() {
     tot.waiting > 0 && <Link to="/jobs?tab=completed&kept=1">{bytes(tot.waiting) + " waiting in the trash"}</Link>, tot.kept > 0 && <Link to="/jobs?tab=completed&left=1">{bytes(tot.kept) + " in originals left in place"}</Link>]
     .filter(Boolean).map((p, i) => <Fragment key={i}>{i > 0 && " · "}{p}</Fragment>);
   // Get started's three ticks from data this page already has: a library, a workflow, a worker on
-  const wfCount = wf.data && !failed(wf.data) ? wf.data.length : 0, steps = getStartedSteps(v.libraries.length, wfCount, on);
+  const wfCount = wf.data && !failed(wf.data) ? wf.data.length : 0, steps = getStartedSteps(v.libraries.length, wfCount, rows.filter((w) => w.status === "busy" || w.status === "online" || w.status === "draining").length);
   // a step's button is live once its prerequisite is done: a library needs a published workflow (step 2), so step 1 waits for it
   const side = (i: number, to: string, label: string, ready = true, after = 0) => steps[i] ? <span className="pill ok">Done</span> : ready ? <Link className="btn sm primary" to={to}>{label}</Link> : <span className="muted sm">after step {after}</span>;
   const workerOf = (id: string) => rows.find((w) => w.jobs.some((j) => j.jobId === id))?.name;
