@@ -229,7 +229,8 @@ export function Overview() {
   const healthShown = failedNow.length > 0 && failKey !== hidKey, summaryOk = !!sum.data && !failed(sum.data), libsOk = !!libs.data && !failed(libs.data);
   const attn = attentionRows({ failures: sum.data && !failed(sum.data) ? sum.data.recentFailures : [], libraryIds: libsOk ? new Set([...libOf.keys()]) : null, healthShown, fallbacks: v.encoderFallbacks?.length ?? 0, libraries: v.libraries });
   // the Status strip (dashboard cards §1): "Nothing needs you" only once the summary and the libraries have loaded
-  const needsNone = summaryOk && libsOk && attn.none;
+  const docOk = !!doc.data && !failed(doc.data); // no health answer yet, or none at all, is not "nothing needs you"
+  const needsNone = summaryOk && libsOk && docOk && attn.none;
   // while the Get started card shows, the strip says which step is missing (Off), not the usual facts
   const fresh = freshFact(starting ? nextStep(steps) : null);
   const sw = fresh ? { word: "Off", tone: "muted" as const } : stateWord(rows, h.filesWaiting), wfact = workersFact(rows), facts: ReactNode[] = [];

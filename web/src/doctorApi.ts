@@ -4,6 +4,7 @@ import { call, MOCK, type Answer } from "./api";
 import type { Doctor, DoctorCheck } from "./types/doctor";
 
 const fresh = new URLSearchParams(location.search).get("mock") === "fresh";
+const calm = new URLSearchParams(location.search).has("calm"); // D2: ?calm is an all-good install (no Fail, no warning)
 let tested = new Date(Date.now() - 2 * 3600000).toISOString();
 const c = (id: string, label: string, status: DoctorCheck["status"], detail: string, hint: string | null = null): DoctorCheck => ({ id, label, status, detail, hint });
 function mockDoctor(): Doctor {
@@ -25,7 +26,7 @@ function mockDoctor(): Doctor {
         c("library:2:access", "Library access", "ok", "TV: readable and writable."),
         c("library:2:space", "Library free space", "ok", "TV: enough free space."),
         c("library:2:hardlinks", "Hard-linked files", "warn", "TV: 12 files are shared with another folder (for example by Radarr). We will leave them alone, because changing one would break the link.", "Leave them, or exclude the seeding folder.")]),
-    ] };
+    ].filter((k) => !calm || k.status === "ok" || k.status === "absent") };
 }
 
 export async function getDoctor(retest = false): Promise<Answer<Doctor>> {
