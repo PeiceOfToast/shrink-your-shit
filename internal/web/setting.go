@@ -648,6 +648,12 @@ func changedEcho(body map[string]json.RawMessage, s *rules.Selectors) bool {
 		case "keepifbigger":
 			var x bool
 			same = json.Unmarshal(v, &x) == nil && x == cur.KeepIfBigger
+		case "audiolanguages": // G2: the step's own list, echoed; a changed list is refused, not dropped
+			var x []string
+			same = json.Unmarshal(v, &x) == nil && slices.Equal(x, cur.AudioLangs)
+		case "subtitlelanguages":
+			var x []string
+			same = json.Unmarshal(v, &x) == nil && slices.Equal(x, cur.SubLangs)
 		default:
 			continue
 		}

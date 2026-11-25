@@ -226,3 +226,28 @@ func TestLibrarySettingWithStepLanguagesSavesItsGetBody(t *testing.T) {
 		t.Errorf("the step lists changed: audio %v, subtitles %v", got.AudioLangs, got.SubLangs)
 	}
 }
+
+// A changed step list is refused with 409 and nothing is saved (#724 round 3); the same save with the list echoed
+// unchanged goes through.
+func TestChangedStepListIsRefusedNotDropped(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	sel := rules.DefaultSelectors(3)
+	sel.Audio, sel.OnlyMyLanguages, _ = rules.StandardAudio("my_languages", true)
+	sel.AudioLangs = []string{"eng", "ger"}
+	l, _ := st.AddLibrary("Movies", t.TempDir(), sel.Template(), true)
+	path := fmt.Sprintf("/api/libraries/%d/setting", l.ID)
+	_, before, _ := do(t, nil, srv, call{method: "GET", path: path})
+	var m map[string]any
+	if err := json.Unmarshal([]byte(before), &m); err != nil {
+		t.Fatal(err)
+	}
+	m["audioLanguages"] = []string{"fre"}
+	b, _ := json.Marshal(m)
+	code, out := post(t, srv, "PUT", path, string(b))
+	if code != 409 || errCode(out) != "edit_in_new_ui" {
+		t.Fatalf("changed step list: %d %s, want 409 edit_in_new_ui", code, out)
+	}
+	if f, _ := st.GetFlow(l.FlowID); f.Template.Selectors == nil || !slices.Equal(f.Template.Selectors.AudioLangs, []string{"eng", "ger"}) {
+		t.Errorf("the refused save changed the stored list: %+v", f.Template.Selectors)
+	}
+}

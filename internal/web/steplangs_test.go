@@ -73,11 +73,20 @@ func TestStepLanguagesAreKeptAcrossASave(t *testing.T) {
 	}
 }
 
-// A body that tries to set a step list is refused as an unknown choice: the page does not offer one.
+// The page cannot set a step list: a changed list is refused (409, the same as the other echoed fields the
+// page cannot set), and an echo of the stored list is not a change.
 func TestPageCannotSetAStepList(t *testing.T) {
-	_, err := readSelectors(selectorsBody(t, map[string]any{"audio": "keep_all", "audioLanguages": []string{"eng"}}), nil, nil)
-	if selectorCode(err) != "invalid" {
-		t.Errorf("want invalid for audioLanguages in the page body, got %v", err)
+	stored := &rules.Selectors{AudioLangs: []string{"jpn"}, SubLangs: []string{"eng", "fre"}}
+	changed := selectorsBody(t, map[string]any{"audioLanguages": []string{"eng"}})
+	if !changedEcho(changed, stored) {
+		t.Error("a changed audioLanguages list must count as a change")
+	}
+	echo := selectorsBody(t, map[string]any{"audioLanguages": []string{"jpn"}, "subtitleLanguages": []string{"eng", "fre"}})
+	if changedEcho(echo, stored) {
+		t.Error("an echo of the stored lists is not a change")
+	}
+	if !changedEcho(selectorsBody(t, map[string]any{"subtitleLanguages": []string{"fre"}}), stored) {
+		t.Error("a changed subtitleLanguages list must count as a change")
 	}
 }
 
