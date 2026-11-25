@@ -227,7 +227,7 @@ export function Overview() {
   const more = [h.waitingToFree > 0 && bytes(h.waitingToFree) + (h.freed > 0 ? " more" : " frees") + (h.nextFreeAt ? " by " + dayName(h.nextFreeAt.slice(0, 10)) : ""), h.couldFree > 0 && <Link to="/jobs?tab=completed&left=1">{"could free " + bytes(h.couldFree) + " if you remove the originals"}</Link>].filter(Boolean).map((p, i) => <Fragment key={i}>{i > 0 && " · "}{p}</Fragment>);
   // Needs attention (D2): one list from the page's own data; the card and the Status strip's "Nothing needs you" both read attn.none
   const healthShown = failedNow.length > 0 && failKey !== hidKey, summaryOk = !!sum.data && !failed(sum.data), libsOk = !!libs.data && !failed(libs.data);
-  const attn = attentionRows({ failures: sum.data && !failed(sum.data) ? sum.data.recentFailures : [], libraryIds: new Set([...libOf.keys()]), healthShown, fallbacks: v.encoderFallbacks?.length ?? 0, libraries: v.libraries });
+  const attn = attentionRows({ failures: sum.data && !failed(sum.data) ? sum.data.recentFailures : [], libraryIds: libsOk ? new Set([...libOf.keys()]) : null, healthShown, fallbacks: v.encoderFallbacks?.length ?? 0, libraries: v.libraries });
   // the Status strip (dashboard cards §1): "Nothing needs you" only once the summary and the libraries have loaded
   const needsNone = summaryOk && libsOk && attn.none;
   // while the Get started card shows, the strip says which step is missing (Off), not the usual facts
@@ -273,7 +273,7 @@ export function Overview() {
             <span className="ltile" aria-hidden="true"><Icon id="i-alert" /></span>
             <div className="lmain"><div className="lname"><b>{failedNow.length === 1 ? "A health check failed" : plural(failedNow.length, "health check", "health checks") + " failed"}:</b></div>
               <span className="sm">{failedNow[0].detail} <Link to="/settings/system#health">Open Health</Link></span></div>
-            <div className="lside"><button className="btn sm ghost" type="button" onClick={hideHealth}>Dismiss</button></div>
+            <div className="lside"><button className="btn sm ghost" type="button" aria-label="Dismiss the health check note" onClick={hideHealth}>Dismiss</button></div>
           </li>}
           {v.encoderFallbacks?.map((f) => <li key={f.workerId} className="lcard">
             <span className="ltile" aria-hidden="true"><Icon id="i-alert" /></span>

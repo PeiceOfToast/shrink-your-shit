@@ -13,13 +13,14 @@ export const LIBRARY_WORD: Record<string, [word: string, meaning: string]> = {
 
 export function attentionRows<F extends AttentionFailure, L extends AttentionLibrary>(a: {
   failures: F[]; // the summary's recent failures, newest first
-  libraryIds: Set<string>; // the libraries the page loaded
+  libraryIds: Set<string> | null; // the libraries the page loaded; null while they have not loaded (keep every failure)
   healthShown: boolean; // a failed health check the person hasn't dismissed
   fallbacks: number; // encoder fall-back notes
   libraries: L[];
 }) {
   // a failure from a library the page doesn't have (removed) is dropped; it stays in the Jobs log
-  const loaded = a.failures.filter((f) => f.libraryId != null && a.libraryIds.has(String(f.libraryId)));
+  const ids = a.libraryIds;
+  const loaded = ids === null ? a.failures : a.failures.filter((f) => f.libraryId != null && ids.has(String(f.libraryId)));
   const failures = loaded.slice().sort((x, y) => (y.finishedAt ?? "").localeCompare(x.finishedAt ?? "")).slice(0, 3);
   const dropped = a.failures.length - loaded.length;
   const libraries = a.libraries.filter((l) => l.state !== "active");
