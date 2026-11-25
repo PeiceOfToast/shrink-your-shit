@@ -287,3 +287,11 @@ func (s *Store) DoneCount() (int, error) {
 	err := s.reader().QueryRow(`SELECT COUNT(DISTINCT path) FROM jobs WHERE ` + convertedNow("jobs") + ` AND ` + newestSQL).Scan(&n)
 	return n, err
 }
+
+// LastSavedAt is when a file was last converted: the update time of the newest converted job (see convertedNow),
+// or of a kept job whose output is in place. "" when there is none.
+func (s *Store) LastSavedAt() (string, error) {
+	var at string
+	err := s.reader().QueryRow(`SELECT COALESCE(MAX(updated),'') FROM jobs WHERE (` + convertedNow("jobs") + `) OR (jobs.status='kept' AND jobs.output_path<>'')`).Scan(&at)
+	return at, err
+}

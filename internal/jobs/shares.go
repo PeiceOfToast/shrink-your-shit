@@ -288,10 +288,12 @@ func (s *Store) ShareMountsByShare(shareID int64) ([]ShareMount, error) {
 	return out, nil
 }
 
-// MountRoots lists the mount paths the shares are recorded at, now. A re-added share gets its new mount here
-// (U-B: its libraries keep their old paths); the purge searches them for moved originals.
+// MountRoots lists the folders the shares are mounted at, now: the mount point each share was given
+// (shares.mount_point) and the path the share daemon recorded (share_mounts.mount_path), each once. A re-added
+// share gets its new mount here (U-B: its libraries keep their old paths); the purge searches them for moved originals.
 func (s *Store) MountRoots() ([]string, error) {
-	rows, err := s.db.Query(`SELECT DISTINCT mount_path FROM share_mounts WHERE mount_path != ''`)
+	rows, err := s.db.Query(`SELECT mount_point FROM shares WHERE mount_point != ''
+		UNION SELECT mount_path FROM share_mounts WHERE mount_path != ''`)
 	if err != nil {
 		return nil, err
 	}

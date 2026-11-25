@@ -355,3 +355,33 @@ func TestGuideAdvancedRefusesAStrayLinkOnAQuestionAfterTheSave(t *testing.T) {
 		t.Errorf("a save changed a workflow it can't read")
 	}
 }
+
+// review2-716 P3: a second link off a port the questions read (a condition's Yes to a hand-made step as
+// well as its end) is hand-made; without the fix only the first link was read, coverage said full and a
+// save deleted the second branch.
+func TestGuideAdvancedRefusesASecondLinkOffOnePort(t *testing.T) {
+	a := DefaultAnswers(GoalSmaller)
+	a.Before = []Card{{Type: TypeCheckName, Config: map[string]any{"pattern": "a"}, Then: &Then{Side: "yes", End: "leave"}}}
+	d := Build(a)
+	q := nodeOf(d, TypeCheckName)
+	extra := node(TypeNotify, "", map[string]any{"kind": "good", "text": "hand-made"})
+	d.Nodes = append(d.Nodes, extra)
+	d.Edges = append(d.Edges, link(q.ID, "match", extra.ID)) // a second link off Yes
+	g := GuideOf(d)
+	if g.Advanced != CoverageNone || !strings.Contains(g.AdvancedWhy, "'Check the file name' has a link the questions don't show") {
+		t.Fatalf("%+v", g)
+	}
+	before := mustJSON(d)
+	if got := Apply(d, Answers{Flow: FlowAdvanced, Before: []Card{}}); mustJSON(got) != before {
+		t.Errorf("a save changed a workflow it can't read")
+	}
+	// the same after the save: a second link off a card's success
+	b := DefaultAnswers(GoalSmaller)
+	b.AfterCards = []Card{{Type: TypeTag, Config: map[string]any{"add": "x"}}, {Type: TypeNote, Config: map[string]any{"text": "next"}}} // the tag's success already leads on
+	d2 := Build(b)
+	d2.Nodes = append(d2.Nodes, extra)
+	d2.Edges = append(d2.Edges, link(nodeOf(d2, TypeTag).ID, "success", extra.ID))
+	if g := GuideOf(d2); g.Advanced != CoverageNone || !strings.Contains(g.AdvancedWhy, "'Tag the file' has a link the questions don't show") {
+		t.Fatalf("after the save: %+v", g)
+	}
+}

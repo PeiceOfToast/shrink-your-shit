@@ -16,16 +16,19 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
-// Access to /api/* is one shared token. It is required whenever a token is stored, and one is made
-// and stored the first time the program listens beyond this computer. On loopback with no token,
-// /api/* is open. A browser signs in once (POST /api/login) and then sends a session cookie; scripts
-// send "Authorization: Bearer <token>". The cookie's value is derived from the token, so sessions
-// survive a restart and making a new token ends all of them.
+// Access to /api/* is one shared token, or a password, or nothing, as signin.json says (signin.go).
+// The token is required whenever one is stored, and one is made and stored the first time the program
+// listens beyond this computer. A browser signs in once (POST /api/login) and then sends a session
+// cookie; scripts send "Authorization: Bearer <token>". The cookie's value is derived from the token and
+// the password's hash, so sessions survive a restart, and making a new token or a new password ends them.
 
 // TokenFile is the token's file name inside the data folder.
 const TokenFile = "access-token"
@@ -35,13 +38,19 @@ const sessionCookie = "syp_session"
 // afterTokenStored runs (in tests only) between storing a new token and using it.
 var afterTokenStored func()
 
-// Access holds the token and checks requests against it.
+// Access holds the token and the sign-in choice, and checks requests against them.
 type Access struct {
 	dir   string
 	mu    sync.RWMutex
-	token string // "" = none stored (only possible on loopback)
+	token string // "" = none stored
+	mode  string // ModeHome or ModePassword (signin.json)
+	hash  string // the password's bcrypt hash, "" = no password set
+	stamp fileStamp
 
-	// FailDelay is how long a wrong token waits before the answer, to slow down guessing.
+	transport Transport   // who counts as a private address (set by Handler)
+	login     pairLimiter // failed sign-ins per address
+
+	// FailDelay is how long a wrong token or password waits before the answer, to slow down guessing.
 	FailDelay time.Duration
 }
 
@@ -54,14 +63,36 @@ func ReadToken(dataDir string) (string, error) {
 	return strings.TrimSpace(string(b)), nil
 }
 
-// OpenAccess loads the token stored in dataDir. When exposed (listening beyond loopback) and none is
-// stored, it makes and stores one and reports created, so the caller can show the sign-in address once.
+// OpenAccess loads the token and the sign-in choice stored in dataDir. When exposed (listening beyond
+// loopback) and no token is stored, it makes and stores one and reports created, so the caller can show
+// the sign-in address once.
 func OpenAccess(dataDir string, exposed bool) (a *Access, created bool, err error) {
+	if err := os.MkdirAll(dataDir, 0o755); err != nil { // the sign-in choice is written here at once
+		return nil, false, err
+	}
 	tok, err := ReadToken(dataDir)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, false, err
 	}
-	a = &Access{dir: dataDir, token: tok, FailDelay: 500 * time.Millisecond}
+	a = &Access{dir: dataDir, token: tok, FailDelay: 500 * time.Millisecond,
+		login: pairLimiter{max: loginMaxFails, window: loginWindow}}
+	s, ok, err := readSignin(dataDir)
+	if err != nil {
+		return nil, false, err
+	}
+	if !ok { // a new install listens at home; an install from before the choice keeps its token sign-in
+		s = signinState{Mode: ModeHome}
+		if tok != "" || os.Getenv("SYP_INSTALL") == "docker" { // a new Docker install asks for sign-in (Docker shows every client as private)
+			s.Mode = ModePassword
+		}
+		if err := writeSignin(dataDir, s); err != nil {
+			return nil, false, err
+		}
+	}
+	a.mode, a.hash = s.Mode, s.PasswordHash
+	if a.stamp, err = stampOf(dataDir); err != nil {
+		return nil, false, err
+	}
 	if tok == "" && exposed {
 		if _, err := a.rotate(); err != nil {
 			return nil, false, err
@@ -78,8 +109,8 @@ func (a *Access) Token() string {
 	return a.token
 }
 
-// Required reports whether /api/* needs the token.
-func (a *Access) Required() bool { return a.Token() != "" }
+// Required reports whether /api/* needs a sign-in from some address (a token or a password is set).
+func (a *Access) Required() bool { return a.current().required() }
 
 // rotate makes a new token, stores it (owner-only file, replaced in one step) and starts using it,
 // which ends every existing session. The lock covers storing and using, so the token in use is always
@@ -92,22 +123,7 @@ func (a *Access) rotate() (string, error) {
 		return "", err
 	}
 	tok := base64.RawURLEncoding.EncodeToString(b)
-	f, err := os.CreateTemp(a.dir, ".access-token-*") // created with mode 0600
-	if err != nil {
-		return "", err
-	}
-	_, err = f.WriteString(tok + "\n")
-	if err == nil {
-		err = f.Sync()
-	}
-	if cerr := f.Close(); err == nil {
-		err = cerr
-	}
-	if err == nil {
-		err = os.Rename(f.Name(), filepath.Join(a.dir, TokenFile))
-	}
-	if err != nil {
-		os.Remove(f.Name())
+	if err := writeFileAtomic(a.dir, TokenFile, []byte(tok+"\n")); err != nil {
 		return "", err
 	}
 	if afterTokenStored != nil {
@@ -117,9 +133,31 @@ func (a *Access) rotate() (string, error) {
 	return tok, nil
 }
 
-func sessionValue(tok string) string {
-	m := hmac.New(sha256.New, []byte(tok))
-	m.Write([]byte("syp-session-v1"))
+// writeFileAtomic replaces dir/name in one step: a new owner-only file is synced, then renamed over it.
+func writeFileAtomic(dir, name string, data []byte) error {
+	f, err := os.CreateTemp(dir, "."+name+"-*") // created with mode 0600
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(data)
+	if err == nil {
+		err = f.Sync()
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Rename(f.Name(), filepath.Join(dir, name))
+	}
+	if err != nil {
+		os.Remove(f.Name())
+	}
+	return err
+}
+
+func sessionValue(tok, hash string) string {
+	m := hmac.New(sha256.New, []byte(tok+"\x00"+hash))
+	m.Write([]byte("syp-session-v2"))
 	return hex.EncodeToString(m.Sum(nil))
 }
 
@@ -133,8 +171,8 @@ func bearer(r *http.Request) string {
 	return ""
 }
 
-func setSession(w http.ResponseWriter, tok string) {
-	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: sessionValue(tok), Path: "/",
+func setSession(w http.ResponseWriter, tok, hash string) {
+	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: sessionValue(tok, hash), Path: "/",
 		MaxAge: 90 * 24 * 3600, HttpOnly: true, SameSite: http.SameSiteStrictMode})
 }
 
@@ -158,8 +196,8 @@ func writes(method string) bool {
 
 // guard wraps the /api/* handler. Writes must be JSON and, unless they carry a Bearer token, come
 // from this site's own pages (Origin / Sec-Fetch-Site against Host): a cookie is sent by the browser
-// on its own, so another site must not be able to make one. Every /api/* request except login and
-// logout then needs the token, when one is stored.
+// on its own, so another site must not be able to make one. Every /api/* request except the sign-in
+// state, login and logout then needs a token, a password's session, or a private address in home mode.
 func (a *Access) guard(next http.Handler) http.Handler {
 	sameSite := http.NewCrossOriginProtection()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -177,22 +215,27 @@ func (a *Access) guard(next http.Handler) http.Handler {
 				return
 			}
 		}
-		if r.URL.Path == "/api/login" || r.URL.Path == "/api/logout" {
+		switch r.URL.Path {
+		case "/api/login", "/api/logout", "/api/auth":
 			next.ServeHTTP(w, r)
 			return
 		}
-		tok := a.Token()
-		if tok == "" {
+		now := a.current()
+		if !now.required() {
 			next.ServeHTTP(w, r)
 			return
 		}
 		if b != "" {
-			if same(b, tok) {
+			if same(b, now.tok) {
 				next.ServeHTTP(w, r)
 				return
 			}
 			time.Sleep(a.FailDelay)
-		} else if c, err := r.Cookie(sessionCookie); err == nil && same(c.Value, sessionValue(tok)) {
+		} else if now.cookieOK(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if now.open(r, a.transport) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -200,23 +243,46 @@ func (a *Access) guard(next http.Handler) http.Handler {
 	})
 }
 
-// routes adds the sign-in and token endpoints to the /api mux.
+// routes adds the sign-in, sign-in choice and token endpoints to the /api mux.
 func (a *Access) routes(api *http.ServeMux) {
+	api.HandleFunc("GET /api/auth", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, a.view(r, false))
+	})
+	api.HandleFunc("POST /api/auth/mode", a.setMode)
 	api.HandleFunc("POST /api/login", func(w http.ResponseWriter, r *http.Request) {
-		var in struct{ Token string }
+		var in struct{ Password, Token string }
 		json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&in)
-		tok := a.Token()
-		if tok == "" { // nothing to sign in to
-			writeJSON(w, map[string]bool{"ok": true})
+		now := a.current()
+		client := a.transport.Client(r)
+		if locked, _ := a.login.locked(client, time.Now()); locked {
+			w.Header().Set("Retry-After", strconv.Itoa(loginRetryAfter))
+			writeErrorWith(w, http.StatusTooManyRequests, "too_many_tries", "Too many tries. Wait a minute, then try again.",
+				map[string]any{"retryAfter": loginRetryAfter})
 			return
 		}
-		if !same(strings.TrimSpace(in.Token), tok) {
+		if !now.required() { // nothing to sign in to
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		code, msg := "bad_password", "That password isn't right."
+		var ok bool
+		switch {
+		case in.Password != "":
+			// bcrypt reads at most 72 bytes: a longer attempt is refused rather than matched on its start
+			ok = now.hash != "" && len(in.Password) <= maxPassword &&
+				bcrypt.CompareHashAndPassword([]byte(now.hash), []byte(in.Password)) == nil
+		case in.Token != "":
+			code, msg = "bad_token", "That token doesn't match this server. Check you copied all of it."
+			ok = now.tok != "" && same(strings.TrimSpace(in.Token), now.tok)
+		}
+		if !ok {
+			a.login.fail(client, time.Now())
 			time.Sleep(a.FailDelay)
-			apiError(w, http.StatusUnauthorized, "bad_token", "That token doesn't match this server. Check you copied all of it.")
+			apiError(w, http.StatusUnauthorized, code, msg)
 			return
 		}
-		setSession(w, tok)
-		writeJSON(w, map[string]bool{"ok": true})
+		setSession(w, now.tok, now.hash)
+		w.WriteHeader(http.StatusNoContent)
 	})
 	api.HandleFunc("POST /api/logout", func(w http.ResponseWriter, r *http.Request) {
 		http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", MaxAge: -1,
@@ -237,7 +303,7 @@ func (a *Access) routes(api *http.ServeMux) {
 			apiError(w, http.StatusInternalServerError, "token_not_saved", "The new token could not be saved, so the old one still works. "+err.Error())
 			return
 		}
-		setSession(w, tok) // whoever made the new token stays signed in; everyone else must sign in again
+		setSession(w, tok, a.current().hash) // whoever made the new token stays signed in; everyone else must sign in again
 		writeJSON(w, map[string]string{"token": tok})
 	})
 }

@@ -2,7 +2,7 @@
 // GET /api/v2/overview (#177): the headline (space saved, NET, never added to the trash's GROSS bytes), the workers,
 // what is converting now, the libraries (the Libraries page's own figures) and the last 30 days. Live: job.progress
 // moves the bars in place; a job, library or worker change refetches. Every number comes from the server.
-import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Icon } from "../Icon";
 import { MOCK, SignedOut, failed, type Answer } from "../api";
 import { bytes, clock, count, dayClock, encoderName, lastScan, plural } from "../format";
@@ -12,8 +12,10 @@ import { listJobs } from "../jobsApi";
 import { listWorkflows } from "../workflowApi";
 import { listLibrariesV2 } from "../libraryApi";
 import { convertedLine } from "../convertedLine";
+import { barPath, sparkBars, sparkValue } from "../sparkBars";
 import { getStartedSteps, nextStep, showGetStarted } from "../getStarted";
 import { runFields, startedAt } from "../jobCards";
+import { allLibrariesRunning, filesFact, freshFact, lastDoneFact, nextScanFact, nothingFact, stateWord, workersFact, type Fact } from "../statusStrip";
 const HEALTH_HIDDEN = "syp-health-dismissed"; // the failed checks the Dismiss was for
 import { onLive } from "../live";
 import { LoadFailed, PageHead } from "../PageHead";
@@ -22,10 +24,9 @@ import { useData } from "../useData";
 import { allWorkers, listWorkers } from "../workersApi";
 import { getOverview, type Overview as O, type OverviewJob } from "../overviewApi";
 import { mockState, scanAll, summary } from "../mock";
-import { GpuPct, NoGpu, WorkersSwitch } from "./Workers";
+import { WorkersSwitch } from "./Workers";
 import type { JobProgressEvent } from "../types/jobs";
 
-const STATE: Record<string, [string, string]> = { busy: ["Converting", "run"], online: ["Ready", ""], draining: ["Finishing", "warn"], paused: ["Off", ""], offline: ["Offline", "bad"], stalled: ["Not responding", "bad"] };
 const slots = (w: O["workers"][number]) => w.slots.cpu ?? { used: w.slots.used ?? 0, total: w.slots.total ?? 0 };
 const pct = (n: number | null) => (n == null ? null : Math.max(0, Math.min(100, Math.round(n))));
 const perGB = (s: number | null) => (s == null ? "not recorded" : s < 60 ? Math.round(s) + " s" : Math.floor(s / 60) + " min" + (Math.round(s % 60) ? " " + Math.round(s % 60) + " s" : ""));
@@ -77,21 +78,54 @@ function DayBars({ title, note, days, series, fmt, tick = true, extra, quiet }: 
   </figure>;
 }
 
-// U6: a tile's sparkline, drawn from daily[] only. A day not recorded is a short baseline tick, a gap, never a zero
-function Spark({ values, label, color }: { values: (number | null)[]; label: string; color: string }) {
-  const W = 128, H = 56, n = values.length, max = Math.max(1, ...values.map((v) => v ?? 0));
-  const x = (i: number) => (n > 1 ? (i * W) / (n - 1) : W / 2), y = (v: number) => H - 6 - ((H - 12) * v) / max;
-  const runs: string[] = [];
-  let cur = "";
-  // a run of one point gets a zero-length segment ("M p L p"), so the round cap draws a dot instead of nothing
-  const end = () => { if (cur) runs.push(cur.includes("L") ? cur : cur + "L" + cur.slice(1)); cur = ""; };
-  values.forEach((v, i) => { if (v == null) end(); else cur += (cur ? "L" : "M") + x(i).toFixed(1) + "," + y(v).toFixed(1); });
-  end();
-  return <svg className="spark" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label={label + (values.some((v) => v == null) ? "; the days not recorded are left blank" : "")}>
-    <line x1="0" x2={W} y1={H - 2} y2={H - 2} stroke="var(--border-strong)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
-    {runs.map((d) => <path key={d} d={d} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />)}
-    {values.map((v, i) => (v == null ? <rect key={i} x={x(i) - 1} y={H - 3} width="2" height="2" fill="var(--border-strong)" /> : null))}
-  </svg>;
+// A tile's bars, one per day, drawn from daily[] only (user 11-25: bars, not a line). A day not recorded is a short
+// baseline tick, never a zero bar. Hover, a tap, or keyboard focus (Left/Right between days) shows that day's date and
+// number in the daily charts' tip. The tile's aria-label still names the value; the table below has every day.
+function Spark({ values, days, label, color, text }: { values: (number | null)[]; days: string[]; label: string; color: string; text: (n: number) => string }) {
+  const W = 128, H = 56, n = values.length, [at, setAt] = useState<number | null>(null), [said, setSaid] = useState(""), ref = useRef<HTMLDivElement>(null), tipRef = useRef<HTMLDivElement>(null);
+  const { bars, ticks } = sparkBars(values, W, H), slot = W / n;
+  const spoken = (i: number) => days[i] + ", " + sparkValue(values[i], text);
+  // the tip is centred on its day, but a phone tile is narrower than the tip: shift it back inside the tile
+  useLayoutEffect(() => {
+    const tip = tipRef.current, tile = ref.current?.closest(".tile")?.getBoundingClientRect();
+    if (!tip || !tile) return;
+    tip.style.marginLeft = "0px";
+    const r = tip.getBoundingClientRect(), pad = 4;
+    const dx = Math.max(0, tile.left + pad - r.left) - Math.max(0, r.right - (tile.right - pad));
+    if (dx) tip.style.marginLeft = dx + "px";
+  }, [at]);
+  // a tap outside the chart clears its tip (a touch never sends pointerleave, so this is the only way off a phone)
+  useEffect(() => {
+    if (at == null) return;
+    const outside = (e: PointerEvent) => { if (!ref.current?.contains(e.target as Node)) setAt(null); };
+    document.addEventListener("pointerdown", outside);
+    return () => document.removeEventListener("pointerdown", outside);
+  }, [at != null]);
+  // one Tab stop: the wrapper. Left/Right move a day, Home/End jump to the ends, Escape hides the tip and keeps focus.
+  // The live region speaks on arrow keys only, not on hover.
+  const onKey = (e: KeyboardEvent) => {
+    const cur = at ?? n - 1;
+    const next = e.key === "ArrowRight" ? cur + 1 : e.key === "ArrowLeft" ? cur - 1 : e.key === "Home" ? 0 : e.key === "End" ? n - 1 : null;
+    if (e.key === "Escape") return setAt(null);
+    if (next == null) return;
+    e.preventDefault();
+    const i = Math.min(n - 1, Math.max(0, next));
+    setAt(i); setSaid(spoken(i));
+  };
+  return <div ref={ref} className="spark sbars" role="group" aria-label={label} tabIndex={0} onFocus={() => setAt((a) => a ?? n - 1)} onBlur={() => setAt(null)} onKeyDown={onKey}
+    onPointerLeave={(e) => e.pointerType === "mouse" && setAt(null)}>
+    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label={label + (ticks.length ? "; the days not recorded are left blank" : "")}>
+      <line x1="0" x2={W} y1={H - 2} y2={H - 2} stroke="var(--border-strong)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+      {at != null && <rect x={at * slot} y="0" width={slot} height={H} fill="var(--border)" />}
+      {bars.map((b) => <path key={b.i} d={barPath(b)} fill={color} />)}
+      {ticks.map((i) => <rect key={"t" + i} x={i * slot + slot / 2 - 1} y={H - 3} width="2" height="2" fill="var(--border-strong)" />)}
+      {values.map((_, i) => <rect key={"h" + i} x={i * slot} y="0" width={slot} height={H} fill="transparent"
+        onPointerEnter={(e) => e.pointerType === "mouse" && setAt(i)}
+        onPointerDown={(e) => setAt((a) => (a === i && e.pointerType !== "mouse" ? null : i))} />)}
+    </svg>
+    {at != null && <div ref={tipRef} className="tip" style={{ left: `${((at + 0.5) / n) * 100}%` }}><span><b>{days[at]}</b><em>{sparkValue(values[at], text)}</em></span></div>}
+    <span aria-live="polite" style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" }}>{said}</span>
+  </div>;
 }
 
 export function Overview() {
@@ -137,20 +171,22 @@ export function Overview() {
     // the design's inner shape: a square tile, three pills on the left, a pill over a short bar on the right
     const ph = (k: number) => <li key={k} className="lcard lskel" aria-hidden="true"><span className="ltile skel-ph" /><div className="lmain"><div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>{bar(72, 22, 11)}{bar(110, 22, 11)}{bar(88, 22, 11)}</div></div><div style={{ marginLeft: "auto", display: "grid", gap: 6, justifyItems: "end" }}>{bar(110, 22, 11)}{bar(70, 10, 4)}</div></li>;
     return <div className="stack ov">
-      <PageHead icon="i-dashboard" title="Dashboard">
+      <PageHead icon="i-dashboard" title="Dashboard" />
+      <section className="status" aria-label="Status"><div className="status-main"><span className="skel-ph" style={{ width: 220, height: 16 }} /></div>
+        <div className="status-acts">
         {wl.data ? <WorkersSwitch n={lw.filter((w) => w.status === "busy" || w.status === "online").length} m={lw.length} busy={lw.some((w) => w.currentJobIds.length > 0)} finishing={lw.filter((w) => w.status === "draining").length} onSet={(a) => act(allWorkers(a))} /> : <span className="skel-ph skel-sw" aria-hidden="true" />}
         <button className="btn sm ghost" type="button" onClick={() => (MOCK ? scanAll() : act(scanAllLibraries()))}><Icon id="i-refresh" />Scan all libraries</button>
-      </PageHead>
+        </div>
+      </section>
       {o.error ? <LoadFailed error={o.error} reload={o.reload} /> : <>
-        <section className="tiles" aria-hidden="true">{[0, 1, 2].map((k) => <div key={k} className="tile"><span className="skel-ph" style={{ width: "40%", height: 12 }} /><span className="skel-ph" style={{ width: 120, height: 30, gridColumn: 2, gridRow: 1, justifySelf: "end" }} /><span className="skel-ph" style={{ width: "60%", height: 12 }} /></div>)}</section>
+        <section className="tiles" aria-hidden="true">{[0, 1].map((k) => <div key={k} className="tile"><span className="skel-ph" style={{ width: "40%", height: 12 }} /><span className="skel-ph" style={{ width: 120, height: 30, gridColumn: 2, gridRow: 1, justifySelf: "end" }} /><span className="skel-ph" style={{ width: "60%", height: 12 }} /></div>)}</section>
         <section className="sec"><h2>Converting now</h2><ul className="lcards" aria-hidden="true">{[0, 1].map(ph)}</ul></section>
         <section className="sec"><h2>Libraries</h2><ul className="lcards" aria-hidden="true">{[0, 1, 2].map(ph)}</ul></section>
-        <section className="sec"><h2>Workers</h2><ul className="lcards" aria-hidden="true">{[0].map(ph)}</ul></section>
         <section className="sec"><h2>Last 30 days</h2><div className="lcard lskel" aria-hidden="true" style={{ minHeight: 160, display: "block" }}><span className="skel-ph" style={{ width: "40%", height: 12 }} /><div className="skel-ph" style={{ display: "block", width: "100%", height: 110, marginTop: 12 }} /></div></section>
       </>}
     </div>;
   }
-  const v = o.data, h = v.headline, noLibs = v.libraries.length === 0, job = (j: OverviewJob) => ({ ...j, ...live[j.jobId] });
+  const v = o.data, h = v.headline, noLibs = v.libraries.length === 0;
   // one row per worker of GET /api/v2/workers; its files' progress from the overview (or, for a worker the overview
   // doesn't list, from Converting now by job id)
   // review a7d25ec P2-2: the overview's worker entries put every job under this computer, so a row's files are the
@@ -162,20 +198,20 @@ export function Overview() {
   const on = rows.filter((w) => w.status === "busy" || w.status === "online").length, fin = rows.filter((w) => w.status === "draining").length;
   const busy = rows.some((w) => w.jobs.length > 0), failed24 = sum.data && !failed(sum.data) ? sum.data.last24h.failed : null;
   // Needs attention: the summary's newest failures (the same rows as the jobs list, so the list's own fields)
-  const failedRows = sum.data && !failed(sum.data) ? sum.data.recentFailures.slice(0, 3) : [], s24 = sum.data && !failed(sum.data) ? sum.data.last24h : null, stopped = rows.filter((w) => w.status === "paused").length;
+  const failedRows = sum.data && !failed(sum.data) ? sum.data.recentFailures.slice(0, 3) : [], s24 = sum.data && !failed(sum.data) ? sum.data.last24h : null;
   const slotUsed = rows.reduce((a, w) => a + slots(w).used, 0), slotTotal = rows.reduce((a, w) => a + slots(w).total, 0);
   const rec = v.daily.filter((d) => d.recorded), first = rec[0]?.day, add = (f: (d: Day) => number) => rec.reduce((a, d) => a + f(d), 0);
   const tot = { done: add((d) => d.completed), skipped: add((d) => d.skipped), failed: add((d) => d.failed), freed: add((d) => d.freedBytes), saved: add((d) => d.savedBytes ?? 0), waiting: add((d) => d.waitingBytes ?? 0), kept: add((d) => d.couldFreeBytes ?? 0) };
   // run 2 (11-19): a kept original (headline couldFree) is in savedBytes but neither freed nor in the trash. A server with
   // daily couldFreeBytes (#367) says which part is kept: Freed / Waiting in the trash / Originals left in place. An older one doesn't,
   // so plot savedBytes as one series, "Files made smaller per day" (design 11-19, SCREENS line 36)
-  const hasSaved = rec.some((d) => d.savedBytes != null), three = hasSaved && rec.some((d) => d.couldFreeBytes != null), kept = !three && h.couldFree > 0 && hasSaved, split = !kept && hasSaved, load = rows.some((w) => w.cpuPercent != null || w.gpuPercent != null);
+  const hasSaved = rec.some((d) => d.savedBytes != null), three = hasSaved && rec.some((d) => d.couldFreeBytes != null), kept = !three && h.couldFree > 0 && hasSaved, split = !kept && hasSaved;
   // design 11-19 (SCREENS.md:37): never "0 KB" in the note, only the parts there are; the legend keeps all three, kept is --chart-muted
   const freedPart = Math.max(0, tot.saved - tot.waiting - tot.kept), spaceNote = [freedPart > 0 ? bytes(freedPart) + " freed" : "nothing freed yet",
     tot.waiting > 0 && <Link to="/jobs?tab=completed&kept=1">{bytes(tot.waiting) + " waiting in the trash"}</Link>, tot.kept > 0 && <Link to="/jobs?tab=completed&left=1">{bytes(tot.kept) + " in originals left in place"}</Link>]
     .filter(Boolean).map((p, i) => <Fragment key={i}>{i > 0 && " · "}{p}</Fragment>);
   // Get started's three ticks from data this page already has: a library, a workflow, a worker on
-  const wfCount = wf.data && !failed(wf.data) ? wf.data.length : 0, steps = getStartedSteps(v.libraries.length, wfCount, on);
+  const wfCount = wf.data && !failed(wf.data) ? wf.data.length : 0, steps = getStartedSteps(v.libraries.length, wfCount, rows.filter((w) => w.status === "busy" || w.status === "online" || w.status === "draining").length);
   // a step's button is live once its prerequisite is done: a library needs a published workflow (step 2), so step 1 waits for it
   const side = (i: number, to: string, label: string, ready = true, after = 0) => steps[i] ? <span className="pill ok">Done</span> : ready ? <Link className="btn sm primary" to={to}>{label}</Link> : <span className="muted sm">after step {after}</span>;
   const workerOf = (id: string) => rows.find((w) => w.jobs.some((j) => j.jobId === id))?.name;
@@ -189,12 +225,33 @@ export function Overview() {
   const avgLine = <><span>New files, on average <b>{v.averages.fileShrinkPercent == null ? "not recorded" : Math.round(v.averages.fileShrinkPercent) + "% smaller"}</b></span>
             <span>Time per GB <b>{perGB(v.averages.secondsPerGB)}</b></span></>;
   const more = [h.waitingToFree > 0 && bytes(h.waitingToFree) + (h.freed > 0 ? " more" : " frees") + (h.nextFreeAt ? " by " + dayName(h.nextFreeAt.slice(0, 10)) : ""), h.couldFree > 0 && <Link to="/jobs?tab=completed&left=1">{"could free " + bytes(h.couldFree) + " if you remove the originals"}</Link>].filter(Boolean).map((p, i) => <Fragment key={i}>{i > 0 && " · "}{p}</Fragment>);
+  // the Status strip (dashboard cards §1): the state word and the facts a person checks. "Nothing needs you" when the
+  // Needs attention card and its notes have nothing to show (the same conditions as today; D2 moves them into one card)
+  const healthShown = failedNow.length > 0 && failKey !== hidKey, summaryOk = !!sum.data && !failed(sum.data);
+  const needsNone = summaryOk && failedRows.length === 0 && !healthShown && !(v.encoderFallbacks?.length) && allLibrariesRunning(v.libraries.map((l) => l.state));
+  // while the Get started card shows, the strip says which step is missing (Off), not the usual facts
+  const fresh = freshFact(starting ? nextStep(steps) : null);
+  const sw = fresh ? { word: "Off", tone: "muted" as const } : stateWord(rows, h.filesWaiting), wfact = workersFact(rows), facts: ReactNode[] = [];
+  const shown = (f: Fact) => typeof f === "string" ? f : <>{f.pre}<b>{f.value}</b>{f.post}</>; // the value is bold, the words are not
+  if (fresh) facts.push(fresh);
+  else {
+    if (wfact) { facts.push(shown(wfact.text)); if (wfact.notReady) facts.push(<Link key="nr" to="/workers">{wfact.notReady}</Link>); }
+    facts.push(shown(filesFact(h.filesWaiting)));
+    for (const f of [lastDoneFact(h.lastDoneAt, new Date(), dayClock), nextScanFact(v.nextScanAt, clock), nothingFact(needsNone)]) if (f) facts.push(shown(f));
+  }
   return (
     <div className="stack ov">
-      <PageHead icon="i-dashboard" title="Dashboard">
-        <WorkersSwitch n={on} m={rows.length} busy={busy} finishing={fin} onSet={(a) => act(allWorkers(a))} />
-        {!noLibs && <button className="btn sm ghost" type="button" onClick={() => (MOCK ? scanAll() : act(scanAllLibraries()))}><Icon id="i-refresh" />Scan all libraries</button>}
-      </PageHead>
+      <PageHead icon="i-dashboard" title="Dashboard" />
+      <section className="status" aria-label="Status">
+        <div className="status-main">
+          <p className="status-state"><span className={"status-dot " + sw.tone} aria-hidden="true" /><b>{sw.word}</b></p>
+          <p className="status-facts">{facts.map((f, k) => <Fragment key={k}>{k > 0 && " · "}{f}</Fragment>)}</p>
+        </div>
+        <div className="status-acts">
+          <WorkersSwitch n={on} m={rows.length} busy={busy} finishing={fin} onSet={(a) => act(allWorkers(a))} />
+          {!noLibs && <button className="btn sm ghost" type="button" onClick={() => (MOCK ? scanAll() : act(scanAllLibraries()))}><Icon id="i-refresh" />Scan all libraries</button>}
+        </div>
+      </section>
       {said && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{said}</span></p>}
       {failedNow.length > 0 && failKey !== hidKey && <div className="note bad"><Icon id="i-alert" /><div style={{ flex: 1 }}>
         <b>{failedNow.length === 1 ? "A health check failed" : plural(failedNow.length, "health check", "health checks") + " failed"}:</b> {failedNow[0].detail} <Link to="/settings/system#health">Open Health</Link>
@@ -216,20 +273,13 @@ export function Overview() {
             {rec.length >= 2 && hasSaved && <div className={split ? "hide-phone" : undefined}>Last 30 days: {spaceNote}</div>}
             {rec.length < 2 && <div>Charts start after two days of conversions.</div>}
           </div>
-          {rec.length >= 2 && <Spark label={(kept ? "Files made smaller per day" : "Space saved per day") + ", last " + v.daily.length + " days"} color="var(--success)" values={v.daily.map((d) => (d.recorded ? (hasSaved ? d.savedBytes : d.freedBytes) ?? 0 : null))} />}
+          {rec.length >= 2 && <Spark label={(kept ? "Files made smaller per day" : "Space saved per day") + ", last " + v.daily.length + " days"} color="var(--success)" days={v.daily.map((d) => dayName(d.day))} text={(n) => bytes(n) + (kept ? " smaller" : hasSaved ? " saved" : " freed")} values={v.daily.map((d) => (d.recorded ? (hasSaved ? d.savedBytes : d.freedBytes) ?? 0 : null))} />}
         </div>
         <div className="tile">
           <span className="l">Files converted</span>
           <span className="v">{count(h.filesConverted)}</span>
           <div className="d"><div>{perDay != null ? <>{count(perDay)} per day{s24 && <> · last 24 h {count(s24.completed)} done, {count(s24.skipped)} skipped</>}</> : "Charts start after two days of conversions."}</div></div>
-          {rec.length >= 2 && <Spark label={"Files converted per day, last " + v.daily.length + " days"} color="var(--accent)" values={v.daily.map((d) => (d.recorded ? d.completed : null))} />}
-        </div>
-        <div className="tile rt-desk">
-          <span className="l">Right now</span>
-          <span className="v">{count(v.active.length)} <small>converting</small></span>
-          {/* no daily series for a live count, so no sparkline: there is no history to draw it from */}
-          <div className="d"><div>{count(h.filesWaiting)} waiting{failed24 != null && <> · <Link to="/jobs?tab=failed" className={failed24 > 0 ? "bad" : undefined}>{count(failed24)} failed in 24 h</Link></>}</div>
-            {stopped > 0 && <div>{plural(stopped, "worker", "workers")} stopped</div>}</div>
+          {rec.length >= 2 && <Spark label={"Files converted per day, last " + v.daily.length + " days"} color="var(--accent)" days={v.daily.map((d) => dayName(d.day))} text={(n) => plural(n, "file converted", "files converted")} values={v.daily.map((d) => (d.recorded ? d.completed : null))} />}
         </div>
       </section>
 
@@ -323,17 +373,6 @@ export function Overview() {
             <p className="muted sm">Saved is space already freed. A replaced original waits in the trash until its date: it no longer counts in Size now, but it isn't freed yet, which is the 'frees from' figure. Sizes are updated when a library is scanned.</p></details></>}
       </section>
 
-      <section className="sec" aria-labelledby="ov-w"><h2 id="ov-w">Workers <Link className="more" to="/workers">Workers page</Link></h2>
-        {!rows.length ? (wl.error && !wl.data ? <LoadFailed error={wl.error} reload={wl.reload} /> : <p className="muted">No workers yet.</p>) : (
-          <table className="tbl ovt"><thead><tr><th>Worker</th><th className="num">Speed</th><th className="num">Slots</th>{load && <th className="num">CPU · GPU</th>}</tr></thead>
-            <tbody>{rows.map((w) => { const [t, cls] = STATE[w.status] ?? [w.status, ""], js = w.jobs.map(job), sl = slots(w);
-              return <tr key={w.id}>
-                <td className="nm"><b>{w.name}</b> <span className={"pill " + cls}>{t}</span> <Link className="btn icon ghost gear" to={"/workers/" + encodeURIComponent(w.id) + "?tab=limits"} aria-label={"Settings for " + w.name} title="Settings"><Icon id="i-gear" /></Link></td>
-                <td className="num" data-l="Speed">{js.map((j) => [j.fps != null && Math.round(j.fps) + " fps", j.speed != null && j.speed.toFixed(1) + "× realtime"].filter(Boolean).join(" · ")).filter(Boolean).join(", ") || (js.length ? js.map((j) => j.stage).find(Boolean) ?? "—" : "")}</td>
-                <td className="num" data-l="Slots">{sl.used} of {sl.total}</td>
-                {load && <td className="num" data-l="CPU · GPU">{w.status === "paused" || w.status === "offline" ? "—" : w.cpuPercent == null && w.gpuPercent == null ? "Not measured yet" : <>{w.cpuPercent == null ? "—" : Math.round(w.cpuPercent) + "%"} · {w.gpuPercent == null ? <NoGpu /> : <GpuPct n={w.gpuPercent} />}</>}</td>}
-              </tr>; })}</tbody></table>)}
-      </section>
 
 
       {/* the 30-day block is a closed disclosure at every width (design 1440 and 390) */}
