@@ -15,7 +15,7 @@ import { convertedLine } from "../convertedLine";
 import { barPath, sparkBars, sparkValue } from "../sparkBars";
 import { getStartedSteps, nextStep, showGetStarted } from "../getStarted";
 import { runFields, startedAt } from "../jobCards";
-import { filesFact, lastDoneFact, nextScanFact, nothingFact, stateWord, workersFact } from "../statusStrip";
+import { allLibrariesRunning, filesFact, freshFact, lastDoneFact, nextScanFact, nothingFact, stateWord, workersFact, type Fact } from "../statusStrip";
 const HEALTH_HIDDEN = "syp-health-dismissed"; // the failed checks the Dismiss was for
 import { onLive } from "../live";
 import { LoadFailed, PageHead } from "../PageHead";
@@ -179,7 +179,7 @@ export function Overview() {
         </div>
       </section>
       {o.error ? <LoadFailed error={o.error} reload={o.reload} /> : <>
-        <section className="tiles" aria-hidden="true">{[0, 1, 2].map((k) => <div key={k} className="tile"><span className="skel-ph" style={{ width: "40%", height: 12 }} /><span className="skel-ph" style={{ width: 120, height: 30, gridColumn: 2, gridRow: 1, justifySelf: "end" }} /><span className="skel-ph" style={{ width: "60%", height: 12 }} /></div>)}</section>
+        <section className="tiles" aria-hidden="true">{[0, 1].map((k) => <div key={k} className="tile"><span className="skel-ph" style={{ width: "40%", height: 12 }} /><span className="skel-ph" style={{ width: 120, height: 30, gridColumn: 2, gridRow: 1, justifySelf: "end" }} /><span className="skel-ph" style={{ width: "60%", height: 12 }} /></div>)}</section>
         <section className="sec"><h2>Converting now</h2><ul className="lcards" aria-hidden="true">{[0, 1].map(ph)}</ul></section>
         <section className="sec"><h2>Libraries</h2><ul className="lcards" aria-hidden="true">{[0, 1, 2].map(ph)}</ul></section>
         <section className="sec"><h2>Workers</h2><ul className="lcards" aria-hidden="true">{[0].map(ph)}</ul></section>
@@ -229,11 +229,17 @@ export function Overview() {
   // the Status strip (dashboard cards §1): the state word and the facts a person checks. "Nothing needs you" when the
   // Needs attention card and its notes have nothing to show (the same conditions as today; D2 moves them into one card)
   const healthShown = failedNow.length > 0 && failKey !== hidKey, summaryOk = !!sum.data && !failed(sum.data);
-  const needsNone = summaryOk && failedRows.length === 0 && !healthShown && !(v.encoderFallbacks?.length);
-  const sw = stateWord(rows), wfact = workersFact(rows), facts: ReactNode[] = [];
-  if (wfact) { facts.push(wfact.text); if (wfact.notReady) facts.push(<Link key="nr" to="/workers">{wfact.notReady}</Link>); }
-  facts.push(filesFact(h.filesWaiting));
-  for (const f of [lastDoneFact(h.lastDoneAt, new Date(), dayClock), nextScanFact(v.nextScanAt, clock), nothingFact(needsNone)]) if (f) facts.push(f);
+  const needsNone = summaryOk && failedRows.length === 0 && !healthShown && !(v.encoderFallbacks?.length) && allLibrariesRunning(v.libraries.map((l) => l.state));
+  // before the Get started steps are done the strip says what is missing (Off), not the usual facts
+  const fresh = freshFact(v.libraries.length, steps.every(Boolean));
+  const sw = fresh ? { word: "Off", tone: "muted" as const } : stateWord(rows, h.filesWaiting), wfact = workersFact(rows), facts: ReactNode[] = [];
+  const shown = (f: Fact) => typeof f === "string" ? f : <>{f.pre}<b>{f.value}</b>{f.post}</>; // the value is bold, the words are not
+  if (fresh) facts.push(fresh);
+  else {
+    if (wfact) { facts.push(shown(wfact.text)); if (wfact.notReady) facts.push(<Link key="nr" to="/workers">{wfact.notReady}</Link>); }
+    facts.push(shown(filesFact(h.filesWaiting)));
+    for (const f of [lastDoneFact(h.lastDoneAt, new Date(), dayClock), nextScanFact(v.nextScanAt, clock), nothingFact(needsNone)]) if (f) facts.push(shown(f));
+  }
   return (
     <div className="stack ov">
       <PageHead icon="i-dashboard" title="Dashboard" />
