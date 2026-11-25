@@ -17,6 +17,9 @@ import { setRole } from "../setupApi";
 import { useSetup } from "./Enroll";
 import { useData } from "../useData";
 import { holdLost } from "../live";
+import { ModeChoice, PasswordFields } from "../SignInChoice";
+import { getAuth, setAuthMode } from "../signinApi";
+import { authWord, canSave, passwordProblem, type AuthMode, type AuthState } from "../signinRules";
 
 async function act<T>(p: Promise<Answer<T>>, say: (m: string) => void): Promise<T | null> {
   try { const r = await p; if (failed(r)) return (say(r.error.message), null); return r; } catch (e) { if (e instanceof SignedOut) return null; throw e; }
@@ -165,9 +168,62 @@ function Languages({ codes, setCodes, say }: { codes: string[]; setCodes: Dispat
     </SettingRow>);
 }
 
-// Access: the token only when asked for; a new one asks first; Sign out only when the server needs a token (IA).
+// Sign-in (design: "Sign-in" section, #sign-in, between General and Appearance): the same choice as setup, from GET /api/auth.
+// Save changes the mode or the password; the caller keeps its cookie (the server sets a fresh one), so nothing navigates.
+export function SignInSettings() {
+  const au = useData(getAuth, []);
+  return (
+    <section id="sign-in" aria-labelledby="signin-h" className="stack settings-sec">
+      <section className="card"><div className="hd"><h2 id="signin-h">Sign-in</h2></div>
+        <div className="bd" style={{ padding: 0 }}>
+          {au.data ? <SignInForm cur={au.data} saved={au.reload} /> : <div className="empty">{au.error?.message ?? "Loading…"}</div>}
+        </div></section>
+    </section>);
+}
+
+function SignInForm({ cur, saved }: { cur: AuthState; saved: () => void }) {
+  const [mode, setMode] = useState<AuthMode>(cur.mode), [pw, setPw] = useState(""), [again, setAgain] = useState(""), [changing, setChanging] = useState(false);
+  const [said, setSaid] = useState(""), [bad, setBad] = useState(false), [busy, setBusy] = useState(false);
+  const want = { mode, pw, again };
+  const newPw = pw !== "" || again !== "";
+  // the password fields show when the mode is password and either none is set yet (optional) or Change password was pressed
+  const showFields = mode === "password" && (!cur.passwordSet || changing);
+  const ok = canSave(cur, want) && (!(mode === "password" && changing) || passwordProblem(pw, again) === null);
+  const dirty = mode !== cur.mode || (mode === "password" && newPw);
+  const save = async () => {
+    setBad(false); setSaid(""); setBusy(true);
+    const body = mode === "home" ? { mode } : newPw ? { mode, password: pw } : { mode };
+    const r = await setAuthMode(body).catch((e) => { if (e instanceof SignedOut) return null; throw e; }).finally(() => setBusy(false));
+    if (!r) return;
+    if (failed(r)) return (setBad(true), setSaid(authWord(r.error.code, r.error.message)));
+    setPw(""); setAgain(""); setChanging(false);
+    setSaid(mode === "home" ? "Saved. Anyone on your home network can open it now without signing in." : "Saved. This browser stays signed in.");
+    saved();
+  };
+  return (<>
+    <div className="bd stack" style={{ gap: 12, padding: 16 }}>
+      <ModeChoice mode={mode} onMode={(m) => (setMode(m), setBad(false), setSaid(""))}>
+        {mode === "password" && cur.passwordSet && !changing && (
+          <div className="row" style={{ marginTop: 8 }}><button className="btn sm" type="button" onClick={() => (setChanging(true), setBad(false), setSaid(""))}>Change password</button></div>
+        )}
+        {mode === "password" && !cur.passwordSet && <p className="note" style={{ marginTop: 8 }}>No password yet: you sign in with the access token. Set a password to sign in with it instead.</p>}
+        {showFields && <PasswordFields pw={pw} again={again} onPw={(v) => (setPw(v), setBad(false))} onAgain={(v) => (setAgain(v), setBad(false))} />}
+      </ModeChoice>
+      <div className="stack" style={{ gap: 8 }}>
+        <p className={bad ? "st bad" : "muted"} role={bad ? "alert" : "status"} style={{ margin: 0 }}>{said}</p>
+        <div className="row" style={{ justifyContent: "flex-start", flexWrap: "wrap", gap: 12 }}>
+          <button className="btn primary" type="button" disabled={!ok || !dirty || busy} onClick={save}>{changing ? "Save password" : "Save sign-in"}</button>
+          {changing && <button className="btn ghost" type="button" onClick={() => (setChanging(false), setPw(""), setAgain(""), setBad(false), setSaid(""))}>Cancel</button>}
+        </div>
+      </div>
+    </div>
+  </>);
+}
+
+// Access: the token only when asked for; a new one asks first; Sign out only when sign-in is by password (design: the token is the sign-in otherwise).
 function Access({ auth }: { auth: boolean }) {
   const [tok, setTok] = useState<string | null>(null), [ask, setAsk] = useState(false), [said, setSaid] = useState("");
+  const mode = useData(getAuth, []);
   const show = async () => { if (tok) return setTok(null); const r = await act(getToken(), setSaid); if (r) setTok(r.token); };
   const make = async () => { setAsk(false); const r = await act(rotateToken(), setSaid); if (r) (setTok(r.token), setSaid("New token made. Use it to sign in on other devices.")); };
   const out = async () => { if (await act(signOut(), setSaid)) navigate("/signin"); };
@@ -181,7 +237,7 @@ function Access({ auth }: { auth: boolean }) {
     {ask && <div className="note" role="alertdialog" aria-labelledby="tok-ask" style={{ margin: "0 16px 12px" }}><Icon id="i-alert" /><div className="sp"><strong id="tok-ask">Make a new token?</strong> {auth ? "The old one stops working, so other devices must use the new one." : "This server doesn't ask for one now. Making one turns sign-in on for every browser and script, and they will need the token from then on."}</div>
       <button className="btn sm primary" type="button" onClick={make}>Make it</button><button className="btn sm ghost" type="button" onClick={() => setAsk(false)}>Cancel</button></div>}
     <p className="muted" role="status" style={{ margin: said ? "0 16px 12px" : 0 }}>{said || null}</p>
-    {auth && <SettingRow title="Sign out of this browser" desc="Only shown when the server needs the token.">
+    {auth && mode.data?.mode === "password" && <SettingRow title="Sign out of this browser" desc="Only shown when sign-in is by password.">
       <button className="btn" type="button" aria-label="Sign out of this browser" onClick={out}>Sign out</button>
     </SettingRow>}
   </>);
