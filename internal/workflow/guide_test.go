@@ -181,6 +181,53 @@ func TestGuideReadsAHandEditedWorkflow(t *testing.T) {
 	}
 }
 
+// Review of #715: a second card of a kind the questions own stays as it is (an extra), so saving answers
+// never drops it; a Basic setting taken from a variable makes the workflow one for Advanced.
+func TestGuideKeepsRepeatedCardsAndRefusesReferences(t *testing.T) {
+	a := DefaultAnswers(GoalSmaller)
+	a.After = After{Notify: true, NotifyTarget: "Phone"}
+	d := Build(a)
+	first := nodeOf(d, TypeNotify)
+	second := node(TypeNotify, "", map[string]any{"target": "Desk", "kind": "good", "text": "done"})
+	d.Nodes = append(d.Nodes, second)
+	d.Edges = append(d.Edges, link(first.ID, "success", second.ID))
+	g := GuideOf(d)
+	if g.Coverage != CoveragePartial || g.Answers.After.NotifyTarget != "Phone" || strings.Join(g.Extra, ",") != "Send a notification" {
+		t.Fatalf("%+v", g)
+	}
+	a.Quality = 2
+	d2 := Apply(d, a)
+	if r := Validate(d2); r.Errors() {
+		t.Fatalf("%+v", r.Issues)
+	}
+	if got := Steps(d2); strings.HasSuffix(strings.Join(got, " > "), "Save the result > Send a notification > Send a notification") == false {
+		t.Errorf("the second card went: %v", got)
+	}
+	if n := nodeOf(d2, TypeNotify); n.ID != first.ID {
+		t.Errorf("the first card changed id")
+	}
+	a.After = After{}
+	d3 := Apply(d, a) // the owned card goes, the extra stays and follows the save
+	if got := Steps(d3); !strings.HasSuffix(strings.Join(got, " > "), "Save the result > Send a notification") || len(d3.Nodes) != len(PresetOrder)+1 {
+		t.Errorf("without the owned card: %v (%d nodes)", got, len(d3.Nodes))
+	}
+	// a reference in a Basic setting: Advanced's
+	d4 := Build(DefaultAnswers(GoalSmaller))
+	for i := range d4.Nodes {
+		if d4.Nodes[i].Type == TypeAudio {
+			d4.Nodes[i].Config["onlyMyLanguages"] = "{{mine}}"
+		}
+	}
+	if g := GuideOf(d4); g.Coverage != CoverageNone || !strings.Contains(g.Why, "'Audio' takes a setting from a variable") {
+		t.Errorf("%+v", g)
+	}
+	// the folder is a template by design: a reference there is an ordinary answer
+	d5 := Build(Answers{Original: OriginalOneFolder, Folder: "/media/{{library}} (shrunk)"})
+	if g := GuideOf(d5); g.Coverage != CoverageFull || g.Answers.Folder != "/media/{{library}} (shrunk)" {
+		t.Errorf("%+v", g)
+	}
+}
+
 // A wrong answer is refused with the question it belongs to.
 func TestGuideCheckNamesTheQuestion(t *testing.T) {
 	a := Fill(Answers{Format: "mpeg2", Original: OriginalOneFolder, Skip: Skip{MinResolution: 900}, Languages: []string{"english"}})

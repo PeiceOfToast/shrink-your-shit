@@ -521,14 +521,24 @@ func walk(d Doc) (walked, bool) {
 		d, _ := Definition(PresetOrder[next])
 		return w.fail("it has no '" + d.Name + "' step")
 	}
-	// after the save: the guide's cards, then anything else
+	// a Basic answer taken from a variable ({{name}}) can't be shown as a choice; the folder is a template by design
+	for typ, id := range w.by {
+		for k, v := range byID[id].Config {
+			if s, ok := v.(string); ok && basicKeys[typ][k] && k != "folder" && strings.Contains(s, "{{") {
+				return w.fail("'" + nodeName(byID[id]) + "' takes a setting from a variable")
+			}
+		}
+	}
+	// after the save: the guide's cards (one of each kind), then anything else
+	ownedKinds := map[string]bool{}
 	for cur != "" {
 		n, ok := byID[cur]
 		if !ok || seen[cur] {
 			break
 		}
 		seen[cur] = true
-		if slices.Contains(afterTypes, n.Type) && n.Enabled && w.afterTail == "" {
+		if slices.Contains(afterTypes, n.Type) && n.Enabled && w.afterTail == "" && !ownedKinds[n.Type] {
+			ownedKinds[n.Type] = true
 			w.after = append(w.after, n)
 			w.nodes = append(w.nodes, n)
 			cur = succ[cur]
