@@ -109,6 +109,26 @@ func v2Workflows(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			apiError(w, http.StatusNotFound, "original_not_found", "There is no such kept original. Nothing was changed.")
 			return
 		}
+		o, err := store.OriginalByID(id)
+		if errors.Is(err, jobs.ErrNotFound) {
+			apiError(w, http.StatusNotFound, "original_not_found", "There is no such kept original. Nothing was changed.")
+			return
+		}
+		if err != nil {
+			serverError(w, err)
+			return
+		}
+		if o.State == jobs.OriginalKept { // its share is merely unplugged: not known to be gone, so not forgotten
+			waiting, err := WaitingMounts(store)
+			if err != nil {
+				serverError(w, err)
+				return
+			}
+			if Waits(o.Path, waiting) {
+				apiError(w, http.StatusConflict, "not_mounted", "Its share isn't connected, so it can't be checked. Nothing was changed.")
+				return
+			}
+		}
 		err = worker.Forget(store, id, time.Now())
 		var fe *worker.ForgetError
 		switch {

@@ -85,7 +85,16 @@ func (s *Store) SetKeptGone(id int64, at time.Time) error {
 // RehomeOriginal moves kept row id to where its files are now: a share re-added at another mount (U-B). Its
 // path, new path and trash are set in one write; nothing is moved on disk.
 func (s *Store) RehomeOriginal(id int64, path, newPath, trash string) error {
-	return s.setOriginal(id, `path=?, new_path=?, trash=?`, path, newPath, trash)
+	res, err := s.db.Exec(`UPDATE originals SET path=?, new_path=?, trash=? WHERE id=? AND state=?`,
+		path, newPath, trash, id, OriginalKept) // only a kept row moves: a purged or swapping one is left alone
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return ErrNotFound // not re-homed this round, so nothing is deleted for it
+	}
+	s.swapChanges.Add(1)
+	return nil
 }
 
 // SetSwapState records how a restart ended an unfinished swap (rolled_back or needs_attention).

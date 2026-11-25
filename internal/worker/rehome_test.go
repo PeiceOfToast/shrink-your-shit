@@ -25,6 +25,12 @@ func movedShare(t *testing.T) (*scenario, jobs.Original, string) {
 	if err := os.Rename(s.dir, newRoot); err != nil {
 		t.Fatal(err)
 	}
+	// macOS: t.TempDir is under /var, a link to /private/var. The library row stores the resolved folder (jobs.RealPath
+	// through addLibrary's canonical), so the test names the new root the same way.
+	newRoot, err := jobs.RealPath(newRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.store.AddLibraryWithoutFlow("Arcane", newRoot, false); err != nil {
 		t.Fatal(err)
 	}
@@ -248,5 +254,21 @@ func TestForgetAnUnknownIDIsNotFound(t *testing.T) {
 	s, _ := keptOne(t)
 	if err := Forget(s.store, 999999, time.Now()); !errors.Is(err, jobs.ErrNotFound) {
 		t.Errorf("unknown id: %v, want ErrNotFound", err)
+	}
+}
+
+// U-B: only a kept row is re-homed. A purged row is left as it was, and the write reports that it moved nothing.
+func TestRehomeLeavesAPurgedRowAlone(t *testing.T) {
+	s, o, newRoot := movedShare(t)
+	if err := s.store.SetKeptGone(o.ID, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	err := s.store.RehomeOriginal(o.ID, filepath.Join(newRoot, filepath.Base(o.Path)), filepath.Join(newRoot, filepath.Base(o.NewPath)), filepath.Join(newRoot, TrashDir, filepath.Base(o.Trash)))
+	if !errors.Is(err, jobs.ErrNotFound) {
+		t.Errorf("rehome of a purged row: err %v, want ErrNotFound", err)
+	}
+	r, _ := s.store.OriginalByID(o.ID)
+	if r.Path != o.Path || r.State != jobs.OriginalPurged {
+		t.Errorf("purged row changed: path %s state %s", r.Path, r.State)
 	}
 }
