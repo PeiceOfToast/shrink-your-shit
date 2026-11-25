@@ -134,7 +134,7 @@ export function Libraries() {
       <Problem m={libs.data ? libs.error?.message : undefined} />
       {/* one toolbar: the filter buttons with their counts on the left, the search on the right; while selecting, All and the bulk actions (on phones they sit under "...") */}
       {!empty && <div className="ltools" role="toolbar" aria-label="Libraries">
-        <div className="seg" role="group" aria-label="Show libraries">
+        <div className="seg seg2x2" role="group" aria-label="Show libraries">
           {FILTERS.map(([k, t]) => <button key={k} type="button" aria-pressed={filter === k} onClick={() => setFilter(k)}>{counted ? t + " · " + count(counts[k]) : t}</button>)}
         </div>
         {selecting && <label className="hit selall"><input type="checkbox" aria-label="Select all shown libraries" disabled={items.length === 0} checked={allShownSelected(items, sel)} onChange={(e) => setSel(selectShown(sel, items, e.target.checked))} /><span className="sm">All</span></label>}
@@ -325,7 +325,7 @@ export function WorkflowField({ value, onChange, workflows, self, none, makeNew 
             {none && <option value="0">No workflow yet</option>}
             {workflows.map((w) => <option key={w.id} value={w.id} disabled={!w.usable}>{w.name}{w.usable ? "" : " (not published yet)"}</option>)}
           </select>
-          {value && value !== "0" && value !== "new" && <Link className="wfedit" to={"/workflows/" + value + "?view=simple"}>Edit this workflow</Link>}
+          {value && value !== "0" && value !== "new" && <Link className="wfedit" to={"/workflows/" + value}>Edit this workflow</Link>}
         </div>
         <span id="lib-wf-hint" className="hint">{hint}</span>
         {workflows.length === 0 && !makeNew && <span className="hint">No workflows yet. <Link to="/workflows">Make one in Workflows</Link>.</span>}

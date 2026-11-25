@@ -76,6 +76,40 @@ func private(a netip.Addr) bool {
 	return a.IsLoopback() || a.IsPrivate() || a.IsLinkLocalUnicast()
 }
 
+// forwardedFor is the client address behind the trusted proxies: X-Forwarded-For read from the right, past
+// every hop a trusted proxy appended, so a chain of trusted proxies still gives the client. The first entry
+// that is not a trusted proxy is the client; the entries before it are whatever the client sent, and are not
+// believed. ok is false when every entry is a trusted proxy, or an entry is not an address.
+func (t Transport) forwardedFor(r *http.Request) (netip.Addr, bool) {
+	parts := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
+	for i := len(parts) - 1; i >= 0; i-- {
+		a, err := netip.ParseAddr(strings.TrimSpace(parts[i]))
+		if err != nil {
+			return netip.Addr{}, false
+		}
+		if a = a.Unmap(); !t.trusted(a) {
+			return a, true
+		}
+	}
+	return netip.Addr{}, false
+}
+
+// trusted reports whether a is one of the trusted proxies' addresses.
+func (t Transport) trusted(a netip.Addr) bool {
+	for _, p := range t.TrustedProxies {
+		if p.Contains(a) {
+			return true
+		}
+	}
+	return false
+}
+
+// forwardedByProxy reports whether r carries a proxy's signature (the forwarding headers). A proxy on this
+// host forwards the internet's address in them, so an untrusted peer that sends one is not a private client.
+func forwardedByProxy(r *http.Request) bool {
+	return r.Header.Get("X-Forwarded-For") != "" || r.Header.Get("X-Real-IP") != "" || r.Header.Get("Forwarded") != ""
+}
+
 // Allowed reports whether r may reach the worker API (or pairing).
 func (t Transport) Allowed(r *http.Request) bool {
 	peer, ok := peerAddr(r)
@@ -95,11 +129,35 @@ func (t Transport) Allowed(r *http.Request) bool {
 	if strings.EqualFold(strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-Proto"), ",")[0]), "https") {
 		return true
 	}
-	if f := strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-For"), ",")[0]); f != "" {
-		a, err := netip.ParseAddr(f)
-		return err == nil && private(a.Unmap())
+	if r.Header.Get("X-Forwarded-For") != "" {
+		a, ok := t.forwardedFor(r)
+		return ok && private(a)
 	}
 	return r.TLS != nil || private(peer)
+}
+
+// PrivateClient reports whether r comes from a private address: the direct peer, or, through a trusted
+// proxy, the client address it reports, which must itself be private. A proxy's silence is not taken for
+// its own address (unlike Client): the real client is then unknown, so it is not private. From anyone
+// else X-Forwarded-For is ignored, so a public address cannot borrow a private one. And a request from an
+// untrusted peer that carries a forwarding header is not private: a reverse proxy on this LAN would show
+// the internet's client that way, and home mode must not admit it by address (review P1).
+func (t Transport) PrivateClient(r *http.Request) bool {
+	peer, ok := peerAddr(r)
+	if !ok {
+		return false
+	}
+	trusted := false
+	for _, p := range t.TrustedProxies {
+		if p.Contains(peer) {
+			trusted = true
+		}
+	}
+	if !trusted {
+		return private(peer) && !forwardedByProxy(r)
+	}
+	a, ok := t.forwardedFor(r)
+	return ok && private(a)
 }
 
 // Pairing tries (orch-lead 13:41Z): a failed pair waits PairFailDelay, as a wrong token does, and an
@@ -112,15 +170,25 @@ var (
 )
 
 type pairLimiter struct {
-	mu    sync.Mutex
-	fails map[netip.Addr][]time.Time
+	mu     sync.Mutex
+	fails  map[netip.Addr][]time.Time
+	max    int           // failures allowed in the window; 0 = PairMaxFails
+	window time.Duration // 0 = PairWindow
+}
+
+func (l *pairLimiter) limits() (int, time.Duration) {
+	if l.max == 0 {
+		return PairMaxFails, PairWindow
+	}
+	return l.max, l.window
 }
 
 // recent drops failures older than the window and returns those left.
 func (l *pairLimiter) recent(a netip.Addr, now time.Time) []time.Time {
+	_, window := l.limits()
 	kept := l.fails[a][:0]
 	for _, at := range l.fails[a] {
-		if now.Sub(at) < PairWindow {
+		if now.Sub(at) < window {
 			kept = append(kept, at)
 		}
 	}
@@ -137,8 +205,8 @@ func (l *pairLimiter) locked(a netip.Addr, now time.Time) (bool, time.Time) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	f := l.recent(a, now)
-	if len(f) >= PairMaxFails {
-		return true, f[0].Add(PairWindow)
+	if max, window := l.limits(); len(f) >= max {
+		return true, f[0].Add(window)
 	}
 	return false, time.Time{}
 }
@@ -157,8 +225,8 @@ func (t Transport) Client(r *http.Request) netip.Addr {
 	peer, _ := peerAddr(r)
 	for _, p := range t.TrustedProxies {
 		if p.Contains(peer) {
-			if a, err := netip.ParseAddr(strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-For"), ",")[0])); err == nil {
-				return a.Unmap()
+			if a, ok := t.forwardedFor(r); ok {
+				return a
 			}
 		}
 	}

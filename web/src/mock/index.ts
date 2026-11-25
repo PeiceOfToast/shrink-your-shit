@@ -154,6 +154,8 @@ function fresh(): State {
 }
 
 let state: State = mockMode === "fresh" ? fresh() : running();
+// D1 fix 1: ?waiting makes every worker on and idle (none busy), so the Status strip shows Waiting while files wait
+if (mockMode !== "fresh" && new URLSearchParams(location.search).has("waiting")) for (const w of state.workers) if (w.status !== "paused" && w.status !== "draining") { w.status = "online"; w.currentJobIds = []; }
 // U-A: ?libs=many adds 42 libraries to the running mock, for the Jobs library select (one name is long, to check the cut-off)
 if (mockMode !== "fresh" && new URLSearchParams(location.search).has("libs")) state.libraries.push(...Array.from({ length: 42 }, (_, i) => library("m" + (i + 1), i === 0 ? "Library 1: an archive with a much longer name than the rest" : "Library " + (i + 1), "/media/m" + (i + 1), 0, 0, 10)));
 let version = 0;

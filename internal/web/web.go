@@ -31,6 +31,7 @@ func Handler(store *jobs.Store, access *Access, eng Engine) http.Handler {
 	mux.Handle("/api/", access.guard(api))
 	joins := newJoinBook(store)                                                             // E2: join requests from new workers
 	mux.Handle("/api/worker/v1/", workerAPI(store, eng.Transport, eng.Version, eng, joins)) // V7b1: remote workers, their own tokens
+	access.transport = eng.Transport                                                        // who is private (home mode)
 	access.routes(api)
 	libraryRoutes(api, store, eng)
 	systemRoutes(api, store, eng)
@@ -72,7 +73,8 @@ func Handler(store *jobs.Store, access *Access, eng Engine) http.Handler {
 		svc = integrations.New(store, integrations.Options{})
 	}
 	v2Integrations(api, svc)
-	v2Backups(api, store, ss) // item 5: /api/v2/backups
+	v2Guide(api, store, svc, notifier) // slice 12: the guided builder's questions
+	v2Backups(api, store, ss)          // item 5: /api/v2/backups
 	// For health checks: answers without signing in and says nothing else. "ok" needs the database to
 	// answer one query (user item 9: an update whose program is up but can't reach its data is not
 	// healthy). A database busy past healthzWait (one connection, held by a long write) is still "ok":

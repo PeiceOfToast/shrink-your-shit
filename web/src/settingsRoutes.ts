@@ -22,3 +22,12 @@ export const settingsTarget = (path: string): string | null => moved[path] ?? nu
 
 // The path part of an address (no ?query or #hash).
 export const pathOf = (to: string): string => to.split(/[?#]/)[0];
+
+// Where an old address redirects to, keeping the query the person came with (?mock=1 and the like). The query goes
+// before the target's own #anchor; a target that already has a query (/workflows?tab=variables) keeps it first.
+export const redirectTarget = (target: string, search: string): string => {
+  const [beforeHash, hash] = target.split("#", 2);
+  const [path, ownQuery] = beforeHash.split("?", 2);
+  const query = [ownQuery, search.replace(/^\?/, "")].filter(Boolean).join("&");
+  return path + (query ? "?" + query : "") + (hash !== undefined ? "#" + hash : "");
+};

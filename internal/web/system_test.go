@@ -119,6 +119,7 @@ func TestSystemHealth(t *testing.T) {
 
 func TestSetupChecksNeedSignIn(t *testing.T) {
 	srv, _, a := doctorServer(t, true)
+	passwordMode(t, a)
 	for _, k := range []call{
 		{method: "POST", path: "/api/libraries/check", body: `{"path":"/"}`, ctype: "application/json"},
 		{method: "GET", path: "/api/system/health"},

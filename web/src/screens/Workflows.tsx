@@ -7,7 +7,7 @@ import { Icon } from "../Icon";
 import { count, plural } from "../format";
 import { SignedOut, failed, type Answer } from "../api";
 import { useData } from "../useData";
-import { createWorkflow, deleteWorkflow, duplicateWorkflow, getDraft, importWorkflow, listTemplates, listWorkflows, patchWorkflow } from "../workflowApi";
+import { deleteWorkflow, duplicateWorkflow, getDraft, importWorkflow, listTemplates, listWorkflows, patchWorkflow } from "../workflowApi";
 import { importLines, type ReportLine } from "../importReport";
 import { shownWorkflows, wfFilterCounts, type WfFilter } from "../workflowList";
 import { getWorkflowVars } from "../workflowVarsApi";
@@ -61,46 +61,6 @@ function RowMenu({ w, onSaid, reload }: { w: Workflow; onSaid: (s: string) => vo
         {used && <div className="hint" id={"used-" + w.id} style={{ padding: "0 10px 6px" }}>Used by {used}</div>}
       </div>
     </details>
-  );
-}
-
-function Wizard({ onClose, onMade }: { onClose: () => void; onMade: (w: Workflow) => void }) {
-  const [name, setName] = useState(""), [desc, setDesc] = useState(""), [err, setErr] = useState("");
-  const first = useRef<HTMLInputElement>(null);
-  useEffect(() => first.current?.focus(), []);
-  const [busy, setBusy] = useState(false);
-  const create = async () => {
-    if (!name.trim()) return (setErr("Give the workflow a name."), first.current?.focus());
-    setBusy(true);
-    const w = await act(createWorkflow(name.trim(), desc.trim()), setErr).finally(() => setBusy(false));
-    if (w) onMade(w);
-  };
-  return (
-    <section className="card" aria-labelledby="new-h">
-      <div className="hd"><h2 id="new-h">New workflow</h2></div>
-      <div className="bd stack">
-        <div className="grid cols2">
-          <div className="field"><label htmlFor="wf-name">Name</label>
-            <input id="wf-name" ref={first} className="input" value={name} onChange={(e) => (setName(e.target.value), setErr(""))} aria-invalid={!!err} aria-describedby={err ? "wf-err" : undefined} />
-            {err && <span className="hint" id="wf-err" style={{ color: "var(--error-text)" }}>{err}</span>}</div>
-          <div className="field"><label htmlFor="wf-type">File type</label><select id="wf-type" className="input"><option>Video</option></select></div>
-        </div>
-        <div className="field"><label htmlFor="wf-desc">Description <span className="muted" style={{ fontWeight: 400 }}>(optional)</span></label>
-          <input id="wf-desc" className="input" placeholder="What this workflow is for" value={desc} onChange={(e) => setDesc(e.target.value)} /></div>
-        {/* How to start: the engine has the Start Simple preset only; Visual workflow (an empty canvas) and other
-            templates come when the server has them, never as disabled choices (spec 5.2; review P3). */}
-        <fieldset className="stack choice" style={{ border: 0, padding: 0, margin: 0 }}>
-          <legend className="lab">How to start</legend>
-          <div className="radio"><input type="radio" id="how-simple" name="how" checked readOnly />
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <label htmlFor="how-simple">Start Simple: Shrink videos</label>
-              {/* design review rule 4: "same resolution", and that originals stay */}
-              <div className="hint" style={{ fontSize: "var(--fs)" }}>{START_SIMPLE}</div>
-            </div></div>
-        </fieldset>
-        <div className="row"><button className="btn primary" type="button" disabled={busy} onClick={create}>Create draft</button><button className="btn ghost" type="button" onClick={onClose}>Cancel</button></div>
-      </div>
-    </section>
   );
 }
 
@@ -168,7 +128,7 @@ export function Workflows() {
   const all = wfs.data ?? [], templates = tpl.data ?? [];
   const tabParam = new URLSearchParams(useSearch()).get("tab"), tab = tabParam === "templates" || tabParam === "variables" ? tabParam : "workflows"; // in the URL: Back and reload keep it
   const setTab = (t: string) => navigate("/workflows" + (t === "workflows" ? "" : "?tab=" + t));
-  const [q, setQ] = useState(""), [tag, setTag] = useState(""), [fav, setFav] = useState(false), [filter, setFilter] = useState<WfFilter>("all"), [wizard, setWizard] = useState(false), [said, setSaid] = useState("");
+  const [q, setQ] = useState(""), [tag, setTag] = useState(""), [fav, setFav] = useState(false), [filter, setFilter] = useState<WfFilter>("all"), [said, setSaid] = useState("");
   const tags = [...new Set(all.flatMap((w) => w.tags))].sort();
   // Pass 5 #3: with no tag on any workflow, the Tag filter is hidden and the card shows no tag chips. Based on the list the API returned, so filtering never hides them.
   const hasTags = tags.length > 0, activeTag = hasTags ? tag : "";
@@ -200,11 +160,10 @@ export function Workflows() {
           <button className="btn sm ghost" type="button" onClick={() => fileIn.current?.click()}>Import…</button>
           <input ref={fileIn} type="file" accept=".json,application/json" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void pickFile(f); }} />
           <button className="btn sm ghost" type="button" aria-pressed={fav} onClick={() => setFav(!fav)}><Icon id="i-star" />Favourites</button>
-          {!wizard && <button className="btn sm primary" type="button" onClick={() => (setWizard(true), setSaid(""))}><Icon id="i-plus" />New workflow</button>}
+          <button className="btn sm primary" type="button" onClick={() => navigate("/workflows/guided")}><Icon id="i-plus" />New workflow</button>
         </>}
       </PageHead>
-      {wizard && <Wizard onClose={() => setWizard(false)} onMade={(w) => navigate("/workflows/" + w.id)} />}
-      <div className="tabs" role="tablist">
+      <div className="tabs tabs3" role="tablist">
         <button role="tab" type="button" aria-selected={tab === "workflows"} onClick={() => tab !== "workflows" && setTab("workflows")}>Workflows {wfs.data && <span className="n">{all.length}</span>}</button>
         <button role="tab" type="button" aria-selected={tab === "templates"} onClick={() => tab !== "templates" && setTab("templates")}>Templates {tpl.data && <span className="n">{templates.length}</span>}</button>
         <button role="tab" type="button" aria-selected={tab === "variables"} onClick={() => tab !== "variables" && setTab("variables")}>Variables {vars.data && <span className="n">{vars.data.total}</span>}</button>
@@ -237,7 +196,7 @@ export function Workflows() {
           <input className="input find" type="search" placeholder="Search workflows" aria-label="Search workflows" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>}
         {wfs.error && wfs.data && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{wfs.error.message}</span></p>}
-        {!wfs.loaded ? <WfSkeleton /> : wfs.error && !wfs.data ? <LoadFailed error={wfs.error} reload={wfs.reload} /> : all.length === 0 ? <Empty icon="i-workflow" text="No workflows yet. A workflow says what happens to each file.">{!wizard && <button className="btn primary" type="button" onClick={() => (setWizard(true), setSaid(""))}><Icon id="i-plus" />New workflow</button>}</Empty>
+        {!wfs.loaded ? <WfSkeleton /> : wfs.error && !wfs.data ? <LoadFailed error={wfs.error} reload={wfs.reload} /> : all.length === 0 ? <Empty icon="i-workflow" text="No workflows yet. A workflow says what happens to each file."><button className="btn primary" type="button" onClick={() => navigate("/workflows/guided")}><Icon id="i-plus" />New workflow</button></Empty>
           : rows.length === 0 ? <div className="empty">No workflow matches.</div> : (
           <ul className="lcards" aria-label="Workflow list">
             {rows.map((w) => <WfCard key={w.id} w={w} hasTags={hasTags} setSaid={setSaid} reload={wfs.reload} />)}

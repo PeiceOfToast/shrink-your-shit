@@ -8,7 +8,9 @@ import type { WorkerStatus } from "./types/v2";
 
 export interface OverviewJob { jobId: string; name: string; percent: number | null; fps: number | null; speed: number | null; etaS: number | null }
 export interface Overview {
-  headline: { freed: number; waitingToFree: number; nextFreeAt: string | null; couldFree: number; grew?: number; filesConverted: number; filesWaiting: number };
+  headline: { freed: number; waitingToFree: number; nextFreeAt: string | null; couldFree: number; grew?: number; filesConverted: number; filesWaiting: number;
+    // dashboard Status strip (workshop PR #727, not merged yet): the last file done; absent or null until it lands
+    lastDoneAt?: string | null };
   trash: { bytes: number; files: number; nextDeleteAt: string | null };
   workers: { id: string; name: string; kind: string; status: WorkerStatus; slots: { cpu?: { used: number; total: number }; used?: number; total?: number }; jobs: OverviewJob[]; cpuPercent: number | null; gpuPercent: number | null }[];
   active: { jobId: string; library: { id: string; name: string } | null; name: string; percent: number | null; etaS: number | null; expectedSavingBytes: number | null; expectedSavingEstimated?: boolean; speed?: number | null; fps?: number | null; stage?: string | null }[];
@@ -19,6 +21,8 @@ export interface Overview {
   // original is still in the trash (<= savedBytes). freedBytes is dated by the delete day. Optional until #309 merges.
   // workshop #367: couldFreeBytes = the part of savedBytes whose original was kept in place, dated like savedBytes.
   timeZone: string;
+  // the next scheduled scan (the Status strip's "next scan"); absent or null until the server sends it (#727)
+  nextScanAt?: string | null;
   averages: { fileShrinkPercent: number | null; secondsPerGB: number | null };
   // #323: graphics-encoder fall-backs today, per worker; pausedUntil is set after three in a row (an hour on the processor)
   encoderFallbacks?: { workerId: string; worker: string; encoder: string; lastError: string; count: number; at: string; pausedUntil: string | null }[];
@@ -37,7 +41,7 @@ function sample(): Overview {
   const fell = new URLSearchParams(location.search).has("fallback"); // ?mock=1&fallback: a paused graphics encoder
   return {
     headline: { freed: tot((l) => l.bytes.freed), waitingToFree: tot((l) => l.bytes.waitingToFree), nextFreeAt: s.trash.nextDeleteAt, couldFree: 0, grew: tot((l) => l.bytes.grew ?? 0),
-      filesConverted: tot((l) => l.counts.completed), filesWaiting: tot((l) => l.counts.waiting) },
+      filesConverted: tot((l) => l.counts.completed), filesWaiting: tot((l) => l.counts.waiting), lastDoneAt: new Date(Date.now() - 4 * 6e4).toISOString() },
     trash: { bytes: s.trash.bytes, files: s.trash.files, nextDeleteAt: s.trash.nextDeleteAt },
     workers: s.workers.map((w) => ({ id: w.id, name: w.name, kind: w.id === "local" ? "builtin" : "remote", status: w.status, slots: w.slots,
       jobs: jobs.filter((j) => w.currentJobIds.includes(j.jobId)), cpuPercent: w.live.cpuPercent, gpuPercent: w.live.gpu[0]?.utilPercent ?? null })),
@@ -54,6 +58,7 @@ function sample(): Overview {
           freedBytes: i >= 13 && i < 30 ? Math.round((0.4 + (((i - 7) * 5) % 9) / 6) * GB) : 0,
           savedBytes: Math.round((0.4 + ((i * 5) % 9) / 6) * GB), waitingBytes: i < 23 ? 0 : Math.round((0.4 + ((i * 5) % 9) / 6) * GB), couldFreeBytes: 0 }),
     timeZone: "Europe/London",
+    nextScanAt: new Date(Date.now() + 6 * 36e5).toISOString(),
     averages: { fileShrinkPercent: 38, secondsPerGB: 130 },
     encoderFallbacks: fell ? [{ workerId: s.workers[0].id, worker: s.workers[0].name, encoder: "hevc_qsv", lastError: "ffmpeg exited with code 1",
       count: 3, at: new Date(Date.now() - 6e5).toISOString(), pausedUntil: new Date(Date.now() + 50 * 6e4).toISOString() }] : [],

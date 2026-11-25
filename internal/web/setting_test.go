@@ -164,7 +164,8 @@ func TestFlowStepsInPlainWords(t *testing.T) {
 }
 
 func TestSettingEndpointsNeedSignIn(t *testing.T) {
-	srv, _, _, _ := libServer(t, true)
+	srv, _, a, _ := libServer(t, true)
+	passwordMode(t, a)
 	for _, k := range []call{
 		{method: "GET", path: "/api/settings/slider"},
 		{method: "GET", path: "/api/libraries/1/setting"},
