@@ -8,9 +8,10 @@ import { Icon } from "../Icon";
 import { PageHead } from "../PageHead";
 import { SettingRow, ValueChip } from "../SettingRow";
 import { SignedOut, failed, type Answer } from "../api";
+import { canForget, fileName, nextForgetId, unreachableLine } from "../unreachable";
 import { bytes, plural } from "../format";
-import { cancelUpdate, checkUpdate, getConverting, getHealth, getUpdate, installUpdate, purgeTrash, rollbackUpdate, type UpdateNotice, getSettings, getToken, getTrash, patchSettings, rotateToken, signOut } from "../libraryApi";
-import type { PurgeResult } from "../types/v2";
+import { cancelUpdate, checkUpdate, getConverting, getHealth, getUpdate, installUpdate, forgetOriginal, purgeTrash, rollbackUpdate, type UpdateNotice, getSettings, getToken, getTrash, patchSettings, rotateToken, signOut } from "../libraryApi";
+import type { PurgeResult, Unreachable } from "../types/v2";
 import type { FirstRunSettings } from "../types/v1";
 import { SettingsTabs } from "../pages";
 import { Link, navigate } from "../router";
@@ -201,17 +202,36 @@ export function SafetySettings() {
   };
   // Empty trash now: deletes the kept originals before their keep time is up (a confirm first; the result lists any library skipped)
   const [ask, setAsk] = useState(false), [purging, setPurging] = useState(false), [gone, setGone] = useState<PurgeResult | null>(null), [purgeSaid, setPurgeSaid] = useState(""), purgeBtn = useRef<HTMLButtonElement>(null), freed = useRef<HTMLParagraphElement>(null);
+  // U-B: the kept originals the purge couldn't delete; Forget removes a record whose file is gone (a 409 keeps the row and says why)
+  const [unreach, setUnreach] = useState<Unreachable[] | null>(null), [rowSaid, setRowSaid] = useState<Record<number, string>>({}), [forgetting, setForgetting] = useState<number | null>(null), [forgotSaid, setForgotSaid] = useState(""), [focusAt, setFocusAt] = useState<number | null>(null), unreachLine = useRef<HTMLParagraphElement>(null);
   // Focus moves after the commit: to the result after a purge, back to the (enabled again) button after an error
   const [back, setBack] = useState(0);
   useEffect(() => { if (gone) freed.current?.focus(); }, [gone]);
   useEffect(() => { if (back) purgeBtn.current?.focus(); }, [back]);
   const purge = async () => {
-    setPurging(true); setPurgeSaid(""); setGone(null);
+    setPurging(true); setPurgeSaid(""); setGone(null); setUnreach(null); setForgotSaid(""); setRowSaid({});
     const r = await act(purgeTrash(), setPurgeSaid);
     setPurging(false); setAsk(false);
-    if (r) (setGone(r), tr.reload());
+    if (r) (setGone(r), setUnreach(r.unreachable?.length ? r.unreachable : null), tr.reload());
     else setBack((b) => b + 1);
   };
+  const forget = async (u: Unreachable, idx: number) => {
+    setForgetting(u.id); setRowSaid((m) => ({ ...m, [u.id]: "" }));
+    let r: Answer<unknown>;
+    try { r = await forgetOriginal(u.id); } catch (e) { if (e instanceof SignedOut) return setForgetting(null); throw e; }
+    setForgetting(null);
+    if (failed(r)) return setRowSaid((m) => ({ ...m, [u.id]: r.error.message }));
+    setUnreach((list) => (list ?? []).filter((x) => x.id !== u.id));
+    setForgotSaid(`Forgot ${fileName(u.path)}. The file was not deleted.`);
+    setFocusAt(idx); tr.reload();
+  };
+  // after a forget, focus goes to the next Forget button, or to the warning line when none are left
+  useEffect(() => {
+    if (focusAt === null) return;
+    setFocusAt(null);
+    const id = nextForgetId(unreach ?? [], focusAt);
+    if (id !== null) document.getElementById("forget-" + id)?.focus(); else unreachLine.current?.focus();
+  }, [focusAt]); // eslint-disable-line react-hooks/exhaustive-deps
   const t = tr.data;
   return (
     <div className="stack">
@@ -231,13 +251,27 @@ export function SafetySettings() {
               <span className="mono">{st.data.trashPath.match(/called (\S+)/)?.[1] ?? st.data.trashPath}</span>
             </SettingRow>}
             <SettingRow title="Kept right now" descId="purge-h" desc={<span aria-live="polite">{!t ? (tr.error?.message ?? "") : t.files ? <><strong>Kept originals:</strong> {bytes(t.bytes)} · {plural(t.files, "file", "files")}.{t.nextDeleteAt && " The next ones go on " + day(t.nextDeleteAt) + "."}</> : "No originals are being kept right now."}</span>}>
-              {t && <button ref={purgeBtn} className="btn" type="button" disabled={!t.files || purging} aria-describedby={t.files ? undefined : "purge-h"} onClick={() => (setGone(null), setPurgeSaid(""), setAsk(true))}>
+              {t && <button ref={purgeBtn} className="btn" type="button" disabled={!t.files || purging} aria-describedby={t.files ? undefined : "purge-h"} onClick={() => (setGone(null), setUnreach(null), setPurgeSaid(""), setAsk(true))}>
                 {t.files ? `Empty trash now: ${plural(t.files, "file", "files")}, ${bytes(t.bytes)}` : "Empty trash now"}</button>}
             </SettingRow>
             {purgeSaid && <p className="st bad" role="alert" style={{ margin: "0 16px 12px" }}><Icon id="i-alert" /><span>{purgeSaid}</span></p>}
             {gone && <div aria-live="polite" className="stack" style={{ gap: 6, padding: "0 16px 12px" }}>
               <p ref={freed} tabIndex={-1} className={gone.deletedFiles ? "st ok" : "st warn"} style={{ margin: 0 }}><Icon id={gone.deletedFiles ? "i-check-c" : "i-alert"} /><span>{gone.deletedFiles ? `Freed ${bytes(gone.freedBytes)} (${plural(gone.deletedFiles, "file", "files")}).` : "Nothing was deleted."}</span></p>
               {gone.skipped.map((s, i) => <p key={i} className="st warn" style={{ margin: 0 }}><Icon id="i-alert" /><span>{`${s.library} was skipped. ${s.reason}`}</span></p>)}
+              {forgotSaid && <p role="status" className="st" style={{ margin: 0 }}><span>{forgotSaid}</span></p>}
+              {unreach && <div className="stack" style={{ gap: 8 }}>
+                <p ref={unreachLine} tabIndex={-1} className="st warn" style={{ margin: 0 }}><Icon id="i-alert" /><span>{unreach.length ? unreachableLine(unreach.length) : "Every original that couldn't be deleted has been forgotten."}</span></p>
+                {unreach.length > 0 && <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 8 }}>
+                  {unreach.map((u, i) => <li key={u.id} style={{ display: "flex", flexWrap: "wrap", gap: "8px 11px", alignItems: "center", justifyContent: "space-between", borderTop: "1px solid var(--line, #ddd)", paddingTop: 8 }}>
+                    <div style={{ minWidth: 0, flex: "1 1 220px" }}>
+                      <div className="mono" style={{ overflowWrap: "anywhere" }}>{u.path}</div>
+                      <div className="muted" style={{ overflowWrap: "anywhere" }}>{u.reason}</div>
+                      {rowSaid[u.id] && <p className="st bad" role="alert" style={{ margin: "4px 0 0" }}><Icon id="i-alert" /><span>{rowSaid[u.id]}</span></p>}
+                    </div>
+                    {canForget(u) && <button id={"forget-" + u.id} className="btn" type="button" disabled={forgetting !== null} aria-label={`Forget ${fileName(u.path)}`} onClick={() => forget(u, i)}>Forget</button>}
+                  </li>)}
+                </ul>}
+              </div>}
             </div>}
           </div>
         </section>

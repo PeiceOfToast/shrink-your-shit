@@ -3,7 +3,7 @@
 import { call, MOCK, failed, type Answer } from "./api";
 import * as mock from "./mock";
 import type { FirstFiles, FirstRunSettings, FolderReport, LibraryItem, WorkerV1 } from "./types/v1";
-import type { Library, PurgeResult, Trash, Workflow } from "./types/v2";
+import type { Library, PurgeResult, Trash, Unreachable, Workflow } from "./types/v2";
 import * as wf from "./workflowApi";
 
 // A workflow a library can use: a never-published one can't be chosen (87faa4b), on the server and the mock.
@@ -189,13 +189,27 @@ export async function getTrash(): Promise<Answer<Trash>> {
 }
 
 // POST /api/v2/trash/purge (omit libraryId = all libraries). Mock: empties the mock trash; ?purgeskip=1 leaves one
-// library's 3 files behind as skipped, with the server's reason text (#458).
+// library's 3 files behind as skipped, with the server's reason text (#458). ?purgeunreach=1 leaves 3 kept originals the
+// server couldn't delete (U-B): two not_found (the second answers 409 on Forget) and one in_use.
 export async function purgeTrash(libraryId?: string): Promise<Answer<PurgeResult>> {
   if (!MOCK) return call("POST", "/api/v2/trash/purge", libraryId ? { libraryId } : {});
-  const s = mock.mockState(), t = s.trash, skip = new URLSearchParams(location.search).has("purgeskip");
-  const left = skip ? { files: 3, bytes: 2e9 } : { files: 0, bytes: 0 };
+  const s = mock.mockState(), t = s.trash, q = new URLSearchParams(location.search), skip = q.has("purgeskip"), unreach = q.has("purgeunreach");
+  const left = skip ? { files: 3, bytes: 2e9 } : unreach ? { files: 3, bytes: 3e9 } : { files: 0, bytes: 0 };
   s.trash = { ...t, files: left.files, bytes: left.bytes, nextDeleteAt: left.files ? t.nextDeleteAt : null, lastDeleteAt: new Date().toISOString() };
-  return M({ deletedFiles: t.files - left.files, freedBytes: t.bytes - left.bytes, skipped: skip ? [{ library: "Archive disk", reason: "Its share isn't connected, so nothing in it was touched." }] : [] });
+  return M({ deletedFiles: t.files - left.files, freedBytes: t.bytes - left.bytes, skipped: skip ? [{ library: "Archive disk", reason: "Its share isn't connected, so nothing in it was touched." }] : [], unreachable: unreach ? mockUnreachable() : [] });
+}
+const mockUnreachable = (): Unreachable[] => [
+  { id: 101, path: "/mnt/old-share/Archive/2019/Holiday 2019/IMG_4432.mov", code: "not_found", reason: "The share isn't connected, so the file can't be found." },
+  { id: 102, path: "/mnt/old-share/Archive/2020/Family/Birthday party (final cut).mkv", code: "not_found", reason: "The share isn't connected, so the file can't be found." },
+  { id: 103, path: "/mnt/old-share/Archive/2021/Concerts/Set 2 - encode.mkv", code: "in_use", reason: "Another program has this file open, so it was left alone." },
+];
+
+// POST /api/v2/originals/{id}/forget: removes the kept record and never deletes a file. A file that can still be found
+// answers 409 with a sentence, and nothing changes. Mock: id 102 answers 409 so the error path can be checked.
+export async function forgetOriginal(id: number): Promise<Answer<unknown>> {
+  if (!MOCK) return call("POST", "/api/v2/originals/" + id + "/forget");
+  if (id === 102) return { error: { code: "conflict", message: "The file can still be found at /mnt/old-share/Archive/2020/Family, so nothing was forgotten." } };
+  return M({ id });
 }
 
 // G1 (one UI): remove a library: DELETE /api/libraries/{id}. The server stops watching the folder, takes its waiting
