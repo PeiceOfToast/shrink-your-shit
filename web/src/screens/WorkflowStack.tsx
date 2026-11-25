@@ -6,6 +6,7 @@ import { Component, Fragment, createContext, useContext, useEffect, useRef, useS
 import { Icon } from "../Icon";
 import { GC_CHOICES, gcLabel } from "../gcLabel";
 import { PageHead } from "../PageHead";
+import { FlowTabs } from "./Guided";
 import { SignedOut, failed, type Answer } from "../api";
 import { afterOnly, beforeSave, deleteNode, groupOf, insertAfter, insertAfterSave, insertQuestion, isQuestion, moveNode, newNode, order, otherwiseOf, setOtherwise, type Otherwise } from "../stepEdits"; // the steps in running order: a property of the document, not data
 import { useData } from "../useData";
@@ -1000,6 +1001,7 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
       {/* U11 (flow-builder.md 4.2, ui-review C10): the steps view is the same workspace as the graph: a 48 px toolbar
           (name, status, the view switch and undo/redo in the middle, Check, Save draft and the one primary on the
           right), then a frame that scrolls inside the window */}
+      <FlowTabs id={id} on="advanced" />
       <div className="edbar" role="toolbar" aria-label={"Editing " + w.name}>
         <span className="muted crumb"><Link to="/workflows">Workflows</Link> /</span>
         {renaming ? <form className="row" onSubmit={(e) => { e.preventDefault(); const v = (e.currentTarget.elements.namedItem("nm") as HTMLInputElement).value.trim(); if (v) rename(v); else setRenaming(false); }}>
@@ -1009,11 +1011,6 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
         <span className="pill">{w.version == null || w.draftDiffers || dirty ? "Draft" : "Published"}</span>
         <span className="muted nowrap desk edver">{w.version == null ? "Not published yet" : "v" + w.version + " published" + (w.draftDiffers || dirty ? " · v" + (w.version + 1) + " draft" : "")}</span>
         <div className="mid">
-          <div className="edsegs" role="group" aria-label="View">
-            {simple ? <Link to={"/workflows/" + id}>Steps</Link> : <span aria-current="page">Steps</span>}
-            {simple ? <span aria-current="page">Simple</span> : <Link to={"/workflows/" + id + "?view=simple"}>Simple</Link>}
-            <Link to={"/workflows/" + id + "/graph"}>Graph</Link>
-          </div>
           {canStack && <><span className="vr" aria-hidden="true" />{undoRedo}</>}
         </div>
         {canStack && tools}
