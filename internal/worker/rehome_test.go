@@ -296,6 +296,61 @@ func TestEmptyTrashFindsAMovedOriginalByShareMountPointOnly(t *testing.T) {
 	}
 }
 
+// Nested shape: the library folder is the parent of the share's new mount point (library L, original moved to
+// L/Shows/Arcane). Both L and L/Shows/Arcane are roots, but they name the same candidate: the original is found
+// once, re-homed once and deleted, and is not reported ambiguous.
+func TestEmptyTrashFindsAMovedOriginalUnderItsOwnLibraryFolder(t *testing.T) {
+	s, o := keptOne(t)
+	libs, err := s.store.Libraries()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range libs {
+		if err := s.store.DeleteLibrary(l.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	lib, err := jobs.RealPath(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.store.AddLibraryWithoutFlow("Shows", lib, false); err != nil {
+		t.Fatal(err)
+	}
+	newRoot := filepath.Join(lib, "Shows", "Arcane")
+	if err := os.MkdirAll(filepath.Dir(newRoot), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(s.dir, newRoot); err != nil {
+		t.Fatal(err)
+	}
+	newRoot, err = jobs.RealPath(newRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sh, err := s.store.SaveShare(jobs.Share{Type: "smb", Address: "//h/x", Name: "ssd", Guest: true}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.SetShareMountPoint(sh.ID, newRoot); err != nil {
+		t.Fatal(err)
+	}
+	movedTrash := filepath.Join(newRoot, TrashDir, filepath.Base(o.Trash))
+	rep := Purge(s.store, 0, later(t, o), nil, 0)
+	if rep.Deleted != 1 {
+		t.Fatalf("deleted %d, want 1; said %q; unreachable %+v", rep.Deleted, rep.Said, rep.Unreachable)
+	}
+	if len(rep.Unreachable) != 0 {
+		t.Errorf("unreachable %+v, want none: one place is ours, not ambiguous", rep.Unreachable)
+	}
+	if _, err := os.Stat(movedTrash); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the moved original is still there: %v", err)
+	}
+	if r, _ := s.store.OriginalByID(o.ID); r.State != jobs.OriginalPurged || !strings.HasPrefix(r.Path, newRoot) {
+		t.Errorf("row %s at %s, want purged under %s", r.State, r.Path, newRoot)
+	}
+}
+
 func TestForgetAnUnknownIDIsNotFound(t *testing.T) {
 	s, _ := keptOne(t)
 	if err := Forget(s.store, 999999, time.Now()); !errors.Is(err, jobs.ErrNotFound) {

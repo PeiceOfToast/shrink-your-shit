@@ -139,11 +139,11 @@ func rehomeOrReport(st Store, o jobs.Original, roots []string, say *[]string) (j
 		o.Path, o.NewPath, o.Trash = m.path, m.newPath, m.trash
 		return o, nil
 	case len(matches) > 1:
-		return unreachable(CodeAmbiguous, fmt.Sprintf("its file is in %d places under the library folders, so none was chosen. Nothing was deleted.", len(matches)))
+		return unreachable(CodeAmbiguous, fmt.Sprintf("its file was found in %d places under the library folders. None was chosen, so nothing was deleted.", len(matches)))
 	case changed:
-		return unreachable(CodeChanged, "a file is under the library folders where its original was, but it is not the kept original, so nothing was deleted.")
+		return unreachable(CodeChanged, "a different file is under the library folders where its original was. Nothing was deleted.")
 	case orphan:
-		return unreachable(CodeNotFound, "its original is under the library folders, but the converted file is not beside it, so nothing was deleted.")
+		return unreachable(CodeNotFound, "its original is under the library folders, but its converted file is not next to it. Nothing was deleted.")
 	case found:
 		return unreachable(CodeNotFound, "its file was not found under the library folders or the shares' mount points.")
 	}
