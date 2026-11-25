@@ -92,5 +92,13 @@ export const QUESTION_OF_FIELD: Record<string, number> = {
   skip: 9, includeDolbyVision: 9, after: 10,
 };
 
+// Q6's subtitle choices: the ones the server offers, in the plan's order. srt is shown only when offered; an unknown
+// value the server offers goes last, as it came.
+const SUBTITLE_ORDER = ["keep_all", "my_languages", "text_only", "srt"];
+export const subtitleChoices = (offered: string[]) => [
+  ...SUBTITLE_ORDER.filter((v) => offered.includes(v)),
+  ...offered.filter((v) => !SUBTITLE_ORDER.includes(v)),
+];
+
 // Q9's conditions are all off by default: a zero value is "any".
 export const skipOn = (s: Skip) => ({ size: s.minSizeGB > 0, res: s.minResolution > 0, minutes: s.minMinutes > 0 });

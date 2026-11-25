@@ -7,7 +7,7 @@ import { failed, SignedOut, type Answer } from "../api";
 import { useData } from "../useData";
 import { navigate } from "../router";
 import { createWorkflow, getDraft, getGuideInfo, previewGuide, publish, saveAnswers } from "../workflowApi";
-import { applyGoal, basicDoesntAsk, basicSave, canBasic, questionCount, QUESTION_OF_FIELD, skipOn, type Answers, type Goal, type GuideInfo } from "../guide";
+import { applyGoal, basicDoesntAsk, basicSave, canBasic, questionCount, QUESTION_OF_FIELD, skipOn, subtitleChoices, type Answers, type Goal, type GuideInfo } from "../guide";
 import type { Issue } from "../types/v1";
 import type { ValidationIssue, WorkflowRevision } from "../types/v2";
 
@@ -76,7 +76,7 @@ function LanguagePicker({ codes, set }: { codes: string[]; set: (c: string[]) =>
           <option value="">Choose…</option>
           {rest.map(([c, n]) => <option key={c} value={c}>{n}</option>)}
         </select></div>
-      <p className="hint">These are your languages for every workflow.</p>
+      <p className="hint">These are your languages for every workflow. Changing them here changes them everywhere (Settings &gt; General).</p>
     </div>
   );
 }
@@ -252,7 +252,7 @@ export function Guided({ id }: { id?: string }) {
         </div>);
       case 6: return (
         <div className="stack">
-          <Choice name="subtitles" legend="Subtitles" hide value={a.subtitles} options={av.subtitles.map((v) => [v, SUBTITLES[v] ?? v, v === "keep_all" ? "Subtitle pictures are never burned into the video." : undefined] as Pick)} onChange={(v) => set({ subtitles: v })} />
+          <Choice name="subtitles" legend="Subtitles" hide value={a.subtitles} options={subtitleChoices(av.subtitles).map((v) => [v, SUBTITLES[v] ?? v, v === "keep_all" ? "Subtitle pictures are never burned into the video." : undefined] as Pick)} onChange={(v) => set({ subtitles: v })} />
           {a.subtitles === "my_languages" && <p className="hint">Uses the languages from the sound question.</p>}
         </div>);
       case 7: return (

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { applyGoal, basicDoesntAsk, basicSave, canBasic, hasAfter, questionCount, skipOn, QUESTION_OF_FIELD } from "./guide.ts";
+import { applyGoal, basicDoesntAsk, basicSave, canBasic, hasAfter, questionCount, skipOn, subtitleChoices, QUESTION_OF_FIELD } from "./guide.ts";
 import { GUIDE_INFO } from "./mock/guide.ts";
 
 const info = GUIDE_INFO;
@@ -69,4 +69,10 @@ test("a server refusal names the question it belongs to", () => {
 test("Q9 conditions are on when their value is above zero", () => {
   assert.deepEqual(skipOn({ minSizeGB: 0, minResolution: 0, minMinutes: 0 }), { size: false, res: false, minutes: false });
   assert.deepEqual(skipOn({ minSizeGB: 2, minResolution: 1080, minMinutes: 0 }), { size: true, res: true, minutes: false });
+});
+
+test("Q6 offers the .srt choice only when the server offers srt, in the plan's order", () => {
+  assert.deepEqual(subtitleChoices(["srt", "keep_all", "text_only"]), ["keep_all", "text_only", "srt"]);
+  assert.equal(subtitleChoices(["keep_all", "my_languages", "text_only"]).includes("srt"), false);
+  assert.deepEqual(subtitleChoices(["keep_all", "vtt"]), ["keep_all", "vtt"]);
 });

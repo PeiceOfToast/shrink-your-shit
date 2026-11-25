@@ -19,7 +19,7 @@ export const GUIDE_INFO: GuideInfo = {
   available: {
     formats: ["hevc", "h264", "av1"],
     audio: ["stereo_aac_surround", "stereo_aac", "eac3_surround", "as_is"],
-    subtitles: ["keep_all", "my_languages", "text_only"],
+    subtitles: ["keep_all", "my_languages", "text_only", "srt"],
     after: { mediaServer: false, downloader: false, notifyTargets: [{ id: "n1", name: "Phone" }] },
   },
   languages: ["eng", "deu"],
