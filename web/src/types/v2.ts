@@ -153,7 +153,9 @@ export interface Settings { firstRunDone: boolean; firstRunStep: number; intakeP
 // trash until their date. Later embedded as Summary.bytes.trash.
 export interface Trash { bytes: number; files: number; nextDeleteAt: Time | null; lastDeleteAt: Time | null }
 // POST /api/v2/trash/purge {libraryId?}: a library whose folder isn't mounted is skipped, never reported as "deleted 0".
-export interface PurgeResult { deletedFiles: number; freedBytes: number; skipped: { library: string; reason: string }[] }
+// a kept original Empty trash now couldn't delete; the server names the file, why, and the code (not_found rows can be forgotten)
+export interface Unreachable { id: number; path: string; code: "not_found" | "ambiguous" | "changed" | "in_use"; reason: string }
+export interface PurgeResult { deletedFiles: number; freedBytes: number; skipped: { library: string; reason: string }[]; unreachable?: Unreachable[] }
 export interface Workflow { // GET /workflows (contract: Workflows, revisions and the graph)
   id: ID;
   name: string;
