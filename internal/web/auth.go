@@ -313,7 +313,7 @@ func (a *Access) routes(api *http.ServeMux) {
 	api.HandleFunc("GET /api/settings/token", func(w http.ResponseWriter, r *http.Request) {
 		tok := a.Token()
 		if tok == "" {
-			apiError(w, http.StatusNotFound, "no_token", "No access token is set, so there is none to show. Sign-in may use a password instead, or none if the sign-in choice is home.")
+			apiError(w, http.StatusNotFound, "no_token", "No access token is set, so there is none to show. Sign-in may use a password instead, or none once setup is done and no password is set.")
 			return
 		}
 		writeJSON(w, map[string]string{"token": tok})
