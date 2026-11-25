@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { pathOf, settingsTarget } from "./settingsRoutes.ts";
+import { pathOf, redirectTarget, settingsTarget } from "./settingsRoutes.ts";
 
 test("every old Settings address goes to the tab or page that holds it now", () => {
   const table: [string, string][] = [
@@ -32,4 +32,17 @@ test("the path part of a target drops the query and hash", () => {
   assert.equal(pathOf("/workflows?tab=variables"), "/workflows");
   assert.equal(pathOf("/settings/system#health"), "/settings/system");
   assert.equal(pathOf("/libraries/shares"), "/libraries/shares");
+});
+
+test("an old address keeps the query the person came with, before the mapped hash", () => {
+  assert.equal(redirectTarget("/settings/processing#safety", "?mock=1&purgeunreach=1"), "/settings/processing?mock=1&purgeunreach=1#safety");
+  assert.equal(redirectTarget("/settings/processing", "?mock=1"), "/settings/processing?mock=1");
+  assert.equal(redirectTarget("/settings/general#appearance", "?mock=fresh"), "/settings/general?mock=fresh#appearance");
+});
+
+test("with no query, the target is unchanged; a target's own query stays first", () => {
+  assert.equal(redirectTarget("/settings/processing#safety", ""), "/settings/processing#safety");
+  assert.equal(redirectTarget("/settings/processing", "?"), "/settings/processing");
+  assert.equal(redirectTarget("/workflows?tab=variables", "?mock=1"), "/workflows?tab=variables&mock=1");
+  assert.equal(redirectTarget("/workflows?tab=variables", ""), "/workflows?tab=variables");
 });

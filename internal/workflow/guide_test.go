@@ -33,7 +33,7 @@ func TestGuideDefaultsAreSafeAndReadBack(t *testing.T) {
 			t.Fatalf("%s: compile: %+v", goal, iss)
 		}
 		g := GuideOf(d)
-		if g.Coverage != CoverageFull || g.Answers == nil || !reflect.DeepEqual(*g.Answers, Fill(a)) {
+		if g.Coverage != CoverageFull || g.Answers == nil || !reflect.DeepEqual(basicOf(*g.Answers), basicOf(Fill(a))) {
 			t.Fatalf("%s: read back %s %+v\nwant %+v", goal, g.Coverage, g.Answers, Fill(a))
 		}
 	}
@@ -72,7 +72,7 @@ func TestGuideRoundTripsEveryAnswer(t *testing.T) {
 	g := GuideOf(d)
 	want := Fill(a)
 	want.Goal = GoalSmaller // the goal isn't stored: HEVC in MKV reads as "smaller"
-	if g.Coverage != CoverageFull || !reflect.DeepEqual(*g.Answers, want) {
+	if g.Coverage != CoverageFull || !reflect.DeepEqual(basicOf(*g.Answers), basicOf(want)) {
 		t.Fatalf("read back %s %+v\nwant %+v (why %q)", g.Coverage, g.Answers, want, g.Why)
 	}
 	a.Goal = GoalSmaller
@@ -89,7 +89,7 @@ func TestGuideRoundTripsEveryAnswer(t *testing.T) {
 		t.Fatalf("%+v", r.Issues)
 	}
 	g2 := GuideOf(d2)
-	if g2.Coverage != CoverageFull || !reflect.DeepEqual(*g2.Answers, Fill(a)) || len(d2.Nodes) != len(PresetOrder)+1 {
+	if g2.Coverage != CoverageFull || !reflect.DeepEqual(basicOf(*g2.Answers), basicOf(Fill(a))) || len(d2.Nodes) != len(PresetOrder)+1 {
 		t.Errorf("after taking them away: %s %+v, %d nodes", g2.Coverage, g2.Answers, len(d2.Nodes))
 	}
 }
@@ -115,13 +115,13 @@ func TestGuideReadsAHandEditedWorkflow(t *testing.T) {
 		t.Fatalf("%+v", g)
 	}
 	a := *g.Answers
-	a.Quality, a.Skip, a.After = 2, Skip{MinSizeGB: 2}, After{MediaServer: true}
+	a.Flow, a.Quality, a.Skip, a.After = FlowBasic, 2, Skip{MinSizeGB: 2}, After{MediaServer: true} // a Basic save: its views win over the lists it got
 	d2 := Apply(d, a)
 	if r := Validate(d2); r.Errors() {
 		t.Fatalf("%+v", r.Issues)
 	}
 	g2 := GuideOf(d2)
-	if g2.Coverage != CoveragePartial || !reflect.DeepEqual(*g2.Answers, Fill(a)) || strings.Join(g2.Extra, ", ") != "Add a note to the log, Tag the file" {
+	if g2.Coverage != CoveragePartial || !reflect.DeepEqual(basicOf(*g2.Answers), basicOf(Fill(a))) || strings.Join(g2.Extra, ", ") != "Add a note to the log, Tag the file" {
 		t.Fatalf("after applying: %+v\nwant %+v", g2, Fill(a))
 	}
 	if got := Steps(d2); strings.Join(got, " > ") != "Library files > Check the file > Add a note to the log > Leave some files alone > Convert video > Audio > Subtitles > File type > Check the result > Save the result > Tell the media server > Tag the file" {
@@ -148,15 +148,16 @@ func TestGuideReadsAHandEditedWorkflow(t *testing.T) {
 	}
 	// can't be read: a question in the conversion's way, the earlier install's settings, a reordered conversion
 	q := node(TypeCheckName, "", map[string]any{"pattern": "x"})
+	qEnd := node(TypeEnd, "", map[string]any{"reason": "named x"})
 	d3 := clone(d)
-	d3.Nodes = append(d3.Nodes, q)
+	d3.Nodes = append(d3.Nodes, q, qEnd)
 	for i := range d3.Edges {
 		if d3.Edges[i].From == note.ID {
-			d3.Edges = append(d3.Edges, link(q.ID, "match", d3.Edges[i].To))
+			d3.Edges = append(d3.Edges, link(q.ID, "match", d3.Edges[i].To), link(q.ID, "else", qEnd.ID))
 			d3.Edges[i].To = q.ID
 		}
 	}
-	if g := GuideOf(d3); g.Coverage != CoverageNone || g.Answers != nil || !strings.Contains(g.Why, "'Check the file name' sits where the questions can't show it") || !strings.HasSuffix(g.Why, "Open it in Advanced.") {
+	if g := GuideOf(d3); g.Coverage != CoverageNone || g.Advanced != CoverageFull || g.Answers == nil || !strings.Contains(g.Why, "'Check the file name' sits where the questions can't show it") || !strings.HasSuffix(g.Why, "Open it in Advanced.") {
 		t.Errorf("a question: %+v", g)
 	}
 	if g := GuideOf(FromTemplate(rules.Template{Kind: rules.KindLegacy}, nil)); g.Coverage != CoverageNone || !strings.Contains(g.Why, "earlier install") {
@@ -416,4 +417,10 @@ func allFormats(t *testing.T) {
 	t.Helper()
 	rules.SetAvailableFormats(map[string]bool{"libx265": true, "libx264": true, "libsvtav1": true, "libvpx-vp9": true, "aac": true, "libopus": true, "eac3": true, "ac3": true, "srt": true})
 	t.Cleanup(func() { rules.SetAvailableFormats(nil) })
+}
+
+// basicOf is the Basic flow's view of answers: the Advanced lists left out.
+func basicOf(a Answers) Answers {
+	a.Before, a.AfterCards, a.ConvertFails, a.CheckFails, a.Variables, a.Flow = nil, nil, nil, nil, nil, ""
+	return a
 }
