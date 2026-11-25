@@ -115,6 +115,21 @@ func TestGuidedBuilderAPI(t *testing.T) {
 	if code, b := send("PUT", "/api/v2/workflows/"+id+"/answers", `{"answers":{"goal":"both"}}`, ""); code != 428 {
 		t.Errorf("no version: %d %s", code, b)
 	}
+	// the Advanced flow (G1b): the draft carries the lists; an Advanced save writes them; a Basic save over
+	// a workflow Basic can't show is refused, an Advanced one over it is not
+	code, body = send("PUT", "/api/v2/workflows/"+id+"/answers", `{"answers":{"flow":"advanced","goal":"both","before":[{"type":"check.name","config":{"pattern":"sample","match":"contains"},"then":{"side":"yes","end":"leave"}}],"afterCards":[],"convertFails":{"end":"stop"}}}`, rev.Etag)
+	json.Unmarshal([]byte(body), &rev)
+	if code != 200 || rev.Guide.Coverage != "none" || rev.Guide.Advanced != "full" || len(rev.Guide.Answers.Before) != 1 || rev.Guide.Answers.Before[0].Then.Side != "yes" || rev.Guide.Answers.ConvertFails.End != "stop" {
+		t.Fatalf("advanced save: %d %s", code, body)
+	}
+	if code, b := send("PUT", "/api/v2/workflows/"+id+"/answers", `{"answers":{"flow":"basic","goal":"both"}}`, rev.Etag); code != 409 || errCode(b) != "not_guided" || !strings.Contains(b, `"flow":"basic"`) {
+		t.Errorf("a Basic save over an Advanced workflow: %d %s", code, b)
+	}
+	code, body = send("POST", "/api/v2/workflows/guide/preview", `{"answers":{"flow":"advanced","before":[{"type":"check.name","config":{"pattern":"x"},"then":{"end":"leave"}}],"afterCards":[{"type":"action.tag","config":{"add":"done"}}]}}`, "")
+	json.Unmarshal([]byte(body), &pv)
+	if code != 200 || !strings.HasPrefix(pv.Summary[0], "Check the file name") || pv.Steps[len(pv.Steps)-1] != "Tag the file" {
+		t.Fatalf("advanced preview: %d %s", code, body)
+	}
 	// a workflow the questions can't read: the draft says so, and answers are refused with not_guided
 	f, err := st.AddWorkflow("Hand made", workflow.FromTemplate(rules.Template{Kind: rules.KindLegacy}, nil))
 	if err != nil {
@@ -122,7 +137,7 @@ func TestGuidedBuilderAPI(t *testing.T) {
 	}
 	_, body = send("GET", "/api/v2/workflows/"+strconv.FormatInt(f.ID, 10)+"/draft", "", "")
 	json.Unmarshal([]byte(body), &rev)
-	if rev.Guide.Coverage != "none" || rev.Guide.Answers != nil || !strings.Contains(rev.Guide.Why, "earlier install") {
+	if rev.Guide.Coverage != "none" || rev.Guide.Advanced != "none" || rev.Guide.Answers != nil || !strings.Contains(rev.Guide.Why, "earlier install") {
 		t.Fatalf("legacy guide: %s", body)
 	}
 	if code, b := send("PUT", "/api/v2/workflows/"+strconv.FormatInt(f.ID, 10)+"/answers", `{"answers":{}}`, rev.Etag); code != 409 || errCode(b) != "not_guided" {
