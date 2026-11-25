@@ -5,7 +5,6 @@
 // design 05:34Z). Not here: log retention (no setting on the server).
 import { useEffect, useId, useRef, useState, type Dispatch, type MouseEvent, type ReactNode, type SetStateAction } from "react";
 import { Icon } from "../Icon";
-import { PageHead } from "../PageHead";
 import { SettingRow, ValueChip } from "../SettingRow";
 import { SignedOut, failed, type Answer } from "../api";
 import { canForget, fileName, nextForgetId, unreachableLine } from "../unreachable";
@@ -13,7 +12,6 @@ import { bytes, plural } from "../format";
 import { cancelUpdate, checkUpdate, getConverting, getHealth, getUpdate, installUpdate, forgetOriginal, purgeTrash, rollbackUpdate, type UpdateNotice, getSettings, getToken, getTrash, patchSettings, rotateToken, signOut } from "../libraryApi";
 import type { PurgeResult, Unreachable } from "../types/v2";
 import type { FirstRunSettings } from "../types/v1";
-import { SettingsTabs } from "../pages";
 import { Link, navigate } from "../router";
 import { setRole } from "../setupApi";
 import { useSetup } from "./Enroll";
@@ -28,11 +26,9 @@ const day = (t: string) => new Date(t).toLocaleDateString([], { day: "numeric", 
 export function GeneralSettings() {
   const st = useData(getSettings, []);
   return (
-    <div className="stack">
-      <PageHead icon="i-settings" title="Settings" />
-      <SettingsTabs at="general" />
+    <section id="general" aria-labelledby="pc-h" className="stack settings-sec">
       {!st.data ? <div className="empty">{st.error?.message ?? "Loading…"}</div> : <General start={st.data.languages ?? []} auth={!!st.data.authRequired} saved={st.reload} />}
-    </div>);
+    </section>);
 }
 
 // The page's one Save (the design): it saves the languages; the rows above only change what is on the page until then.
@@ -51,7 +47,7 @@ function General({ start, auth, saved }: { start: string[]; auth: boolean; saved
     <div className="stack" style={{ gap: 8 }}>
       <p className={bad ? "st bad" : "muted"} role="status" style={{ margin: 0 }}>{said}</p>
       <div className="row" style={{ justifyContent: "flex-start", flexWrap: "wrap", gap: 12 }}>
-        <button className="btn primary" type="button" disabled={!dirty} onClick={save}>Save</button>
+        <button className="btn primary" type="button" aria-label="Save general settings" disabled={!dirty} onClick={save}>Save</button>
         <span className="muted">Languages are saved when you press Save.</span>
       </div>
     </div>
@@ -234,9 +230,7 @@ export function SafetySettings() {
   }, [focusAt]); // eslint-disable-line react-hooks/exhaustive-deps
   const t = tr.data;
   return (
-    <div className="stack">
-      <PageHead icon="i-settings" title="Settings" />
-      <SettingsTabs at="safety" />
+    <section id="safety" aria-labelledby="keep-h" className="stack settings-sec">
       {!st.data ? <div className="empty">{st.error?.message ?? "Loading…"}</div> : <>
         <section className="card" aria-labelledby="keep-h"><div className="hd"><h2 id="keep-h">Keeping originals</h2></div>
           <div className="bd stack" style={{ padding: 0, gap: 0 }}>
@@ -280,14 +274,14 @@ export function SafetySettings() {
         <div className="stack" style={{ gap: 8 }}>
           <p className={bad ? "st bad" : "muted"} role="status" style={{ margin: 0 }}>{said}</p>
           <div className="row" style={{ justifyContent: "flex-start", flexWrap: "wrap", gap: 12 }}>
-            <button className="btn primary" type="button" disabled={days == null || Number(days) === st.data.keepOriginalsDays} onClick={save}>Save</button>
+            <button className="btn primary" type="button" aria-label="Save safety settings" disabled={days == null || Number(days) === st.data.keepOriginalsDays} onClick={save}>Save</button>
             <span className="muted">Saves the number of days only. Empty trash now applies at once.</span>
           </div>
         </div>
       </>}
       {ask && t && <Confirm title="Empty trash now?" body={`This deletes ${plural(t.files, "original file", "original files")} (${bytes(t.bytes)}), kept in case you need them back. It can't be undone.`}
         yes={purging ? "Deleting…" : "Delete " + plural(t.files, "file", "files")} no="Cancel" danger busy={purging} onYes={purge} onNo={() => (setAsk(false), purgeBtn.current?.focus())} />}
-    </div>);
+    </section>);
 }
 
 // Workflows may run commands (flow builder FB2b, the user's decision): the switch behind a workflow's "Run a command" step. Off
@@ -440,9 +434,7 @@ function Install({ d, reload, check }: { d: UpdateNotice; reload: () => void; ch
 export function AboutSettings() {
   const h = useData(getHealth, []);
   return (
-    <div className="stack">
-      <PageHead icon="i-settings" title="Settings" />
-      <SettingsTabs at="about" />
+    <section id="about" aria-labelledby="about-h" className="stack settings-sec">
       <section className="card" aria-labelledby="about-h"><div className="hd"><h2 id="about-h">About</h2></div>
         <div className="bd" style={{ padding: 0 }}>
           <SettingRow title="Version">{h.data?.version && <ValueChip>{h.data.version}</ValueChip>}</SettingRow>
@@ -451,5 +443,5 @@ export function AboutSettings() {
       <Updates />
       <section className="card" aria-labelledby="log-h"><div className="hd"><h2 id="log-h">Recent log lines</h2></div>
         <div className="bd"><pre className="mono sm" tabIndex={0} role="region" aria-labelledby="log-h" style={{ overflow: "auto", maxHeight: "16rem", margin: 0, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{h.data ? (h.data.logsTail.length ? h.data.logsTail.join("\n") : "Nothing has been logged yet.") : ""}</pre></div></section>
-    </div>);
+    </section>);
 }

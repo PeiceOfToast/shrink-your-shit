@@ -1,10 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Empty, PageHead } from "./PageHead";
 import type { NavItem } from "./nav";
 import { ACCENTS, DEFAULTS, DENSITIES, MOTIONS, TEXT_SIZES, THEMES, keep, preview, useAppearance, type Appearance } from "./prefs";
-import { MOCK } from "./api";
 import { Link, onLeave } from "./router";
-import { sharesSupported } from "./sharesApi";
 import { SettingRow } from "./SettingRow";
 
 // What each page will hold (spec 4-9). Until its step lands it says so and offers nothing that looks like it works.
@@ -86,19 +84,45 @@ function Seg<T extends string | number>({ legend, name, value, options, desc, on
 
 // Settings > Appearance (DESIGN/v2/THEMES.md): changes show at once and are kept on Save; leaving with unsaved
 // changes asks. The advanced theme editor (custom colours, presets, import/export) comes later.
-// Settings' tabs (SCREENS V9); the others come with their settings.
-export function SettingsTabs({ at }: { at: "general" | "shares" | "appearance" | "processing" | "safety" | "connections" | "notifications" | "variables" | "backup" | "health" | "about" }) {
-  const tab = (k: typeof at, label: string) => <Link to={"/settings/" + k} aria-current={at === k ? "page" : undefined}>{label}</Link>;
-  // the shares tab shows only when the server has the shares API (404 = not built yet)
-  const [shares, setShares] = useState(true);
-  useEffect(() => { if (!MOCK) { const f = async () => setShares(await sharesSupported()); f(); } }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  // pass 5 #4: the active tab is in view on load and after a change. Scrolls the row sideways only, never the page.
-  const nav = useRef<HTMLElement>(null);
-  useEffect(() => { const n = nav.current, a = n?.querySelector<HTMLElement>("[aria-current=page]"); if (n && a) n.scrollLeft += a.getBoundingClientRect().left - n.getBoundingClientRect().left - (n.clientWidth - a.offsetWidth) / 2; }, [at, shares]);
+// Settings' four tabs (U-C): General, Processing, Connections, System. Each tab page has one "Settings" head and one tab row.
+export type SettingsTab = "general" | "processing" | "connections" | "system";
+const TABS: [SettingsTab, string][] = [["general", "General"], ["processing", "Processing"], ["connections", "Connections"], ["system", "System"]];
+export function SettingsTabs({ at }: { at: SettingsTab }) {
   return (
-    <nav className="tabs" ref={nav} aria-label="Settings sections">
-      {tab("general", "General")}{tab("appearance", "Appearance")}{tab("processing", "Processing")}{tab("safety", "Safety")}{tab("connections", "Connections")}{tab("notifications", "Notifications")}{shares && tab("shares", "Network shares")}{tab("variables", "Variables")}{tab("backup", "Backup")}{tab("health", "Health")}{tab("about", "About")}
+    <nav className="tabs" aria-label="Settings sections">
+      {TABS.map(([k, label]) => <Link key={k} to={"/settings/" + k} aria-current={at === k ? "page" : undefined}>{label}</Link>)}
     </nav>);
+}
+
+// A tab page: the head, the tab row, then its sections. Arriving on #anchor scrolls that section below the sticky bar
+// and moves focus to its heading (no smooth scroll under reduced motion).
+export function SettingsPage({ at, children }: { at: SettingsTab; children: ReactNode }) {
+  const hash = decodeURIComponent(location.hash.slice(1));
+  useEffect(() => {
+    if (!hash) return;
+    // the section can render after its data loads, so look for it for a moment; an h2 takes focus only with tabIndex
+    let tries = 0;
+    let timer = 0;
+    const land = () => {
+      const sec = document.getElementById(hash);
+      const h = sec?.querySelector<HTMLElement>("h2");
+      if (!sec || !h) {
+        if (tries++ < 40) timer = window.setTimeout(land, 50);
+        return;
+      }
+      sec.scrollIntoView({ block: "start", behavior: document.documentElement.dataset.motion === "reduced" ? "auto" : "smooth" });
+      h.tabIndex = -1;
+      h.focus({ preventScroll: true });
+    };
+    land();
+    return () => window.clearTimeout(timer);
+  }, [hash]);
+  return (
+    <div className="stack">
+      <PageHead icon="i-settings" title="Settings" />
+      <SettingsTabs at={at} />
+      {children}
+    </div>);
 }
 
 export function AppearanceSettings() {
@@ -128,11 +152,9 @@ export function AppearanceSettings() {
   }, []);
   const set = <K extends keyof Appearance>(k: K) => (v: Appearance[K]) => (setSaid(""), setDraft((d) => ({ ...d, [k]: v })));
   return (
-    <div className="stack">
-      <PageHead icon="i-settings" title="Settings" />
-      <SettingsTabs at="appearance" />
+    <section id="appearance" aria-labelledby="appearance-h" className="stack settings-sec">
       <div className="card">
-        <div className="hd"><h2>Appearance</h2></div>
+        <div className="hd"><h2 id="appearance-h">Appearance</h2></div>
         <div className="bd stack" style={{ padding: 0, gap: 0 }}>
           {/* descriptions say only what the app does now (checked in tokens.css, shell.css, prefs.ts) */}
           <Choice legend="Theme" name="theme" value={draft.theme} desc="Dark is the default." options={THEMES.map(([v, l]) => [v, l])} onPick={set("theme")} />
@@ -146,12 +168,12 @@ export function AppearanceSettings() {
       <div className="stack" style={{ gap: 8 }}>
         <p className="muted" role="status" style={{ margin: 0 }}>{said}</p>
         <div className="row" style={{ justifyContent: "flex-start", flexWrap: "wrap", gap: 12 }}>
-          <button className="btn primary" type="button" onClick={() => (keep(draft), setSaid(dirty ? "Saved." : "Nothing was changed."))}>Save</button>
+          <button className="btn primary" type="button" aria-label="Save appearance" onClick={() => (keep(draft), setSaid(dirty ? "Saved." : "Nothing was changed."))}>Save</button>
           {dirty && <button className="btn" type="button" onClick={() => (setDraft(saved), setSaid("Changes undone."))}>Undo changes</button>}
           <button className="btn ghost" type="button" onClick={() => (setDraft(DEFAULTS), setSaid("Defaults shown. Press Save to keep them."))}>Restore defaults</button>
           <span className="muted">Kept in this browser. Another browser or computer keeps its own.</span>
         </div>
       </div>
-    </div>
+    </section>
   );
 }

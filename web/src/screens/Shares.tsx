@@ -5,7 +5,6 @@ import { createPortal } from "react-dom";
 import { Icon } from "../Icon";
 import { failed, type Answer } from "../api";
 import { Empty, LoadFailed, PageHead } from "../PageHead";
-import { SettingsTabs } from "../pages";
 import { SettingRow, ValueChip } from "../SettingRow";
 import { useData } from "../useData";
 import { addShare, checkShare, deleteShare, getShares, patchShare, reconnectShare, testShare } from "../sharesApi";
@@ -205,8 +204,7 @@ export function SharesSettings() {
   const data = resp.data;
   return (
     <div className="stack">
-      <PageHead icon="i-settings" title="Settings" />
-      <SettingsTabs at="shares" />
+      <PageHead icon="i-library" title="Network shares" crumbs={[["Libraries", "/libraries"]]} />
       <p className="muted" role="status">{said}</p>
       {resp.error && is404(resp.error) ? <p className="muted">This server doesn't have network shares yet.</p> : resp.error && !data ? <LoadFailed error={resp.error} reload={resp.reload} /> : resp.error ? <p className="st bad" role="alert"><Icon id="i-alert" /><span>{resp.error.message}</span></p> : !data ? <div className="empty">Loading…</div> : <>
         <section className="card" aria-labelledby="h-shares">

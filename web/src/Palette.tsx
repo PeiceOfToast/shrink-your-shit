@@ -13,7 +13,17 @@ interface Result {
 }
 const ALL: Result[] = [
   ...PAGES.map((p) => ({ group: "Pages", label: p.label, icon: p.icon, to: p.to })),
-  { group: "Settings", label: "Appearance: theme, accent, density, text size, motion", icon: "i-drop", to: "/settings/appearance" },
+  { group: "Settings", label: "Appearance: theme, accent, density, text size, motion", icon: "i-drop", to: "/settings/general#appearance" },
+  { group: "Settings", label: "General", icon: "i-settings", to: "/settings/general" },
+  { group: "Settings", label: "Processing", icon: "i-settings", to: "/settings/processing" },
+  { group: "Settings", label: "Safety: keeping originals", icon: "i-settings", to: "/settings/processing#safety" },
+  { group: "Settings", label: "Connections", icon: "i-settings", to: "/settings/connections" },
+  { group: "Settings", label: "Notifications", icon: "i-settings", to: "/settings/connections#notifications" },
+  { group: "Settings", label: "Health", icon: "i-settings", to: "/settings/system#health" },
+  { group: "Settings", label: "Backup", icon: "i-settings", to: "/settings/system#backup" },
+  { group: "Settings", label: "About", icon: "i-settings", to: "/settings/system#about" },
+  { group: "Libraries", label: "Network shares", icon: "i-library", to: "/libraries/shares" },
+  { group: "Workflows", label: "Variables", icon: "i-workflow", to: "/workflows?tab=variables" },
 ];
 
 function Mark({ text, q }: { text: string; q: string }) {
