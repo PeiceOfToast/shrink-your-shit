@@ -2,7 +2,7 @@
 // GET /api/v2/overview (#177): the headline (space saved, NET, never added to the trash's GROSS bytes), the workers,
 // what is converting now, the libraries (the Libraries page's own figures) and the last 30 days. Live: job.progress
 // moves the bars in place; a job, library or worker change refetches. Every number comes from the server.
-import { Fragment, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent as RPointer, type ReactNode } from "react";
 import { Icon } from "../Icon";
 import { MOCK, SignedOut, failed, type Answer } from "../api";
 import { bytes, clock, count, dayClock, encoderName, lastScan, plural } from "../format";
@@ -12,7 +12,9 @@ import { listJobs } from "../jobsApi";
 import { listWorkflows } from "../workflowApi";
 import { listLibrariesV2 } from "../libraryApi";
 import { convertedLine } from "../convertedLine";
-import { barPath, sparkBars, sparkValue } from "../sparkBars";
+import { barPath } from "../sparkBars";
+import { dayLine, dayRows, keyTarget } from "../barKeys";
+import { filesFoot, shrinkLine, spaceFoot, spaceHeadline } from "../cardLines";
 import { getStartedSteps, nextStep, showGetStarted } from "../getStarted";
 import { runFields, startedAt } from "../jobCards";
 import { filesFact, freshFact, lastDoneFact, nextScanFact, nothingFact, stateWord, workersFact, type Fact } from "../statusStrip";
@@ -36,63 +38,18 @@ const dayName = (d: string) => new Date(d + "T12:00:00").toLocaleDateString(unde
 
 type Day = O["daily"][number];
 type Series = { label: string; color: string; value: (d: Day) => number };
-// dataviz: one measure per chart (never two scales), stacked parts never added into a figure they aren't (freed and
-// waiting are shown and named apart), thin bars with a 4 px rounded top on the baseline, 2 px gaps between parts,
-// hairline solid grid, a legend for 2 or more parts, a tooltip per day and the table view below. Days before history
-// are a flat stub, not a zero.
-function DayBars({ title, note, days, series, fmt, tick = true, extra, quiet }: { title: string; note: ReactNode; days: Day[]; series: Series[]; fmt: (n: number) => string; tick?: boolean; extra?: (d: Day) => string | null; quiet: string }) {
-  const [at, setAt] = useState<number | null>(null), ref = useRef<SVGSVGElement>(null), [W, setW] = useState(600);
-  const n = days.length, sum = (d: Day) => series.reduce((a, x) => a + x.value(d), 0), allZero = days.every((x) => !x.recorded || sum(x) === 0);
-  // the viewBox is the measured width in px, so a label's font-size is its real size (the small text size at any width) and the plot is 122 px tall
-  const H = 160, top = 16, base = H - 22, bw = W / n, barW = Math.min(16, bw * 0.7);
-  useLayoutEffect(() => { const el = ref.current; if (!el) return; const fit = () => setW(el.clientWidth || 600); fit(); const ro = new ResizeObserver(fit); ro.observe(el); return () => ro.disconnect(); }, [allZero]);
-  const max = Math.max(1, ...days.filter((d) => d.recorded).map(sum));
-  const y = (v: number) => ((base - top) * v) / max, notRec = days.filter((d) => !d.recorded).length;
-  const roundTop = (x: number, yy: number, w: number, h: number) => { const r = Math.min(4, h, w / 2);
-    return `M${x},${yy + h}V${yy + r}Q${x},${yy} ${x + r},${yy}H${x + w - r}Q${x + w},${yy} ${x + w},${yy + r}V${yy + h}Z`; };
-  const d = at == null ? null : days[at];
-  return <figure className="dchart" onMouseLeave={() => setAt(null)}>
-    <h3 className="ch">{title} <span className="muted">{note}</span></h3>
-    {allZero ? <p className="muted quiet">{quiet}</p> : <>
-    {series.length > 1 ? <ul className="legend">{series.map((x) => <li key={x.label}><i style={{ background: x.color }} />{x.label}</li>)}</ul>
-      : <ul className="legend ph" aria-hidden="true"><li>&nbsp;</li></ul>/* design 11-19: keeps side-by-side baselines level; hidden when the charts stack */}
-    <svg ref={ref} viewBox={`0 0 ${W} ${H}`} role="img" aria-label={title + ", last " + n + " days" + (notRec ? "; the first " + notRec + " not recorded" : "") + ". The table below has every day."} className="daychart">
-      {[0, 0.5, 1].map((f) => <line key={f} x1="0" x2={W} y1={base - y(max * f)} y2={base - y(max * f)} stroke={f ? "var(--border)" : "var(--border-strong)"} strokeWidth="1" vectorEffect="non-scaling-stroke" />)}
-      {tick && <text x="0" y={top - 4} fill="var(--text-2)" style={{ fontSize: "var(--fs-sm)" }}>{fmt(max)}</text>}
-      {at != null && <rect x={at * bw} y={top} width={bw} height={base - top} fill="var(--raised)" />}
-      {days.map((dd, i) => { const x = i * bw + (bw - barW) / 2;
-        if (!dd.recorded) return <rect key={dd.day} x={x} y={base - 2} width={barW} height={2} fill="var(--border)" />;
-        let yy = base; const parts = series.map((s) => ({ s, h: y(s.value(dd)) })).filter((p) => p.h > 0);
-        return <g key={dd.day}>{parts.map((p, k) => { const last = k === parts.length - 1, gap = k ? 2 : 0, h = Math.max(1, p.h - gap); yy -= p.h;
-          return last ? <path key={k} d={roundTop(x, yy, barW, h)} fill={p.s.color} /> : <rect key={k} x={x} y={yy} width={barW} height={h} fill={p.s.color} />; })}</g>; })}
-      <text x="0" y={H - 4} fill="var(--text-2)" style={{ fontSize: "var(--fs-sm)" }}>{dayName(days[0].day)}</text>
-      {W >= 480 && <text x={W / 2} y={H - 4} fill="var(--text-2)" style={{ fontSize: "var(--fs-sm)" }} textAnchor="middle">{dayName(days[Math.floor(n / 2)].day)}</text>}
-      <text x={W} y={H - 4} fill="var(--text-2)" style={{ fontSize: "var(--fs-sm)" }} textAnchor="end">{dayName(days[n - 1].day)}</text>
-      {days.map((dd, i) => <rect key={dd.day} x={i * bw} y="0" width={bw} height={H} fill="transparent" onMouseEnter={() => setAt(i)} />)}
-    </svg>
-    {d && <div className="tip" style={{ left: `clamp(80px, ${((at! + 0.5) / n) * 100}%, calc(100% - 80px))` }}>
-      <b>{dayName(d.day)}</b>
-      {d.recorded ? series.map((x) => <span key={x.label}><i style={{ background: x.color }} />{x.label}<em>{x.value(d) ? fmt(x.value(d)) : "none"}</em></span>) : <span className="muted">not recorded</span>}
-      {d.recorded && extra?.(d) && <span className="muted">{extra(d)}</span>}
-    </div>}
-    </>}
-  </figure>;
-}
-
-// A tile's bars, one per day, drawn from daily[] only (user 11-25: bars, not a line). A day not recorded is a short
-// baseline tick, never a zero bar. Hover, a tap, or keyboard focus (Left/Right between days) shows that day's date and
-// number in the daily charts' tip. The tile's aria-label still names the value; the table below has every day.
-function Spark({ values, days, label, color, text }: { values: (number | null)[]; days: string[]; label: string; color: string; text: (n: number) => string }) {
-  const W = 128, H = 56, n = values.length, [at, setAt] = useState<number | null>(null), [said, setSaid] = useState(""), ref = useRef<HTMLDivElement>(null), tipRef = useRef<HTMLDivElement>(null);
-  const { bars, ticks } = sparkBars(values, W, H), slot = W / n;
-  const spoken = (i: number) => days[i] + ", " + sparkValue(values[i], text);
-  // the tip is centred on its day, but a phone tile is narrower than the tip: shift it back inside the tile
+// The card bars' keyboard and tip (design-direction-tile-bars). The 30-day bars in both cards use this one hook (the old tile sparkline is gone):
+// one Tab stop on the wrapper, ←/→ Home/End, the last day on focus, Esc hides the tip, a tap toggles, and the polite live
+// text speaks on keys only (never on hover). Mouse hover shows the same tip.
+function useBarPick(n: number, spoken: (i: number) => string) {
+  const [at, setAt] = useState<number | null>(null), [said, setSaid] = useState(""), ref = useRef<HTMLDivElement>(null), tipRef = useRef<HTMLDivElement>(null);
+  // the tip is centred on its day, but a phone tile or card can be narrower than the tip: shift it back inside
   useLayoutEffect(() => {
-    const tip = tipRef.current, tile = ref.current?.closest(".tile")?.getBoundingClientRect();
-    if (!tip || !tile) return;
+    const tip = tipRef.current, box = ref.current?.closest(".tile, .card")?.getBoundingClientRect();
+    if (!tip || !box) return;
     tip.style.marginLeft = "0px";
     const r = tip.getBoundingClientRect(), pad = 4;
-    const dx = Math.max(0, tile.left + pad - r.left) - Math.max(0, r.right - (tile.right - pad));
+    const dx = Math.max(0, box.left + pad - r.left) - Math.max(0, r.right - (box.right - pad));
     if (dx) tip.style.marginLeft = dx + "px";
   }, [at]);
   // a tap outside the chart clears its tip (a touch never sends pointerleave, so this is the only way off a phone)
@@ -102,31 +59,60 @@ function Spark({ values, days, label, color, text }: { values: (number | null)[]
     document.addEventListener("pointerdown", outside);
     return () => document.removeEventListener("pointerdown", outside);
   }, [at != null]);
-  // one Tab stop: the wrapper. Left/Right move a day, Home/End jump to the ends, Escape hides the tip and keeps focus.
-  // The live region speaks on arrow keys only, not on hover.
   const onKey = (e: KeyboardEvent) => {
-    const cur = at ?? n - 1;
-    const next = e.key === "ArrowRight" ? cur + 1 : e.key === "ArrowLeft" ? cur - 1 : e.key === "Home" ? 0 : e.key === "End" ? n - 1 : null;
-    if (e.key === "Escape") return setAt(null);
-    if (next == null) return;
+    const r = keyTarget(e.key, at ?? n - 1, n);
+    if (r === null) return;
+    if (r === "hide") return setAt(null);
     e.preventDefault();
-    const i = Math.min(n - 1, Math.max(0, next));
-    setAt(i); setSaid(spoken(i));
+    setAt(r); setSaid(spoken(r));
   };
-  return <div ref={ref} className="spark sbars" role="group" aria-label={label} tabIndex={0} onFocus={() => setAt((a) => a ?? n - 1)} onBlur={() => setAt(null)} onKeyDown={onKey}
-    onPointerLeave={(e) => e.pointerType === "mouse" && setAt(null)}>
-    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label={label + (ticks.length ? "; the days not recorded are left blank" : "")}>
-      <line x1="0" x2={W} y1={H - 2} y2={H - 2} stroke="var(--border-strong)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
-      {at != null && <rect x={at * slot} y="0" width={slot} height={H} fill="var(--border)" />}
-      {bars.map((b) => <path key={b.i} d={barPath(b)} fill={color} />)}
-      {ticks.map((i) => <rect key={"t" + i} x={i * slot + slot / 2 - 1} y={H - 3} width="2" height="2" fill="var(--border-strong)" />)}
-      {values.map((_, i) => <rect key={"h" + i} x={i * slot} y="0" width={slot} height={H} fill="transparent"
-        onPointerEnter={(e) => e.pointerType === "mouse" && setAt(i)}
-        onPointerDown={(e) => setAt((a) => (a === i && e.pointerType !== "mouse" ? null : i))} />)}
+  return {
+    at, said, tipRef,
+    wrap: { ref, tabIndex: 0, role: "group" as const, onFocus: () => setAt((a) => a ?? n - 1), onBlur: () => setAt(null), onKeyDown: onKey,
+      onPointerLeave: (e: RPointer) => { if (e.pointerType === "mouse") setAt(null); } },
+    hit: (i: number) => ({ onPointerEnter: (e: RPointer) => { if (e.pointerType === "mouse") setAt(i); },
+      onPointerDown: (e: RPointer) => setAt((a) => (a === i && e.pointerType !== "mouse" ? null : i)) }),
+  };
+}
+
+// A card's 30 days: the parts stacked bottom up in series order (Space saved's Freed and Waiting in the trash; Files
+// converted's Done, Skipped and Failed), a 2-unit tick on the baseline for a day not recorded, nothing for a recorded zero.
+// The tip and the live text list every part of that day (the tip's rows and the spoken line are the same rows).
+function CardBars({ label, days, series, fmt, extra, quiet }: { label: string; days: Day[]; series: Series[]; fmt: (n: number) => string; extra?: (d: Day) => string | null; quiet: string }) {
+  const n = days.length, W = 600, H = 120, base = H - 2, top = 2, gap = 1.5, slot = W / n, w = Math.max(1, slot * 0.7);
+  const sum = (d: Day) => series.reduce((a, s) => a + s.value(d), 0), allZero = days.every((d) => !d.recorded || sum(d) === 0);
+  const max = Math.max(1, ...days.filter((d) => d.recorded).map(sum)), notRec = days.filter((d) => !d.recorded).length;
+  const rowsOf = (d: Day) => dayRows(d.recorded, series.map((s) => ({ label: s.label, color: s.color, value: s.value(d) })), fmt);
+  const { at, said, tipRef, wrap, hit } = useBarPick(n, (i) => dayLine(dayName(days[i].day), rowsOf(days[i]), days[i].recorded ? extra?.(days[i]) : null));
+  const y = (v: number) => ((base - top) * v) / max, d = at == null ? null : days[at];
+  if (allZero) return <p className="muted quiet short">{quiet}</p>;
+  return <div className="cbars sbars" aria-label={label} {...wrap}>
+    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label={"One bar per day" + (notRec ? "; the first " + notRec + " not recorded" : "") + ". The table below has every day."}>
+      {[0, 0.5, 1].map((f) => <line key={f} x1="0" x2={W} y1={base - y(max * f)} y2={base - y(max * f)} stroke={f ? "var(--border)" : "var(--border-strong)"} strokeWidth="1" vectorEffect="non-scaling-stroke" />)}
+      {at != null && <rect x={at * slot} y="0" width={slot} height={H} fill="var(--raised)" />}
+      {days.map((dd, i) => { const x = i * slot + (slot - w) / 2;
+        if (!dd.recorded) return <rect key={dd.day} x={x} y={base - 2} width={w} height={2} fill="var(--border)" />;
+        // a part with a value is drawn at least 1 unit tall, so a small one beside a big one (Failed 1 beside Done 4,000) still shows
+        const parts = series.filter((s) => s.value(dd) > 0).map((s) => ({ s, h: Math.max(1, y(s.value(dd))) }));
+        let yy = base;
+        return <g key={dd.day}>{parts.map((p, k) => { const bottom = k === 0, last = k === parts.length - 1, hh = bottom ? p.h : Math.max(1, p.h - gap); yy -= p.h;
+          return last ? <path key={k} d={barPath({ i, x, y: yy, w, h: hh })} fill={p.s.color} /> : <rect key={k} x={x} y={yy} width={w} height={hh} fill={p.s.color} />; })}</g>; })}
+      {days.map((_, i) => <rect key={"h" + i} x={i * slot} y="0" width={slot} height={H} fill="transparent" {...hit(i)} />)}
     </svg>
-    {at != null && <div ref={tipRef} className="tip" style={{ left: `${((at + 0.5) / n) * 100}%` }}><span><b>{days[at]}</b><em>{sparkValue(values[at], text)}</em></span></div>}
+    <div className="cbar-axis" aria-hidden="true"><span>{dayName(days[0].day)}</span><span>{dayName(days[n - 1].day)}</span></div>
+    {d && <div ref={tipRef} className="tip" style={{ left: `${((at! + 0.5) / n) * 100}%` }}>
+      <b>{dayName(d.day)}</b>
+      {d.recorded ? rowsOf(d).map((r, k) => <span key={k}>{r.color && <i style={{ background: r.color }} />}{r.label}<em>{r.text}</em></span>) : <span className="muted">not recorded</span>}
+      {d.recorded && extra?.(d) && <span className="muted">{extra(d)}</span>}
+    </div>}
     <span aria-live="polite" style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" }}>{said}</span>
   </div>;
+}
+
+// The table behind "Show as a table": every day, newest first; a day not recorded says so across the row
+function DayTable({ days, cols }: { days: Day[]; cols: { head: string; get: (d: Day) => string }[] }) {
+  return <div className="daytbl"><table className="tbl"><thead><tr><th>Day</th>{cols.map((c) => <th key={c.head} className="num">{c.head}</th>)}</tr></thead>
+    <tbody>{[...days].reverse().map((d) => <tr key={d.day}><td>{dayName(d.day)}</td>{d.recorded ? cols.map((c) => <td key={c.head} className="num">{c.get(d)}</td>) : <td colSpan={cols.length} className="muted">not recorded</td>}</tr>)}</tbody></table></div>;
 }
 
 export function Overview() {
@@ -180,10 +166,9 @@ export function Overview() {
         </div>
       </section>
       {o.error ? <LoadFailed error={o.error} reload={o.reload} /> : <>
-        <section className="tiles" aria-hidden="true">{[0, 1].map((k) => <div key={k} className="tile"><span className="skel-ph" style={{ width: "40%", height: 12 }} /><span className="skel-ph" style={{ width: 120, height: 30, gridColumn: 2, gridRow: 1, justifySelf: "end" }} /><span className="skel-ph" style={{ width: "60%", height: 12 }} /></div>)}</section>
+        <section className="cards" aria-hidden="true">{[0, 1].map((k) => <div key={k} className="card"><span className="skel-ph" style={{ width: "40%", height: 12 }} /><span className="skel-ph" style={{ width: "60%", height: 30, marginTop: 8 }} /><span className="skel-ph" style={{ display: "block", width: "100%", height: 110, marginTop: 12 }} /></div>)}</section>
         <section className="sec"><h2>Converting now</h2><ul className="lcards" aria-hidden="true">{[0, 1].map(ph)}</ul></section>
         <section className="sec"><h2>Libraries</h2><ul className="lcards" aria-hidden="true">{[0, 1, 2].map(ph)}</ul></section>
-        <section className="sec"><h2>Last 30 days</h2><div className="lcard lskel" aria-hidden="true" style={{ minHeight: 160, display: "block" }}><span className="skel-ph" style={{ width: "40%", height: 12 }} /><div className="skel-ph" style={{ display: "block", width: "100%", height: 110, marginTop: 12 }} /></div></section>
       </>}
     </div>;
   }
@@ -199,6 +184,7 @@ export function Overview() {
   const on = rows.filter((w) => w.status === "busy" || w.status === "online").length, fin = rows.filter((w) => w.status === "draining").length;
   const busy = rows.some((w) => w.jobs.length > 0), failed24 = sum.data && !failed(sum.data) ? sum.data.last24h.failed : null;
   const s24 = sum.data && !failed(sum.data) ? sum.data.last24h : null;
+  const last24 = s24 && <>last 24 h: {count(s24.completed)} done, {count(s24.skipped)} skipped, <Link to="/jobs?tab=failed">{count(s24.failed)} failed</Link></>;
   const slotUsed = rows.reduce((a, w) => a + slots(w).used, 0), slotTotal = rows.reduce((a, w) => a + slots(w).total, 0);
   const rec = v.daily.filter((d) => d.recorded), first = rec[0]?.day, add = (f: (d: Day) => number) => rec.reduce((a, d) => a + f(d), 0);
   const tot = { done: add((d) => d.completed), skipped: add((d) => d.skipped), failed: add((d) => d.failed), freed: add((d) => d.freedBytes), saved: add((d) => d.savedBytes ?? 0), waiting: add((d) => d.waitingBytes ?? 0), kept: add((d) => d.couldFreeBytes ?? 0) };
@@ -210,6 +196,17 @@ export function Overview() {
   const freedPart = Math.max(0, tot.saved - tot.waiting - tot.kept), spaceNote = [freedPart > 0 ? bytes(freedPart) + " freed" : "nothing freed yet",
     tot.waiting > 0 && <Link to="/jobs?tab=completed&kept=1">{bytes(tot.waiting) + " waiting in the trash"}</Link>, tot.kept > 0 && <Link to="/jobs?tab=completed&left=1">{bytes(tot.kept) + " in originals left in place"}</Link>]
     .filter(Boolean).map((p, i) => <Fragment key={i}>{i > 0 && " · "}{p}</Fragment>);
+  // D3: the two cards' bar parts and table columns (the SCREENS V2 Space split rules, unchanged): Freed / Waiting in the trash /
+  // Originals left in place when the server has them; one series "Smaller" when only the kept split is known; else "Freed"
+  const spaceSeries: Series[] = split ? [{ label: "Freed", color: "var(--success)", value: (d) => Math.max(0, (d.savedBytes ?? 0) - (d.waitingBytes ?? 0) - (d.couldFreeBytes ?? 0)) }, { label: "Waiting in the trash", color: "var(--chart-pending)", value: (d) => d.waitingBytes ?? 0 },
+      ...(three ? [{ label: "Originals left in place", color: "var(--chart-muted)", value: (d: Day) => d.couldFreeBytes ?? 0 }] : [])]
+    : kept ? [{ label: "Smaller", color: "var(--success)", value: (d: Day) => d.savedBytes ?? 0 }]
+    : [{ label: "Freed", color: "var(--success)", value: (d: Day) => d.freedBytes }];
+  const spaceCols = [{ head: kept ? "Smaller" : split ? "Saved" : "Freed", get: (d: Day) => bytes(split || kept ? d.savedBytes ?? 0 : d.freedBytes) },
+    ...(split ? [{ head: "Waiting in the trash", get: (d: Day) => bytes(d.waitingBytes ?? 0) }] : []),
+    ...(three ? [{ head: "Originals left in place", get: (d: Day) => bytes(d.couldFreeBytes ?? 0) }] : [])];
+  const filesSeries: Series[] = [{ label: "Done", color: "var(--success)", value: (d) => d.completed }, { label: "Skipped", color: "var(--chart-muted)", value: (d) => d.skipped }, { label: "Failed", color: "var(--error)", value: (d) => d.failed }];
+  const filesCols = [{ head: "Done", get: (d: Day) => count(d.completed) }, { head: "Skipped", get: (d: Day) => count(d.skipped) }, { head: "Failed", get: (d: Day) => count(d.failed) }];
   // Get started's three ticks from data this page already has: a library, a workflow, a worker on
   const wfCount = wf.data && !failed(wf.data) ? wf.data.length : 0, steps = getStartedSteps(v.libraries.length, wfCount, rows.filter((w) => w.status === "busy" || w.status === "online" || w.status === "draining").length);
   // a step's button is live once its prerequisite is done: a library needs a published workflow (step 2), so step 1 waits for it
@@ -220,11 +217,7 @@ export function Overview() {
   const libOf = new Map((libs.data && !failed(libs.data) ? libs.data : []).map((l) => [String(l.id), l] as const));
   const runOf = new Map((running.data && !failed(running.data) ? running.data.items : []).map((j) => [j.jobId ?? j.id, j] as const));
   const perDay = convertedLine(v.daily);
-  // the two averages, shown under the charts and under the "start after two days" placeholders alike
-  const hasAvg = v.averages.fileShrinkPercent != null || v.averages.secondsPerGB != null;
-  const avgLine = <><span>New files, on average <b>{v.averages.fileShrinkPercent == null ? "not recorded" : Math.round(v.averages.fileShrinkPercent) + "% smaller"}</b></span>
-            <span>Time per GB <b>{perGB(v.averages.secondsPerGB)}</b></span></>;
-  const more = [h.waitingToFree > 0 && bytes(h.waitingToFree) + (h.freed > 0 ? " more" : " frees") + (h.nextFreeAt ? " by " + dayName(h.nextFreeAt.slice(0, 10)) : ""), h.couldFree > 0 && <Link to="/jobs?tab=completed&left=1">{"could free " + bytes(h.couldFree) + " if you remove the originals"}</Link>].filter(Boolean).map((p, i) => <Fragment key={i}>{i > 0 && " · "}{p}</Fragment>);
+  const more = [h.waitingToFree > 0 && bytes(h.waitingToFree) + (h.freed > 0 ? " more" : " frees") + (h.nextFreeAt ? " by " + dayName(h.nextFreeAt.slice(0, 10)) : ""), h.couldFree > 0 && <Link to="/jobs?tab=completed&left=1">{"could free " + bytes(h.couldFree) + " if you remove the originals"}</Link>, v.trash.bytes > 0 && <Link to="/settings/safety">{bytes(v.trash.bytes) + " in the trash"}</Link>].filter(Boolean).map((p, i) => <Fragment key={i}>{i > 0 && " · "}{p}</Fragment>);
   // Needs attention (D2): one list from the page's own data; the card and the Status strip's "Nothing needs you" both read attn.none
   const healthShown = failedNow.length > 0 && failKey !== hidKey, summaryOk = !!sum.data && !failed(sum.data), libsOk = !!libs.data && !failed(libs.data);
   const attn = attentionRows({ failures: sum.data && !failed(sum.data) ? sum.data.recentFailures : [], libraryIds: libsOk ? new Set([...libOf.keys()]) : null, healthShown, fallbacks: v.encoderFallbacks?.length ?? 0, libraries: v.libraries });
@@ -290,26 +283,46 @@ export function Overview() {
         </ul>
         <p className="muted sm">Failures from libraries you removed don't show here; they stay in the Jobs log.</p>
       </section>}
-      {/* U6 (C2): three tiles replace the headline band. Sparklines come from daily[] only: a day not recorded is a gap, never a zero */}
-      <section className="tiles" aria-label="Totals">
-        <div className="tile">
+      {/* D3: Space saved and Files converted are two cards (one column under 900 px) with their 30 days as bars. A day not recorded
+          is a tick, never a zero; the charts need two recorded days, and the tiles' words say so until then */}
+      <section className="cards" aria-label="Totals">
+        <div className="card">
           <span className="l">Space saved</span>
-          <span className={"v" + (h.freed > 0 ? " ok" : "")}>{bytes(h.freed)}</span>
+          <span className={"v" + (h.freed > 0 ? " ok" : "")}>{spaceHeadline(h.freed, bytes)}</span>
           <div className="d">
             {more.length > 0 && <div>{more}</div>}
             {noLibs && h.freed <= 0 && <div><Link to="/libraries/new">Add a library</Link> to start.</div>}
             {/* design SCREENS V2 Space rules: neutral, on its own line, only when > 0; never added to or taken from the figures */}
+            {shrinkLine(v.averages.fileShrinkPercent) && <div>{shrinkLine(v.averages.fileShrinkPercent)}</div>}
             {(h.grew ?? 0) > 0 && <div>{bytes(h.grew!)} added by files that came out bigger</div>}
-            {rec.length >= 2 && hasSaved && <div className={split ? "hide-phone" : undefined}>Last 30 days: {spaceNote}</div>}
+            {rec.length >= 2 && hasSaved && <div>Last 30 days: {spaceNote}</div>}
             {rec.length < 2 && <div>Charts start after two days of conversions.</div>}
           </div>
-          {rec.length >= 2 && <Spark label={(kept ? "Files made smaller per day" : "Space saved per day") + ", last " + v.daily.length + " days"} color="var(--success)" days={v.daily.map((d) => dayName(d.day))} text={(n) => bytes(n) + (kept ? " smaller" : hasSaved ? " saved" : " freed")} values={v.daily.map((d) => (d.recorded ? (hasSaved ? d.savedBytes : d.freedBytes) ?? 0 : null))} />}
+          {rec.length >= 2 && <>
+            {spaceSeries.length > 1 && <ul className="legend">{spaceSeries.map((x) => <li key={x.label}><i style={{ background: x.color }} />{x.label}</li>)}</ul>}
+            <CardBars label={(kept ? "Files made smaller per day" : "Space saved per day") + ", last " + v.daily.length + " days"} days={v.daily} series={spaceSeries} fmt={bytes} quiet="Nothing saved in the last 30 days."
+              extra={(d) => (split && (d.waitingBytes ?? 0) > 0 && h.nextFreeAt ? "Frees from " + dayName(h.nextFreeAt.slice(0, 10)) : null)} />
+            <div className="cardfoot"><span>{spaceFoot(split || kept ? tot.saved : tot.freed, bytes)}</span>
+              <details><summary className="muted">Show as a table</summary><DayTable days={v.daily} cols={spaceCols} /></details></div>
+          </>}
         </div>
-        <div className="tile">
+        <div className="card">
           <span className="l">Files converted</span>
-          <span className="v">{count(h.filesConverted)}</span>
-          <div className="d"><div>{perDay != null ? <>{count(perDay)} per day{s24 && <> · last 24 h {count(s24.completed)} done, {count(s24.skipped)} skipped</>}</> : "Charts start after two days of conversions."}</div></div>
-          {rec.length >= 2 && <Spark label={"Files converted per day, last " + v.daily.length + " days"} color="var(--accent)" days={v.daily.map((d) => dayName(d.day))} text={(n) => plural(n, "file converted", "files converted")} values={v.daily.map((d) => (d.recorded ? d.completed : null))} />}
+          <span className="v">{count(h.filesConverted)}<small>all time</small></span>
+          <div className="d">
+            {perDay != null ? <div>{count(perDay)} per day lately{s24 && <> · {last24}</>}</div> : <>
+              <div>Charts start after two days of conversions.</div>
+              {s24 && <div>{last24}</div>}
+            </>}
+            {v.averages.secondsPerGB != null && <div>About {perGB(v.averages.secondsPerGB)} of converting per GB on this computer</div>}
+          </div>
+          {rec.length >= 2 && <>
+            <ul className="legend">{filesSeries.map((x) => <li key={x.label}><i style={{ background: x.color }} />{x.label}</li>)}</ul>
+            <CardBars label={"Files converted per day, last " + v.daily.length + " days"} days={v.daily} series={filesSeries} fmt={count} quiet="No files in the last 30 days."
+              extra={() => null} />
+            <div className="cardfoot"><span>{filesFoot(tot.done, tot.skipped, tot.failed, count)}</span>
+              <details><summary className="muted">Show as a table</summary><DayTable days={v.daily} cols={filesCols} /></details></div>
+          </>}
         </div>
       </section>
 
@@ -389,31 +402,8 @@ export function Overview() {
 
 
       {/* the 30-day block is a closed disclosure at every width (design 1440 and 390) */}
-      <section className="sec" aria-labelledby="ov-a"><details className="lastdays"><summary><h2 id="ov-a">Last 30 days</h2><span className="muted sm">: space saved per day, files per day</span></summary>
-        {rec.length < 2 ? <><p className="muted quiet short">Charts start after two days of conversions. So far: {count(h.filesConverted)} {h.filesConverted === 1 ? "file" : "files"} converted.</p>{hasAvg && <div className="chartfoot">{avgLine}</div>}</> : <>
-          <div className="charts">
-            {/* workshop 11-19: savedBytes and waitingBytes are dated by the day a conversion finished, freedBytes by the day an
-                original was deleted, so the split is savedBytes - waitingBytes freed + waitingBytes waiting; never freedBytes + waitingBytes.
-                An older server without savedBytes: freed per delete day only. No top tick: a bar's height adds parts kept apart */}
-            <DayBars title={kept ? "Files made smaller per day" : "Space saved per day"} days={v.daily} fmt={bytes} tick={!split} quiet="Nothing saved in the last 30 days." note={kept ? bytes(tot.saved) + " smaller · " + (h.freed > 0 ? bytes(h.freed) + " freed so far" : "nothing freed yet: originals are kept") : split ? spaceNote : bytes(tot.freed) + " freed"}
-              extra={(d) => (split && (d.waitingBytes ?? 0) > 0 && h.nextFreeAt ? "Frees from " + dayName(h.nextFreeAt.slice(0, 10)) : null)}
-              series={split ? [{ label: "Freed", color: "var(--success)", value: (d) => Math.max(0, (d.savedBytes ?? 0) - (d.waitingBytes ?? 0) - (d.couldFreeBytes ?? 0)) }, { label: "Waiting in the trash", color: "var(--chart-pending)", value: (d) => d.waitingBytes ?? 0 },
-                ...(three ? [{ label: "Originals left in place", color: "var(--chart-muted)", value: (d: Day) => d.couldFreeBytes ?? 0 }] : [])]
-                : kept ? [{ label: "Smaller", color: "var(--success)", value: (d) => d.savedBytes ?? 0 }]
-                : [{ label: "Freed", color: "var(--success)", value: (d) => d.freedBytes }]} />
-            <DayBars title="Files per day" days={v.daily} fmt={count} quiet="No files in the last 30 days." note={[count(tot.done) + " done", count(tot.skipped) + " skipped", count(tot.failed) + " failed"].join(" · ")}
-              series={[{ label: "Done", color: "var(--success)", value: (d) => d.completed }, { label: "Skipped", color: "var(--chart-muted)", value: (d) => d.skipped }, { label: "Failed", color: "var(--error)", value: (d) => d.failed }]} />
-          </div>
-          <div className="chartfoot">
-            {avgLine}
-            <details><summary className="muted">Show as a table</summary>
-              <div className="daytbl"><table className="tbl"><thead><tr><th>Day</th><th className="num">{kept ? "Smaller" : split ? "Saved" : "Freed"}</th>{split && <th className="num">Waiting in the trash</th>}{three && <th className="num">Originals left in place</th>}<th className="num">Done</th><th className="num">Skipped</th><th className="num">Failed</th></tr></thead>
-                <tbody>{[...v.daily].reverse().map((d) => <tr key={d.day}><td>{dayName(d.day)}</td>{d.recorded ? <><td className="num">{bytes(split || kept ? d.savedBytes ?? 0 : d.freedBytes)}</td>{split && <td className="num">{bytes(d.waitingBytes ?? 0)}</td>}{three && <td className="num">{bytes(d.couldFreeBytes ?? 0)}</td>}<td className="num">{count(d.completed)}</td><td className="num">{count(d.skipped)}</td><td className="num">{count(d.failed)}</td></> : <td colSpan={(split ? 5 : 4) + (three ? 1 : 0)} className="muted">not recorded</td>}</tr>)}</tbody></table></div>
-            </details>
-          </div></>}
         {first && rec.length >= 2 && v.daily.length > 0 && first > v.daily[0].day && <p className="muted sm">Recorded from {dayName(first)}.</p>}
         {rec.length >= 2 && !(MOCK || /^(Etc\/)?UTC$/.test(v.timeZone)) && <p className="muted sm">Days run midnight to midnight, {v.timeZone.split("/").pop()!.replace(/_/g, " ")} time.</p>}
-      </details></section>
       </>}
     </div>
   );
