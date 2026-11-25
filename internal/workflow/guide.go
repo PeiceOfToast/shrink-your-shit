@@ -294,9 +294,11 @@ func Build(a Answers) Doc { return Apply(Preset(), a) }
 func Apply(d Doc, a Answers) Doc {
 	a = Fill(a)
 	w, ok := walk(d)
-	if !ok && w.advancedWhy != "" {
+	lists := a.Flow == FlowAdvanced || (a.Flow == "" && (a.Before != nil || a.AfterCards != nil))
+	if (!ok && w.advancedWhy != "") || (lists && w.advancedWhy != "") { // no flow can read it: nothing changes
 		return d
 	}
+	orig := d
 	d = clone(d)
 	set := func(id string, f func(c map[string]any)) {
 		for i := range d.Nodes {
@@ -358,8 +360,7 @@ func Apply(d Doc, a Answers) Doc {
 			})
 		}
 	}
-	lists := a.Flow == FlowAdvanced || (a.Flow == "" && (a.Before != nil || a.AfterCards != nil))
-	if lists && w.advancedWhy == "" {
+	if lists {
 		if a.Before != nil {
 			d = applyBefore(d, w, a.Before)
 		}
@@ -375,6 +376,27 @@ func Apply(d Doc, a Answers) Doc {
 		d = applySkip(d, w, a.Skip)
 		d = applyAfter(d, w, a.After)
 	}
+	return inOrder(orig, d)
+}
+
+// inOrder keeps the steps and links that were there in their old places, new ones after them, so
+// re-applying unchanged answers changes no bytes (QA-716).
+func inOrder(orig, d Doc) Doc {
+	nodeAt, edgeAt := map[string]int{}, map[string]int{}
+	for i, n := range orig.Nodes {
+		nodeAt[n.ID] = i
+	}
+	for i, e := range orig.Edges {
+		edgeAt[e.ID] = i
+	}
+	rank := func(at map[string]int, id string) int {
+		if i, ok := at[id]; ok {
+			return i
+		}
+		return len(at) + 1
+	}
+	slices.SortStableFunc(d.Nodes, func(x, y Node) int { return rank(nodeAt, x.ID) - rank(nodeAt, y.ID) })
+	slices.SortStableFunc(d.Edges, func(x, y Edge) int { return rank(edgeAt, x.ID) - rank(edgeAt, y.ID) })
 	return d
 }
 
@@ -449,6 +471,7 @@ func hasConfigKey(typ, key string) bool {
 func applySkip(d Doc, w walked, s Skip) Doc {
 	want := s.MinSizeGB > 0 || s.MinResolution > 0 || s.MinMinutes > 0
 	config := map[string]any{"size": int(math.Round(s.MinSizeGB * 1024)), "resolution": s.MinResolution, "minMinutes": s.MinMinutes}
+	kept := keep(d)
 	switch {
 	case want && w.check != "":
 		for i := range d.Nodes {
@@ -476,7 +499,7 @@ func applySkip(d Doc, w walked, s Skip) Doc {
 		}
 		d.Nodes = slices.DeleteFunc(d.Nodes, func(n Node) bool { return n.ID == w.check || n.ID == w.checkEnd })
 		d.Edges = slices.DeleteFunc(d.Edges, func(e Edge) bool { return e.From == w.check || e.To == w.check || e.To == w.checkEnd })
-		d.Edges = append(d.Edges, Edge{ID: NewID(), From: w.by[TypeInput], FromPort: "success", To: next, ToPort: "in"})
+		d.Edges = append(d.Edges, kept.link(w.by[TypeInput], "success", next))
 	}
 	return d
 }
@@ -516,13 +539,14 @@ func applyAfter(d Doc, w walked, a After) Doc {
 		}
 		run = append(run, n)
 	}
-	keep := map[string]bool{}
+	stay := map[string]bool{}
 	for _, n := range run {
-		keep[n.ID] = true
+		stay[n.ID] = true
 	}
-	d.Nodes = slices.DeleteFunc(d.Nodes, func(n Node) bool { return owned[n.ID] && !keep[n.ID] })
+	kept := keep(d)
+	d.Nodes = slices.DeleteFunc(d.Nodes, func(n Node) bool { return owned[n.ID] && !stay[n.ID] })
 	d.Edges = slices.DeleteFunc(d.Edges, func(e Edge) bool {
-		return (owned[e.From] && !keep[e.From]) || (owned[e.To] && !keep[e.To]) ||
+		return (owned[e.From] && !stay[e.From]) || (owned[e.To] && !stay[e.To]) ||
 			(e.From == w.by[TypeCommit] && e.FromPort == "success") || (owned[e.From] && e.FromPort == "success")
 	})
 	for _, n := range run {
@@ -538,11 +562,11 @@ func applyAfter(d Doc, w walked, a After) Doc {
 	}
 	prev := w.by[TypeCommit]
 	for _, n := range run {
-		d.Edges = append(d.Edges, Edge{ID: NewID(), From: prev, FromPort: "success", To: n.ID, ToPort: "in"})
+		d.Edges = append(d.Edges, kept.link(prev, "success", n.ID))
 		prev = n.ID
 	}
 	if w.afterTail != "" {
-		d.Edges = append(d.Edges, Edge{ID: NewID(), From: prev, FromPort: "success", To: w.afterTail, ToPort: "in"})
+		d.Edges = append(d.Edges, kept.link(prev, "success", w.afterTail))
 	}
 	return d
 }

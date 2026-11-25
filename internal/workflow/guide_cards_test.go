@@ -4,6 +4,7 @@ package workflow
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
@@ -181,4 +182,138 @@ func TestGuideAdvancedSummary(t *testing.T) {
 func mustJSON(v any) string {
 	b, _ := json.Marshal(v)
 	return string(b)
+}
+
+// review-716 P1 and probe C: a hand-made link off a step in front of the conversion, or one end shared
+// by two conditions, is something the questions can't show: not full, and Apply changes nothing.
+func TestGuideAdvancedLeavesHandMadeLinksInFront(t *testing.T) {
+	a := DefaultAnswers(GoalSmaller)
+	a.Before = []Card{{Type: TypeWait, Config: map[string]any{"seconds": 5}}}
+	d := Build(a)
+	end := node(TypeEnd, "", map[string]any{"reason": "waited out"})
+	d.Nodes = append(d.Nodes, end)
+	d.Edges = append(d.Edges, link(nodeOf(d, TypeWait).ID, "error", end.ID))
+	g := GuideOf(d)
+	if g.Advanced != CoverageNone || g.Coverage == CoverageFull || !strings.Contains(g.AdvancedWhy, "'Wait' has a link the questions don't show") {
+		t.Fatalf("%+v", g)
+	}
+	before := mustJSON(d)
+	if g.Answers != nil {
+		if got := Apply(d, *g.Answers); mustJSON(got) != before {
+			t.Errorf("an Advanced save changed it")
+		}
+	}
+	if got := Apply(d, Answers{Flow: FlowAdvanced, Before: []Card{}}); mustJSON(got) != before {
+		t.Errorf("an Advanced save with new lists changed a workflow it can't read")
+	}
+	// probe C: two conditions whose No sides share one end
+	b := DefaultAnswers(GoalSmaller)
+	b.Before = []Card{{Type: TypeCheckName, Config: map[string]any{"pattern": "a"}, Then: &Then{End: "leave"}}, {Type: TypeCheckTag, Config: map[string]any{"tags": "x"}, Then: &Then{End: "leave"}}}
+	d2 := Build(b)
+	ends := []Node{}
+	for _, n := range d2.Nodes {
+		if n.Type == TypeEnd {
+			ends = append(ends, n)
+		}
+	}
+	if len(ends) != 2 {
+		t.Fatalf("%d ends", len(ends))
+	}
+	for i := range d2.Edges { // the second condition's No now leads to the first end; the second end is orphaned
+		if d2.Edges[i].To == ends[1].ID {
+			d2.Edges[i].To = ends[0].ID
+		}
+	}
+	g2 := GuideOf(d2)
+	if g2.Advanced != CoverageNone || !strings.Contains(g2.AdvancedWhy, "its links join at 'Leave the file alone'") {
+		t.Fatalf("shared end: %+v", g2)
+	}
+	before2 := mustJSON(d2)
+	if got := Apply(d2, Answers{Flow: FlowAdvanced, Before: []Card{}}); mustJSON(got) != before2 {
+		t.Errorf("a save changed a workflow with a shared end")
+	}
+}
+
+// review-716 P2: a step reached from two branches after the save can't be shown as a tree; it reads as
+// none and a save never writes it twice.
+func TestGuideAdvancedRefusesAFanInAfterTheSave(t *testing.T) {
+	a := DefaultAnswers(GoalSmaller)
+	a.AfterCards = []Card{{Type: TypeCheckResult, Config: map[string]any{"test": "saved_at_least", "percent": 50}, Yes: []Card{{Type: TypeNotify, Config: map[string]any{"kind": "good", "text": "done"}}}}}
+	d := Build(a)
+	q, n := nodeOf(d, TypeCheckResult), nodeOf(d, TypeNotify)
+	d.Edges = append(d.Edges, link(q.ID, "else", n.ID))
+	g := GuideOf(d)
+	if g.Advanced != CoverageNone || !strings.Contains(g.AdvancedWhy, "its links join at 'Send a notification'") {
+		t.Fatalf("%+v", g)
+	}
+	got := Apply(d, Answers{Flow: FlowAdvanced, AfterCards: []Card{}})
+	seen := map[string]int{}
+	for _, x := range got.Nodes {
+		seen[x.ID]++
+	}
+	for id, c := range seen {
+		if c > 1 {
+			t.Errorf("node %s written %d times", id, c)
+		}
+	}
+	if mustJSON(got) != mustJSON(d) {
+		t.Errorf("a save changed a workflow it can't read")
+	}
+}
+
+// QA-716: re-applying unchanged answers changes no bytes, and a label a person put on a link the
+// questions own survives, as do the ends' ids.
+func TestGuideReapplyKeepsLinksAndLabels(t *testing.T) {
+	allFormats(t)
+	a := DefaultAnswers(GoalSmaller)
+	a.Before = []Card{{Type: TypeCheckName, Config: map[string]any{"pattern": "sample", "match": "contains"}, Then: &Then{Side: "yes", End: "stop", Config: map[string]any{"reason": "A sample."}}}, {Type: TypeNote, Config: map[string]any{"text": "hi"}}}
+	a.AfterCards = []Card{{Type: TypeTag, Config: map[string]any{"add": "done"}}, {Type: TypeCheckResult, Config: map[string]any{"test": "saved_at_least", "percent": 10}, Yes: []Card{{Type: TypeMediaServer, Config: map[string]any{"which": "all"}}}}}
+	a.ConvertFails = &Fails{End: "leave", Reason: "nope"}
+	d := Build(a)
+	for i := range d.Edges { // a hand-made label on a link the questions own
+		if d.Edges[i].From == nodeOf(d, TypeNote).ID {
+			d.Edges[i].Label = "QA hand link"
+		}
+	}
+	g := GuideOf(d)
+	if g.Advanced != CoverageFull {
+		t.Fatalf("%+v", g)
+	}
+	got := Apply(d, *g.Answers)
+	if mustJSON(got) != mustJSON(d) {
+		t.Errorf("re-apply changed bytes:\n%s\n%s", mustJSON(got), mustJSON(d))
+	}
+	// the same with a Basic save on top: its views are unchanged, so nothing moves
+	b := *g.Answers
+	b.Flow = FlowBasic
+	if got := Apply(d, b); mustJSON(got) != mustJSON(d) {
+		t.Errorf("a Basic re-apply changed bytes")
+	}
+	// one answer changed: only its part moves; the label and the ends' ids stay
+	c := *g.Answers
+	c.ConvertFails = &Fails{End: "leave", Reason: "changed"}
+	c.AfterCards[0].Config["add"] = "finished"
+	d2 := Apply(d, c)
+	if !slices.ContainsFunc(d2.Edges, func(e Edge) bool { return e.Label == "QA hand link" }) {
+		t.Errorf("the label went")
+	}
+	if x, y := nodeOf(d, TypeFail), nodeOf(d2, TypeFail); x.ID != y.ID {
+		t.Errorf("the Then end changed id")
+	}
+	ends := func(dd Doc) string {
+		for _, e := range dd.Edges {
+			if e.From == nodeOf(dd, TypeConvert).ID && e.FromPort == "error" {
+				return e.To + "/" + e.ID
+			}
+		}
+		return ""
+	}
+	if ends(d) != ends(d2) || strOf(nodeByIDOf(d2, strings.Split(ends(d2), "/")[0]).Config, "reason", "") != "changed" {
+		t.Errorf("the conversion's end or its link changed: %s vs %s", ends(d), ends(d2))
+	}
+}
+
+func nodeByIDOf(d Doc, id string) Node {
+	n, _ := nodeByID(d, id)
+	return n
 }
