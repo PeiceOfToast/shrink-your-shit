@@ -88,7 +88,7 @@ func main() {
 	ffmpeg := flag.String("ffmpeg", os.Getenv("SYP_FFMPEG"), "path to ffmpeg (default: find it; env SYP_FFMPEG)")
 	ffprobe := flag.String("ffprobe", os.Getenv("SYP_FFPROBE"), "path to ffprobe (default: find it; env SYP_FFPROBE)")
 	showVersion := flag.Bool("version", false, "print the version and exit")
-	trustedProxies := flag.String("trusted-proxies", os.Getenv("SYP_TRUSTED_PROXIES"), "addresses or ranges (comma-separated) of reverse proxies whose X-Forwarded-Proto/For are believed, for remote workers outside your network (env SYP_TRUSTED_PROXIES)")
+	trustedProxies := flag.String("trusted-proxies", os.Getenv("SYP_TRUSTED_PROXIES"), "addresses or ranges (comma-separated) of reverse proxies whose X-Forwarded-Proto/For are believed, for remote workers outside your network; every proxy between the client and this server must be listed (env SYP_TRUSTED_PROXIES)")
 	flag.Parse()
 	if *showVersion {
 		fmt.Println("shrink-your-shit", version)
