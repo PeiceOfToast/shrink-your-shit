@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { allLibrariesRunning, filesFact, freshFact, lastDoneFact, nextScanFact, nothingFact, stateWord, workersFact, type Fact } from "./statusStrip.ts";
+import { filesFact, freshFact, lastDoneFact, nextScanFact, nothingFact, stateWord, workersFact, type Fact } from "./statusStrip.ts";
 
 const NOW = new Date("2026-11-25T12:00:00Z");
 const dayStub = (t: string) => "TIME:" + t;
@@ -68,13 +68,6 @@ test("the files fact is plural, counted, and the number is the bold value", () =
   assert.equal(flat(filesFact(1)), "1 file waiting");
 });
 
-test("a library that can't run means no Nothing needs you", () => {
-  assert.equal(allLibrariesRunning(["active", "active"]), true);
-  assert.equal(allLibrariesRunning(["active", "paused"]), false);
-  assert.equal(allLibrariesRunning(["no_workflow"]), false);
-  assert.equal(allLibrariesRunning(["paused_share"]), false);
-  assert.equal(allLibrariesRunning([]), true);
-});
 
 test("the fresh-install sentence names the missing step; no step (card not shown) gives no sentence", () => {
   assert.equal(freshFact(0), "Add a library to start");

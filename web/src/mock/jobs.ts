@@ -27,6 +27,8 @@ let items: JobItem[] = [
   base("skip-1", "Blade.Runner.2049.2017.2160p.DV.mkv", "Blade Runner 2049 (2017)", MOV, "skipped", { reason: { code: "dolby_vision", message: "It has Dolby Vision (profile 5), which can't be kept when it is converted." }, detail: "It has Dolby Vision (profile 5), which can't be kept when it is converted.", skippedId: "1", codec: "HEVC", resolution: "2160p" }),
   base("skip-2", "Severance.S02E07.1080p.WEB-DL.mkv", "Season 2", TV, "cancelled", { jobId: "47002", // #149: a stopped job keeps its job (steps, tries)
  reason: { code: "user_stopped", message: "You stopped this file. It is left as it is until you press Convert again." }, detail: "You stopped it.", skippedId: "2" }),
+  // D2 foot line: a failure from a library since removed (GONE_LIB, not in the list), newest, so it is in the three the card asks for
+  base("48177", "Old.Episode.S01E02.mkv", "Old archive", ["Old archive", GONE_LIB], "failed", { finishedAt: at(3), detail: "Can't write to /media/shrunk: no space left.", reason: { code: "not_writable", message: "Can't write to /media/shrunk: no space left." } }),
   base("48190", "Wedding.Raw.2018.mov", ".", HOME, "failed", { detail: "The new file is 4 s shorter than the original. The original is kept.", reason: { code: "convert_failed", message: "The new file is 4 s shorter than the original. The original is kept." } }),
   base("48191", "Crash.Test.2024.mp4", "Crash Test (2024)", HOME, "failed", { detail: "There isn't enough free space to write the new file. About 571 MB is needed, 101 MB is free.", reason: { code: "no_space", message: "There isn't enough free space to write the new file. About 571 MB is needed, 101 MB is free." } }),
   base("no-log", "Old.Movie.2020.mp4", "Old Movies", HOME, "completed", { beforeBytes: 8 * GB, afterBytes: 4 * GB, bytes: 4 * GB, codec: "HEVC", finishedAt: at(60 * 24 * 60), flow: { id: "w1", name: "Shrink videos" }, originalState: "kept_beside" }),
@@ -48,7 +50,8 @@ if (new URLSearchParams(location.search).get("jobs") === "many") items = [...ite
 const TAB: Record<Tab, JobState[]> = { waiting: ["queued", "retry_wait"], running: ["preparing", "running", "validating", "committing"], completed: ["completed"], skipped: ["skipped", "cancelled"], failed: ["failed"] };
 const tabOf = (s: JobState) => (Object.keys(TAB) as Tab[]).find((t) => TAB[t].includes(s))!;
 export function mockJobs(tab: Tab, q: string, path?: string, limit = 200, library = "", kept = false, left = false): JobsPage {
-  const mine = items.filter((j) => !library || j.libraryId === library); // as the server: ?libraryId= narrows the rows and the tab counts
+  const calm = new URLSearchParams(location.search).has("calm"); // D2: ?calm has no failed jobs, so the Needs attention card is absent
+  const mine = items.filter((j) => (!library || j.libraryId === library) && !(calm && tabOf(j.state) === "failed")); // as the server: ?libraryId= narrows the rows and the tab counts
   const counts = Object.fromEntries((Object.keys(TAB) as Tab[]).map((t) => [t, mine.filter((j) => tabOf(j.state) === t).length])) as Record<Tab, number>;
   // as the server with ?kept=1 or ?left=1 (Done only): the rows whose original is still kept, or still left beside or in place; the counts stay the tab's own
   let rows = mine.filter((j) => tabOf(j.state) === tab && (!q || j.name.toLowerCase().includes(q.toLowerCase())) && (!path || j.path === path) && (!kept || (tab === "completed" && j.originalState === "kept")) && (!left || (tab === "completed" && (j.originalState === "left_in_place" || j.originalState === "kept_beside"))));

@@ -101,13 +101,14 @@ function running(): State {
   const step = (index: number, name: string) => ({ nodeId: "n" + index, name, index, count: 5 });
   return {
     settings: { firstRunDone: true, firstRunStep: 4, intakePaused: false, catalogueEnabled: false, firstRunLibrary: null, scanEvery: 45, scanEverySource: "flag" }, // 45 s: the flag's unlisted value
-    libraries: [{ ...library("l1", "Movies", "/media/movies", 8.1 * GB, 780 * GB, 1600), bytes: { freed: 8.1 * GB, waitingToFree: 780 * GB, grew: 1.1 * GB }, ...(shareOff && { status: "paused_share" as const, pausedBy: { shareId: "s1", shareName: "Media share", since: ago(30), use: "folder" as const } }) }, library("l2", "TV Shows", "/media/tv", 0, 410 * GB, 900), { ...library("l3", "Home videos", "/media/home", 28.3 * GB, 10 * GB, 300), workflowId: "w2", workflowName: "Home videos - my rules" }],
+    libraries: [{ ...library("l1", "Movies", "/media/movies", 8.1 * GB, 780 * GB, 1600), bytes: { freed: 8.1 * GB, waitingToFree: 780 * GB, grew: 1.1 * GB }, ...(shareOff && { status: "paused_share" as const, pausedBy: { shareId: "s1", shareName: "Media share", since: ago(30), use: "folder" as const } }) }, library("l2", "TV Shows", "/media/tv", 0, 410 * GB, 900), { ...library("l3", "Home videos", "/media/home", 28.3 * GB, 10 * GB, 300), workflowId: "w2", workflowName: "Home videos - my rules" }, { ...library("l4", "Archive", "/media/archive", 0, 0, 120), enabled: false }],
     workers: [tested(worker("this", "This computer", "busy", [1, 2], [0, 1], 120, ["j-48213"]), true), tested(worker("nas", "NAS box", "busy", [1, 1], [0, 0], 300, ["j-48214"]), false), worker("laptop", "Laptop", "offline", [0, 1], [0, 0], 22, [])].map((w) => (workersOff ? { ...w, status: "offline" as const } : w)),
     jobs: [
       job("j-48213", "Dune.Part.Two.2024.2160p.REMUX.mkv", MOVIES, "running", { subState: "converting", worker: { id: "this", name: "This computer" }, currentStep: step(3, "Convert video"), startedAt: ago(12), expectedSavingBytes: 1.2 * GB, expectedSavingEstimated: true,
         progress: { stage: "Converting video", percent: 62, workflowPercent: 55, elapsedS: 728, speed: 1.7, etaS: 450, fps: 41, bitrateKbps: 9800 } }),
       job("j-48214", "The.Bear.S03E04.1080p.WEB-DL.mkv", TV, "running", { subState: "converting", worker: { id: "nas", name: "NAS box" }, currentStep: step(3, "Convert video"), startedAt: ago(4), expectedSavingBytes: -200e6, expectedSavingEstimated: true,
         progress: { stage: "Converting video", percent: 18, workflowPercent: 30, elapsedS: 222, speed: 0.4, etaS: null, fps: 9, bitrateKbps: 4100 } }),
+      job("j-48177", "Old.Episode.S01E02.mkv", ["l9", "Old archive"], "failed", { endedAt: ago(3), currentStep: step(3, "Convert video"), reason: { code: "not_writable", message: "Can't write to /media/shrunk: no space left." } }), // a library since removed: Needs attention drops it
       job("j-48190", "Wedding.Raw.2018.mov", HOME, "failed", { endedAt: ago(11), currentStep: step(3, "Convert video"), reason: { code: "encoder_failed", message: "The encoder ran out of graphics memory." } }),
       job("j-48161", "Arrival.2016.1080p.BluRay.mkv", MOVIES, "failed", { endedAt: ago(102), currentStep: step(4, "Check the result"), reason: { code: "check_failed", message: "The new file is 4 s shorter than the original. The original is kept." } }),
       job("j-48102", "Severance.S02E07.1080p.WEB-DL.mkv", TV, "failed", { endedAt: ago(255), currentStep: step(5, "Save the result"), reason: { code: "not_writable", message: "Can't write to /media/shrunk: no space left." } }),
@@ -154,8 +155,11 @@ function fresh(): State {
 }
 
 let state: State = mockMode === "fresh" ? fresh() : running();
+// D2: ?calm has no failed jobs and no library that isn't running, so the Needs attention card is absent ("Nothing needs you")
+if (mockMode !== "fresh" && new URLSearchParams(location.search).has("calm")) state = { ...state, jobs: state.jobs.filter((j) => j.state !== "failed"), libraries: state.libraries.filter((l) => l.enabled), last24h: { ...state.last24h, failed: 0 }, workers: state.workers.map((w) => (w.status === "offline" || w.status === "stalled" ? { ...w, status: "online" as const } : w)) };
 // D1 fix 1: ?waiting makes every worker on and idle (none busy), so the Status strip shows Waiting while files wait
 if (mockMode !== "fresh" && new URLSearchParams(location.search).has("waiting")) for (const w of state.workers) if (w.status !== "paused" && w.status !== "draining") { w.status = "online"; w.currentJobIds = []; }
+if (mockMode !== "fresh" && new URLSearchParams(location.search).has("waiting")) state.jobs = state.jobs.filter((j) => j.state !== "running"); // the top bar's "Converting" follows the active jobs
 // U-A: ?libs=many adds 42 libraries to the running mock, for the Jobs library select (one name is long, to check the cut-off)
 if (mockMode !== "fresh" && new URLSearchParams(location.search).has("libs")) state.libraries.push(...Array.from({ length: 42 }, (_, i) => library("m" + (i + 1), i === 0 ? "Library 1: an archive with a much longer name than the rest" : "Library " + (i + 1), "/media/m" + (i + 1), 0, 0, 10)));
 let version = 0;
