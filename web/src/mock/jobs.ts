@@ -5,6 +5,7 @@ import type { ActionResult, JobAction, JobDetail, JobItem, JobState, JobsPage, T
 
 const GB = 1e9, now = Date.now(), at = (min: number) => new Date(now - min * 60e3).toISOString();
 const MOV = ["Movies", "l1"] as const, TV = ["TV Shows", "l2"] as const, HOME = ["Home videos", "l3"] as const; // ids as in the mock library list
+const GONE_LIB = "l9"; // not in the mock library list: a library removed after its jobs finished
 const base = (id: string, name: string, folder: string, lib: readonly [string, string], state: JobState, extra: Partial<JobItem>): JobItem => ({
   id, jobId: id.startsWith("skip-") ? undefined : id, origin: id.startsWith("skip-") ? "scan" : "job", state, subState: null, name, folder,
   path: "/media/" + lib[0].toLowerCase().replace(" ", "") + "/" + (folder === "." ? "" : folder + "/") + name, library: lib[0], libraryId: lib[1],
@@ -36,6 +37,8 @@ let items: JobItem[] = [
   base("48197", "Old.Tape.1998.avi", "Old Tapes", HOME, "failed", { detail: "Kept the original: the original is damaged in 7 places.", reason: { code: "kept_original", message: "Kept the original: the original is damaged in 7 places." } }),
   // a workflow stopped its own job (Stop as failed): the server's reason from a real job (id 17), no failure summary
   base("48300", "Stop.Clean.Sample.mkv", "Clips", HOME, "failed", { reason: { code: "workflow_stopped", message: "Stopped by this workflow: the new file did not save at least 99%. (No (67.4% saved, asked for at least 99%)). The original is untouched." } }),
+  // a job whose library was removed after it finished: the list keeps the folder text and the old id; the detail has no library
+  base("48301", "Gone.Film.2016.mkv", "Old Films", ["Old films", GONE_LIB], "completed", { beforeBytes: 6 * GB, afterBytes: 2.8 * GB, bytes: 2.8 * GB, codec: "HEVC", finishedAt: at(60 * 24 * 4), flow: { id: "w1", name: "Shrink videos" }, originalState: "kept", keptDaysLeft: 5 }),
   base("48198", "Lecture.2020.mkv", "Lecture (2020)", HOME, "completed", {}),
   base("48199", "Old.Movie.2018.mkv", "Old Movie (2018)", HOME, "completed", {}),
   base("failed-replace", "Replace.Fail.mkv", "Failed Saves", HOME, "failed", { detail: "The new file was converted, but saving it in place of the original failed.", reason: { code: "stalled", message: "The new file was converted, but saving it in place of the original failed." } }),
@@ -204,7 +207,7 @@ export function mockJob(id: string): JobDetail | null {
     ...(j.state === "failed" && j.id === "48191" ? { failure: { step: "encode", stepIndex: 1, stepCount: 2, afterMs: 0, mediaTime: null, hint: "Free some space on that disk, then press Retry.", ffmpegRan: false, exitCode: null, keyLines: [] } } : {}),
     ...(j.state === "failed" && j.id === "failed-replace" ? { failure: { step: "replace", stepIndex: 3, stepCount: 4, afterMs: 500, mediaTime: null, hint: null, ffmpegRan: true, exitCode: 1, keyLines: ["rename /mnt/shrunk/file.tmp /mnt/shrunk/file.mkv: permission denied"] } } : {}), retryAt: j.retryAt ?? null, error: null, worker: j.worker ?? null,
     file: { path: j.path, bytes: j.beforeBytes ?? j.bytes }, createdAt: at(300), updatedAt: at(5),
-    library: { id: j.libraryId, name: j.library }, workflow: { id: "w1", revisionId: "w1r4", version: 4, ...(j.id === "48165" ? { queuedVersion: 3 } : {}) },
+    ...(j.libraryId === GONE_LIB ? {} : { library: { id: j.libraryId, name: j.library } }), workflow:{ id: "w1", revisionId: "w1r4", version: 4, ...(j.id === "48165" ? { queuedVersion: 3 } : {}) },
     events: old ? [] : [{ seq: 1, at: at(300), from: null, to: "queued", reason: null, workerId: null },
       ...(j.state !== "queued" ? [{ seq: 5, at: at(20), from: "queued" as JobState, to: "running" as JobState, reason: null, workerId: "builtin" }] : []),
       ...(["completed", "failed"].includes(j.state) ? [{ seq: 8, at: at(10), from: "running" as JobState, to: j.state, reason: j.state === "failed" ? "convert_failed" : null, workerId: "builtin" }] : [])],

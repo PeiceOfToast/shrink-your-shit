@@ -154,6 +154,8 @@ function fresh(): State {
 }
 
 let state: State = mockMode === "fresh" ? fresh() : running();
+// U-A: ?libs=many adds 42 libraries to the running mock, for the Jobs library select (one name is long, to check the cut-off)
+if (mockMode !== "fresh" && new URLSearchParams(location.search).has("libs")) state.libraries.push(...Array.from({ length: 42 }, (_, i) => library("m" + (i + 1), i === 0 ? "Library 1: an archive with a much longer name than the rest" : "Library " + (i + 1), "/media/m" + (i + 1), 0, 0, 10)));
 let version = 0;
 // When the data last changed (the real app: when the summary or a live event last arrived). The Dashboard's "Updated".
 export let updatedAt = new Date();

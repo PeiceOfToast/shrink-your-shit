@@ -1,7 +1,7 @@
 // M3a: the Libraries list's filter rule and progress share. Node runs these (npm test).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { allShownSelected, doneShare, filterCounts, inFilter, keepShown, needsAttention, selectShown } from "./libraryList.ts";
+import { allShownSelected, doneShare, filterCounts, inFilter, keepShown, libraryOptions, needsAttention, selectShown } from "./libraryList.ts";
 import type { Library } from "./types/v2.ts";
 
 const counts = { files: 0, waiting: 0, running: 0, completed: 0, skipped: 0, failed: 0 };
@@ -105,4 +105,11 @@ test("a filter or search change drops the hidden libraries from the selection (t
   assert.deepEqual(keepShown(["a", "b"], []), []); // nothing shown: the selection is empty
   assert.deepEqual(keepShown([], [a, b]), []);
   assert.deepEqual(keepShown(["b", "a"], [a, b]), ["b", "a"]); // order of the selection is kept
+});
+
+// U-A: the Jobs library select lists names in order, with numbers counted as numbers
+test("libraryOptions sorts by name, numbers as numbers, case-blind", () => {
+  const ls = [{ id: "c", name: "Library 10" }, { id: "a", name: "archive" }, { id: "b", name: "Library 2" }, { id: "d", name: "Films" }];
+  assert.deepEqual(libraryOptions(ls).map((l) => l.name), ["archive", "Films", "Library 2", "Library 10"]);
+  assert.deepEqual(ls.map((l) => l.id), ["c", "a", "b", "d"]); // the input is not reordered
 });
