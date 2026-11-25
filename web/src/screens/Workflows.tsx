@@ -204,7 +204,7 @@ export function Workflows() {
         </>}
       </PageHead>
       {wizard && <Wizard onClose={() => setWizard(false)} onMade={(w) => navigate("/workflows/" + w.id)} />}
-      <div className="tabs" role="tablist">
+      <div className="tabs tabs3" role="tablist">
         <button role="tab" type="button" aria-selected={tab === "workflows"} onClick={() => tab !== "workflows" && setTab("workflows")}>Workflows {wfs.data && <span className="n">{all.length}</span>}</button>
         <button role="tab" type="button" aria-selected={tab === "templates"} onClick={() => tab !== "templates" && setTab("templates")}>Templates {tpl.data && <span className="n">{templates.length}</span>}</button>
         <button role="tab" type="button" aria-selected={tab === "variables"} onClick={() => tab !== "variables" && setTab("variables")}>Variables {vars.data && <span className="n">{vars.data.total}</span>}</button>

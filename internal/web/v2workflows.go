@@ -230,7 +230,10 @@ func v2Workflows(api *http.ServeMux, store *jobs.Store, eng Engine) {
 		}
 	})
 	api.HandleFunc("POST /api/v2/workflows", func(w http.ResponseWriter, r *http.Request) {
-		var in struct{ Name, FileType, TemplateID string }
+		var in struct {
+			Name, FileType, TemplateID string
+			Answers                    *workflow.Answers // the guided builder (slice 12, G1): the draft is built from these
+		}
 		if !readJSON(w, r, &in) {
 			return
 		}
@@ -246,10 +249,24 @@ func v2Workflows(api *http.ServeMux, store *jobs.Store, eng Engine) {
 			apiError(w, http.StatusBadRequest, "invalid", "There is no such template. Nothing was changed.")
 			return
 		}
-		f, err := store.AddWorkflow(name, workflow.Preset())
+		doc := workflow.Preset()
+		if in.Answers != nil {
+			a := workflow.Fill(*in.Answers)
+			if !answersOK(w, a) {
+				return
+			}
+			doc = workflow.Build(a)
+		}
+		f, err := store.AddWorkflow(name, doc)
 		if err != nil {
 			storeErr(w, err)
 			return
+		}
+		if in.Answers != nil && in.Answers.LanguagesEverywhere {
+			if err := saveLanguages(store, in.Answers.Languages); err != nil {
+				serverError(w, err)
+				return
+			}
 		}
 		v, err := workflowView(store, f.ID)
 		if err != nil {
@@ -699,7 +716,8 @@ func revisionView(r jobs.Revision, sc workflow.Scopes) map[string]any {
 	}
 	return map[string]any{"id": id, "workflowId": strconv.FormatInt(r.WorkflowID, 10), "number": r.Number, "status": r.Status,
 		"workflow": workflow.Masked(r.Doc), "layout": r.Layout, "logicHash": r.LogicHash, "stackable": res.Stackable,
-		"stepSummaries": res.StepSummaries, "fileOn": res.FileOn, "validation": res.Issues, "etag": r.Etag, "createdAt": r.Created, "publishedAt": r.Published}
+		"stepSummaries": res.StepSummaries, "fileOn": res.FileOn, "validation": res.Issues, "etag": r.Etag, "createdAt": r.Created, "publishedAt": r.Published,
+		"guide": workflow.GuideOf(r.Doc)} // slice 12: the questions' reading of the draft
 }
 
 func stepTypes(d workflow.Doc) []string {
