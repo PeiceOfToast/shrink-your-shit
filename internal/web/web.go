@@ -72,7 +72,8 @@ func Handler(store *jobs.Store, access *Access, eng Engine) http.Handler {
 		svc = integrations.New(store, integrations.Options{})
 	}
 	v2Integrations(api, svc)
-	v2Backups(api, store, ss) // item 5: /api/v2/backups
+	v2Guide(api, store, svc, notifier) // slice 12: the guided builder's questions
+	v2Backups(api, store, ss)          // item 5: /api/v2/backups
 	// For health checks: answers without signing in and says nothing else. "ok" needs the database to
 	// answer one query (user item 9: an update whose program is up but can't reach its data is not
 	// healthy). A database busy past healthzWait (one connection, held by a long write) is still "ok":
