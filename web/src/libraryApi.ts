@@ -199,16 +199,17 @@ export async function purgeTrash(libraryId?: string): Promise<Answer<PurgeResult
   return M({ deletedFiles: t.files - left.files, freedBytes: t.bytes - left.bytes, skipped: skip ? [{ library: "Archive disk", reason: "Its share isn't connected, so nothing in it was touched." }] : [], unreachable: unreach ? mockUnreachable() : [] });
 }
 const mockUnreachable = (): Unreachable[] => [
-  { id: 101, path: "/mnt/old-share/Archive/2019/Holiday 2019/IMG_4432.mov", code: "not_found", reason: "The share isn't connected, so the file can't be found." },
-  { id: 102, path: "/mnt/old-share/Archive/2020/Family/Birthday party (final cut).mkv", code: "not_found", reason: "The share isn't connected, so the file can't be found." },
-  { id: 103, path: "/mnt/old-share/Archive/2021/Concerts/Set 2 - encode.mkv", code: "in_use", reason: "Another program has this file open, so it was left alone." },
+  // reasons copied from the server (rehome.go, restore.go): lowercase, as the screen capitalises them
+  { id: 101, path: "/mnt/old-share/Archive/2019/Holiday 2019/IMG_4432.mov", code: "not_found", reason: "its file was not found under the library folders." },
+  { id: 102, path: "/mnt/old-share/Archive/2020/Family/Birthday party (final cut).mkv", code: "not_found", reason: "its file was not found under the library folders." },
+  { id: 103, path: "/mnt/old-share/Archive/2021/Concerts/Set 2 - encode.mkv", code: "in_use", reason: "a queued or running job uses this file, so its kept original was left." },
 ];
 
 // POST /api/v2/originals/{id}/forget: removes the kept record and never deletes a file. A file that can still be found
-// answers 409 with a sentence, and nothing changes. Mock: id 102 answers 409 so the error path can be checked.
+// answers 409 file_found with the server's sentence, and nothing changes. Mock: id 102 answers 409 so the error path can be checked.
 export async function forgetOriginal(id: number): Promise<Answer<unknown>> {
   if (!MOCK) return call("POST", "/api/v2/originals/" + id + "/forget");
-  if (id === 102) return { error: { code: "conflict", message: "The file can still be found at /mnt/old-share/Archive/2020/Family, so nothing was forgotten." } };
+  if (id === 102) return { error: { code: "file_found", message: "A file is still under the library or mount folders where its original was, so it isn't gone. Nothing was changed." } };
   return M({ id });
 }
 

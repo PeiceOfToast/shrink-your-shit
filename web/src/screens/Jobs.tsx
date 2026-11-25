@@ -23,7 +23,9 @@ import type { Failure, JobAction, JobDetail, JobItem, JobProgressEvent, JobState
 import { stepLabel } from "../stepLabel";
 import { closeMenuToSummary, menuEscape, useCloseOnOutside } from "../menuFocus";
 import { runFields, runningFor } from "../jobCards";
-import { keepShown } from "../libraryList";
+import { keepShown, libraryOptions } from "../libraryList";
+import { cancelOnTab, selectOnTab } from "../jobTabActions";
+import { detailLibraryGone, libraryGone } from "../jobLibrary";
 
 const TABS: [Tab, string][] = [["waiting", "Waiting"], ["running", "Running"], ["completed", "Done"], ["skipped", "Skipped"], ["failed", "Failed"]];
 // G5: the Done filter for originals waiting in the trash. The words come from design (SCREENS V6); keep them here.
@@ -159,6 +161,8 @@ export function Jobs() {
   const picked = items.filter((j) => sel.includes(j.id)), none = !picked.length || busy;
   // Select mode keeps only the rows still shown: a tab, library or search change drops the rest (and their ticks)
   const shownKey = items.map((j) => j.id).join("\n");
+  // a tab that offers no Select (done) also drops select mode and its ticks, so coming back starts clean
+  useEffect(() => { if (!selectOnTab(tab)) { setSelecting(false); setSel([]); } }, [tab]);
   useEffect(() => setSel((s) => { const k = keepShown(s, items); return k.length === s.length ? s : k; }), [shownKey]);
   const run = async (a: JobAction) => {
     if (a === "cancel" && !window.confirm("Cancel " + plural(picked.length, "file", "files") + "? The files stay as they are. Nothing is deleted.")) return;
@@ -179,7 +183,7 @@ export function Jobs() {
     {/* one word per action (pass 5): Retry only on the Failed tab; a skip is Convert again */}
     {tab === "failed" && <button className="btn sm ghost" type="button" disabled={none} title={none ? "Select files first" : undefined} onClick={() => run("retry")}><Icon id="i-refresh" />Retry</button>}
     {tab === "skipped" && <button className="btn sm ghost" type="button" disabled={none} title={none ? "Select files first" : undefined} onClick={() => run("requeue")}><Icon id="i-arrow-r" />Convert again</button>}
-    <button className="btn sm ghost" type="button" disabled={none} title={none ? "Select files first" : undefined} onClick={() => run("cancel")}><Icon id="i-stop" />Cancel</button>
+    {cancelOnTab(tab) && <button className="btn sm ghost" type="button" disabled={none} title={none ? "Select files first" : undefined} onClick={() => run("cancel")}><Icon id="i-stop" />Cancel</button>}
     {tab === "waiting" && <span className="row nw" style={{ gap: 4 }}>
       <select className="input sm" aria-label="Priority" value={prio} onChange={(e) => setPrio(e.target.value as Pin | "none")}><option value="first">First</option><option value="none">Normal</option><option value="last">Last</option></select>
       <button className="btn sm ghost" type="button" disabled={none} onClick={() => run("reprioritize")}>Change priority</button></span>}
@@ -187,7 +191,7 @@ export function Jobs() {
   return (
     <div className="stack">
       <PageHead icon="i-jobs" title="Jobs" sub="Every file the workers look at: waiting, converting, done, skipped and failed.">
-        {!firstRun && <button className="btn sm ghost" type="button" aria-pressed={selecting} onClick={() => (selecting && setSel([]), setSelecting(!selecting))}>{selecting ? "Done" : "Select"}</button>}
+        {!firstRun && selectOnTab(tab) && <button className="btn sm ghost" type="button" aria-pressed={selecting} onClick={() => (selecting && setSel([]), setSelecting(!selecting))}>{selecting ? "Done" : "Select"}</button>}
       </PageHead>
       {off && <p className="st warn" role="status"><Icon id="i-alert" /><span>{off === "offline"
         ? <>No worker is connected. <Link to="/workers">See Workers.</Link></>
@@ -202,23 +206,26 @@ export function Jobs() {
       <div className="tabs" role="tablist" aria-label="Jobs">
         {TABS.map(([t, label]) => <button key={t} role="tab" type="button" aria-selected={tab === t} onClick={() => tab !== t && go(t)}>{label}{counts && <span className="n">{count(t === "completed" && (kept || left) && current ? current.total : counts[t])}</span>}</button>)}
       </div>
-      {!firstRun && (selecting || sel.length > 0) && <div className="ltools" role="toolbar" aria-label="Jobs selection">
+      {!firstRun && selectOnTab(tab) && (selecting || sel.length > 0) && <div className="ltools" role="toolbar" aria-label="Jobs selection">
         <label className="hit selall"><input type="checkbox" aria-label="Select all files" checked={items.length > 0 && sel.length === items.length} onChange={(e) => setSel(e.target.checked ? items.map((j) => j.id) : [])} /><span className="sm">All</span></label>
         <span className="desk">{actions}</span>
         {selecting && <details className="menu phone" ref={phoneMenu} onKeyDown={menuEscape}><summary className="btn sm icon ghost" aria-label="More actions"><Icon id="i-more" /></summary><div className="pop" role="menu" onClick={(e) => { if ((e.target as Element).closest("button")) closeMenuToSummary(e.currentTarget); }}>{actions}</div></details>}
         {picked.length > 0 && <span className="muted sm">{picked.length} selected</span>}
       </div>}
-      {/* parity 11-19 #2 (G4): pick a library here too; it sets the same ?libraryId= as "See its jobs", and the chip above stays.
-          One joined button per library (aria-pressed on the chosen one); hidden on the empty state and while loading or on error.
-          An id no library has shows the chip only, with no button row. Its own row under the tabs (design jobs-running): the filter left, the search right. */}
+      {/* Pick a library here too: one select, "All libraries" first, then the names. It sets the same ?libraryId= as "See its jobs";
+          the chip above is only for an id the list lacks. Shown with more than one library, when the page loaded with no error and
+          either a known id or rows; hidden on the empty state, while loading, and on error. Its own row under the tabs: the filter left, the search right. */}
       <div className="lfilt">
         <span className="filt">{tab === "completed" && <span className="seg" role="group" aria-label="Original file">
           <button type="button" aria-pressed={!kept && !left} onClick={() => navigate(query("completed", library, ""))}>All</button>
           <button type="button" aria-pressed={kept} onClick={() => navigate(query("completed", library, kept ? "" : "kept"))}>{TRASH_WORDS}</button>
           <button type="button" aria-pressed={left} onClick={() => navigate(query("completed", library, left ? "" : "left"))}>{LEFT_WORDS}</button></span>}
-        {!!page.data && !page.error && !!libs.data && libs.data.length > 1 && (library ? libs.data.some((l) => l.id === library) : items.length > 0) && <span className="seg" role="group" aria-label="Library">
-          <button type="button" aria-pressed={!library} onClick={() => navigate(query(tab, ""))}>All libraries</button>
-          {libs.data.map((l) => <button key={l.id} type="button" aria-pressed={library === l.id} onClick={() => navigate(query(tab, l.id))}>{l.name}</button>)}
+        {!!page.data && !page.error && !!libs.data && libs.data.length > 1 && (library ? libs.data.some((l) => l.id === library) : items.length > 0) && <span className="libsel">
+          <label htmlFor="jobs-library">Library</label>
+          <select id="jobs-library" key="jobs-library" className="input" value={library} onChange={(e) => navigate(query(tab, e.target.value))}>
+            <option value="">All libraries</option>
+            {libraryOptions(libs.data).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+          </select>
         </span>}</span>
         <input className="input find" type="search" placeholder="Search file names" aria-label="Search file names" value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
@@ -234,7 +241,7 @@ export function Jobs() {
             const gain = j.state === "completed" && !!j.beforeBytes && j.afterBytes != null && j.afterBytes < j.beforeBytes;
             // the facts chips: library, folder, pin, place, worker (the running card shows them above its five fields)
             const facts = (<div className="chips">
-              <span className="mchip">{j.library}</span>
+              <span className="mchip">{libraryGone(j.libraryId, libs.data) ? "Library removed" : j.library}</span>
               {j.folder !== "." && <span className="mchip">{j.folder}</span>}
               {j.pin && <span className="mchip prio">{j.pin === "first" ? "First" : "Last"}</span>}
               {tab === "waiting" && (j.position != null ? <span className="mchip">Place {j.position} in the queue</span> : <span className="mchip">Not taken now</span>)}
@@ -752,7 +759,7 @@ function Drawer({ id, row, onClose, onChanged }: { id: string; row?: JobItem; on
             : reason && <section><h3>{whyHeading(j?.reason?.code ?? "", false)}</h3><p>{reason}</p>{ruleName(j?.workflow, rule?.name) && rule && <p className="sm">The rule is <a className="linkbtn" href={"/workflows/" + encodeURIComponent(rule.id)} onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); navigate("/workflows/" + encodeURIComponent(rule.id)); }}}>{rule.name}</a>.</p>}</section>}
           <section><h3>File</h3><dl className="kv">
             {(own?.path ?? j?.file?.path) && <><dt>Source</dt><dd className="mono sm">{slashWrap(own?.path ?? j?.file?.path ?? "")}</dd></>} {/* review 54ff228: no '-' when the server doesn't keep the path (a removed library's job) */}
-            {(j?.library || own) && <><dt>Library</dt><dd>{j?.library?.name ?? own?.library}</dd></>}
+            {(j?.library || own) && <><dt>Library</dt><dd>{detailLibraryGone(j, own?.libraryId) ? "Library removed" : j?.library?.name ?? own?.library}</dd></>}
             {own?.state === "completed" && <> {/* review 66edc3d P3: after a restore the file is the original again: no saving */}
               <dt>Original</dt><dd>{kept ? keptLine : own.originalState === "kept" ? keptWords(own.keptDaysLeft ?? 0) : own.originalState === "restored" ? "Put back in place. The smaller version was deleted." : own.originalState === "deleted" ? "Deleted. The new file replaced it." : own.originalState === "left_in_place" ? "Left where it was. The new file is in another folder." + freeNote : own.originalState === "kept_beside" ? "Kept next to the new file, in the same folder." + freeNote : "Left in place"}</dd></>}
             {!own && kept && <><dt>Original</dt><dd>{keptLine}</dd></>}
