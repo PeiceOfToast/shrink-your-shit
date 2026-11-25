@@ -139,7 +139,8 @@ The web page has two sign-in choices, set on the setup or settings page:
   is not a trusted proxy is not admitted by address, so a reverse proxy on your LAN does not expose the page.
   A proxy must be listed in `-trusted-proxies` and must append to `X-Forwarded-For`. Docker Desktop and rootless
   Docker show every client as private, which is why a new Docker install starts in password mode.
-- **Password**: everyone signs in with the password, or with the access token.
+- **Password**: everyone signs in with the password, or with the access token. Pick this if this computer can be
+  reached from the internet, for example through a forwarded port or a reverse proxy.
 
 When the program listens beyond this computer (`-addr 0.0.0.0:8484`, the container, a Proxmox LXC), it
 makes a random access token and keeps it in its data folder (file `access-token`, readable only by the

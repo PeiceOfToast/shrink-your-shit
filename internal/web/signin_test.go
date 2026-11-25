@@ -3,8 +3,11 @@
 package web
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -300,6 +303,58 @@ func TestResetPasswordIsUsedWithoutARestart(t *testing.T) {
 	}
 	if code, _, _ := do(t, nil, srv, call{method: "POST", path: "/api/login", body: `{"password":"second password"}`, ctype: "application/json"}); code != 204 {
 		t.Errorf("new password after reset: %d, want 204", code)
+	}
+}
+
+// Run as root, reset-password hands the file to the folder's owner, or the server could not read it.
+func TestResetPasswordHandsTheFileToTheFolderOwner(t *testing.T) {
+	dir := t.TempDir()
+	oldOwner, oldChown := ownerOf, chownFile
+	defer func() { ownerOf, chownFile = oldOwner, oldChown }()
+	ownerOf = func(string) (int, int, bool) { return 1000, 1001, true }
+	var gotPath string
+	var gotUID, gotGID int
+	chownFile = func(p string, uid, gid int) error { gotPath, gotUID, gotGID = p, uid, gid; return nil }
+	if err := ResetPassword(dir, "first password"); err != nil {
+		t.Fatal(err)
+	}
+	if gotPath != filepath.Join(dir, SigninFile) || gotUID != 1000 || gotGID != 1001 {
+		t.Errorf("chown: %q to %d:%d", gotPath, gotUID, gotGID)
+	}
+}
+
+// When the hand-off fails the reset says so, instead of reporting success the server cannot use.
+func TestResetPasswordSaysWhenTheFileCannotBeHanded(t *testing.T) {
+	dir := t.TempDir()
+	oldOwner, oldChown := ownerOf, chownFile
+	defer func() { ownerOf, chownFile = oldOwner, oldChown }()
+	ownerOf = func(string) (int, int, bool) { return 1000, 1000, true }
+	chownFile = func(string, int, int) error { return errors.New("operation not permitted") }
+	err := ResetPassword(dir, "first password")
+	if err == nil || !strings.Contains(err.Error(), "cannot read it") {
+		t.Errorf("a failed hand-off: %v", err)
+	}
+}
+
+// A signin.json the server cannot read is logged once per change, and the choice in use stays.
+func TestUnreadableSigninFileIsLoggedAndKeepsTheChoice(t *testing.T) {
+	a := newAccess(t, false)
+	if err := a.save(signinState{Mode: ModePassword}); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	old := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(old)
+	if err := os.WriteFile(filepath.Join(a.dir, SigninFile), []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a.current()
+	if got := a.current(); got.mode != ModePassword {
+		t.Errorf("the choice in use changed to %q", got.mode)
+	}
+	if n := strings.Count(buf.String(), "cannot be used"); n != 1 {
+		t.Errorf("logged %d times, want once: %q", n, buf.String())
 	}
 }
 

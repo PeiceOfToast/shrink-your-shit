@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io/fs"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -104,7 +105,30 @@ func ResetPassword(dataDir, password string) error {
 	if err != nil {
 		return err
 	}
-	return writeSignin(dataDir, signinState{Mode: ModePassword, PasswordHash: string(h)})
+	if err := writeSignin(dataDir, signinState{Mode: ModePassword, PasswordHash: string(h)}); err != nil {
+		return err
+	}
+	return handToFolderOwner(dataDir)
+}
+
+// chownFile and ownerOf are seams for the root case. Run as root, the new file would stay root-owned and the
+// server, which runs as the folder's owner, could not read it. Only unix has owners (see signin_owner_*.go).
+var (
+	chownFile = os.Chown
+	ownerOf   = folderOwner
+)
+
+// handToFolderOwner gives signin.json to the owner of dataDir when the write ran as root.
+func handToFolderOwner(dataDir string) error {
+	uid, gid, ok := ownerOf(dataDir)
+	if !ok {
+		return nil
+	}
+	if err := chownFile(filepath.Join(dataDir, SigninFile), uid, gid); err != nil {
+		return errors.New("the new password is saved, but " + SigninFile + " could not be given to the folder's owner, " +
+			"so the running server cannot read it. Run reset-password as that user: " + err.Error())
+	}
+	return nil
 }
 
 // signinNow is what the sign-in choice says for one request.
@@ -154,7 +178,12 @@ func (a *Access) refresh() {
 	}
 	s, ok, err := readSignin(a.dir)
 	if err != nil || !ok {
-		return // a bad file changes nothing: the choice in use stays
+		// A bad file changes nothing, and it is logged once per change rather than on every request.
+		log.Printf("sign-in: %s cannot be used, so the sign-in choice in use stays: %v", SigninFile, err)
+		a.mu.Lock()
+		a.stamp = st
+		a.mu.Unlock()
+		return
 	}
 	a.mu.Lock()
 	a.mode, a.hash, a.stamp = s.Mode, s.PasswordHash, st
