@@ -3,7 +3,7 @@
 // password set) the password form comes first; the token form stays one link away.
 import { Icon } from "../Icon";
 import { PageHead } from "../PageHead";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { failed } from "../api";
 import { navigate, useSearch } from "../router";
 import { getAuth, signIn, type SignInError } from "../signinApi";
@@ -30,6 +30,14 @@ export function SignIn() {
     return () => clearTimeout(t);
   }, [limit]);
   const byPassword = auth?.mode === "password" && auth.passwordSet && !useToken;
+  // switching forms clears the wrong-password line and hides the value; the too-many count carries over. Focus moves to the new field.
+  const moved = useRef(false);
+  const switchTo = (token: boolean) => { moved.current = true; setUseToken(token); setError(""); setShown(false); };
+  useEffect(() => {
+    if (!moved.current) return;
+    moved.current = false;
+    document.getElementById(byPassword ? "password" : "token")?.focus();
+  }, [byPassword]);
 
   const go = async () => {
     setError(""); setBusy(true);
@@ -65,7 +73,8 @@ export function SignIn() {
           ) : error && <p id={field + "-error"} className="st bad" role="alert"><Icon id="i-alert" /><span>{error}</span></p>}
         </div>
         <div className="row"><button className="btn primary" type="submit" disabled={busy || limit !== null || !value.trim()}>Sign in</button></div>
-        {byPassword && <div className="row"><button className="linkbtn" type="button" onClick={() => (setUseToken(true), setError(""), setShown(false))}>Use the access token instead</button></div>}
+        {byPassword && <div className="row"><button className="linkbtn" type="button" onClick={() => switchTo(true)}>Use the access token instead</button></div>}
+        {!byPassword && auth?.mode === "password" && auth.passwordSet && <div className="row"><button className="linkbtn" type="button" onClick={() => switchTo(false)}>Use the password instead</button></div>}
         {byPassword && (
           <details className="where"><summary>Forgot the password?</summary>
             <p className="hint">Sign in with the access token instead, then set a new password in Settings &gt; General.</p>
