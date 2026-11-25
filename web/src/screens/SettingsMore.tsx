@@ -208,6 +208,9 @@ export function SafetySettings() {
   const [back, setBack] = useState(0);
   useEffect(() => { if (gone) freed.current?.focus(); }, [gone]);
   useEffect(() => { if (back) purgeBtn.current?.focus(); }, [back]);
+  // a failed Forget: the focused button was disabled while the request ran, so focus goes back to its row after the commit
+  const [retry, setRetry] = useState<{ id: number } | null>(null);
+  useEffect(() => { if (retry) document.getElementById("forget-" + retry.id)?.focus(); }, [retry]);
   const purge = async () => {
     setPurging(true); setPurgeSaid(""); setGone(null); setUnreach(null); setForgotSaid(""); setRowSaid({});
     const r = await act(purgeTrash(), setPurgeSaid);
@@ -220,7 +223,7 @@ export function SafetySettings() {
     let r: Answer<unknown>;
     try { r = await forgetOriginal(u.id); } catch (e) { if (e instanceof SignedOut) return setForgetting(null); throw e; }
     setForgetting(null);
-    if (failed(r)) return setRowSaid((m) => ({ ...m, [u.id]: r.error.message }));
+    if (failed(r)) return (setRowSaid((m) => ({ ...m, [u.id]: r.error.message })), setRetry({ id: u.id }));
     setUnreach((list) => (list ?? []).filter((x) => x.id !== u.id));
     setForgotSaid(`Forgot ${fileName(u.path)}. The file was not deleted.`);
     setFocusAt(idx); tr.reload();
