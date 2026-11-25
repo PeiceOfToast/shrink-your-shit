@@ -63,7 +63,7 @@ func linksOf(d Doc) links {
 	}
 	for _, e := range d.Edges {
 		l.fan[[2]string{e.From, e.FromPort}]++
-		l.in[e.To]++ // every link counts, so a second one off the same port shows as a join too (review2-716 P3)
+		l.in[e.To]++ // "how many links lead into it": every link, whichever port it leaves; a second link off one port is stray's job (fan)
 		if _, dup := l.out[[2]string{e.From, e.FromPort}]; dup {
 			continue
 		}
