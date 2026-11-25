@@ -141,6 +141,7 @@ func TestGPUJobsSeparateSetting(t *testing.T) {
 
 func TestSettingsAndFlowsNeedSignIn(t *testing.T) {
 	srv, _, a, _ := libServer(t, true)
+	passwordMode(t, a)
 	for _, k := range []call{
 		{method: "GET", path: "/api/settings"},
 		{method: "PATCH", path: "/api/settings", body: "{}", ctype: "application/json"},

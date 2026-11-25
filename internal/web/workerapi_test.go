@@ -92,6 +92,7 @@ func workerCall(t *testing.T, srv *httptest.Server, path, token, body string, le
 // V7b1: pairing once, scope both ways, versions, the Workers page, leases with fencing, removal.
 func TestRemoteWorkerPairingAndLeases(t *testing.T) {
 	srv, st, a, _ := libServer(t, true) // exposed: the person's token is required
+	passwordMode(t, a)
 	person := a.Token()
 	code, body, _ := do(t, nil, srv, call{method: "POST", path: "/api/v2/workers/pairings", body: `{}`, ctype: "application/json", bearer: person})
 	var p struct{ Code, Command string }

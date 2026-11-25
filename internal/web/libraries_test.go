@@ -159,6 +159,7 @@ func TestLibraryValidation(t *testing.T) {
 
 func TestLibraryEndpointsNeedSignIn(t *testing.T) {
 	srv, _, a, _ := libServer(t, true)
+	passwordMode(t, a)
 	for _, k := range []call{
 		{method: "GET", path: "/api/libraries"},
 		{method: "POST", path: "/api/libraries", body: "{}", ctype: "application/json"},
@@ -228,7 +229,8 @@ func TestFsDirsListsFoldersOnly(t *testing.T) {
 }
 
 func TestLibraryListShapeAndVersionHeader(t *testing.T) {
-	srv, st, _, _ := libServer(t, false)
+	srv, st, a, _ := libServer(t, false)
+	passwordMode(t, a)
 	st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), false)
 	code, body, resp := do(t, nil, srv, call{method: "GET", path: "/api/libraries"})
 	if code != 200 || !strings.Contains(body, `"total":1`) || !strings.Contains(body, `"id":"1"`) || !strings.Contains(body, `"flowId":"1"`) {
@@ -237,7 +239,8 @@ func TestLibraryListShapeAndVersionHeader(t *testing.T) {
 	if resp.Header.Get("X-SYP-API") != "1" {
 		t.Errorf("X-SYP-API = %q", resp.Header.Get("X-SYP-API"))
 	}
-	srv2, _, _, _ := libServer(t, true)
+	srv2, _, a2, _ := libServer(t, true)
+	passwordMode(t, a2)
 	if _, _, resp := do(t, nil, srv2, call{method: "GET", path: "/api/libraries"}); resp.StatusCode != 401 || resp.Header.Get("X-SYP-API") != "1" {
 		t.Errorf("a refused /api answer carries the version too: %d %q", resp.StatusCode, resp.Header.Get("X-SYP-API"))
 	}
