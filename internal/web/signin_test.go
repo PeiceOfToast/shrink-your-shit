@@ -577,6 +577,7 @@ func TestLostTokenNewInstallStaysLockedFromTheLAN(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { st.Close() })
 	made, err := a.EnsureSetupToken(st)
 	if err != nil || !made || a.Token() == "" {
 		t.Fatalf("startup check: made=%v token=%q err=%v", made, a.Token(), err)
@@ -601,6 +602,7 @@ func TestTokenlessInstallIsLockedUntilSetupIsDone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { st.Close() })
 	if made, err := a.EnsureSetupToken(st); err != nil || !made || a.Token() == "" {
 		t.Fatalf("startup check: made=%v token=%q err=%v, want a token", made, a.Token(), err)
 	}
@@ -643,6 +645,7 @@ func TestFinishedInstallWithoutTokenMintsNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { st.Close() })
 	finishSetup(t, st)
 	if made, err := a.EnsureSetupToken(st); err != nil || made || a.Token() != "" {
 		t.Errorf("finished install: made=%v token=%q err=%v, want no token", made, a.Token(), err)
