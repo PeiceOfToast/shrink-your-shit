@@ -170,6 +170,14 @@ func Check(a Answers) []Issue {
 	if a.Skip.MinMinutes < 0 || a.Skip.MinMinutes > 100000 {
 		bad("skip.minMinutes", "A running time in minutes, 0 for any.")
 	}
+	// until G2 gives the steps their own languages key, a choice here can only be the person's languages in
+	// Settings: audio languages need "also use these everywhere", subtitle languages wait (review-715 P2-1)
+	if !hasConfigKey(TypeAudio, "languages") && len(a.Languages) > 0 && !a.LanguagesEverywhere {
+		bad("languages", "For now the languages you choose apply everywhere: tick 'Also use these as my languages everywhere', or leave them to Settings.")
+	}
+	if !hasConfigKey(TypeSubtitles, "languages") && len(a.SubtitleLanguages) > 0 {
+		bad("subtitleLanguages", "Subtitles' own languages come in a later update. For now they follow the sound's.")
+	}
 	for field, codes := range map[string][]string{"languages": a.Languages, "subtitleLanguages": a.SubtitleLanguages} {
 		if len(codes) > 20 {
 			bad(field, "At most 20 languages.")
@@ -455,7 +463,11 @@ func walk(d Doc) (walked, bool) {
 			return w.fail("it keeps an earlier install's settings")
 		}
 	}
+	linkedElsewhere := map[string]bool{} // a card with a link off another port (W9's error link) is hand-made: not the guide's
 	for _, e := range d.Edges {
+		if e.FromPort != "success" {
+			linkedElsewhere[e.From] = true
+		}
 		if e.ToPort != "in" {
 			continue
 		}
@@ -537,7 +549,7 @@ func walk(d Doc) (walked, bool) {
 			break
 		}
 		seen[cur] = true
-		if slices.Contains(afterTypes, n.Type) && n.Enabled && w.afterTail == "" && !ownedKinds[n.Type] {
+		if slices.Contains(afterTypes, n.Type) && n.Enabled && w.afterTail == "" && !ownedKinds[n.Type] && !linkedElsewhere[n.ID] {
 			ownedKinds[n.Type] = true
 			w.after = append(w.after, n)
 			w.nodes = append(w.nodes, n)
@@ -638,7 +650,7 @@ func GuideOf(d Doc) Guide {
 	}
 	if w.check != "" {
 		c := byID[w.check].Config
-		a.Skip = Skip{MinSizeGB: math.Round(float64(intOf(c, "size", 0))/1024*100) / 100, MinResolution: intOf(c, "resolution", 0), MinMinutes: intOf(c, "minMinutes", 0)}
+		a.Skip = Skip{MinSizeGB: float64(intOf(c, "size", 0)) / 1024, MinResolution: intOf(c, "resolution", 0), MinMinutes: intOf(c, "minMinutes", 0)}
 	}
 	for _, n := range w.after {
 		switch n.Type {

@@ -4,6 +4,7 @@ package workflow
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -211,6 +212,24 @@ func TestGuideKeepsRepeatedCardsAndRefusesReferences(t *testing.T) {
 	if got := Steps(d3); !strings.HasSuffix(strings.Join(got, " > "), "Save the result > Send a notification") || len(d3.Nodes) != len(PresetOrder)+1 {
 		t.Errorf("without the owned card: %v (%d nodes)", got, len(d3.Nodes))
 	}
+	// review-715 P2-2: a card with its own error link is hand-made; unticking leaves it and its link alone
+	for _, typ := range afterTypes {
+		b := DefaultAnswers(GoalSmaller)
+		b.After = After{MediaServer: typ == TypeMediaServer, Downloader: typ == TypeDownloader, Notify: typ == TypeNotify}
+		dd := Build(b)
+		card := nodeOf(dd, typ)
+		end := node(TypeEnd, "", map[string]any{"reason": "didn't work"})
+		dd.Nodes = append(dd.Nodes, end)
+		dd.Edges = append(dd.Edges, link(card.ID, "error", end.ID))
+		g := GuideOf(dd)
+		if g.Coverage != CoveragePartial || g.Answers.After != (After{}) || len(g.Extra) != 1 {
+			t.Fatalf("%s with an error link: %+v", typ, g)
+		}
+		dd2 := Apply(dd, *g.Answers)
+		if nodeOf(dd2, typ).ID != card.ID || !slices.ContainsFunc(dd2.Edges, func(e Edge) bool { return e.From == card.ID && e.FromPort == "error" && e.To == end.ID }) {
+			t.Errorf("%s: the hand-made card or its error link went", typ)
+		}
+	}
 	// a reference in a Basic setting: Advanced's
 	d4 := Build(DefaultAnswers(GoalSmaller))
 	for i := range d4.Nodes {
@@ -230,7 +249,7 @@ func TestGuideKeepsRepeatedCardsAndRefusesReferences(t *testing.T) {
 
 // A wrong answer is refused with the question it belongs to.
 func TestGuideCheckNamesTheQuestion(t *testing.T) {
-	a := Fill(Answers{Format: "mpeg2", Original: OriginalOneFolder, Skip: Skip{MinResolution: 900}, Languages: []string{"english"}})
+	a := Fill(Answers{Format: "mpeg2", Original: OriginalOneFolder, Skip: Skip{MinResolution: 900}, Languages: []string{"english"}, LanguagesEverywhere: true})
 	iss := Check(a)
 	var fields []string
 	for _, i := range iss {
@@ -241,6 +260,48 @@ func TestGuideCheckNamesTheQuestion(t *testing.T) {
 	}
 	if iss[1].Message != "'mpeg2' is not a choice here." {
 		t.Errorf("%q", iss[1].Message)
+	}
+	// review-715 P2-1: until G2, languages chosen here can only go to Settings, so the preview and the save agree
+	if iss := Check(Answers{Languages: []string{"eng"}}); len(iss) != 1 || iss[0].Field != "languages" || !strings.Contains(iss[0].Message, "apply everywhere") {
+		t.Errorf("languages without everywhere: %+v", iss)
+	}
+	if iss := Check(Answers{Languages: []string{"eng"}, LanguagesEverywhere: true}); len(iss) != 0 {
+		t.Errorf("languages everywhere: %+v", iss)
+	}
+	if iss := Check(Answers{SubtitleLanguages: []string{"eng"}}); len(iss) != 1 || iss[0].Field != "subtitleLanguages" {
+		t.Errorf("subtitle languages: %+v", iss)
+	}
+	// review-715 P3-2: a built workflow carries no languages key before G2
+	d := Build(Answers{Languages: []string{"eng"}, LanguagesEverywhere: true})
+	for _, typ := range []string{TypeAudio, TypeSubtitles} {
+		if _, has := guideConfig(d, typ)["languages"]; has {
+			t.Errorf("%s has a languages key before G2", typ)
+		}
+	}
+}
+
+// review-715 P3-2 and P3-1: a Save the result step with no policy reads as beside the library, never
+// replace; a small size condition reads back as stored, so the next save keeps it.
+func TestGuideReadsAnOldSaveStepAndSmallSizes(t *testing.T) {
+	d := Build(DefaultAnswers(GoalSmaller))
+	for i := range d.Nodes {
+		if d.Nodes[i].Type == TypeCommit {
+			d.Nodes[i].Config = map[string]any{}
+		}
+	}
+	g := GuideOf(d)
+	if g.Answers.Original != OriginalBesideLibrary || g.Answers.IfBigger != "replace" {
+		t.Errorf("%+v", g.Answers)
+	}
+	a := DefaultAnswers(GoalSmaller)
+	a.Skip.MinSizeGB = 0.004
+	d2 := Build(a)
+	g2 := GuideOf(d2)
+	if g2.Answers.Skip.MinSizeGB <= 0 || g2.Answers.Skip.MinSizeGB != float64(intOf(guideConfig(d2, TypeCheck), "size", 0))/1024 {
+		t.Fatalf("%v", g2.Answers.Skip)
+	}
+	if d3 := Apply(d2, *g2.Answers); nodeOf(d3, TypeCheck).ID == "" {
+		t.Errorf("the next save dropped the size condition")
 	}
 }
 
