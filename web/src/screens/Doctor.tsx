@@ -5,12 +5,10 @@
 // Look (M2c, design settings-health-*.png): a banner for the summary (the .note look, green when all is well), then one card per group, one line per check.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "../Icon";
-import { PageHead } from "../PageHead";
 import { SignedOut, failed } from "../api";
 import { getDoctor } from "../doctorApi";
 import { encoderRows, healthSummary, libraryRows, type HealthTone } from "../doctorSummary";
 import { clock } from "../format";
-import { SettingsTabs } from "../pages";
 import type { Doctor, DoctorCheck } from "../types/doctor";
 import type { Issue } from "../types/v1";
 
@@ -61,9 +59,7 @@ export function HealthSettings() {
   const icon = sum?.tone === "bad" ? "i-x-c" : sum?.tone === "warn" ? "i-alert" : "i-check-c";
 
   return (
-    <div className="stack">
-      <PageHead icon="i-settings" title="Settings" />
-      <SettingsTabs at="health" />
+    <section id="health" aria-labelledby="hs-h" className="stack settings-sec">
       <p className="muted" style={{ margin: 0 }}>Checks that this computer can convert your files. It changes no settings. Fixed an encoder? Test encoders again, and the next conversion uses it.</p>
       {notHere ? <p className="muted">This server can't run the health checks yet.</p>
         : error && !d ? <p className="st bad" role="alert"><Icon id="i-alert" /><span>{error.message}</span></p>
@@ -89,5 +85,5 @@ export function HealthSettings() {
                     {(g === "Libraries" ? libraryRows(cs) : g === "Encoders" ? encoderRows(cs) : cs).map((c) => <Check key={c.id} c={c} />)}</ul>
                 </section>; })}
             </>}
-    </div>);
+    </section>);
 }

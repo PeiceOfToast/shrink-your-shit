@@ -3,8 +3,7 @@
 import { useState } from "react";
 import { Icon } from "../Icon";
 import { failed, type Answer } from "../api";
-import { LoadFailed, PageHead } from "../PageHead";
-import { SettingsTabs } from "../pages";
+import { LoadFailed } from "../PageHead";
 import { SettingRow, ValueChip } from "../SettingRow";
 import { useData } from "../useData";
 import { clock } from "../format";
@@ -116,7 +115,7 @@ function Form({ kind, it, onDone, onCancel, onTested }: { kind: IntegrationKind;
       <div aria-live="polite">{result && <Result tone={result.tone} text={result.text} />}{error && <p className="st bad" role="alert" style={{ margin: 0 }}><Icon id="i-alert" /><span>{error}</span></p>}</div>
       <div className="row" style={{ gap: 8 }}>
         <button className="btn" type="button" disabled={busy || !url.trim() || (!it && !key)} onClick={test}>Test</button>
-        <button className="btn primary" type="submit" disabled={busy}>{busy ? "Working…" : "Save"}</button>
+        <button className="btn primary" type="submit" aria-label="Save media app" disabled={busy}>{busy ? "Working…" : "Save"}</button>
         <button className="btn ghost" type="button" onClick={onCancel} disabled={busy}>Cancel</button>
       </div>
       {testWhy && !busy && <p className="muted sm" style={{ margin: 0 }}>{testWhy}</p>}
@@ -160,9 +159,7 @@ export function ConnectionsSettings() {
   const d = useData(listIntegrations, []), [said, setSaid] = useState("");
   const notHere = d.error && (d.error.code === "http_404" || d.error.code === "not_found");
   return (
-    <div className="stack">
-      <PageHead icon="i-settings" title="Settings" />
-      <SettingsTabs at="connections" />
+    <section id="connections" aria-labelledby="h-media" className="stack settings-sec">
       <p className="muted" style={{ margin: 0 }}>Tell your media apps when a file changes, so they show the new file and Sonarr and Radarr don't download it again.</p>
       <p className="muted" role="status" style={{ margin: 0 }}>{said}</p>
       {notHere ? <p className="muted">This server can't connect to media apps yet.</p>
@@ -177,5 +174,5 @@ export function ConnectionsSettings() {
               </section>
               {/* contract "Plex / Jellyfin": said once on the screen */}
               <p className="hint" style={{ margin: 0 }}>Changing a file's container (.mp4 to .mkv) can reset its watched state in Jellyfin, and sometimes in Plex.</p></>}
-    </div>);
+    </section>);
 }
