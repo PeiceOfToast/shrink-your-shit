@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { applyGoal, basicDoesntAsk, basicSave, canBasic, hasAfter, questionCount, skipOn, subtitleChoices, QUESTION_OF_FIELD } from "./guide.ts";
+import { applyGoal, basicDoesntAsk, basicSave, canBasic, hasAfter, languagesSent, questionCount, skipOn, subtitleChoices, QUESTION_OF_FIELD } from "./guide.ts";
 import { GUIDE_INFO } from "./mock/guide.ts";
 
 const info = GUIDE_INFO;
@@ -69,6 +69,12 @@ test("a server refusal names the question it belongs to", () => {
 test("Q9 conditions are on when their value is above zero", () => {
   assert.deepEqual(skipOn({ minSizeGB: 0, minResolution: 0, minMinutes: 0 }), { size: false, res: false, minutes: false });
   assert.deepEqual(skipOn({ minSizeGB: 2, minResolution: 1080, minMinutes: 0 }), { size: true, res: true, minutes: false });
+});
+
+test("unticked languages send no languages and no flag; ticked send the list (or Settings when the list is empty)", () => {
+  assert.deepEqual(languagesSent({ languages: ["deu"] }, ["eng"], false), { languages: [], languagesEverywhere: false });
+  assert.deepEqual(languagesSent({ languages: ["deu"] }, ["eng"], true), { languages: ["deu"], languagesEverywhere: true });
+  assert.deepEqual(languagesSent({ languages: [] }, ["eng"], true), { languages: ["eng"], languagesEverywhere: true });
 });
 
 test("Q6 offers the .srt choice only when the server offers srt, in the plan's order", () => {

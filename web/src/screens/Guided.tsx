@@ -7,7 +7,7 @@ import { failed, SignedOut, type Answer } from "../api";
 import { useData } from "../useData";
 import { navigate } from "../router";
 import { createWorkflow, getDraft, getGuideInfo, previewGuide, publish, saveAnswers } from "../workflowApi";
-import { applyGoal, basicDoesntAsk, basicSave, canBasic, questionCount, QUESTION_OF_FIELD, skipOn, subtitleChoices, type Answers, type Goal, type GuideInfo } from "../guide";
+import { applyGoal, basicDoesntAsk, basicSave, canBasic, languagesSent, questionCount, QUESTION_OF_FIELD, skipOn, subtitleChoices, type Answers, type Goal, type GuideInfo } from "../guide";
 import type { Issue } from "../types/v1";
 import type { ValidationIssue, WorkflowRevision } from "../types/v2";
 
@@ -57,7 +57,7 @@ function Choice({ name, legend, value, options, onChange, hide }: { name: string
 
 // The languages for the sound and the subtitles: chips with a remove button, and a list to add one. Its codes are
 // the person's languages for every workflow until per-workflow languages land (G2).
-function LanguagePicker({ codes, set }: { codes: string[]; set: (c: string[]) => void }) {
+function LanguagePicker({ codes, set, ticked, onTick, fromSettings }: { codes: string[]; set: (c: string[]) => void; ticked: boolean; onTick: (v: boolean) => void; fromSettings: boolean }) {
   const [all, setAll] = useState<[string, string][]>([]);
   useEffect(() => { fetch("/languages.json").then((r) => r.json()).then((j: [string, string][]) => setAll(j.map(([c, n]) => [c, n] as [string, string]))).catch(() => {}); }, []);
   const name = (c: string) => all.find((l) => l[0] === c)?.[1] ?? c;
@@ -67,16 +67,19 @@ function LanguagePicker({ codes, set }: { codes: string[]; set: (c: string[]) =>
       <div className="row" style={{ flexWrap: "wrap", gap: 6 }}>
         {codes.map((c) => (
           <span className="mchip" key={c}><span>{name(c)}</span>
-            <button type="button" className="btn sm ghost" aria-label={"Remove " + name(c)} onClick={() => set(codes.filter((x) => x !== c))}>×</button></span>
+            {ticked && <button type="button" className="btn sm ghost" aria-label={"Remove " + name(c)} onClick={() => set(codes.filter((x) => x !== c))}>×</button>}</span>
         ))}
         {codes.length === 0 && <span className="hint">No languages chosen: tracks with no language set are kept.</span>}
       </div>
-      <div className="field"><label htmlFor="g-lang">Add a language</label>
+      {ticked && <div className="field"><label htmlFor="g-lang">Add a language</label>
         <select id="g-lang" className="input" value="" onChange={(e) => e.target.value && set([...codes, e.target.value])}>
           <option value="">Choose…</option>
           {rest.map(([c, n]) => <option key={c} value={c}>{n}</option>)}
-        </select></div>
-      <p className="hint">These are your languages for every workflow. Changing them here changes them everywhere (Settings &gt; General).</p>
+        </select></div>}
+      {ticked
+        ? <p className="hint">These are your languages for every workflow. Changing them here changes them everywhere.{fromSettings && " Your languages from Settings > General are used until you change them here."}</p>
+        : <p className="hint">Uses your languages from Settings &gt; General.</p>}
+      <label className="row"><input type="checkbox" checked={ticked} onChange={(e) => onTick(e.target.checked)} /> Also use these as my languages everywhere</label>
     </div>
   );
 }
@@ -99,6 +102,19 @@ export function FlowTabs({ id, on }: { id: string; on: "basic" | "advanced" }) {
   );
 }
 
+// The first input of the field a refusal names (its question is open), or the question's first input.
+const FIELD_FOCUS: Record<string, string> = {
+  goal: 'input[name="goal"]', format: 'input[name="format"]', resolution: 'input[name="resolution"]', audio: 'input[name="audio"]',
+  allLanguages: 'input[name="langs"]', languages: 'input[name="langs"]', subtitles: 'input[name="subtitles"]',
+  subtitleLanguages: 'input[name="subtitles"]', fileType: 'input[name="fileType"]', original: 'input[name="original"]',
+  folder: '#g-folder', ifBigger: 'input[name="ifBigger"]', skip: '#g-size, #g-res, #g-min', after: '#g-target, input[type="checkbox"]',
+};
+function focusField(field?: string) {
+  const sel = field ? FIELD_FOCUS[field] : undefined;
+  (sel && document.querySelector<HTMLElement>(sel)
+    || document.querySelector<HTMLElement>("section[aria-label^='Question'] input, section[aria-label^='Question'] select"))?.focus();
+}
+
 // Basic: the answers of a new workflow (no id) or of an existing one's draft (id).
 export function Guided({ id }: { id?: string }) {
   const editing = id != null;
@@ -117,6 +133,9 @@ export function Guided({ id }: { id?: string }) {
   const [lines, setLines] = useState<string[]>([]), [issues, setIssues] = useState<ValidationIssue[]>([]);
   const [done, setDone] = useState<{ id: string } | null>(null);
   const nameRef = useRef<HTMLInputElement>(null), headRef = useRef<HTMLHeadingElement>(null);
+  const started = a != null;
+  const [ticked, setTicked] = useState<boolean | null>(null); // the languages box; null = not touched yet
+  const [focusAt, setFocusAt] = useState<{ field?: string } | null>(null); // a refusal's focus request (a new object each time)
 
   // Start the answers: a new workflow with the Simple goal's defaults; an existing one as its draft reads.
   useEffect(() => {
@@ -125,8 +144,10 @@ export function Guided({ id }: { id?: string }) {
     if (g?.answers && canBasic(g) && draft.data) { setA(g.answers); setReadBack(g.answers); setEtag(draft.data.etag); }
   }, [loaded, a, info.data, draft.data, editing, g]);
 
-  // Focus the new step once it is drawn: the first screen waits for the answers, so `a` is in the deps too.
-  useEffect(() => { (step === "entry" ? nameRef : headRef).current?.focus(); }, [step, loaded, a]);
+  // Focus the step when it changes, or once the answers load. Not on every edit: a field being typed in keeps focus.
+  useEffect(() => { (step === "entry" ? nameRef : headRef).current?.focus(); }, [step, loaded, started]);
+  // A refusal moves focus to the field it names.
+  useEffect(() => { if (focusAt) focusField(focusAt.field); }, [focusAt]);
 
   // The summary is the server's sentences for the answers as they are now.
   useEffect(() => {
@@ -143,7 +164,9 @@ export function Guided({ id }: { id?: string }) {
 
   const total = info.data ? questionCount(info.data) : 9;
   const picked = (x: Answers) => (x.languages.length ? x.languages : info.data?.languages ?? []);
-  const payload = (): Answers => ({ ...basicSave(readBack, a!), languages: picked(a!), languagesEverywhere: true });
+  const settingsLangs = info.data?.languages ?? [];
+  const everywhere = ticked ?? settingsLangs.length === 0; // unticked by default when Settings already has a list
+  const payload = (): Answers => ({ ...basicSave(readBack, a!), ...languagesSent(a!, settingsLangs, everywhere) });
   const set = (p: Partial<Answers>) => setA((cur) => (cur ? { ...cur, ...p } : cur));
   const goTo = (s: Step) => { setStep(s); setErr(""); setNote(""); };
 
@@ -155,7 +178,7 @@ export function Guided({ id }: { id?: string }) {
         const e = r.error as Issue & { field?: string };
         setErr(e.message);
         const q = e.field ? QUESTION_OF_FIELD[e.field] : undefined;
-        if (q) setStep(q);
+        if (q) { setStep(q); setFocusAt({ field: e.field }); }
         return null;
       }
       return r;
@@ -248,7 +271,8 @@ export function Guided({ id }: { id?: string }) {
           <Choice name="audio" legend="What happens to the sound" value={a.audio} options={offered(av.audio, PLAN_AUDIO, a.audio).map((v) => [v, AUDIO[v] ?? v] as Pick)} onChange={(v) => set({ audio: v })} />
           <Choice name="langs" legend="Which languages to keep" value={a.allLanguages ? "all" : "mine"}
             options={[["mine", "Only these languages", "Tracks with no language set are always kept."], ["all", "Every language"]]} onChange={(v) => set({ allLanguages: v === "all" })} />
-          {!a.allLanguages && <LanguagePicker codes={picked(a)} set={(languages) => set({ languages })} />}
+          {!a.allLanguages && <LanguagePicker codes={everywhere ? picked(a) : settingsLangs} set={(languages) => set({ languages })}
+            ticked={everywhere} onTick={setTicked} fromSettings={everywhere && a.languages.length === 0 && settingsLangs.length > 0} />}
         </div>);
       case 6: return (
         <div className="stack">

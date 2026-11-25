@@ -100,5 +100,13 @@ export const subtitleChoices = (offered: string[]) => [
   ...offered.filter((v) => !SUBTITLE_ORDER.includes(v)),
 ];
 
+// The languages a save sends. Ticked ("also use these as my languages everywhere") writes the list as the person's
+// languages in Settings; unticked sends nothing, and the workflow follows Settings (no languages, no flag).
+export function languagesSent(a: { languages: string[] }, settings: string[], everywhere: boolean) {
+  return everywhere
+    ? { languages: a.languages.length ? a.languages : settings, languagesEverywhere: true }
+    : { languages: [] as string[], languagesEverywhere: false };
+}
+
 // Q9's conditions are all off by default: a zero value is "any".
 export const skipOn = (s: Skip) => ({ size: s.minSizeGB > 0, res: s.minResolution > 0, minutes: s.minMinutes > 0 });
