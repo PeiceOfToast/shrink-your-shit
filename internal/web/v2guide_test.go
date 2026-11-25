@@ -99,9 +99,9 @@ func TestGuidedBuilderAPI(t *testing.T) {
 	if set, _ := LoadSettings(st); strings.Join(set.Languages, ",") != "eng,ger" {
 		t.Errorf("languages everywhere: %v", set.Languages)
 	}
-	// G2's key is not there yet, so the per-workflow list stays out of the draft and reads back empty
-	if len(a.Languages) != 0 || strings.Contains(body, `"languages":["eng"`) {
-		t.Errorf("the languages key must wait for G2: %s", body)
+	// G2: the audio step carries the languages, and the guide reads them back from it
+	if strings.Join(a.Languages, ",") != "eng,ger" {
+		t.Errorf("the audio step's languages must read back from the draft: %v", a.Languages)
 	}
 	// answers saved into the draft: only the owned steps change; a stale version is refused
 	code, body = send("PUT", "/api/v2/workflows/"+id+"/answers", `{"answers":{"goal":"both","quality":2,"after":{}}}`, rev.Etag)

@@ -32,6 +32,12 @@ func Handler(store *jobs.Store, access *Access, eng Engine) http.Handler {
 	joins := newJoinBook(store)                                                             // E2: join requests from new workers
 	mux.Handle("/api/worker/v1/", workerAPI(store, eng.Transport, eng.Version, eng, joins)) // V7b1: remote workers, their own tokens
 	access.transport = eng.Transport                                                        // who is private (home mode)
+	if store != nil {                                                                       // a new install is locked until first-run is done; unreadable settings count as not done
+		access.setupDone = func() bool {
+			s, err := LoadSettings(store)
+			return err == nil && s.FirstRunDone
+		}
+	}
 	access.routes(api)
 	libraryRoutes(api, store, eng)
 	systemRoutes(api, store, eng)
@@ -49,7 +55,8 @@ func Handler(store *jobs.Store, access *Access, eng Engine) http.Handler {
 	v2Summary(api, store, wv) // V3c: /api/v2/summary, processing and intake pauses
 	// the Dashboard and Libraries share one totals cache: one count, one answer
 	libTotals := &libraryTotals{}
-	v2Overview(api, store, wv, libTotals)   // user review 11-12 item 5: /api/v2/overview
+	// user review 11-12 item 5: /api/v2/overview
+	v2Overview(api, store, wv, libTotals, eng)
 	v2EventStream(api, store, wv)           // V3a: /api/v2/events (live updates)
 	v2Workers(api, wv)                      // V4a: /api/v2/workers
 	v2JoinRequests(api, wv)                 // E2: allow, deny or dismiss a join request

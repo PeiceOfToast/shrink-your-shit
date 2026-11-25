@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -49,6 +50,7 @@ type Access struct {
 
 	transport Transport   // who counts as a private address (set by Handler)
 	login     pairLimiter // failed sign-ins per address
+	setupDone func() bool // whether first-run setup is finished (set by Handler); nil counts as finished
 
 	// FailDelay is how long a wrong token or password waits before the answer, to slow down guessing.
 	FailDelay time.Duration
@@ -63,9 +65,10 @@ func ReadToken(dataDir string) (string, error) {
 	return strings.TrimSpace(string(b)), nil
 }
 
-// OpenAccess loads the token and the sign-in choice stored in dataDir. When exposed (listening beyond
-// loopback) and no token is stored, it makes and stores one and reports created, so the caller can show
-// the sign-in address once.
+// OpenAccess loads the token and the sign-in choice stored in dataDir. It makes and stores a token when no
+// token is stored and either the install is exposed (listening beyond loopback) or it is new (no sign-in
+// choice yet), and reports created, so the caller can show the sign-in address once. An unfinished install
+// with a choice and no token gets one from EnsureSetupToken at startup.
 func OpenAccess(dataDir string, exposed bool) (a *Access, created bool, err error) {
 	if err := os.MkdirAll(dataDir, 0o755); err != nil { // the sign-in choice is written here at once
 		return nil, false, err
@@ -93,13 +96,31 @@ func OpenAccess(dataDir string, exposed bool) (a *Access, created bool, err erro
 	if a.stamp, err = stampOf(dataDir); err != nil {
 		return nil, false, err
 	}
-	if tok == "" && exposed {
+	if tok == "" && (exposed || !ok) { // a new install is locked until setup is done, so it needs a token to get in
 		if _, err := a.rotate(); err != nil {
 			return nil, false, err
 		}
 		created = true
 	}
 	return a, created, nil
+}
+
+// EnsureSetupToken makes a token for an install whose first-run setup is not finished and that has neither a
+// token nor a password: its token file was lost, or a start died between the sign-in choice and the token,
+// and then nothing could sign in. A finished install is left as it is, so this changes nothing after setup.
+// Unreadable settings count as not finished (fail closed). It reports whether it made a token.
+func (a *Access) EnsureSetupToken(store *jobs.Store) (bool, error) {
+	if a.Token() != "" || a.hash != "" {
+		return false, nil
+	}
+	s, err := LoadSettings(store)
+	if err == nil && s.FirstRunDone {
+		return false, nil
+	}
+	if _, err := a.rotate(); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // Token is the current token ("" when none is stored).
@@ -292,7 +313,7 @@ func (a *Access) routes(api *http.ServeMux) {
 	api.HandleFunc("GET /api/settings/token", func(w http.ResponseWriter, r *http.Request) {
 		tok := a.Token()
 		if tok == "" {
-			apiError(w, http.StatusNotFound, "no_token", "No access token is set: this server only listens on this computer, so it needs none.")
+			apiError(w, http.StatusNotFound, "no_token", "No access token is set, so there is none to show. Sign-in may use a password instead, or none once setup is done and no password is set.")
 			return
 		}
 		writeJSON(w, map[string]string{"token": tok})

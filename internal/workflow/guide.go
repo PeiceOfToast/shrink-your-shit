@@ -4,10 +4,11 @@ package workflow
 
 import (
 	"math"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 )
 
 // The guided builder (slice 12, G1 and G1b): a new workflow from questions. Answers are one value per
@@ -155,8 +156,6 @@ func Fill(a Answers) Answers {
 	return a
 }
 
-var langCode = regexp.MustCompile(`^[a-z]{2,3}$`)
-
 // Check refuses an answer outside its choices. Each issue names the answer (Field, the JSON key) so the
 // screen shows it on that question.
 func Check(a Answers) []Issue {
@@ -209,7 +208,7 @@ func Check(a Answers) []Issue {
 			bad(field, "At most 20 languages.")
 		}
 		for _, c := range codes {
-			if !langCode.MatchString(c) {
+			if rules.CanonLang(c) == "" { // the same check Settings and a step's own list use
 				bad(field, "'"+c+"' is not a language code (use codes like eng, fre, ger, or en, fr, de).")
 				break
 			}
