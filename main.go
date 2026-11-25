@@ -64,6 +64,9 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "restore" {
 		os.Exit(restoreCommand(os.Args[2:], os.Stdout, os.Stderr))
 	}
+	if len(os.Args) > 1 && os.Args[1] == "reset-password" { // forgotten sign-in password: set a new one on this computer
+		os.Exit(resetPasswordCommand(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))
+	}
 	logs := &doctor.LogTail{} // the last log lines, for the health report
 	log.SetOutput(io.MultiWriter(os.Stderr, logs))
 	var libs libFlag

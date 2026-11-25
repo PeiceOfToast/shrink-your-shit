@@ -231,7 +231,8 @@ func TestV2Workflows(t *testing.T) {
 
 // /api/v2 is behind the same sign-in as /api.
 func TestV2NeedsSignIn(t *testing.T) {
-	srv, _, _, _ := libServer(t, true)
+	srv, _, a, _ := libServer(t, true)
+	passwordMode(t, a)
 	if code, _, _ := do(t, nil, srv, call{method: "GET", path: "/api/v2/workflows"}); code != http.StatusUnauthorized {
 		t.Errorf("signed out: %d", code)
 	}
