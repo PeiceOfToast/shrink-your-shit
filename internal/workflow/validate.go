@@ -636,17 +636,23 @@ func valueProblem(p map[string]any, v any, title string) string {
 		if max, ok := num(p["maxLength"]); ok && float64(len([]rune(str))) > max {
 			return fmt.Sprintf("“%s” can be at most %v characters.", title, p["maxLength"])
 		}
+		if lang, _ := p["x-language"].(bool); lang && rules.CanonLang(str) == "" { // G2: a language code
+			return fmt.Sprintf("“%s” has %q, which is not a language code (use codes like eng, fre, ger, or en, fr, de).", title, str)
+		}
+	}
+	var list []any
+	switch a := v.(type) {
+	case []any:
+		list = a
+	case []string:
+		for _, e := range a {
+			list = append(list, e)
+		}
+	}
+	if max, ok := num(p["maxItems"]); ok && float64(len(list)) > max {
+		return fmt.Sprintf("“%s” can have at most %v entries.", title, p["maxItems"])
 	}
 	if items, ok := p["items"].(map[string]any); ok {
-		var list []any
-		switch a := v.(type) {
-		case []any:
-			list = a
-		case []string:
-			for _, e := range a {
-				list = append(list, e)
-			}
-		}
 		for _, e := range list {
 			if msg := valueProblem(items, e, title); msg != "" {
 				return msg
