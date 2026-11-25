@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -247,6 +248,51 @@ func TestEmptyTrashFindsAMovedOriginalByMountOnly(t *testing.T) {
 	r, _ := s.store.OriginalByID(o.ID)
 	if r.State != jobs.OriginalPurged {
 		t.Errorf("row %s, want purged", r.State)
+	}
+}
+
+// U-B part 2 (CT 124): the library was deleted, so the only record of the new root is the share's mount point; the
+// daemon has recorded no path. The purge must still find the moved original through MountRoots, re-home it, and delete it.
+func TestEmptyTrashFindsAMovedOriginalByShareMountPointOnly(t *testing.T) {
+	s, o := keptOne(t)
+	libs, err := s.store.Libraries()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range libs {
+		if err := s.store.DeleteLibrary(l.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	newRoot := filepath.Join(t.TempDir(), "mnt", "ssd", "Shows", "Arcane")
+	if err := os.MkdirAll(filepath.Dir(newRoot), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(s.dir, newRoot); err != nil {
+		t.Fatal(err)
+	}
+	newRoot, err = jobs.RealPath(newRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sh, err := s.store.SaveShare(jobs.Share{Type: "smb", Address: "//h/x", Name: "ssd", Guest: true}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.SetShareMountPoint(sh.ID, newRoot); err != nil {
+		t.Fatal(err)
+	}
+	movedTrash := filepath.Join(newRoot, TrashDir, filepath.Base(o.Trash))
+	rep := Purge(s.store, 0, later(t, o), nil, 0)
+	if rep.Deleted != 1 {
+		t.Fatalf("deleted %d, want 1; said %q; unreachable %+v", rep.Deleted, rep.Said, rep.Unreachable)
+	}
+	if _, err := os.Stat(movedTrash); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the moved original is still there: %v", err)
+	}
+	r, _ := s.store.OriginalByID(o.ID)
+	if r.State != jobs.OriginalPurged || !strings.HasPrefix(r.Path, newRoot) {
+		t.Errorf("row %s at %s, want purged under %s", r.State, r.Path, newRoot)
 	}
 }
 

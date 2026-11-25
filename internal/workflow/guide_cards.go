@@ -51,30 +51,32 @@ var thenEnds = map[string]string{"leave": TypeEnd, "stop": TypeFail, "later": Ty
 // links is a workflow's edges by node and port, for reading.
 type links struct {
 	byID map[string]Node
-	out  map[[2]string]string // [node, port] -> the next node
+	out  map[[2]string]string // [node, port] -> the next node (the first link, when a port has several)
+	fan  map[[2]string]int    // [node, port] -> how many links leave it
 	in   map[string]int       // node -> how many links lead into it
 }
 
 func linksOf(d Doc) links {
-	l := links{byID: map[string]Node{}, out: map[[2]string]string{}, in: map[string]int{}}
+	l := links{byID: map[string]Node{}, out: map[[2]string]string{}, fan: map[[2]string]int{}, in: map[string]int{}}
 	for _, n := range d.Nodes {
 		l.byID[n.ID] = n
 	}
 	for _, e := range d.Edges {
+		l.fan[[2]string{e.From, e.FromPort}]++
+		l.in[e.To]++ // every link counts, so a second one off the same port shows as a join too (review2-716 P3)
 		if _, dup := l.out[[2]string{e.From, e.FromPort}]; dup {
 			continue
 		}
 		l.out[[2]string{e.From, e.FromPort}] = e.To
-		l.in[e.To]++
 	}
 	return l
 }
 
-// stray says a node has a link off a port the questions don't read (review-716 P1): hand-made, so the
-// questions leave the workflow alone.
+// stray says a node has a link off a port the questions don't read (review-716 P1), or more than one
+// link off a port they do read (review2-716 P3): hand-made, so the questions leave the workflow alone.
 func (l links) stray(id string, ports ...string) bool {
-	for k := range l.out {
-		if k[0] == id && !slices.Contains(ports, k[1]) {
+	for k, n := range l.fan {
+		if k[0] == id && (!slices.Contains(ports, k[1]) || n > 1) {
 			return true
 		}
 	}
