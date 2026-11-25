@@ -8,7 +8,7 @@ import { onLive } from "../live";
 import { getSetup, listServers, setRole } from "../setupApi";
 import { setAuthMode } from "../signinApi";
 import { ModeChoice, PasswordFields } from "../SignInChoice";
-import { authWord, passwordProblem, type AuthMode } from "../signinRules";
+import { MIN_PASSWORD, authWord, passwordProblem, type AuthMode } from "../signinRules";
 import type { FoundServer, RoleBody, Setup } from "../types/v2";
 import { useData } from "../useData";
 import { listWorkers } from "../workersApi";
@@ -87,7 +87,11 @@ export function Enroll({ setup, reload, noMain }: { setup: Setup; reload: () => 
     setErr("");
     if (pick === "main") {
       const bad = signMode === "password" ? passwordProblem(pw, again) : null;
-      if (bad) return setErr(bad);
+      if (bad) {
+        // PasswordFields shows the problem beside the fields once either has text; with both empty it shows none, so this line says it
+        if (pw === "" && again === "") return setErr(bad);
+        return document.getElementById(pw.length < MIN_PASSWORD ? "signin-pw" : "signin-again")?.focus();
+      }
       if (signMode === "password") {
         setBusy(true);
         const a = await setAuthMode({ mode: "password", password: pw }).catch((e) => { if (e instanceof SignedOut) return null; throw e; });
@@ -152,7 +156,7 @@ export function Enroll({ setup, reload, noMain }: { setup: Setup; reload: () => 
           s.matchesVersion ? undefined : s.name + " runs version " + s.version + (mine ? " and this is " + mine : "") + ". Update one of them so they match."))}
         {card("other", "Join another server", "Type its address")}
       </div>
-      {pick === "main" && <ModeChoice mode={signMode} onMode={(m) => (setSignMode(m), setErr(""))}><PasswordFields pw={pw} again={again} onPw={setPw} onAgain={setAgain} /></ModeChoice>}
+      {pick === "main" && <ModeChoice mode={signMode} onMode={(m) => (setSignMode(m), setErr(""))}><PasswordFields pw={pw} again={again} onPw={(v) => (setPw(v), setErr(""))} onAgain={(v) => (setAgain(v), setErr(""))} /></ModeChoice>}
       {pick === "other" && <label className="field"><span className="lab">Address</span>
         <input className="input" autoFocus placeholder="192.168.1.10 or nas.local" value={addr} onChange={(e) => setAddr(e.target.value)} />
         <span className="hint">Find it in the address bar when you open Shrink Your Shit on that computer.</span></label>}
