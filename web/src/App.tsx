@@ -6,7 +6,7 @@ import { SignIn } from "./screens/SignIn";
 import sprite from "./icons.svg?raw";
 import { itemFor } from "./nav";
 import { AppearanceSettings, Coming, NotFound, PluginsPlanned, SettingsPage } from "./pages";
-import { pathOf, settingsTarget } from "./settingsRoutes";
+import { pathOf, redirectTarget, settingsTarget } from "./settingsRoutes";
 import { Dashboard } from "./screens/Dashboard";
 import { HealthSettings } from "./screens/Doctor";
 import { Libraries, LibraryPage } from "./screens/Libraries";
@@ -20,7 +20,7 @@ import { WorkerPage, Workers } from "./screens/Workers";
 import { Workflows } from "./screens/Workflows";
 import { WorkflowStack } from "./screens/WorkflowStack";
 import { WorkflowGraph } from "./screens/WorkflowGraph";
-import { Link, navigate, usePath } from "./router";
+import { Link, navigate, useSearch, usePath } from "./router";
 import { SampleDataPage, ScreenGuard } from "./PageHead";
 import { ConnBar, Shell, ThemeMenu } from "./Shell";
 import { Icon } from "./Icon";
@@ -34,8 +34,9 @@ let firstRunDone = false;
 export function App() {
   const raw = usePath();
   const p0 = raw.length > 1 ? raw.replace(/\/+$/, "") : raw; // "/settings/" is "/settings"
+  const search = useSearch();
   const moved = settingsTarget(p0); // an old Settings address (or a page that moved): where it lives now
-  useEffect(() => { if (moved && moved !== p0) navigate(moved, true); }, [moved, p0]);
+  useEffect(() => { if (moved && moved !== p0) navigate(redirectTarget(moved, search), true); }, [moved, p0, search]);
   const path = moved ? pathOf(moved) : p0;
   const settings = ["/settings/general", "/settings/processing", "/settings/connections", "/settings/system"].includes(path);
   // Other pages' deeper paths (/workflows/42/graph) are their future routes; Settings' sub-pages are known, so any
