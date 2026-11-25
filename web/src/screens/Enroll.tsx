@@ -89,7 +89,7 @@ export function Enroll({ setup, reload, noMain }: { setup: Setup; reload: () => 
       const bad = signMode === "password" ? passwordProblem(pw, again) : null;
       if (bad) {
         // PasswordFields shows the problem beside the fields once either has text; with both empty it shows none, so this line says it
-        if (pw === "" && again === "") return setErr(bad);
+        if (pw === "" && again === "") { setErr(bad); return document.getElementById("signin-pw")?.focus(); }
         return document.getElementById(pw.length < MIN_PASSWORD ? "signin-pw" : "signin-again")?.focus();
       }
       if (signMode === "password") {
