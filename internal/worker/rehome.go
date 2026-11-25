@@ -132,7 +132,8 @@ func rehomeOrReport(st Store, o jobs.Original, roots []string, say *[]string) (j
 	case len(matches) == 1:
 		m := matches[0]
 		if err := st.RehomeOriginal(o.ID, m.path, m.newPath, m.trash); err != nil {
-			return unreachable(CodeNotFound, "its files were found, but the record could not be moved to them: "+err.Error())
+			*say = append(*say, fmt.Sprintf("%s: its files were found at %s, but the record could not be updated: %v", o.Path, m.path, err))
+			return unreachable(CodeNotFound, "its files were found, but the record couldn't be updated to point at them.")
 		}
 		*say = append(*say, fmt.Sprintf("%s: its files were found at %s after the share moved; the record now names them", o.Path, m.path))
 		o.Path, o.NewPath, o.Trash = m.path, m.newPath, m.trash
@@ -144,9 +145,9 @@ func rehomeOrReport(st Store, o jobs.Original, roots []string, say *[]string) (j
 	case orphan:
 		return unreachable(CodeNotFound, "its original is under the library folders, but the converted file is not beside it, so nothing was deleted.")
 	case found:
-		return unreachable(CodeNotFound, "its file was not found under the library folders.")
+		return unreachable(CodeNotFound, "its file was not found under the library folders or the shares' mount points.")
 	}
-	return unreachable(CodeNotFound, "its folder and file were not found under the library folders.")
+	return unreachable(CodeNotFound, "its folder and file were not found under the library folders or the shares' mount points.")
 }
 
 // ForgetError is a forget that was refused: Code for the API, Message in plain words.
