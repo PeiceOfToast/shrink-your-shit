@@ -90,6 +90,11 @@ UNION ALL
 SELECT decided_at, 'skipped', 0, path, 0 FROM files WHERE ((decision LIKE 'skip: %' AND reason<>'still_changing') OR reason='unreadable') AND decided_at IS NOT NULL) WHERE rs=0 OR NOT EXISTS (SELECT 1 FROM jobs j2 WHERE j2.path=pkey AND ` + convertedNow("j2") + `))
 `
 
+// latestEndsLiveSQL is latestEndsSQL without the job ends of a deleted library. Only the summary's 24 h counts
+// use it: the log and the day totals keep them. A job that names no library is kept, as before.
+var latestEndsLiveSQL = strings.Replace(latestEndsSQL, "WHERE e.kind='job' AND",
+	"WHERE e.kind='job' AND (j.library_id IS NULL OR EXISTS (SELECT 1 FROM libraries WHERE libraries.id=j.library_id)) AND", 1)
+
 // Days are the last n days' totals, oldest first: files finished, files skipped (also stopped), files failed
 // (also kept by a check), each counted once on the day of its latest end, and the bytes freed, saved and
 // waiting that day (NET, from t: TotalsOf's per-day maps). A day before the first recorded history is
