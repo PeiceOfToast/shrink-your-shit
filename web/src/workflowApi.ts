@@ -4,6 +4,8 @@ import { call, failed, MOCK, type Answer } from "./api";
 import * as mock from "./mock";
 import { STEP_DEFS, addStepsOf, mockLadder, stackable, summary, validate as checkDoc } from "./mock/steps";
 import { mockVariables, type VarList } from "./mock/variables";
+import { GUIDE_FULL, GUIDE_INFO, GUIDE_SUMMARY } from "./mock/guide";
+import type { Answers, GuideInfo } from "./guide";
 import type { AddStep, Layout, PublishPreview, StepDefinition, Template, ValidationIssue, Workflow, WorkflowDoc, WorkflowRevision } from "./types/v2";
 
 const enc = encodeURIComponent, base = (id: string) => "/api/v2/workflows/" + enc(id);
@@ -26,9 +28,12 @@ export async function stepDefinitions(): Promise<Answer<StepDefinition[]>> {
 }
 // POST /workflows {name, fileType, templateId}: the Start Simple preset is the only template; a description goes in a
 // PATCH after (POST doesn't take one).
-export async function createWorkflow(name: string, description = ""): Promise<Answer<Workflow>> {
+// With answers (the guided builder), the server builds the steps from them; without, it is the Start Simple preset.
+export async function createWorkflow(name: string, description = "", answers?: Answers): Promise<Answer<Workflow>> {
   if (MOCK) return mock.createWorkflow(name, description);
-  const w = await call<Workflow>("POST", "/api/v2/workflows", { name, fileType: "video", templateId: "shrink_videos" });
+  const body: Record<string, unknown> = { name, fileType: "video", templateId: "shrink_videos" };
+  if (answers) body.answers = answers;
+  const w = await call<Workflow>("POST", "/api/v2/workflows", body);
   if (failed(w) || !description) return w;
   return call("PATCH", base(w.id), { description });
 }
@@ -54,8 +59,23 @@ export async function getPublishedDoc(id: string): Promise<Answer<WorkflowDoc | 
   return failed(r) ? r : r.workflow;
 }
 export async function getDraft(id: string): Promise<Answer<WorkflowRevision>> {
-  if (MOCK) return mock.getDraft(id) ?? no("not_found", "There is no such workflow.");
+  if (MOCK) { const d = mock.getDraft(id); return d ? { ...d, guide: d.guide ?? GUIDE_FULL } : no("not_found", "There is no such workflow."); }
   return call("GET", base(id) + "/draft");
+}
+// The guided builder (slice 12): the defaults per goal, what this computer can make, and the person's languages.
+export async function getGuideInfo(): Promise<Answer<GuideInfo>> {
+  if (MOCK) return GUIDE_INFO;
+  return call("GET", "/api/v2/workflows/guide");
+}
+// The answers as the sentences the summary shows, and what validation says. Nothing is saved.
+export async function previewGuide(answers: Answers): Promise<Answer<{ summary: string[]; validation: ValidationIssue[] }>> {
+  if (MOCK) return { summary: GUIDE_SUMMARY, validation: [] };
+  return call("POST", "/api/v2/workflows/guide/preview", { answers });
+}
+// Save answers into a draft (If-Match: its etag). The answer is the draft's revision, with its new etag.
+export async function saveAnswers(id: string, answers: Answers, etag: string): Promise<Answer<WorkflowRevision>> {
+  if (MOCK) return getDraft(id); // the mock keeps no answers: it returns the draft as it is
+  return call("PUT", base(id) + "/answers", { answers }, { "If-Match": etag });
 }
 // Export the draft as a file (the server's GET /api/flows/{id}/export; the file's JSON, saved by the page).
 export async function exportWorkflow(id: string): Promise<Answer<object>> {
