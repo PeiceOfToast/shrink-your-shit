@@ -23,7 +23,7 @@ import type { Failure, JobAction, JobDetail, JobItem, JobProgressEvent, JobState
 import { stepLabel } from "../stepLabel";
 import { closeMenuToSummary, menuEscape, useCloseOnOutside } from "../menuFocus";
 import { runFields, runningFor } from "../jobCards";
-import { keepShown } from "../libraryList";
+import { keepShown, libraryOptions } from "../libraryList";
 
 const TABS: [Tab, string][] = [["waiting", "Waiting"], ["running", "Running"], ["completed", "Done"], ["skipped", "Skipped"], ["failed", "Failed"]];
 // G5: the Done filter for originals waiting in the trash. The words come from design (SCREENS V6); keep them here.
@@ -208,17 +208,20 @@ export function Jobs() {
         {selecting && <details className="menu phone" ref={phoneMenu} onKeyDown={menuEscape}><summary className="btn sm icon ghost" aria-label="More actions"><Icon id="i-more" /></summary><div className="pop" role="menu" onClick={(e) => { if ((e.target as Element).closest("button")) closeMenuToSummary(e.currentTarget); }}>{actions}</div></details>}
         {picked.length > 0 && <span className="muted sm">{picked.length} selected</span>}
       </div>}
-      {/* parity 11-19 #2 (G4): pick a library here too; it sets the same ?libraryId= as "See its jobs", and the chip above stays.
-          One joined button per library (aria-pressed on the chosen one); hidden on the empty state and while loading or on error.
-          An id no library has shows the chip only, with no button row. Its own row under the tabs (design jobs-running): the filter left, the search right. */}
+      {/* Pick a library here too: one select, "All libraries" first, then the names. It sets the same ?libraryId= as "See its jobs";
+          the chip above is only for an id the list lacks. Shown with more than one library, when the page loaded with no error and
+          either a known id or rows; hidden on the empty state, while loading, and on error. Its own row under the tabs: the filter left, the search right. */}
       <div className="lfilt">
         <span className="filt">{tab === "completed" && <span className="seg" role="group" aria-label="Original file">
           <button type="button" aria-pressed={!kept && !left} onClick={() => navigate(query("completed", library, ""))}>All</button>
           <button type="button" aria-pressed={kept} onClick={() => navigate(query("completed", library, kept ? "" : "kept"))}>{TRASH_WORDS}</button>
           <button type="button" aria-pressed={left} onClick={() => navigate(query("completed", library, left ? "" : "left"))}>{LEFT_WORDS}</button></span>}
-        {!!page.data && !page.error && !!libs.data && libs.data.length > 1 && (library ? libs.data.some((l) => l.id === library) : items.length > 0) && <span className="seg" role="group" aria-label="Library">
-          <button type="button" aria-pressed={!library} onClick={() => navigate(query(tab, ""))}>All libraries</button>
-          {libs.data.map((l) => <button key={l.id} type="button" aria-pressed={library === l.id} onClick={() => navigate(query(tab, l.id))}>{l.name}</button>)}
+        {!!page.data && !page.error && !!libs.data && libs.data.length > 1 && (library ? libs.data.some((l) => l.id === library) : items.length > 0) && <span className="libsel">
+          <label htmlFor="jobs-library">Library</label>
+          <select id="jobs-library" key="jobs-library" className="input" value={library} onChange={(e) => navigate(query(tab, e.target.value))}>
+            <option value="">All libraries</option>
+            {libraryOptions(libs.data).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+          </select>
         </span>}</span>
         <input className="input find" type="search" placeholder="Search file names" aria-label="Search file names" value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
