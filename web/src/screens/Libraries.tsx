@@ -8,6 +8,7 @@ import { Icon } from "../Icon";
 import { SignedOut, failed, type Answer } from "../api";
 import { addLibrary, checkFolder, convertEarlierAgain, getEarlierWorkflow, firstFiles, getLibraryV2, getSettings, listLibraries, listLibrariesV2, listWorkflows, patchLibrary, patchLibraryV2, removeLibrary, scanLibrary, setLibraryWorkflow, type WorkflowChoice } from "../libraryApi";
 import { listJobs } from "../jobsApi";
+import { useSharesSupported } from "../sharesApi";
 import { Link, navigate, useSearch } from "../router";
 import { Browse } from "../FolderPicker";
 import { onLive } from "../live";
@@ -88,6 +89,7 @@ export function Libraries() {
   useEffect(() => onLive((t) => { if (t === "library.changed") libs.reload(); }), []); // eslint-disable-line react-hooks/exhaustive-deps -- #150: at once
   const [sel, setSel] = useState<string[]>([]), [said, setSaid] = useState(flash.said), [q, setQ] = useState(""), [selecting, setSelecting] = useState(false), [filter, setFilter] = useState<LibFilter>("all");
   useEffect(() => { flash.said = ""; }, []);
+  const sharesOn = useSharesSupported();
   const phoneMenu = useRef<HTMLDetailsElement>(null); useCloseOnOutside(phoneMenu);
   const all = libs.data ?? [], counts = filterCounts(all);
   const shownBy = (f: LibFilter, query: string) => all.filter((l) => inFilter(l, f) && (!query || (l.name + " " + l.paths.join(" ")).toLowerCase().includes(query.toLowerCase())));
@@ -126,6 +128,7 @@ export function Libraries() {
     <div className="stack">
       <PageHead icon="i-library" title="Libraries" sub="Folders that are watched for videos. Each one uses a workflow.">
         <button className="btn sm ghost" type="button" aria-pressed={selecting} onClick={() => (setSelecting(!selecting), setSel([]))}>{selecting ? "Done" : "Select"}</button>
+        {sharesOn && <Link className="btn sm" to="/libraries/shares">Network shares</Link>}
         <Link className="btn sm primary" to="/libraries/new"><Icon id="i-plus" />Add library</Link>
       </PageHead>
       <Problem m={libs.data ? libs.error?.message : undefined} />
@@ -194,7 +197,7 @@ function LibCard({ l, tag, selecting, checked, onToggle }: { l: Library; tag: st
         <Status l={l} />
         <div className="lnote">
           {l.counts.failed > 0 && <Link className="over" to={"/jobs?tab=failed&libraryId=" + encodeURIComponent(l.id)}>{count(l.counts.failed)} failed</Link>}
-          {fixable && <Link to="/settings/health">How to fix it</Link>}
+          {fixable && <Link to="/settings/system#health">How to fix it</Link>}
           {l.priority !== 0 && <span>{priorityWord(l.priority)} priority</span>}
           {l.enabled && !needsAttention(l) && l.counts.files > 0 && l.counts.waiting === 0 && l.counts.running === 0 && <span>Everything done</span>}
         </div>
@@ -274,7 +277,7 @@ export function FolderField({ f, free, warn }: { f: ReturnType<typeof useFolder>
           : r.blockers.length ? r.blockers.map((b) => <span key={b.code} className="st bad" role="alert"><Icon id="i-alert" /><span>{b.message}</span></span>)
           : <span className="st ok"><Icon id="i-check-c" /><span>{plural(r.videoCount, "video", "videos")}, {bytes(r.totalBytes)}{free != null ? " · " + bytes(free) + " free" : ""}</span></span>}
         {r && !failed(r) && r.notes.filter((n) => FOLDER_NOTE(n.code)).map((n) => <span key={n.code} className="st warn"><Icon id="i-alert" /><span>{n.message}</span></span>)}
-        {warn && <p className="st bad" role="note"><Icon id="i-alert" /><span>{warn} <Link to="/settings/health">How to fix it</Link></span></p>}
+        {warn && <p className="st bad" role="note"><Icon id="i-alert" /><span>{warn} <Link to="/settings/system#health">How to fix it</Link></span></p>}
       </div></div>
   );
 }

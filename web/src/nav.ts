@@ -13,7 +13,7 @@ export const NAV: [string, NavItem[]][] = [
   ]],
   ["Infrastructure", [{ to: "/workers", label: "Workers", icon: "i-worker" }]],
   ["System", [
-    { to: "/settings", label: "Settings", icon: "i-settings" },
+    { to: "/settings/general", label: "Settings", icon: "i-settings" },
     { to: "/plugins", label: "Plugins", icon: "i-plugin", planned: true },
   ]],
 ];
