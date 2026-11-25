@@ -4,9 +4,9 @@
 
 export type SparkBar = { i: number; x: number; y: number; w: number; h: number };
 
-// Bars and ticks for a W x H box. The tallest recorded day reaches 2 px from the top; the baseline sits 6 px above the bottom.
+// Bars and ticks for a W x H box. The tallest recorded day reaches 2 px from the top; the baseline sits 2 px above the bottom, on the baseline line (the line draws over the bars' feet).
 export function sparkBars(values: (number | null)[], W: number, H: number): { bars: SparkBar[]; ticks: number[] } {
-  const n = values.length, base = H - 6, top = 2;
+  const n = values.length, base = H - 2, top = 2;
   const max = Math.max(1, ...values.map((v) => v ?? 0));
   const slot = W / Math.max(1, n), w = Math.max(1, slot * 0.7);
   const bars: SparkBar[] = [], ticks: number[] = [];

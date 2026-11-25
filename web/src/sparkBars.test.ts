@@ -14,13 +14,13 @@ test("a recorded zero draws no bar and no tick", () => {
   assert.deepEqual(bars.map((b) => b.i), [1]);
 });
 
-test("the tallest day reaches 2 px from the top and the baseline is 6 px up", () => {
+test("the tallest day reaches 2 px from the top and stands on the baseline at H - 2", () => {
   const { bars } = sparkBars([1, 4, 2], 128, 56);
   const tallest = bars.find((b) => b.i === 1)!;
   assert.equal(tallest.y, 2);
-  assert.equal(tallest.y + tallest.h, 50);
+  assert.equal(tallest.y + tallest.h, 54);
   const half = bars.find((b) => b.i === 2)!;
-  assert.ok(Math.abs(half.h - (48 * 2) / 4) < 1e-9);
+  assert.ok(Math.abs(half.h - (52 * 2) / 4) < 1e-9);
 });
 
 test("bar width is 70% of the day slot, centred, at least 1 px", () => {

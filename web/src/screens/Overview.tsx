@@ -116,7 +116,7 @@ function Spark({ values, days, label, color, text }: { values: (number | null)[]
     onPointerLeave={(e) => e.pointerType === "mouse" && setAt(null)}>
     <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label={label + (ticks.length ? "; the days not recorded are left blank" : "")}>
       <line x1="0" x2={W} y1={H - 2} y2={H - 2} stroke="var(--border-strong)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
-      {at != null && <rect x={at * slot} y="0" width={slot} height={H} fill="var(--raised)" />}
+      {at != null && <rect x={at * slot} y="0" width={slot} height={H} fill="var(--border)" />}
       {bars.map((b) => <path key={b.i} d={barPath(b)} fill={color} />)}
       {ticks.map((i) => <rect key={"t" + i} x={i * slot + slot / 2 - 1} y={H - 3} width="2" height="2" fill="var(--border-strong)" />)}
       {values.map((_, i) => <rect key={"h" + i} x={i * slot} y="0" width={slot} height={H} fill="transparent"
