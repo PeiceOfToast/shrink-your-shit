@@ -142,6 +142,12 @@ func newScenario(t *testing.T) *scenario { t.Helper(); return newScenarioNamed(t
 // newScenarioNamed is newScenario with the original named name (in the scenario's folder).
 func newScenarioNamed(t *testing.T, name string) *scenario {
 	t.Helper()
+	return newScenarioAt(t, t.TempDir(), name)
+}
+
+// newScenarioAt is newScenarioNamed with the scenario's folder dir (which must exist).
+func newScenarioAt(t *testing.T, dir, name string) *scenario {
+	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "t.db")
 	st, err := jobs.Open(dbPath)
 	if err != nil {
@@ -149,7 +155,6 @@ func newScenarioNamed(t *testing.T, name string) *scenario {
 	}
 	st.SetPaused(false) // the test's worker is started (S2: a new install starts stopped)
 	t.Cleanup(func() { st.Close() })
-	dir := t.TempDir()
 	src := filepath.Join(dir, name)
 	os.WriteFile(src, []byte("original-bytes"), 0o644)
 	id, _ := st.Enqueue(jobs.Job{Library: dir, Path: src, DurationSec: scenarioDuration, SizeBefore: 14})

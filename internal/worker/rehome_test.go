@@ -3,6 +3,7 @@
 package worker
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"os"
@@ -296,11 +297,23 @@ func TestEmptyTrashFindsAMovedOriginalByShareMountPointOnly(t *testing.T) {
 	}
 }
 
-// Nested shape: the library folder is the parent of the share's new mount point (library L, original moved to
-// L/Shows/Arcane). Both L and L/Shows/Arcane are roots, but they name the same candidate: the original is found
-// once, re-homed once and deleted, and is not reported ambiguous.
+// Nested shape: the original's old folder ends in Shows/Arcane (so its trash path has that suffix), and the library
+// is the parent of the share's new mount point, which is that same folder name under the library. The library root
+// and the mount root both produce one candidate, Lib/Shows/Arcane/.syp-trash/x: the seen[] dedupe must keep it to one
+// match, or the original is reported ambiguous. This fails with the dedupe disabled (review of #730).
 func TestEmptyTrashFindsAMovedOriginalUnderItsOwnLibraryFolder(t *testing.T) {
-	s, o := keptOne(t)
+	oldRoot := filepath.Join(t.TempDir(), "old", "Shows", "Arcane")
+	if err := os.MkdirAll(oldRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s := newScenarioAt(t, oldRoot, "movie.mkv")
+	if _, err := s.keeping(7).RunOne(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	o, err := s.store.OriginalOfJob(s.id)
+	if err != nil {
+		t.Fatal(err)
+	}
 	libs, err := s.store.Libraries()
 	if err != nil {
 		t.Fatal(err)
@@ -321,7 +334,7 @@ func TestEmptyTrashFindsAMovedOriginalUnderItsOwnLibraryFolder(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(newRoot), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Rename(s.dir, newRoot); err != nil {
+	if err := os.Rename(oldRoot, newRoot); err != nil {
 		t.Fatal(err)
 	}
 	newRoot, err = jobs.RealPath(newRoot)
