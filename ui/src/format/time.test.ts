@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ago, clock, clockPrecise, dayClock, duration, jobWhen, timeLeft } from "./time.ts";
+import { ago, clock, clockPrecise, dayClock, dayOf, duration, jobWhen, timeLeft } from "./time.ts";
 
 // Local-time dates, so the tests hold in any zone.
 const local = (y: number, mo: number, d: number, h: number, mi: number, s = 0, ms = 0) =>
@@ -46,4 +46,8 @@ test("jobWhen follows the job state", () => {
   assert.equal(jobWhen({ ...base, state: "running", startedAt: local(2026, 10, 26, 14, 2), queuedAt: null, finishedAt: null, tookMs: null }), "from 14:02");
   assert.equal(jobWhen({ ...base, state: "waiting", startedAt: null, queuedAt: local(2026, 10, 26, 13, 20), finishedAt: null, tookMs: null }), "queued 13:20");
   assert.equal(jobWhen({ ...base, state: "done", startedAt: null, queuedAt: null, finishedAt: null, tookMs: 380_000 }), "took 6:20");
+});
+
+test("dayOf names the day without a clock", () => {
+  assert.equal(dayOf(local(2026, 10, 16, 9, 30)), "16 Nov");
 });

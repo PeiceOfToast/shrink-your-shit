@@ -1,6 +1,6 @@
 import type { Attention, Overview, Summary } from "../types.ts";
 import seriesRaw from "./series.json" with { type: "json" };
-import { localAt, minsAgo } from "./clock.ts";
+import { minsAgo, plus, trashUntil } from "./clock.ts";
 import { nextScanFor } from "../schedule.ts";
 import { clock } from "../../format/time.ts";
 
@@ -21,7 +21,9 @@ export const OVERVIEW: Overview = {
   running: 2,
   workersOn: true,
   trashGB: 61,
-  savedMoreOn16Nov: 3.2,
+  savedMoreGB: 3.2,
+  // The newest done job (finished 12 min after it started, see jobs.ts j5) plus 30 days in the trash.
+  savedMoreAt: trashUntil(plus(minsAgo(200), 708_000)),
   savedSeries: SERIES.saved,
   filesSeries: SERIES.converted,
   filesLast24h: { done: 14, skipped: 2, failed: 3 },
@@ -33,7 +35,7 @@ export const ATTENTION: Attention[] = [
     id: "enc",
     tile: { icon: "alert", tone: "bad" },
     title: "This computer's graphics encoder failed 3 times today",
-    hint: { text: `It converts on the processor until ${clock(localAt(0, 18, 10))}, which is slower.`, link: { label: "Test the encoders", action: "test-encoders" } },
+    hint: { text: `It converts on the processor until ${clock(plus(minsAgo(0), 2 * 60 * 60_000))}, which is slower.`, link: { label: "Test the encoders", action: "test-encoders" } },
     side: { pill: { label: "Slower", tone: "warn" } },
   },
   {

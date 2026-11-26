@@ -4,8 +4,12 @@ import type { Job } from "../types.ts";
 const START = Date.now();
 const MIN = 60_000;
 
+const DAY_MS = 86_400_000;
 export const minsAgo = (m: number) => new Date(START - m * MIN).toISOString();
 export const plus = (iso: string, ms: number) => new Date(Date.parse(iso) + ms).toISOString();
+// The originals go to the trash for 30 days after a job finishes (libraries.ts "original").
+export const trashUntil = (finishedIso: string) => plus(finishedIso, 30 * DAY_MS);
+
 // A local clock time on a day relative to today (-1 = yesterday).
 export const localAt = (dayOffset: number, h: number, m: number) => {
   const d = new Date(START);

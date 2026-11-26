@@ -24,6 +24,11 @@ export function clockPrecise(iso: string): string {
   return `${clock(iso)}:${pad(d.getSeconds())}.${String(d.getMilliseconds()).padStart(3, "0")}`;
 }
 
+// "16 Nov" for a day, with no clock.
+export function dayOf(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+}
+
 // "today 14:02", "yesterday 22:10", "tomorrow 02:00", or "16 Nov 14:02" for other days.
 export function dayClock(iso: string, now = Date.now()): string {
   const diff = Math.round((startOfDay(Date.parse(iso)) - startOfDay(now)) / DAY);

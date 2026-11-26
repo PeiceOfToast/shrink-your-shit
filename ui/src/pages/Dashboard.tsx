@@ -1,5 +1,5 @@
 import { jobHint } from "../format/job.ts";
-import { clock, dayClock } from "../format/time.ts";
+import { clock, dayClock, dayOf } from "../format/time.ts";
 import { Fragment, useEffect, useState, type MouseEvent } from "react";
 import { api, formatCount, formatGB, type Attention, type Job, type Library } from "../api/index.ts";
 import { useApi } from "../api/useApi.ts";
@@ -289,7 +289,7 @@ export function Dashboard() {
               </div>
               <div className="sub tnum">
                 <span>
-                  {o.savedMoreOn16Nov} GB more on 16 Nov, when originals leave the trash · <Link to="/settings/processing">{o.trashGB} GB in the trash</Link>
+                  {o.savedMoreGB} GB more on {dayOf(o.savedMoreAt)}, when originals leave the trash · <Link to="/settings/processing">{o.trashGB} GB in the trash</Link>
                 </span>
                 <span>
                   New files are <b>{o.avgShrinkPct}% smaller</b> on average

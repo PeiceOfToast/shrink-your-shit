@@ -111,7 +111,9 @@ export interface Overview {
   running: number;
   workersOn: boolean;
   trashGB: number;
-  savedMoreOn16Nov: number;
+  // Space that frees up when originals leave the trash, and the day it happens (RFC 3339).
+  savedMoreGB: number;
+  savedMoreAt: string;
   savedSeries: Series[];
   filesSeries: Series[];
   filesLast24h: { done: number; skipped: number; failed: number };
