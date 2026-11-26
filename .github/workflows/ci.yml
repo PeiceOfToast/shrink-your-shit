@@ -160,6 +160,30 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
 
+  ui:
+    name: ui (typecheck, test, build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ui/.nvmrc
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: install
+        working-directory: ui
+        run: npm ci --no-audit --no-fund
+      - name: typecheck
+        working-directory: ui
+        run: npm run typecheck
+      - name: tests
+        working-directory: ui
+        run: npm test
+      - name: build
+        working-directory: ui
+        run: npm run build
+
   build:
     name: build (${{ matrix.goos }}/${{ matrix.goarch }})
     needs: web

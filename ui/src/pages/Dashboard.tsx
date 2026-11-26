@@ -1,0 +1,341 @@
+import { Fragment, useState, type MouseEvent } from "react";
+import { api, formatCount, formatGB, type Attention, type Job, type LibrarySummary } from "../api/index.ts";
+import { useApi } from "../api/useApi.ts";
+import { Bars } from "../ui/Bars.tsx";
+import { Icon } from "../ui/Icon.tsx";
+import { Link, navigate } from "../router.tsx";
+
+// Built exactly as draft-b/dashboard.html (see that file for the markup this mirrors). Batch 1, 11-26.
+
+function paceLabel(secPerGB: number): string {
+  const m = Math.floor(secPerGB / 60);
+  const s = Math.round(secPerGB % 60);
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function Lines({ lines }: { lines: string[] }) {
+  return (
+    <>
+      {lines.map((l, i) => (
+        <Fragment key={i}>
+          {i > 0 && <br />}
+          {l}
+        </Fragment>
+      ))}
+    </>
+  );
+}
+
+function AttentionRow({ a }: { a: Attention }) {
+  const tile = a.tile;
+  return (
+    <li>
+      <span className={"icon" in tile ? `tile ${tile.tone}` : "tile"}>
+        {"icon" in tile ? <Icon name={tile.icon} /> : <Lines lines={tile.lines} />}
+      </span>
+      <div className="main">
+        {a.titleHref ? (
+          <Link className="name" to={a.titleHref}>
+            {a.title}
+          </Link>
+        ) : (
+          <span className="name">{a.title}</span>
+        )}
+        {a.chips && (
+          <div className="chips">
+            {a.chips.map((c) => (
+              <span key={c.label}>
+                {c.icon && <Icon name={c.icon} />}
+                {c.label}
+              </span>
+            ))}
+          </div>
+        )}
+        {a.hint && (
+          <span className="hint">
+            {a.hint.text}
+            {a.hint.link && (
+              <>
+                {" "}
+                <a href={a.hint.link.href}>{a.hint.link.label}</a>
+              </>
+            )}
+          </span>
+        )}
+      </div>
+      <div className="side">
+        {a.side.text && <span className={a.side.text.tone}>{a.side.text.label}</span>}
+        <span className={`pill ${a.side.pill.tone}`}>
+          {a.side.pill.icon && <Icon name={a.side.pill.icon} />}
+          {a.side.pill.label}
+        </span>
+      </div>
+    </li>
+  );
+}
+
+function ConvertingRow({ j }: { j: Job }) {
+  const open = (e: MouseEvent<HTMLLIElement>) => {
+    if ((e.target as HTMLElement).closest("a")) return;
+    navigate(`/jobs/${j.id}/log`);
+  };
+  return (
+    <li className="row-link" onClick={open}>
+      <span className="tile">
+        <Lines lines={j.tileLines ?? []} />
+      </span>
+      <div className="main">
+        <Link className="name" to={`/jobs/${j.id}`}>
+          {j.file}
+        </Link>
+        <div className="chips">
+          <span>
+            <Icon name="folder" />
+            {j.library}
+          </span>
+          <span>
+            <Icon name="worker" />
+            {j.worker}
+          </span>
+          <span>started {j.started}</span>
+        </div>
+        <span className="hint">{j.hint}</span>
+      </div>
+      <div className="side">
+        <span className="pill run">
+          <Icon name="play" />
+          Running · {j.progress}%
+        </span>
+      </div>
+      <div className="lbar bar">
+        <i style={{ width: `${j.progress ?? 0}%` }}></i>
+      </div>
+    </li>
+  );
+}
+
+function LibraryRow({ l }: { l: LibrarySummary }) {
+  return (
+    <tr>
+      <td className="full">
+        <b>{l.name}</b> <span className="muted sm">{l.path}</span>
+      </td>
+      <td data-l="Workflow">{l.workflow}</td>
+      <td className="num tnum" data-l="Files">{formatCount(l.files)}</td>
+      <td className="num tnum" data-l="Waiting">{formatCount(l.waiting)}</td>
+      <td className="num tnum" data-l="Saved">{l.saved}</td>
+      <td>
+        <span className={`pill ${l.status.kind}`}>{l.status.label}</span>
+      </td>
+    </tr>
+  );
+}
+
+export function Dashboard() {
+  const overview = useApi(() => api.getOverview(), []);
+  const attention = useApi(() => api.getAttention(), []);
+  const running = useApi(() => api.getJobs({ state: "running" }), []);
+  const [workersOverride, setWorkersOverride] = useState<boolean | null>(null);
+  const o = overview.data;
+  const workersOn = workersOverride ?? o?.workersOn ?? false;
+
+  const toggleWorkers = () => {
+    const next = !workersOn;
+    setWorkersOverride(next);
+    void api.runWorkersAction(next ? "on" : "off");
+  };
+
+  return (
+    <>
+      <div className="pagehead">
+        <h1>Dashboard</h1>
+        <span className="sp"></span>
+        <button type="button" className="sw" aria-pressed={workersOn} onClick={toggleWorkers}>
+          <span className={`k ${workersOn ? "on" : ""}`}></span>
+          <b>Workers {workersOn ? "on" : "off"}</b>
+        </button>
+        <button type="button" className="btn ghost sm" onClick={() => void api.scanAllLibraries()}>
+          <Icon name="refresh" />
+          Scan all
+        </button>
+      </div>
+
+      {overview.loading && !o && <p className="muted">Loading…</p>}
+      {overview.error && !o && (
+        <section className="card">
+          <p className="bad">Can't load the dashboard. Trying again.</p>
+          <button type="button" className="btn ghost sm" onClick={overview.reload}>
+            Try now
+          </button>
+        </section>
+      )}
+
+      {o && (
+        <>
+          <div className="kpis">
+            <div className="kpi">
+              <span className="l">Freed</span>
+              <span className="v ok">{formatGB(o.freedGB)}</span>
+              <span className="d">+{o.freedTodayGB} GB today</span>
+            </div>
+            <div className="kpi">
+              <span className="l">Converted</span>
+              <span className="v ">{formatCount(o.converted)}</span>
+              <span className="d">{o.convertedPerDay} / day</span>
+            </div>
+            <div className="kpi">
+              <span className="l">Waiting</span>
+              <span className="v ">{formatCount(o.waiting)}</span>
+              <span className="d">next {o.nextScan}</span>
+            </div>
+            <div className="kpi">
+              <span className="l">Failed 24 h</span>
+              <span className="v bad">{o.failed24h}</span>
+              <span className="d">{o.failedRatePct} %</span>
+            </div>
+            <div className="kpi">
+              <span className="l">Avg shrink</span>
+              <span className="v ">{o.avgShrinkPct} %</span>
+              <span className="d">{paceLabel(o.convertSecPerGB)} / GB</span>
+            </div>
+          </div>
+
+          <div className="grid2">
+            <section className="card wide">
+              <h2>
+                Needs attention <span className="muted" style={{ textTransform: "none", letterSpacing: 0, fontFamily: "var(--sans)" }}>{attention.data?.length ?? 0}</span>
+                <Link className="more" to="/jobs?state=failed">failed jobs →</Link>
+              </h2>
+              {attention.data && attention.data.length === 0 && <p className="muted">Nothing needs attention.</p>}
+              {attention.data && attention.data.length > 0 && (
+                <ul className="rows">
+                  {attention.data.map((a) => (
+                    <AttentionRow key={a.id} a={a} />
+                  ))}
+                </ul>
+              )}
+            </section>
+
+            <section className="card">
+              <h2>
+                Space saved
+                <Link className="more" to="/jobs?state=done">Done jobs</Link>
+              </h2>
+              <div className="big tnum ok">
+                {formatGB(o.freedGB)}
+                <small>freed</small>
+              </div>
+              <div className="sub tnum">
+                <span>
+                  {o.savedMoreOn16Nov} GB more on 16 Nov, when originals leave the trash · <a href="#">{o.trashGB} GB in the trash</a>
+                </span>
+                <span>
+                  New files are <b>{o.avgShrinkPct}% smaller</b> on average
+                </span>
+              </div>
+              <ul className="legend">
+                <li>
+                  <i style={{ background: "var(--ok)" }}></i>Freed
+                </li>
+                <li>
+                  <i style={{ background: "var(--accent)" }}></i>In the trash
+                </li>
+              </ul>
+              <Bars series={o.savedSeries} />
+              <div className="axis tnum">
+                <span>27 Oct</span>
+                <span>10 Nov</span>
+                <span>Today</span>
+              </div>
+            </section>
+
+            <section className="card">
+              <h2>
+                Files converted
+                <Link className="more" to="/jobs">All jobs</Link>
+              </h2>
+              <div className="big tnum">
+                {formatCount(o.converted)}
+                <small>all time</small>
+              </div>
+              <div className="sub tnum">
+                <span>
+                  <b>{o.convertedPerDay} per day</b> lately · last 24 h: {o.filesLast24h.done} done, {o.filesLast24h.skipped} skipped,{" "}
+                  <Link to="/jobs?state=failed">{o.filesLast24h.failed} failed</Link>
+                </span>
+                <span>
+                  About <b>2 min 10 s</b> of converting per GB on this computer
+                </span>
+              </div>
+              <ul className="legend">
+                <li>
+                  <i style={{ background: "var(--ok)" }}></i>Done
+                </li>
+                <li>
+                  <i style={{ background: "var(--text2)" }}></i>Skipped
+                </li>
+                <li>
+                  <i style={{ background: "var(--bad)" }}></i>Failed
+                </li>
+              </ul>
+              <Bars series={o.filesSeries} />
+              <div className="axis tnum">
+                <span>27 Oct</span>
+                <span>10 Nov</span>
+                <span>Today</span>
+              </div>
+            </section>
+
+            <section className="card wide">
+              <h2>
+                Converting now
+                <span className="muted" style={{ textTransform: "none", letterSpacing: 0, fontFamily: "var(--sans)" }}>
+                  {o.running} / 3 slots
+                </span>
+                <Link className="more" to="/jobs?state=running">all jobs →</Link>
+              </h2>
+              {running.data && running.data.items.length === 0 && <p className="muted">Nothing is converting right now.</p>}
+              {running.data && running.data.items.length > 0 && (
+                <ul className="rows">
+                  {running.data.items.map((j) => (
+                    <ConvertingRow key={j.id} j={j} />
+                  ))}
+                </ul>
+              )}
+            </section>
+
+            <section className="card wide">
+              <h2>
+                Libraries
+                <Link className="more" to="/libraries">libraries →</Link>
+              </h2>
+              {o.libraries.length === 0 ? (
+                <p className="muted">
+                  No libraries yet. <Link to="/libraries?add=1">Add a library</Link>
+                </p>
+              ) : (
+                <table className="tbl">
+                  <thead>
+                    <tr>
+                      <th>Library</th>
+                      <th>Workflow</th>
+                      <th className="num">Files</th>
+                      <th className="num">Waiting</th>
+                      <th className="num">Saved</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {o.libraries.map((l) => (
+                      <LibraryRow key={l.id} l={l} />
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </section>
+          </div>
+        </>
+      )}
+    </>
+  );
+}
