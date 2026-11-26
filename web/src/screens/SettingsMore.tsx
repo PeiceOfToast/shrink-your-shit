@@ -310,7 +310,7 @@ export function SafetySettings() {
                 {t.files ? `Empty trash now: ${plural(t.files, "file", "files")}, ${bytes(t.bytes)}` : "Empty trash now"}</button>}
             </SettingRow>
             {purgeSaid && <p className="st bad" role="alert" style={{ margin: "0 16px 12px" }}><Icon id="i-alert" /><span>{purgeSaid}</span></p>}
-            <div aria-live="polite" className="stack" style={gone ? { gap: 6, padding: "0 16px 12px" } : { display: "contents" }}>{/* always mounted, so the message is announced; takes no space while idle */}
+            <div aria-live="polite" className="stack" style={gone ? { gap: 6, padding: "0 16px 12px" } : undefined}>{/* always mounted, so the message is announced; takes no space while idle */}
               {gone && <p ref={freed} tabIndex={-1} className={gone.deletedFiles ? "st ok" : "st warn"} style={{ margin: 0 }}><Icon id={gone.deletedFiles ? "i-check-c" : "i-alert"} /><span>{gone.deletedFiles ? `Freed ${bytes(gone.freedBytes)} (${plural(gone.deletedFiles, "file", "files")}).` : "Nothing was deleted."}</span></p>}
               {gone && gone.skipped.map((s, i) => <p key={i} className="st warn" style={{ margin: 0 }}><Icon id="i-alert" /><span>{`${s.library} was skipped. ${s.reason}`}</span></p>)}
               <p role="status" className={gone && forgotSaid ? "st" : "sr"} style={{ margin: 0 }}>{gone && forgotSaid && <span>{forgotSaid}</span>}</p>
