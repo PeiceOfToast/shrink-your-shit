@@ -195,6 +195,7 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 				return nil
 			}
 			if now().Sub(info.ModTime()) < s.MinAge {
+				s.settleYoung(path, info)
 				return nil
 			}
 			if s.scanFile(ctx, t, path, info) {
@@ -231,6 +232,24 @@ func (s *Scanner) recordSkip(path string, st os.FileInfo, code string) {
 		return
 	}
 	s.Store.PutFile(jobs.File{Path: path, Size: st.Size(), ModTime: st.ModTime().UnixNano(), Decision: "skip: " + rules.SkipWords[code], Reason: code})
+}
+
+// settleYoung lists a file younger than MinAge (still being copied) as settling at once, so it shows on Waiting
+// while it grows. It is not looked at: scanFile decides a file only after two looks MinAge apart, and this does not
+// start that wait. A file that is queued, converting, restored, stopped or our own output is left as it is.
+func (s *Scanner) settleYoung(path string, st os.FileInfo) {
+	if open, _ := s.Store.HasOpenJob(path); open {
+		return
+	}
+	if prev, _ := s.Store.GetFile(path); prev != nil && (prev.Decision == jobs.DecisionRestored || prev.Reason == jobs.UserStoppedReason) {
+		return
+	} else if prev != nil && prev.Size == 0 && st.Size() == 0 && strings.HasPrefix(prev.Decision, emptyFileDecision) {
+		return // an empty file that already failed stays decided (scanFile's rule, review #429)
+	}
+	if own, _ := s.Store.IsOwnOutput(path, st.Size(), st.ModTime().UnixNano()); own {
+		return
+	}
+	s.recordSkip(path, st, rules.SkipStillChanging)
 }
 
 // look is a file as it was first seen unchanged: when, and what it was.
