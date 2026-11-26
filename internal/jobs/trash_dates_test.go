@@ -37,7 +37,7 @@ func TestTrashDatesAreNeverPast(t *testing.T) {
 	}
 	near := func(d, want time.Duration) bool { return d > want-2*time.Minute && d < want+2*time.Minute }
 
-	keep("/m/old.mkv", time.Now().Add(-10*24*time.Hour)) // due 3 days ago, held back
+	keep("/m/old.mkv", time.Now().Add(-7*24*time.Hour-90*time.Minute)) // due 90 minutes ago: past one purge, held back
 	tr, err := s.TrashNow(7)
 	if err != nil {
 		t.Fatal(err)
@@ -46,7 +46,7 @@ func TestTrashDatesAreNeverPast(t *testing.T) {
 		t.Errorf("all overdue: %+v; want 1 file counted and no dates", tr)
 	}
 
-	keep("/m/just.mkv", time.Now().Add(-7*24*time.Hour-10*time.Minute)) // due 10 minutes ago: the next purge
+	keep("/m/just.mkv", time.Now().Add(-7*24*time.Hour-30*time.Minute)) // due 30 minutes ago: the next purge
 	tr, _ = s.TrashNow(7)
 	if n, l := at(tr.NextDeleteAt), at(tr.LastDeleteAt); tr.Files != 2 || !near(n, 0) || !near(l, 0) {
 		t.Errorf("held and just due: %d files, next %v, last %v from now; want 2 files, both now", tr.Files, n, l)

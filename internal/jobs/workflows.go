@@ -566,7 +566,9 @@ FROM jobs j JOIN libraries l ON l.id=j.library_id WHERE l.flow_id=?`, since, sin
 type Trash struct {
 	Bytes        int64   `json:"bytes"`
 	Files        int     `json:"files"`
-	NextDeleteAt *string `json:"nextDeleteAt"`
+	NextDeleteAt *string `json:"nextDeleteAt"` // earliest due date among originals the purge can free (now if one is due)
+	// LastDeleteAt is the latest due date among the same originals. An original the purge holds back (overdue by
+	// more than PurgeEvery) is counted in Files and Bytes but in neither date, so this is not "all freed by then".
 	LastDeleteAt *string `json:"lastDeleteAt"`
 }
 
