@@ -19,7 +19,9 @@ export function getSummary(): Promise<Summary> {
     () => {
       const s = getForcedState();
       // Error and running both show new errors, so the status line's "N new errors" link is reachable.
-      return { ...SUMMARY, newErrors: s === "error" || s === "running" ? 2 : 0 };
+      // Fresh install: no job has finished and no library is watched yet.
+      const fresh = s === "fresh" ? { lastDoneAt: null, nextScanAt: null } : {};
+      return { ...SUMMARY, ...fresh, newErrors: s === "error" || s === "running" ? 2 : 0 };
     },
     { failInError: false },
   );
