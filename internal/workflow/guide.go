@@ -378,7 +378,9 @@ func Apply(d Doc, a Answers) Doc {
 		}
 	} else if ok {
 		d = applySkip(d, w, a.Skip)
-		d = applyAfter(d, w, a.After)
+		if !w.afterSkip { // a stretch the questions can't show is kept as it is, Basic too
+			d = applyAfter(d, w, a.After)
+		}
 	}
 	return inOrder(orig, d)
 }
@@ -695,7 +697,7 @@ func walk(d Doc) (walked, bool) {
 	afterCards, why := readAfter(l, cur, map[string]bool{})
 	if why != "" { // the whole stretch from the save on is kept as it is
 		w.afterSkip = true
-		name := ""
+		name := "the steps after Save"
 		if n, ok := l.byID[cur]; ok {
 			name = nodeName(n)
 		}

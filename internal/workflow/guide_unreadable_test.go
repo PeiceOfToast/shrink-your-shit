@@ -92,3 +92,42 @@ func outOf(d Doc, id string) []Edge {
 	}
 	return out
 }
+
+// A Basic save keeps a stretch the questions can't show: the notification after Save has a feeder linked into
+// it, so the questions can't show it, and a Basic save that turns the notification off leaves the join step and
+// its links the same.
+func TestGuideBasicSaveKeepsAStretchItCantShow(t *testing.T) {
+	a := DefaultAnswers(GoalSmaller)
+	a.After = After{Notify: true}
+	d := Build(a)
+	n := nodeOf(d, TypeNotify)
+	feeder := node(TypeNotify, "Feeder", map[string]any{"kind": "good", "text": "fed"})
+	d.Nodes = append(d.Nodes, feeder)
+	d.Edges = append(d.Edges, link(feeder.ID, "", n.ID))
+	if g := GuideOf(d); !slices.Equal(g.Unreadable, []string{nodeName(n)}) {
+		t.Fatalf("unreadable %v", g.Unreadable)
+	}
+	basic := DefaultAnswers(GoalSmaller)
+	basic.Flow = FlowBasic
+	got := Apply(d, basic)
+	if nodeByIDOf(got, n.ID).ID == "" {
+		t.Fatalf("the join step was deleted by a Basic save")
+	}
+	if mustJSON(nodeByIDOf(got, n.ID)) != mustJSON(nodeByIDOf(d, n.ID)) {
+		t.Errorf("the join step changed on a Basic save")
+	}
+	if mustJSON(inOf(got, n.ID)) != mustJSON(inOf(d, n.ID)) {
+		t.Errorf("the links into the join changed on a Basic save: %s", mustJSON(inOf(got, n.ID)))
+	}
+}
+
+// inOf is the links arriving at a step, in order.
+func inOf(d Doc, id string) []Edge {
+	var in []Edge
+	for _, e := range d.Edges {
+		if e.To == id {
+			in = append(in, e)
+		}
+	}
+	return in
+}
