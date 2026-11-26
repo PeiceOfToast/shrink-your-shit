@@ -266,7 +266,7 @@ export function Overview() {
           {attn.health && <li className="lcard">
             <span className="ltile" aria-hidden="true"><Icon id="i-alert" /></span>
             <div className="lmain"><div className="lname"><b>{failedNow.length === 1 ? "A health check failed" : plural(failedNow.length, "health check", "health checks") + " failed"}:</b></div>
-              <span className="sm brk">{failedNow[0].detail} <Link to="/settings/system#health">Open Health</Link></span></div>
+              <span className="sm break-anywhere">{failedNow[0].detail} <Link to="/settings/system#health">Open Health</Link></span></div>
             <div className="lside"><button className="btn sm ghost" type="button" aria-label="Dismiss the health check note" onClick={hideHealth}>Dismiss</button></div>
           </li>}
           {v.encoderFallbacks?.map((f) => <li key={f.workerId} className="lcard">

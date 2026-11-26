@@ -274,7 +274,8 @@ export function Jobs() {
         </ul>)}
       {current && current.total > items.length && <p className="row muted sm" style={{ gap: 8, justifyContent: "center" }}>Showing {items.length.toLocaleString()} of {current.total.toLocaleString()}
         <button className="btn sm" type="button" disabled={items.length < Math.min(lim, current.total)} onClick={() => setMore({ for: scope, n: lim + 200 })}>Show {Math.min(200, current.total - items.length)} more</button></p>}
-      {open && <Drawer id={open} row={items.find((j) => key(j) === open)} onClose={() => go(tab)} onChanged={page.reload} />}
+      {/* a file still changing has no job and no drawer: its ?job=settle-N link opens nothing, and nothing is fetched */}
+      {open && !open.startsWith("settle-") && <Drawer id={open} row={items.find((j) => key(j) === open)} onClose={() => go(tab)} onChanged={page.reload} />}
     </div>
   );
 }
