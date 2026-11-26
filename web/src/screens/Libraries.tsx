@@ -491,7 +491,7 @@ function RemoveSection({ l, v }: { l: LibraryItem; v: Library }) {
           <strong id="rm-q">Remove {l.name}?</strong>
           <div id="rm-d"><p style={{ margin: "0 0 6px" }}>Shrink Your Shit stops watching {l.path}. Nothing in the folder is changed or deleted.</p>
             <ul style={{ margin: 0, paddingLeft: 18 }}>
-              {v.counts.waiting > 0 && <li>{v.counts.waiting === 1 ? "1 waiting file is" : count(v.counts.waiting) + " waiting files are"} taken off the queue.</li>}
+              {v.counts.waiting > 0 && <li>{v.counts.waiting === 1 ? "1 waiting file won't be converted." : count(v.counts.waiting) + " waiting files won't be converted."}</li>}
               {conv.map((j) => <li key={j.id}>{j.name} is being converted: it is stopped, and its original isn't touched.</li>)}
               {v.counts.completed > 0 && <li>Converted files stay as they are. Kept originals can still be got back from Jobs until their date.</li>}
             </ul></div>
