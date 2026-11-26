@@ -174,6 +174,11 @@ func fileItem(store *jobs.Store, libs []jobs.Library, row jobs.FileRow, card str
 		it["reason"], it["detail"] = row.Reason, upperFirst(detail)+"."
 		return it
 	case jobs.CardUnprocessed:
+		if row.Settling { // still changing: no job yet (design 11-26: "Still changing")
+			it["id"], it["status"], it["retryAt"], it["attempts"], it["detail"] = "settle-"+strconv.FormatInt(row.SkipID, 10), "settling", nil, 0, settlingWords
+			it["reason"] = row.Reason
+			return it
+		}
 		it["status"], it["retryAt"], it["attempts"], it["detail"] = "waiting", nil, row.Attempts, nil
 		if row.RetryAt != "" {
 			it["status"], it["retryAt"], it["detail"] = "retrying", row.RetryAt, row.Error
@@ -232,6 +237,9 @@ func fileItem(store *jobs.Store, libs []jobs.Library, row jobs.FileRow, card str
 	it["id"] = jobID
 	return it
 }
+
+// settlingWords are a file still changing's words (design 11-26), on the waiting list before it has a job.
+const settlingWords = "It may still be copying. It joins the queue once it stops changing for a scan."
 
 // templateRe is a {{name}} in a folder setting.
 var templateRe = regexp.MustCompile(`\{\{[^}]*\}\}`)
