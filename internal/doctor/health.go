@@ -4,7 +4,9 @@ package doctor
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"strings"
 	"sync"
 )
@@ -70,11 +72,7 @@ func (c *Checker) Health(ctx context.Context, dataDir string, libs []Library) []
 	}
 	out = append(out, Check{"hardware", "Graphics-card encoder", "ok", hw})
 
-	if err := writeProbe(dataDir); err != nil {
-		out = append(out, Check{"data", "Data folder", "bad", "Cannot write to " + dataDir + ". " + ReadOnlyMessage(dataDir)})
-	} else {
-		out = append(out, Check{"data", "Data folder", "ok", dataDir})
-	}
+	out = append(out, dataHealthCheck(dataDir))
 
 	if len(libs) == 0 {
 		out = append(out, Check{"libraries", "Libraries", "warn", "No libraries yet. Add one on the Libraries page."})
@@ -165,4 +163,16 @@ func GPU(t Tools) (found bool, vendor string) {
 		}
 	}
 	return len(t.Hardware) > 0, ""
+}
+
+// dataHealthCheck is the data folder line of the CLI report. Its words match the web check's (dataCheck).
+func dataHealthCheck(dir string) Check {
+	err := writeProbe(dir)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return Check{"data", "Data folder", "bad", "The data folder " + dir + " does not exist. " + missingDataAdvice}
+	case err != nil:
+		return Check{"data", "Data folder", "bad", "Cannot write to " + dir + ". " + ReadOnlyMessage(dir)}
+	}
+	return Check{"data", "Data folder", "ok", dir}
 }

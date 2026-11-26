@@ -18,6 +18,8 @@ export function lastScan(t: string | null): string {
   const d = new Date(t), day = (x: Date) => x.toDateString(), y = new Date(Date.now() - 864e5);
   return day(d) === day(new Date()) ? clock(d) + " today" : day(d) === day(y) ? "Yesterday " + clock(d) : d.toLocaleDateString([], { day: "numeric", month: "short" }) + " " + clock(d);
 }
+// a day ("2026-11-20") as "Nov 20": the Dashboard and the Libraries page name the same kept-original deadline this way
+export const dayName = (d: string) => new Date(d + "T12:00:00").toLocaleDateString(undefined, { day: "numeric", month: "short" }).replace(" ", "\u00a0"); // "Nov 20" never splits
 // a time with its day when it isn't today (Needs attention rows): "1:52 AM", "yesterday 1:52 AM", "Nov 21, 1:52 AM"
 export function dayClock(t: string | Date, now = new Date()): string {
   const d = new Date(t), y = new Date(now.getTime() - 864e5), day = (x: Date) => x.toDateString();
