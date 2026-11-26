@@ -83,6 +83,8 @@ type Queue interface {
 	// OutputFolder is a library's folder for new files with "Next to each library" (V5a), or why it has
 	// none.
 	OutputFolder(libraryID int64, libPath string) (dir string, fromOverride bool, problem *jobs.FolderProblem, err error)
+	// Libraries is every library, for checking a filled-in folder for new files against them (#764 P2).
+	Libraries() ([]jobs.Library, error)
 	// LeaseOf, RenewLease and HoldsLease: a running job's lease (V7a).
 	LeaseOf(id int64) (string, error)
 	RenewLease(id int64, lease string) (bool, error)
@@ -1663,6 +1665,15 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 			}
 			if vars.HasDotDot(d) { // review-592 follow-up: a setting saved before publish refused '..' beside a template could still climb out once filled in
 				return "", failed(fmt.Sprintf("The folder for new files came out as %q, which has a '..' in it, so nothing was converted. Your original was not touched. Write the folder out in full in %s, then press Retry.", d, where), errors.New("folder for new files: its template made a '..' segment"))
+			}
+			libs, err := w.Queue.Libraries()
+			if err != nil {
+				return "", retryable(failed("The libraries could not be read, so converting did not start. Your original was not touched. Press Retry.", err), retryGeneral)
+			}
+			for _, l := range libs { // #764 P2: a filled-in folder inside a library, or holding one, would have its new files converted again
+				if jobs.OutputInside(d, l.Path) {
+					return "", failed(fmt.Sprintf("The folder for new files came out as %q, which is inside the library at %q (or holds it), so new files would be converted again. Your original was not touched. Change it in %s, then press Retry.", d, l.Path, where), errors.New("folder for new files: its filled-in folder is inside a library"))
+				}
 			}
 			dir = d
 		}

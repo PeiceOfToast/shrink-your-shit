@@ -560,12 +560,12 @@ func outputUsable(w http.ResponseWriter, store *jobs.Store, flowID int64, t rule
 			writeErrorWith(w, http.StatusBadRequest, problem.Code, problem.Message+" Nothing was changed.", map[string]any{"folder": problem.Folder, "reason": problem.Reason})
 			return false
 		}
-		if jobs.SystemFolder(dir) || jobs.SystemFolder(resolved(dir)) {
+		if jobs.SystemFolder(dir) || jobs.SystemFolder(jobs.Resolved(dir)) {
 			apiError(w, http.StatusBadRequest, "system_folder", "New files for "+l.Name+" would go to "+dir+", a system folder. Pick a folder in the library's Output tab. Nothing was changed.")
 			return false
 		}
 		for _, lp := range otherLibraries(store, l.ID) {
-			if outputInside(dir, lp) {
+			if jobs.OutputInside(dir, lp) {
 				apiError(w, http.StatusBadRequest, "inside_library", "New files for "+l.Name+" would go to "+dir+", which is inside the library at "+lp+" (or holds it), so they would be converted again. Pick a folder in the library's Output tab. Nothing was changed.")
 				return false
 			}

@@ -292,14 +292,14 @@ func outputBlockers(store *jobs.Store, except int64, dir string, moreLibraries .
 		return out
 	}
 	dir = filepath.Clean(dir)
-	real := resolved(dir)                                  // links followed, so an alias can't hide a folder inside a library (review 6cafc6f)
+	real := jobs.Resolved(dir)                             // links followed, so an alias can't hide a folder inside a library (review 6cafc6f)
 	if jobs.SystemFolder(dir) || jobs.SystemFolder(real) { // whoever the server runs as (ui-shop QA: root could write /etc)
 		add("system_folder", "This is a system folder. Choose a folder for your videos.")
 		return out
 	}
 	for _, lp := range append(moreLibraries, otherLibraries(store, except)...) { // moreLibraries: one being added or moved
-		if outputInside(dir, lp) {
-			if inside(resolved(lp), real) { // the folder holds the library (outputInside also catches the reverse)
+		if jobs.OutputInside(dir, lp) {
+			if jobs.Inside(jobs.Resolved(lp), real) { // the folder holds the library (outputInside also catches the reverse)
 				add("inside_library", "This folder contains the library. Choose a folder outside it, or the new files would be scanned and converted again.")
 			} else {
 				add("inside_library", "This folder is inside the library, so new files would be converted again. Pick a folder outside "+lp+".")
@@ -326,27 +326,6 @@ func outputBlockers(store *jobs.Store, except int64, dir string, moreLibraries .
 	return out
 }
 
-// inside reports whether path is dir itself or inside it.
-func inside(path, dir string) bool {
-	rel, err := filepath.Rel(dir, path)
-	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
-}
-
-// resolved is path with its links followed, as far as it exists (a folder for new files may not exist
-// yet: its existing parent is resolved and the rest added back).
-func resolved(path string) string {
-	rest := ""
-	for p := path; ; p = filepath.Dir(p) {
-		if r, err := filepath.EvalSymlinks(p); err == nil {
-			return filepath.Join(r, rest)
-		}
-		if filepath.Dir(p) == p {
-			return path
-		}
-		rest = filepath.Join(filepath.Base(p), rest)
-	}
-}
-
 // folderRefused answers 400 when library lib (being added: ID 0; or moved: its new Path) would use
 // flow flowID whose new files go to a folder inside or around it, or to none (V5a: "Next to each
 // library" with no usable folder), or when lib's folder would hold another library's new files:
@@ -364,7 +343,7 @@ func folderRefused(w http.ResponseWriter, store *jobs.Store, flowID int64, lib j
 				return refuse(b.Code, b.Message)
 			}
 			for _, lp := range otherLibraries(store, lib.ID) {
-				if dir != "" && outputInside(dir, lp) {
+				if dir != "" && jobs.OutputInside(dir, lp) {
 					return refuse("inside_library", "This flow saves this library's new files to "+dir+", which is inside the library at "+lp+" (or holds it), so new files would be converted again. Choose another folder. Nothing was changed.")
 				}
 			}
@@ -380,7 +359,7 @@ func folderRefused(w http.ResponseWriter, store *jobs.Store, flowID int64, lib j
 			continue
 		}
 		for _, part := range f.Template.Parts() {
-			if dir, _ := libraryFolder(part, m); dir != "" && outputInside(dir, lib.Path) {
+			if dir, _ := libraryFolder(part, m); dir != "" && jobs.OutputInside(dir, lib.Path) {
 				return refuse("inside_library", lib.Path+" holds "+dir+", where "+m.Name+"'s new files go, so they would be converted again. Choose another folder. Nothing was changed.")
 			}
 		}
@@ -415,18 +394,11 @@ func otherLibraries(store *jobs.Store, except int64) []string {
 	return out
 }
 
-// outputInside reports whether new files saved to dir would land inside library folder lib, or around
-// it (links followed, so an alias can't hide it, review 6cafc6f): they would be converted again.
-func outputInside(dir, lib string) bool {
-	real, lr := resolved(filepath.Clean(dir)), resolved(filepath.Clean(lib))
-	return inside(real, lr) || inside(lr, real)
-}
-
 // outputInsideBlocker is the refusal of a library at lib whose flow saves new files to dir inside or
 // around it (nil if not): adding or moving the library answers it, and so does POST /api/libraries/check
 // with that folder, so first run can say it before the workflow is published (ui-shop 23:37Z).
 func outputInsideBlocker(dir, lib string) *doctor.Issue {
-	if !filepath.IsAbs(dir) || !outputInside(dir, lib) {
+	if !filepath.IsAbs(dir) || !jobs.OutputInside(dir, lib) {
 		return nil
 	}
 	return &doctor.Issue{Code: "inside_library", Message: "This flow saves new files to " + dir + ", which is inside this library (or holds it), so new files would be converted again. Choose another flow, or change the flow's folder. Nothing was changed."}
