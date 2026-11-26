@@ -10,7 +10,6 @@ import { createWorkflow, getDraft, getGuideInfo, previewGuide, publish, saveAnsw
 import { applyGoal, basicDoesntAsk, basicSave, canBasic, GOAL_FIELDS, languagesSent, questionCount, QUESTION_OF_FIELD, skipOn, subtitleChoices, type Answers, type Goal, type GuideInfo } from "../guide";
 import type { Issue } from "../types/v1";
 import type { ValidationIssue, WorkflowRevision } from "../types/v2";
-import { tablistKey } from "../tablistKeys";
 
 const FS = { border: 0, padding: 0, margin: 0 } as const;
 const GOALS: [Goal, string][] = [["smaller", "Smaller files that still look the same"], ["every_device", "Files that play on every device"], ["both", "Both: small and plays on most devices"]];
@@ -93,10 +92,10 @@ export function FlowTabs({ id, on }: { id: string; on: "basic" | "advanced" }) {
   const can = g ? canBasic(g) : true;
   return (
     <div className="stack" style={{ gap: 6 }}>
-      <div className="tabs" role="tablist" aria-label="Edit as" onKeyDown={tablistKey}>
-        <button role="tab" type="button" tabIndex={on === "basic" ? 0 : -1} aria-selected={on === "basic"} aria-disabled={!can} title={!can ? g?.why : undefined}
+      <div className="tabs" role="tablist" aria-label="Edit as">
+        <button role="tab" type="button" aria-selected={on === "basic"} aria-disabled={!can} title={!can ? g?.why : undefined}
           onClick={() => can && on !== "basic" && navigate("/workflows/" + id + "/basic")}>Basic</button>
-        <button role="tab" type="button" tabIndex={on === "advanced" ? 0 : -1} aria-selected={on === "advanced"} onClick={() => on !== "advanced" && navigate("/workflows/" + id)}>Advanced</button>
+        <button role="tab" type="button" aria-selected={on === "advanced"} onClick={() => on !== "advanced" && navigate("/workflows/" + id)}>Advanced</button>
       </div>
     </div>
   );
