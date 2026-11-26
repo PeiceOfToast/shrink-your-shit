@@ -41,7 +41,7 @@ function Lines({ lines }: { lines: string[] }) {
   );
 }
 
-type ActionState = { s: "idle" } | { s: "busy" } | { s: "done" } | { s: "failed"; message: string };
+type ActionState = { s: "idle" } | { s: "busy" } | { s: "done"; line?: string } | { s: "failed"; message: string };
 
 // A Needs attention row shows the server's sentences as they are. Its level sets the tile and pill tone, and its
 // action runs through the method and path the server named.
@@ -51,7 +51,7 @@ function AttentionRow({ a }: { a: Attention }) {
   const run = () => {
     setState({ s: "busy" });
     api.runAction(a.action.method, a.action.path).then(
-      () => setState({ s: "done" }),
+      (r) => setState({ s: "done", line: r.line }),
       (e: unknown) => setState({ s: "failed", message: e instanceof ApiError ? e.message : "Couldn't do that." }),
     );
   };
@@ -71,8 +71,15 @@ function AttentionRow({ a }: { a: Attention }) {
         )}
         <span className="hint">
           {a.means}{" "}
-          {state.s === "busy" && "Working…"}
-          {state.s === "done" && "Started."}
+          {state.s === "busy" && (a.action.path.endsWith("/capabilities/test") ? "Testing…" : "Working…")}
+          {state.s === "done" &&
+            (state.line ? (
+              <>
+                {state.line} {a.link && <Link to={a.link}>See on Workers</Link>}
+              </>
+            ) : (
+              "Started."
+            ))}
           {(state.s === "idle" || state.s === "failed") && (
             <button type="button" className="linklike" onClick={run}>
               {a.action.label}

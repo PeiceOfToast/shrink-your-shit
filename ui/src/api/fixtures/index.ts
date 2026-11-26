@@ -52,7 +52,7 @@ export const ATTENTION: Attention[] = [
     count: 3,
     latestAt: minsAgo(20),
     action: { label: "Test the encoders", method: "POST", path: "/api/v2/workers/this-computer/capabilities/test" },
-    link: null,
+    link: "/workers/this-computer",
   },
   {
     id: "bear",

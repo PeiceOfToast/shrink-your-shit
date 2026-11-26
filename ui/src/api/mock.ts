@@ -96,12 +96,13 @@ export function testEncoders(workerId: string): Promise<{ line: string }> {
 
 // The generic action behind a Needs attention row: it calls the method and path the server named.
 // Only the routes this mock knows answer; anything else fails with a sentence the row shows as it is.
-export function runAction(method: string, path: string): Promise<void> {
+// The encoder test answers with one result sentence; the other routes answer with nothing to show.
+export function runAction(method: string, path: string): Promise<{ line?: string }> {
   const enc = /^\/api\/v2\/workers\/([^/]+)\/capabilities\/test$/.exec(path);
-  if (method === "POST" && enc) return testEncoders(enc[1]).then(() => undefined);
+  if (method === "POST" && enc) return testEncoders(enc[1]);
   const share = /^\/api\/v2\/shares\/([^/]+)\/reconnect$/.exec(path);
-  if (method === "POST" && share) return reconnectShare(share[1]).then(() => undefined);
-  if (method === "POST" && path === "/api/v2/jobs/actions") return respond(() => undefined);
+  if (method === "POST" && share) return reconnectShare(share[1]).then(() => ({}));
+  if (method === "POST" && path === "/api/v2/jobs/actions") return respond(() => ({}));
   return Promise.reject(new ApiError("unknown_action", "That action isn't available here."));
 }
 
