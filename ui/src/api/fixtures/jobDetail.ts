@@ -16,6 +16,15 @@ const DECISIONS = [
 const DURATIONS = [1100, 3200, 252000, 4000, 900, 1400];
 const BEFORE_BYTES = 38.4e9;
 
+// "14:02" → seconds since midnight; "11:48" or "0:42" (took) → seconds; seconds → "HH:MM:SS".
+const clockSec = (hm: string) => {
+  const [h, m] = hm.split(":").map(Number);
+  return h * 3600 + m * 60;
+};
+const durSec = (t: string) => t.split(":").map(Number).reduce((a, n) => a * 60 + n, 0);
+const clock = (t: number) =>
+  [Math.floor(t / 3600), Math.floor((t % 3600) / 60), t % 60].map((n) => String(n).padStart(2, "0")).join(":");
+
 // The settings and measurements each step used (page 03 "values used").
 const VALUES: LogValue[][] = [
   [{ name: "Library", value: "Movies", from: "Library setting" }],
@@ -92,6 +101,12 @@ export function jobDetail(job: Job): JobDetail {
   const sizeAfter = afterBytes != null ? `${(afterBytes / 1e9).toFixed(1)} GB` : null;
   const path = `/media/${job.library.toLowerCase().replace(/\s+/g, "-")}/${job.file}`;
 
+  // Finish = start + took, so Took always matches Started → Finished.
+  const startSec = clockSec(job.started ?? "14:02");
+  const tookSec = job.when.startsWith("took") ? durSec(job.when.replace("took ", "")) : null;
+  const startedAt = job.state === "waiting" || job.state === "skipped" ? null : clock(startSec);
+  const finishedAt = (done || failed) && tookSec != null ? clock(startSec + tookSec) : null;
+
   // Before and after, in the order the page groups them. Changed rows say what happened ("removed", "new").
   const media: MediaRow[] = [
     { group: "General", field: "Duration", before: "1:58:12", after: done ? "1:58:12" : null, changed: false },
@@ -107,9 +122,9 @@ export function jobDetail(job: Job): JobDetail {
     { time: "14:00", level: "info", text: `Queued by the ${job.library} scan` },
     { time: "14:01", level: "info", text: `Picked up by ${job.worker || "a worker"}` },
     ...(failed
-      ? [{ time: "14:06", level: "error" as const, text: `Failed: ${job.step}` }]
+      ? [{ time: finishedAt ?? "14:06", level: "error" as const, text: `Failed: ${job.step}` }]
       : done
-        ? [{ time: "14:18", level: "info" as const, text: "Finished · original moved to the trash" }]
+        ? [{ time: finishedAt ?? "14:18", level: "info" as const, text: "Finished · original moved to the trash" }]
         : []),
   ];
   return {
@@ -119,14 +134,14 @@ export function jobDetail(job: Job): JobDetail {
     worker: job.worker || "—",
     attempt: failed ? 2 : 1,
     // A waiting or skipped job never started.
-    startedAt: job.state === "waiting" || job.state === "skipped" ? null : (job.started ?? "14:02"),
+    startedAt,
     took: job.when.startsWith("took") ? job.when.replace("took ", "") : null,
-    finishedAt: done ? "14:18" : failed ? "14:06" : null,
+    finishedAt,
     sizeBefore: "38.4 GB",
     sizeAfter,
     sizeBeforeBytes: BEFORE_BYTES,
     sizeAfterBytes: afterBytes,
-    writtenAt: done ? "14:18" : null,
+    writtenAt: done ? finishedAt : null,
     outputPath: done ? path : null,
     timeLeft: job.state === "running" ? "3 min left" : null,
     original: done ? "In the trash until 16 Nov" : job.state === "running" ? "Not yet" : failed ? "Kept as it was" : "Not touched",

@@ -21,7 +21,7 @@ function toForm(l: LibraryDetail): Form {
   return { name: l.name, path: l.path, watch: l.watch, paused: l.paused, workflowId: l.workflow?.id ?? "" };
 }
 
-export function LibraryPanel({ id }: { id: string }) {
+export function LibraryPanel({ id, onChange }: { id: string; onChange?: () => void }) {
   const lib = useApi(() => api.getLibrary(id), [id]);
   const wfs = useApi(() => api.getWorkflows(), []);
   const [form, setForm] = useState<Form | null>(null);
@@ -69,6 +69,8 @@ export function LibraryPanel({ id }: { id: string }) {
     if (form.path !== saved.path) patch.path = form.path.trim();
     if (form.watch !== saved.watch) patch.watch = form.watch;
     if (form.paused !== saved.paused) patch.paused = form.paused;
+    // Nothing edited: no "Saved." and no request.
+    if (Object.keys(patch).length === 0) return;
     setBusy(true);
     setErr(null);
     setMsg(null);
@@ -79,6 +81,7 @@ export function LibraryPanel({ id }: { id: string }) {
       setSaved(f);
       setMsg("Saved.");
       lib.reload();
+      onChange?.();
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {

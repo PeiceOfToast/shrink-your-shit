@@ -99,7 +99,7 @@ export function Libraries({ selected }: { selected?: string }) {
       </section>
 
       {adding && <AddLibrary onClose={() => navigate("/libraries")} onAdded={(l) => navigate(`/libraries/${l.id}`)} />}
-      {selected && <LibraryPanel key={selected} id={selected} />}
+      {selected && <LibraryPanel key={selected} id={selected} onChange={libs.reload} />}
     </>
   );
 }

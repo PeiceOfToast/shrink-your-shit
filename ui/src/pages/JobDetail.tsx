@@ -86,16 +86,37 @@ export function JobDetail({ id, initialTab }: { id: string; initialTab: "summary
   // Phone width only: the actions after Retry collapse into a ⋯ menu.
   const [more, setMore] = useState(false);
   const titleRef = useRef<HTMLHeadingElement>(null);
+  const acts = useRef<HTMLDivElement>(null);
+  const moreBtn = useRef<HTMLButtonElement>(null);
   const d = detail.data;
+  // A job that doesn't exist has no log, copy or workflow to open: only ‹ › and X stay.
+  const missing = detail.code === "job_not_found";
 
   useEffect(() => {
     titleRef.current?.focus();
   }, [id]);
 
   const close = () => navigate(`/jobs${filterQs}`);
+  // Escape closes an open menu first (focus back on ⋯); a second Escape closes the panel.
   useKeys((e) => {
-    if (e.key === "Escape") close();
+    if (e.key !== "Escape") return;
+    if (more || menu) {
+      setMore(false);
+      setMenu(false);
+      if (more) moreBtn.current?.focus();
+      return;
+    }
+    close();
   });
+  // A press outside the actions row closes the ⋯ menu.
+  useEffect(() => {
+    if (!more) return;
+    const onDown = (e: PointerEvent) => {
+      if (!acts.current?.contains(e.target as Node)) setMore(false);
+    };
+    document.addEventListener("pointerdown", onDown);
+    return () => document.removeEventListener("pointerdown", onDown);
+  }, [more]);
 
   const fallback: Tab = initialTab === "log" || (d && (d.job.state === "failed" || d.job.state === "running")) ? "log" : "summary";
   const tab = picked ?? fallback;
@@ -161,7 +182,7 @@ export function JobDetail({ id, initialTab }: { id: string; initialTab: "summary
               )}
             </span>
           )}
-          <div className="jd-acts">
+          <div className="jd-acts" ref={acts}>
             <button type="button" className="btn ghost sm" aria-label="Previous job" disabled={!nb.data?.prev} onClick={() => go(nb.data?.prev ?? null)}>‹</button>
             <button type="button" className="btn ghost sm" aria-label="Next job" disabled={!nb.data?.next} onClick={() => go(nb.data?.next ?? null)}>›</button>
             {state === "failed" && (
@@ -174,6 +195,7 @@ export function JobDetail({ id, initialTab }: { id: string; initialTab: "summary
             {(state === "running" || state === "waiting") && (
               <button type="button" className="btn sm" disabled={busy} onClick={() => setConfirm("cancel")}>Cancel</button>
             )}
+            {!missing && (
             <span className="jd-menu-wrap">
               <button type="button" className="btn ghost sm" disabled={!d} aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu((m) => !m)}>
                 Download log ▾
@@ -204,12 +226,17 @@ export function JobDetail({ id, initialTab }: { id: string; initialTab: "summary
                 </div>
               )}
             </span>
-            <button type="button" className="btn ghost sm" disabled={!d} onClick={copyAll}>Copy all</button>
-            <Link to="/workflows" className="btn ghost sm">Open in workflow</Link>
+            )}
+            {!missing && (
+              <button type="button" className="btn ghost sm" disabled={!d} onClick={copyAll}>Copy all</button>
+            )}
+            {!missing && <Link to="/workflows" className="btn ghost sm">Open in workflow</Link>}
             </div>
-            <button type="button" className="btn ghost sm jd-more-btn" aria-label="More actions" aria-expanded={more} onClick={() => setMore((m) => !m)}>
-              ⋯
-            </button>
+            {!missing && (
+              <button ref={moreBtn} type="button" className="btn ghost sm jd-more-btn" aria-label="More actions" aria-expanded={more} onClick={() => setMore((m) => !m)}>
+                ⋯
+              </button>
+            )}
           </div>
           <button type="button" className="btn ghost sm jd-close" aria-label="Close" onClick={close}>
             <Icon name="x" />
