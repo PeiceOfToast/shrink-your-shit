@@ -2,7 +2,7 @@
 // the commit, and deleting joins the steps either side.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { deleteNode, moveNode, order } from "./stepEdits.ts";
+import { deleteNode, dropResult, moveNode, order } from "./stepEdits.ts";
 import type { Edge, Node, WorkflowDoc } from "./types/v2.ts";
 
 const node = (id: string, type: string): Node => ({ id, type, typeVersion: 1, config: {}, enabled: true });
@@ -46,6 +46,24 @@ test("the commit never moves", () => {
 
 test("a step that is not in the chain does not move", () => {
   assert.deepEqual(moveNode(base(), "nope", -1), base());
+});
+
+test("a drop after a nudge down and back is not a move, though the document is rebuilt", () => {
+  const before = base();
+  const nudged = moveNode(moveNode(before, "au", -1), "au", 1);
+  assert.notEqual(nudged, before); // a new object, same order
+  assert.equal(ids(nudged), ids(before));
+  assert.deepEqual(dropResult(before, nudged), { moved: false });
+});
+
+test("a drop at a boundary, where the step could not move, is not a move", () => {
+  const before = base();
+  assert.deepEqual(dropResult(before, moveNode(before, "sk", -1)), { moved: false });
+});
+
+test("a drop that changes the running order is a move", () => {
+  const before = base();
+  assert.deepEqual(dropResult(before, moveNode(before, "au", -1)), { moved: true });
 });
 
 test("deleting a middle step joins the steps either side of it", () => {
