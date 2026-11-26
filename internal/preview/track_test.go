@@ -116,8 +116,12 @@ func TestTrackSaysWhereTheNewFileGoes(t *testing.T) {
 		dest              Destination
 	}{
 		{"folder", "folder", "Original: stays as it is; the new file goes to /media/movies (shrunk)", Destination{Folder: "/media/movies (shrunk)"}},
-		{"folder with a problem", "folder", "Original: stays as it is; the new file goes to a folder that can't be used yet: No folder for new files for Movies yet: /media is on a different disk. Pick a folder.",
+		{"folder with a problem", "folder", "Original: stays as it is; No folder for new files for Movies yet: /media is on a different disk. Pick a folder.",
 			Destination{Problem: "No folder for new files for Movies yet: /media is on a different disk. Pick a folder."}},
+		{"folder template, filled for this file", "folder", "Original: stays as it is; the new file goes to /media/Movies/out",
+			Destination{Pattern: "/media/{{library}}/out", Library: "Movies"}},
+		{"folder template with a name the preview can't know", "folder", "Original: stays as it is; the new file goes to a folder named from your pattern /media/{{worker}}/out",
+			Destination{Pattern: "/media/{{worker}}/out", Library: "Movies"}},
 		{"beside", "beside", "Original: stays as it is, next to the new file", Destination{}},
 		{"replace", "replace", "Original: kept in a .syp-trash folder beside it", Destination{}},
 	} {

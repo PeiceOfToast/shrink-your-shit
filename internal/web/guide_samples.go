@@ -67,9 +67,11 @@ func guideSamples(store *jobs.Store, prev *preview.Previewer, lib jobs.Library, 
 	if err != nil {
 		root = lib.Path // the walk then says the folder cannot be opened, as the library Preview does
 	}
-	var dest preview.Destination
+	dest := preview.Destination{Library: lib.Name}
 	if folder, problem := libraryFolder(t, lib); problem != nil {
 		dest.Problem = problem.Message
+	} else if strings.Contains(folder, "{{") {
+		dest.Pattern = folder // filled per file, as the worker fills it
 	} else {
 		dest.Folder = folder
 	}

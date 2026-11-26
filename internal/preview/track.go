@@ -6,9 +6,12 @@ import (
 	"context"
 	"io/fs"
 	"math"
+	"path/filepath"
 	"strings"
 
+	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/vars"
 )
 
 // fullDecodeMaxSec is the longest file the worker plays completely before it keeps the new file (the
@@ -34,10 +37,13 @@ type Track struct {
 	Skipped          bool   `json:"skipped"`
 }
 
-// Destination is where a folder workflow's new files go: Folder when there is one, or Problem (in plain
-// words) when there is none yet. Both are empty when the answers do not keep new files in a folder.
+// Destination is where a folder workflow's new files go: Folder when there is one, Pattern when the folder
+// is a {{ }} template (filled per file, with Library's name), or Problem (in plain words) when there is none
+// yet. All are empty when the answers do not keep new files in a folder.
 type Destination struct {
 	Folder  string
+	Pattern string
+	Library string
 	Problem string
 }
 
@@ -65,7 +71,7 @@ func (p *Previewer) Track(ctx context.Context, root, path string, st fs.FileInfo
 	case "beside":
 		tr.Lines = append(tr.Lines, Line{Kind: "original", Text: "Original: stays as it is, next to the new file"})
 	case "folder":
-		tr.Lines = append(tr.Lines, Line{Kind: "original", Text: folderOriginal(dest)})
+		tr.Lines = append(tr.Lines, Line{Kind: "original", Text: folderOriginal(dest, root, path, st, info)})
 	default:
 		tr.Lines = append(tr.Lines, Line{Kind: "original", Text: "Original: kept in a .syp-trash folder beside it"})
 	}
@@ -90,15 +96,33 @@ func (p *Previewer) Track(ctx context.Context, root, path string, st fs.FileInfo
 	return tr
 }
 
-// folderOriginal says where a folder workflow's new file goes: the folder, or why there is none yet.
-func folderOriginal(d Destination) string {
+// folderOriginal says where a folder workflow's new file goes: the folder, the template's folder for this
+// file, or why there is none yet (the problem's own message names the library).
+func folderOriginal(d Destination, root, path string, st fs.FileInfo, info media.Info) string {
 	switch {
 	case d.Problem != "":
-		return "Original: stays as it is; the new file goes to a folder that can't be used yet: " + d.Problem
+		return "Original: stays as it is; " + d.Problem
+	case d.Pattern != "":
+		if f, ok := fillFolder(d, root, path, st, info); ok {
+			return "Original: stays as it is; the new file goes to " + f
+		}
+		return "Original: stays as it is; the new file goes to a folder named from your pattern " + d.Pattern
 	case d.Folder != "":
 		return "Original: stays as it is; the new file goes to " + d.Folder
 	}
 	return "Original: stays as it is; the new file goes to a folder"
+}
+
+// fillFolder is the folder the template makes for this file: vars.Folder over the file's values, as the
+// worker makes them. ok is false when the template uses a name this preview can't know (the worker's own
+// name, the workflow's revision, the run's variables), or when the folder would not be a full path.
+func fillFolder(d Destination, root, path string, st fs.FileInfo, info media.Info) (string, bool) {
+	src := vars.Source{Path: path, Library: d.Library, LibraryRoot: root, SizeBytes: st.Size(), Info: &info}
+	f, empty := vars.Folder(d.Pattern, src.Values())
+	if len(empty) > 0 || !filepath.IsAbs(f) || vars.HasDotDot(f) {
+		return "", false
+	}
+	return f, true
 }
 
 // encoderName is the software encoder ffmpeg runs for the plan's video ("libx265" and so on), or "".
