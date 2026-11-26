@@ -264,3 +264,50 @@ func TestTokenAddrNeedsData(t *testing.T) {
 		t.Errorf("rc %d: %q", rc, errOut.String())
 	}
 }
+
+// The plain command prints the first folder in tokenDirs with a token, so the hint is plain only when that
+// folder is this service's. An earlier folder with a token, or no token at all, gets the -data form.
+func TestTokenHintMatchesTheFolderTokenCommandReads(t *testing.T) {
+	writeToken := func(dir string) {
+		if err := os.WriteFile(filepath.Join(dir, web.TokenFile), []byte("tok\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mine := t.TempDir()
+	t.Setenv("SYP_DATA", mine) // the service's folder is first in tokenDirs
+	writeToken(mine)
+	if got := tokenHint(mine); got != "shrink-your-shit token" {
+		t.Errorf("own token is the first found: want the plain command, got %q", got)
+	}
+
+	earlier := t.TempDir()
+	t.Setenv("SYP_DATA", earlier) // now an earlier folder holds a token
+	writeToken(earlier)
+	own := filepath.Join(t.TempDir(), "my data") // a folder the default search would not reach
+	if err := os.MkdirAll(own, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := tokenHint(own), "shrink-your-shit token -data "+shellQuote(own); got != want {
+		t.Errorf("earlier folder has a token: want %q, got %q", want, got)
+	}
+	if got := tokenHint(earlier); got != "shrink-your-shit token" {
+		t.Errorf("the folder that is first with a token: want the plain command, got %q", got)
+	}
+
+	// A folder in the search list after the earlier token folder: the old hint named it plain, but the
+	// plain command reads the earlier folder's token, so this folder needs -data.
+	la := t.TempDir()
+	t.Setenv("LOCALAPPDATA", la)
+	laData := filepath.Join(la, "shrink-your-shit", "data")
+	if err := os.MkdirAll(laData, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := tokenHint(laData), "shrink-your-shit token -data "+shellQuote(laData); got != want {
+		t.Errorf("LOCALAPPDATA folder after an earlier token: want %q, got %q", want, got)
+	}
+
+	t.Setenv("SYP_DATA", t.TempDir()) // no token in any folder searched first
+	if got, want := tokenHint(own), "shrink-your-shit token -data "+shellQuote(own); got != want {
+		t.Errorf("no token found: want %q, got %q", want, got)
+	}
+}
