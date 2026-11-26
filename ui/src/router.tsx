@@ -63,6 +63,7 @@ export function resolve(pathname: string): Route {
     if (parts.length === 1) return { name: "libraries" };
     if (parts.length === 2) return { name: "library", id: parts[1] };
   }
+  if (parts[0] === "settings" && parts[1] === "log") return { name: "systemLog" };
   return { name: "placeholder", title: TITLES[parts[0]] ?? "Not found" };
 }
 

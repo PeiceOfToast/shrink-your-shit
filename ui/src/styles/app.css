@@ -1,5 +1,7 @@
 /* Parts the draft does not have: menus, search, dev switcher, placeholder notes. Tokens come from draft-b.css. */
 .app{min-height:100vh}
+/* Paths, card names and file names. The class was used on several pages but never defined. */
+.mono{font-family:var(--mono)}
 .topbar .brand{text-decoration:none;color:var(--text)}
 button.search{background:none;border:1px solid var(--border);color:var(--text2);width:300px;font:inherit;font-size:13px;cursor:pointer;text-align:left}
 .topbar kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--border);border-radius:3px;padding:0 4px;margin-left:auto}
@@ -63,12 +65,29 @@ button.search{background:none;border:1px solid var(--border);color:var(--text2);
 .dlg h2{margin:0 0 14px;font-size:17px;font-weight:700}
 .dlg-actions{justify-content:flex-end;gap:8px;flex-wrap:wrap}
 pre.cmd{margin:8px 0 14px;padding:12px 14px;border:1px solid var(--border);border-radius:calc(var(--radius) - 4px);background:var(--bg);font-family:var(--mono);font-size:13px;white-space:pre-wrap;word-break:break-all;user-select:all}
-/* Fixed columns so every path field starts at the same x, whatever each row's status says. */
-.librow{display:grid;grid-template-columns:220px minmax(0,1fr) 150px 72px;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)}
+/* Fixed columns so every path field starts at the same x: name | path field | Test and status. A failure or
+   "save first" note sits under the field on desktop, and under the last line on a phone. */
+.librow{display:grid;grid-template-columns:240px minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)}
 .librow > label{min-width:0}
 .librow input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent);vertical-align:middle}
+.librow-path{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.librow-field{min-width:0}
+.librow-act{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.librow-msg{grid-column:2;font-size:13px}
+.librow-msg span{display:block}
 @media (max-width:640px){
   .librow{grid-template-columns:1fr}
+  .librow-msg{grid-column:auto}
+}
+
+/* Worker settings: the number inputs are about 120px, not full width. */
+.inp.narrow{width:120px;max-width:100%}
+
+/* Worker page recent jobs at phone width: the Jobs card, with the labelled facts wrapping in one run. */
+@media (max-width:900px){
+  table.tbl.wk-jobs tr{display:flex;flex-wrap:wrap;column-gap:14px;row-gap:4px;padding:10px 14px}
+  table.tbl.wk-jobs td.full{flex-basis:100%}
+  table.tbl.wk-jobs td[data-l]{flex:none}
 }
 
 /* Worker settings: the same gap between every setting. */

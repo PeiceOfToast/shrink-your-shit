@@ -37,7 +37,14 @@ function WorkerRow({ w }: { w: Worker }) {
       </td>
       <td className="num tnum wk-done">{formatCount(w.doneToday)}</td>
       <td className="wk-sub muted sm">
-        {[where, w.gpu?.name, w.now && `Now: ${w.now.file}`].filter(Boolean).join(" · ")}
+        {where}
+        {w.gpu && (
+          <>
+            {" · "}
+            <span className="mono">{w.gpu.name}</span>
+          </>
+        )}
+        {w.now && ` · Now: ${w.now.file}`}
       </td>
     </tr>
   );

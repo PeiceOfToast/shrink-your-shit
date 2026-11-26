@@ -15,7 +15,17 @@ export function AddWorker({ onClose }: { onClose: () => void }) {
   const [denied, setDenied] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
   const pairId = pair.data?.id;
+  const command = pair.data?.command;
+
+  const copy = () => {
+    if (!command) return;
+    const cantCopy = () => setErr("Can't copy here. Select the command and copy it.");
+    // The clipboard API is missing on plain HTTP, so say so rather than fail silently.
+    if (!navigator.clipboard) return cantCopy();
+    navigator.clipboard.writeText(command).then(() => setCopied(true), cantCopy);
+  };
 
   useEffect(() => {
     if (!pairId) return;
@@ -61,7 +71,11 @@ export function AddWorker({ onClose }: { onClose: () => void }) {
             <>
               <p>Run this on the other machine:</p>
               <pre className="cmd">{pair.data.command}</pre>
+              <div className="row">
+                <button type="button" className="btn sm" onClick={copy}>{copied ? "Copied" : "Copy command"}</button>
+              </div>
               <p className="muted sm">The code works until {clock(pair.data.expiresAt)}.</p>
+              {!joined && !denied && !request && <p className="muted">Waiting for the other machine to ask to join…</p>}
               {pair.data.plainHTTP && (
                 <div className="note">
                   <span>This server is reached over plain HTTP, so the code travels unencrypted. Only join on a network you trust.</span>
@@ -85,7 +99,6 @@ export function AddWorker({ onClose }: { onClose: () => void }) {
                   </span>
                 </div>
               )}
-              {!joined && !denied && !request && <p className="muted">Waiting for the other machine to ask to join…</p>}
               {err && <p className="err" role="alert">{err}</p>}
             </>
           )}

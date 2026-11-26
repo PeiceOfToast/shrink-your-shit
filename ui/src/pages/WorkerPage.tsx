@@ -43,6 +43,8 @@ export function WorkerPage({ id }: { id: string }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  // Which Save was just done, so "Saved." shows beside that Save button.
+  const [savedWhere, setSavedWhere] = useState<"settings" | "libs" | null>(null);
 
   const w = worker.data;
 
@@ -65,6 +67,7 @@ export function WorkerPage({ id }: { id: string }) {
     setBusy(true);
     setErr(null);
     setMsg(null);
+    setSavedWhere(null);
     try {
       await fn();
       after?.();
@@ -90,7 +93,7 @@ export function WorkerPage({ id }: { id: string }) {
     if (form.encoder !== saved.encoder) patch.primaryEncoder = form.encoder === "auto" ? null : form.encoder;
     if (Object.keys(patch).length === 0) return;
     run(() => api.patchWorker(id, patch), () => {
-      setMsg("Saved.");
+      setSavedWhere("settings");
       worker.reload();
     });
   };
@@ -102,7 +105,7 @@ export function WorkerPage({ id }: { id: string }) {
       .map(([libraryId, l]) => ({ libraryId, workerPath: l.workerPath.trim(), mode: l.mode }));
   const saveLibs = () => {
     run(() => api.patchWorker(id, { libraries: tickedList() }), () => {
-      setMsg("Saved.");
+      setSavedWhere("libs");
       worker.reload();
     });
   };
@@ -190,7 +193,7 @@ export function WorkerPage({ id }: { id: string }) {
             <label className="lbl" htmlFor="w-slots">Files at once</label>
             <input
               id="w-slots"
-              className="inp"
+              className="inp narrow"
               type="number"
               min={1}
               max={8}
@@ -202,7 +205,7 @@ export function WorkerPage({ id }: { id: string }) {
             <label className="lbl" htmlFor="w-gpu">Graphics slots</label>
             <input
               id="w-gpu"
-              className="inp"
+              className="inp narrow"
               type="number"
               min={0}
               max={8}
@@ -212,17 +215,17 @@ export function WorkerPage({ id }: { id: string }) {
             />
             {w.gpu ? (
               <div className="hint">
-                <span className="mono">{w.gpu.name}</span>.{" "}
-                <button type="button" className="btn ghost sm" onClick={testEncoders} disabled={busy}>Test the encoders</button>
+                <span className="mono">{w.gpu.name}</span>
               </div>
             ) : (
               <div className="hint">No graphics card found, so files convert on the processor.</div>
             )}
           </div>
           <div className="field">
-            <span className="lbl">Hours it may work</span>
+            <label className="lbl" htmlFor="w-anytime">Hours it may work</label>
             <label className="row" style={{ gap: 8 }}>
               <input
+                id="w-anytime"
                 type="checkbox"
                 checked={form.anyTime}
                 onChange={(e) => setForm({ ...form, anyTime: e.target.checked })}
@@ -259,8 +262,12 @@ export function WorkerPage({ id }: { id: string }) {
                 <option key={o.value} value={o.value}>{o.label}</option>
               ))}
             </select>
+            <div className="row">
+              <button type="button" className="btn sm" onClick={testEncoders} disabled={busy}>Test the encoders</button>
+            </div>
           </div>
           <div className="row" style={{ justifyContent: "flex-end" }}>
+            {savedWhere === "settings" && <span className="muted sm" role="status">Saved.</span>}
             <button type="button" className="btn primary sm" onClick={saveSettings} disabled={!settingsDirty || busy}>Save</button>
           </div>
         </section>
@@ -277,40 +284,50 @@ export function WorkerPage({ id }: { id: string }) {
             // Test checks the saved path (page 10), so it waits until the field matches what is saved.
             const savedPath = w.libraries.find((x) => x.libraryId === l.id)?.workerPath ?? "";
             const unsaved = row.workerPath.trim() !== savedPath.trim();
+            const failed = row.ticked && t.state === "failed" && t.message;
+            const waitingForSave = row.ticked && unsaved && !!row.workerPath.trim();
             return (
               <div className="librow" key={l.id}>
-                <label>
+                <label className="librow-name">
                   <input
                     type="checkbox"
                     checked={row.ticked}
                     onChange={(e) => setLibForm({ ...libForm, [l.id]: { ...row, ticked: e.target.checked } })}
                   />{" "}
                   <b>{l.name}</b>
-                  <span className="muted xs mono"> {l.path}</span>
+                  <span className="librow-path muted xs mono">{l.path}</span>
                 </label>
-                <input
-                  aria-label={`Path on ${w.name} for ${l.name}`}
-                  className="inp mono"
-                  placeholder="Path on this worker"
-                  value={row.workerPath}
-                  disabled={!row.ticked}
-                  onChange={(e) => setLibForm({ ...libForm, [l.id]: { ...row, workerPath: e.target.value } })}
-                />
-                <span className="xs">
-                  <span className={`pill ${t.state === "ok" ? "ok" : t.state === "failed" ? "bad" : t.state === "pending" ? "run" : ""}`}>
-                    {TEST_TEXT[t.state]}
-                  </span>
-                  {t.state === "failed" && t.message && <span className="bad"> {t.message}</span>}
-                  {unsaved && row.ticked && row.workerPath.trim() && <span className="muted"> Save to test this path</span>}
-                </span>
-                <button
-                  type="button"
-                  className="btn ghost sm"
-                  onClick={() => testPath(l.id)}
-                  disabled={!row.ticked || !row.workerPath.trim() || unsaved || t.state === "pending"}
-                >
-                  Test
-                </button>
+                <div className="librow-field">
+                  <input
+                    aria-label={`Path on ${w.name} for ${l.name}`}
+                    className="inp mono"
+                    placeholder="Path on this worker"
+                    value={row.workerPath}
+                    disabled={!row.ticked}
+                    onChange={(e) => setLibForm({ ...libForm, [l.id]: { ...row, workerPath: e.target.value } })}
+                  />
+                </div>
+                <div className="librow-act">
+                  <button
+                    type="button"
+                    className="btn sm"
+                    onClick={() => testPath(l.id)}
+                    disabled={!row.ticked || !row.workerPath.trim() || unsaved || t.state === "pending"}
+                  >
+                    Test
+                  </button>
+                  {row.ticked && (
+                    <span className={`pill ${t.state === "ok" ? "ok" : t.state === "failed" ? "bad" : t.state === "pending" ? "run" : ""}`}>
+                      {TEST_TEXT[t.state]}
+                    </span>
+                  )}
+                </div>
+                {(failed || waitingForSave) && (
+                  <div className="librow-msg xs">
+                    {failed && <span className="bad">{t.message}</span>}
+                    {waitingForSave && <span className="muted">Save to test this path</span>}
+                  </div>
+                )}
               </div>
             );
           })}
@@ -318,6 +335,7 @@ export function WorkerPage({ id }: { id: string }) {
             <p className="muted sm">New: {w.newLibraries.map((l) => l.name).join(", ")}, not taken yet.</p>
           )}
           <div className="row" style={{ justifyContent: "flex-end" }}>
+            {savedWhere === "libs" && <span className="muted sm" role="status">Saved.</span>}
             <button type="button" className="btn primary sm" onClick={saveLibs} disabled={!libsDirty || busy}>Save</button>
           </div>
         </section>
@@ -333,7 +351,7 @@ export function WorkerPage({ id }: { id: string }) {
         {jobs.error && !jobs.data && <p className="bad pad">Can't load this worker's jobs.</p>}
         {jobs.data && jobs.data.items.length === 0 && <p className="muted pad">No jobs yet.</p>}
         {jobs.data && jobs.data.items.length > 0 && (
-          <table className="tbl">
+          <table className="tbl wk-jobs">
             <thead>
               <tr>
                 <th>Status</th>
