@@ -319,7 +319,7 @@ func TestUnreadableFoldersInsideAreANote(t *testing.T) {
 	if !r.OK || r.VideoCount != 1 {
 		t.Fatalf("%+v", r)
 	}
-	if n := r.Notes[0]; n.Code != "unreadable_folders" || n.Message != "2 folders inside couldn't be read; files in them won't be converted." {
+	if n := r.Notes[0]; n.Code != "unreadable_folders" || n.Message != "2 folders inside couldn't be read; files in them won't be converted. Until they can be read or are on the flow's Ignore list, the library's count and last scan time can stay as they were." {
 		t.Errorf("%+v", r.Notes)
 	}
 }
@@ -356,7 +356,7 @@ func TestHealthCarriesLibraryNotes(t *testing.T) {
 	if lib := got["library:1"]; lib.Status != "bad" || !strings.Contains(lib.Detail, "free on this disk") {
 		t.Errorf("the blocker: %+v", lib)
 	}
-	if n := got["library:1:unreadable_folders"]; n.Status != "warn" || n.Detail != "1 folder inside couldn't be read; files in it won't be converted." {
+	if n := got["library:1:unreadable_folders"]; n.Status != "warn" || n.Detail != "1 folder inside couldn't be read; files in it won't be converted. Until it can be read or is on the flow's Ignore list, the library's count and last scan time can stay as they were." {
 		t.Errorf("the unreadable note: %+v", n)
 	}
 	if n := got["library:1:hardlinks"]; n.Status != "warn" || !strings.Contains(n.Detail, "shared with another folder") {

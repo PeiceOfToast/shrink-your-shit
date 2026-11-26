@@ -642,9 +642,9 @@ func (c *Checker) Folder(ctx context.Context, path string) (r FolderReport) {
 	if unreadable == 1 {
 		// A note, not a blocker: a disk's root often holds a folder only the system may open
 		// (lost+found), and the rest of the library is still usable.
-		r.Notes = append(r.Notes, Issue{Code: "unreadable_folders", Message: "1 folder inside couldn't be read; files in it won't be converted."})
+		r.Notes = append(r.Notes, Issue{Code: "unreadable_folders", Message: "1 folder inside couldn't be read; files in it won't be converted. Until it can be read or is on the flow's Ignore list, the library's count and last scan time can stay as they were."})
 	} else if unreadable > 1 {
-		r.Notes = append(r.Notes, Issue{Code: "unreadable_folders", Message: fmt.Sprintf("%d folders inside couldn't be read; files in them won't be converted.", unreadable)})
+		r.Notes = append(r.Notes, Issue{Code: "unreadable_folders", Message: fmt.Sprintf("%d folders inside couldn't be read; files in them won't be converted. Until they can be read or are on the flow's Ignore list, the library's count and last scan time can stay as they were.", unreadable)})
 	}
 	if len(tools.Hardware) == 0 {
 		r.Notes = append(r.Notes, Issue{Code: "no_hw_encoder", Message: "Not found. That is fine."})

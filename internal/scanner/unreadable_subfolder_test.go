@@ -18,8 +18,8 @@ func TestUnreadableSubfolderKeepsItsFilesState(t *testing.T) {
 	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
 		t.Skip("chmod does not stop reads on Windows or as root")
 	}
-	for _, mode := range []os.FileMode{0o000, 0o311} { // 000: nothing; 0311: search but not read
-		t.Run(map[os.FileMode]string{0o000: "000", 0o311: "0311"}[mode], func(t *testing.T) {
+	for _, mode := range []os.FileMode{0o000, 0o311, 0o644} { // 000: nothing; 0311: search but not read; 0644: list but not search
+		t.Run(map[os.FileMode]string{0o000: "000", 0o311: "0311", 0o644: "0644"}[mode], func(t *testing.T) {
 			s, st, _, _ := setup(t, hevcBig)
 			libs, _ := st.Libraries()
 			l := libs[0]

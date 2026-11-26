@@ -170,8 +170,8 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 				return nil
 			}
 			if d.IsDir() {
-				// lost+found is a disk's root folder, root-only and never media: skipped here, not in SkipDir, which
-				// the doctor's unreadable-folder note also uses
+				// lost+found is skipped at any depth below the library (it is a disk root's folder, never media): here,
+				// not in SkipDir, which the doctor's unreadable-folder note also uses
 				if path != lib && (SkipDir(d.Name()) || d.Name() == "lost+found") {
 					return fs.SkipDir
 				}
@@ -184,6 +184,10 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 			// listing's size and time can lag behind the file's
 			info, err := os.Lstat(path)
 			if err != nil {
+				if !errors.Is(err, fs.ErrNotExist) { // listed but not searchable (mode 0644): its files are not seen
+					unread = append(unread, filepath.Dir(path))
+					log.Printf("scan: %s: cannot read the folder %s: its files are not seen, the library is not recorded this scan; the next scan tries again (if it is not media, add it to the flow's Ignore list)", lib, filepath.Dir(path))
+				}
 				return nil
 			}
 			seen[path], sizes[path] = true, info.Size()

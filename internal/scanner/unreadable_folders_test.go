@@ -23,6 +23,12 @@ func TestUnreadableLostFoundStillRecordsTheLibrary(t *testing.T) {
 	libs, _ := st.Libraries()
 	l := libs[0]
 	doneOriginal(t, st, l, "kept.mkv")
+	scanLibrary(s, l) // the first scan, before lost+found exists
+	before, _ := st.GetLibrary(l.ID)
+	if before.LastScanVideos == 0 {
+		t.Fatal("the first scan recorded no videos; the test needs some")
+	}
+
 	lf := filepath.Join(l.Path, "lost+found")
 	if err := os.Mkdir(lf, 0o755); err != nil {
 		t.Fatal(err)
@@ -31,18 +37,13 @@ func TestUnreadableLostFoundStillRecordsTheLibrary(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.Chmod(lf, 0o755) }) // so TempDir can be removed
-	scanLibrary(s, l)
-	before, _ := st.GetLibrary(l.ID)
-	if before.LastScanVideos == 0 {
-		t.Fatal("the first scan recorded no videos; the test needs some")
-	}
 
 	os.Remove(filepath.Join(l.Path, "kept.mkv")) // a real deletion, with lost+found still unreadable
 	scanLibrary(s, l)
 	after, _ := st.GetLibrary(l.ID)
-	if after.LastScanVideos != before.LastScanVideos-1 {
-		t.Errorf("last scan %d videos after the original was deleted; want %d recorded: an unreadable lost+found froze the library",
-			after.LastScanVideos, before.LastScanVideos-1)
+	if after.LastScanVideos != before.LastScanVideos-1 || after.LastScan == "" || after.LastScan < before.LastScan {
+		t.Errorf("after the original was deleted with an unreadable lost+found: last scan %d videos at %q; want %d recorded at a time not before %q: lost+found froze the library",
+			after.LastScanVideos, after.LastScan, before.LastScanVideos-1, before.LastScan)
 	}
 	if c, _ := st.Counts(); c[l.ID].FreedBytes != 600 {
 		t.Errorf("freed %d after the original was deleted; want 600", c[l.ID].FreedBytes)
