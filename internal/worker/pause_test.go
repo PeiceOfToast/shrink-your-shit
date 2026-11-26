@@ -402,11 +402,14 @@ func TestLibraryRemovalInsideTheSwapFinishesIt(t *testing.T) {
 	}
 }
 
-// positionExec makes the encode report its position every 10 ms until it ends: step 0 is an ffmpeg
-// stuck on one position (it runs until stopped); step > 0 moves on each time and ends after steps.
+// positionExec makes the encode report its position every 100 ms of the watchdog's clock until it ends: step 0 is an
+// ffmpeg stuck on one position (it runs until stopped); step > 0 moves on each time and ends after steps. The
+// clock is the test's fake one, moved by each report: wall-clock timers slip on a loaded CI runner, and a slipped
+// timer is not a stall.
 type positionExec struct {
 	*media.FakeExec
 	step, steps int64
+	clock       *fakeClockAt
 }
 
 func (x positionExec) Stream(ctx context.Context, onLine func(string), name string, args ...string) (string, error) {
@@ -414,11 +417,10 @@ func (x positionExec) Stream(ctx context.Context, onLine func(string), name stri
 		return x.FakeExec.Stream(ctx, onLine, name, args...)
 	}
 	for i := int64(0); x.step == 0 || i < x.steps; i++ {
-		select {
-		case <-ctx.Done():
-			return "", ctx.Err()
-		case <-time.After(10 * time.Millisecond):
+		if err := ctx.Err(); err != nil {
+			return "", err
 		}
+		x.clock.add(100 * time.Millisecond) // this report comes 100 ms of the watchdog's time after the last
 		frame := i
 		if x.step == 0 { // stuck: no frame moves either (a frame count that goes on is an encode that is alive)
 			frame = 0
@@ -438,10 +440,12 @@ func (x positionExec) Stream(ctx context.Context, onLine func(string), name stri
 // Row 17:40Z: an ffmpeg whose position, frames and bytes all hold still is stuck, and the stall stop ends it;
 // one whose position moves on slowly, for longer than StallAfter in all, is not stopped.
 func TestStallStopWaitsForAMovingEncode(t *testing.T) {
+	clock := &fakeClockAt{t: time.Date(2026, 11, 26, 5, 0, 0, 0, time.UTC)}
 	s := newScenario(t)
 	w := s.worker(Replace)
+	w.stallClock = clock.now
 	w.StallAfter = 2 * time.Second
-	w.Exec = positionExec{FakeExec: s.exec}
+	w.Exec = positionExec{FakeExec: s.exec, clock: clock}
 	done := make(chan struct{})
 	go func() { w.RunOne(context.Background()); close(done) }()
 	waitDone(t, done)
@@ -450,10 +454,12 @@ func TestStallStopWaitsForAMovingEncode(t *testing.T) {
 	}
 	s.assertOriginalSafe()
 
+	clock = &fakeClockAt{t: time.Date(2026, 11, 26, 5, 0, 0, 0, time.UTC)}
 	s = newScenario(t)
 	w = s.worker(Replace)
+	w.stallClock = clock.now
 	w.StallAfter = 2 * time.Second
-	w.Exec = positionExec{FakeExec: s.exec, step: 1000, steps: 300} // ~3 s, longer than StallAfter; a report every 10 ms, 1 ms of the film each
+	w.Exec = positionExec{FakeExec: s.exec, step: 1000, steps: 30, clock: clock} // 3 s of the watchdog's time in 30 reports, longer than StallAfter; 1 ms of the film each
 	if _, err := w.RunOne(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -468,11 +474,13 @@ func TestStallStopWaitsForAMovingEncode(t *testing.T) {
 		want jobs.Status
 	}{{1000, jobs.Done}, {0, jobs.Failed}} {
 		scenarioDuration = 0
+		clock = &fakeClockAt{t: time.Date(2026, 11, 26, 5, 0, 0, 0, time.UTC)}
 		s = newScenario(t)
 		scenarioDuration = 100
 		w = s.worker(Replace)
+		w.stallClock = clock.now
 		w.StallAfter = 2 * time.Second
-		w.Exec = positionExec{FakeExec: s.exec, step: c.step, steps: 300}
+		w.Exec = positionExec{FakeExec: s.exec, step: c.step, steps: 30, clock: clock}
 		done := make(chan struct{})
 		go func() { w.RunOne(context.Background()); close(done) }()
 		waitDone(t, done)
