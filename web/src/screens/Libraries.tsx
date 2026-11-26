@@ -6,14 +6,14 @@ import { Empty, LoadFailed, PageHead } from "../PageHead";
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "../Icon";
 import { SignedOut, failed, type Answer } from "../api";
-import { addLibrary, checkFolder, convertEarlierAgain, getEarlierWorkflow, firstFiles, getLibraryV2, getSettings, listLibraries, listLibrariesV2, listWorkflows, patchLibrary, patchLibraryV2, removeLibrary, scanLibrary, setLibraryWorkflow, type WorkflowChoice } from "../libraryApi";
+import { addLibrary, checkFolder, convertEarlierAgain, getEarlierWorkflow, firstFiles, getLibraryV2, getSettings, getTrash, listLibraries, listLibrariesV2, listWorkflows, patchLibrary, patchLibraryV2, removeLibrary, scanLibrary, setLibraryWorkflow, type WorkflowChoice } from "../libraryApi";
 import { listJobs } from "../jobsApi";
 import { useSharesSupported } from "../sharesApi";
 import { Link, navigate, useSearch } from "../router";
 import { Browse } from "../FolderPicker";
 import { onLive } from "../live";
 import { getPublishedDoc, getWorkflow, listWorkflows as listWorkflowDocs } from "../workflowApi";
-import { bytes, count, duration, lastScan, plural } from "../format";
+import { bytes, count, dayName, duration, lastScan, plural } from "../format";
 import { allShownSelected, doneShare, filterCounts, inFilter, keepShown, needsAttention, selectShown, type LibFilter } from "../libraryList";
 import { filesHead, folderNeedsPass, saveEnabled } from "../libraryForm";
 import { useData } from "../useData";
@@ -84,6 +84,8 @@ const FILTERS: [LibFilter, string][] = [["all", "All"], ["watching", "Watching"]
 
 export function Libraries() {
   const libs = useData(listLibrariesV2, [], 3000);
+  // the trash's next deletion day: the same day the Dashboard's "frees from" names
+  const trash = useData(getTrash, [], 3000), trashDay = trash.data?.nextDeleteAt ? dayName(trash.data.nextDeleteAt.slice(0, 10)) : null;
   // user item 3 (design 7.1): each row shows its workflow's summary in full ("Standard · Balanced · ..."), from the workflows list
   const docs = useData(listWorkflowDocs, [], 10000), tag = (l: Library) => { const t = docs.data?.find((w) => w.id === l.workflowId)?.summaryTag ?? ""; return t.trim() === l.workflowName.trim() ? "" : t; }; // review 628ebc3 P2: a workflow named by its summary (the default) shows it once
   useEffect(() => onLive((t) => { if (t === "library.changed") libs.reload(); }), []); // eslint-disable-line react-hooks/exhaustive-deps -- #150: at once
@@ -147,7 +149,7 @@ export function Libraries() {
       {!libs.loaded ? <LibSkeleton /> : libs.error && !libs.data ? <LoadFailed error={libs.error} reload={libs.reload} /> : all.length === 0 ? <Empty icon="i-library" text="No libraries yet. A library is a folder that is watched for videos."><Link className="btn primary" to="/libraries/new"><Icon id="i-plus" />Add library</Link></Empty>
         : items.length === 0 ? <div className="empty">No library matches.</div> : (
         <ul className={"lcards" + (selecting ? " selecting" : "")} aria-label="Library list">
-          {items.map((l) => <LibCard key={l.id} l={l} tag={tag(l)} selecting={selecting} checked={sel.includes(l.id)} onToggle={(on) => setSel(on ? [...sel, l.id] : sel.filter((x) => x !== l.id))} />)}
+          {items.map((l) => <LibCard key={l.id} l={l} tag={tag(l)} trashDay={trashDay} selecting={selecting} checked={sel.includes(l.id)} onToggle={(on) => setSel(on ? [...sel, l.id] : sel.filter((x) => x !== l.id))} />)}
         </ul>)}
       {all.length > 0 && <details className="libhelp"><summary>What Saved and Size now mean</summary>
         <p className="muted sm">Saved is space already freed. A replaced original waits in the trash until its date: it no longer counts in Size now, but it isn't freed yet, which is the 'frees from' figure. Sizes are updated when a library is scanned.</p></details>}
@@ -176,7 +178,7 @@ function LibSkeleton() {
 // One library as a card (design libraries-list): tile, name, a chip line of facts; on the right the status pill and a
 // second line; a thin bar along the bottom edge: the done share (none with no files). The name's link opens the whole
 // card (a stretched link, see shell.css); in select mode the card is the checkbox's and the name is a plain link.
-function LibCard({ l, tag, selecting, checked, onToggle }: { l: Library; tag: string; selecting: boolean; checked: boolean; onToggle: (on: boolean) => void }) {
+function LibCard({ l, tag, trashDay, selecting, checked, onToggle }: { l: Library; tag: string; trashDay: string | null; selecting: boolean; checked: boolean; onToggle: (on: boolean) => void }) {
   const share = doneShare(l.counts), pct = share === null ? null : Math.round(share * 100);
   const fixable = l.status === "path_missing" || l.status === "not_readable"; // Health lists the library's folder check (writable is true for these, so not keyed on it)
   return (
@@ -192,7 +194,7 @@ function LibCard({ l, tag, selecting, checked, onToggle }: { l: Library; tag: st
           <span className="mchip">{shareWait(l) ? "Waiting for " + shareName(l) + " to connect · " : ""}{count(l.counts.waiting)} waiting{paused(l) ? ", not converting" : ""}</span>
           <span className="mchip">{l.scan.lastScanAt ? "Scanned " + lastScan(l.scan.lastScanAt) : "Not scanned yet"}</span>
           {l.bytes.freed > 0 && <span className="mchip"><Icon id="i-check-c" />{bytes(l.bytes.freed)} saved</span>}
-          {l.bytes.waitingToFree > 0 && <span className="mchip"><Icon id="i-trash" />{bytes(l.bytes.waitingToFree)} in the trash</span>}
+          {l.bytes.waitingToFree > 0 && <span className="mchip"><Icon id="i-trash" />{bytes(l.bytes.waitingToFree) + (trashDay ? " to free from " + trashDay : " to free")}</span>}
         </div>
       </div>
       <div className="lside">
