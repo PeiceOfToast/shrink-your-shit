@@ -8,7 +8,7 @@ import { GC_CHOICES, gcLabel } from "../gcLabel";
 import { PageHead } from "../PageHead";
 import { FlowTabs } from "./Guided";
 import { SignedOut, failed, type Answer } from "../api";
-import { afterOnly, beforeSave, deleteNode, groupOf, insertAfter, insertAfterSave, insertQuestion, isQuestion, moveNode, newNode, order, otherwiseOf, setOtherwise, type Otherwise } from "../stepEdits"; // the steps in running order: a property of the document, not data
+import { afterOnly, beforeSave, deleteNode, dropResult, groupOf, insertAfter, insertAfterSave, insertQuestion, isQuestion, moveNode, newNode, order, otherwiseOf, setOtherwise, type Otherwise } from "../stepEdits"; // the steps in running order: a property of the document, not data
 import { useData } from "../useData";
 import { exportWorkflow, getDraft, getLadder, getWorkflow, listTemplates, listWorkflows, patchWorkflow, publish, publishPreview, saveDraft, stepDefinitions, validateDoc, type Checked, type Ladder } from "../workflowApi";
 import { Link, navigate, onLeave, useSearch } from "../router";
@@ -845,7 +845,7 @@ function Editor({ id, w, defs, first, reloadMeta }:{ id: string; w: Workflow; de
     if (!lift) return;
     const { id, doc: d } = lift; setLift(null);
     const l = order(d), k = placeOf(d, id);
-    if (d !== doc) { edit(d); setOrderAt(hist.at + 1); setSaid(`${nameOf(l[k])} moved to step ${k + 1} of ${l.length}.`); }
+    if (dropResult(doc, d).moved) { edit(d); setOrderAt(hist.at + 1); setSaid(`${nameOf(l[k])} moved to step ${k + 1} of ${l.length}.`); }
     else setSaid(`${nameOf(l[k])} stays at step ${k + 1} of ${l.length}.`);
     focusGrip(id);
   };

@@ -65,7 +65,7 @@ export function SignIn() {
       <form className="stack" onSubmit={(e) => (e.preventDefault(), go())}>
         <div className="field"><label htmlFor={field}>{byPassword ? "Password" : "Access token"}</label>
           {/* parity 11-19 #3: Show/Hide in the field, and where to find the token (README "Signing in") */}
-          <div className="pw"><input id={field} className={"input" + (byPassword ? "" : " mono")} type={shown ? "text" : "password"} autoComplete="current-password" spellCheck={false} value={value} aria-invalid={error ? "true" : undefined} aria-describedby={error ? field + "-error" : undefined} onChange={(e) => setValue(e.target.value)} />
+          <div className="pw"><input id={field} className={"input" + (byPassword ? "" : " mono")} type={shown ? "text" : "password"} autoComplete="current-password" spellCheck={false} value={value} aria-invalid={error || limit ? "true" : undefined} aria-describedby={error || limit ? field + "-error" : undefined} onChange={(e) => setValue(e.target.value)} />
             <button className="btn sm icon ghost" type="button" aria-controls={field} aria-pressed={shown} aria-label={byPassword ? "Show the password" : "Show the token"} title={byPassword ? "Show the password" : "Show the token"} onClick={() => setShown(!shown)}><Icon id="i-eye" /></button></div>
           {limit ? (
             // the alert span mounts once and never changes; the count sits outside it, so it isn't read out again

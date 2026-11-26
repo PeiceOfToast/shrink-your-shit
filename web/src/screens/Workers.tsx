@@ -21,6 +21,7 @@ import type { JobItem } from "../types/jobs";
 import { FileName } from "../FileName";
 import { OS_NAMES, encoderChip, formatsChip, graphicsChips, graphicsLine, systemLine, workerBars } from "../workerCards";
 import { runFields } from "../jobCards";
+import { tablistKey } from "../tablistKeys";
 
 // review 61dc891 P2-1: only what the server reports (a remote worker may send no OS or host): no guess, no stray dot
 const going = (w: Worker) => w.status === "busy" || w.status === "online";
@@ -445,7 +446,7 @@ export function WorkerPage({ id }: { id: string }) {
         <StartStop w={w} onDone={(m) => (setSaid(m), d.reload())} />
       </PageHead>
       <p className="sm muted" style={{ marginTop: -8 }}>{[w.host, OS_NAMES[w.os ?? ""], w.arch, w.appVersion, w.kind === "local" ? "built in" : ""].filter(Boolean).join(" · ")}</p>
-      <div className="tabs" role="tablist">{TABS.map(([k, l]) => <button key={k} role="tab" type="button" aria-selected={tab === k} onClick={() => navigate("/workers/" + encodeURIComponent(id) + (k === "overview" ? "" : "?tab=" + k))}>{l}</button>)}</div>
+      <div className="tabs" role="tablist" onKeyDown={tablistKey}>{TABS.map(([k, l]) => <button key={k} role="tab" type="button" tabIndex={tab === k ? 0 : -1} aria-selected={tab === k} onClick={() => navigate("/workers/" + encodeURIComponent(id) + (k === "overview" ? "" : "?tab=" + k))}>{l}</button>)}</div>
       <p className="muted" role="status">{said}</p>
       {tab === "overview" && <>
         <Live w={w} />
