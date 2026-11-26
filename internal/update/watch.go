@@ -28,6 +28,10 @@ const (
 	setupLimit = 20 * time.Minute // an installer run that takes longer is given up
 )
 
+// watchMaxLife bounds how long a watcher can run: two installer runs, two health waits, and some margin for
+// the stops. A record older than this is not a live watcher's, whatever process now holds its PID.
+const watchMaxLife = 2*setupLimit + 2*watchWait + 5*time.Minute
+
 // Watcher decides how a Windows update ends. The fields after Health are the outside world; tests replace them.
 type Watcher struct {
 	PID                int    // the app's process

@@ -186,6 +186,49 @@ func TestRecoverPendingLeavesAnUpdateItsWatcherIsRunning(t *testing.T) {
 	}
 }
 
+// A live PID is not proof the watcher still runs: the record is older than any watcher run, so the PID now belongs
+// to something else, and recovery goes on.
+func TestRecoverPendingProceedsWhenAnOldRecordsPIDIsAlive(t *testing.T) {
+	old := pidAlive
+	pidAlive = func(int) bool { return true }
+	t.Cleanup(func() { pidAlive = old })
+	f := newWatchFixture(t, func(int) bool { return true }, nil, nil)
+	f.w.RunSetup = func(string) error { panic(killed{}) }
+	runKilled(t, func() { f.w.Watch() })
+	p := readPending(f.w.DataDir)
+	if p == nil {
+		t.Fatal("no record after the kill")
+	}
+
+	if err := RecoverPending(f.w.DataDir, "0.2.0", p.At.Add(watchMaxLife)); err != nil {
+		t.Fatal(err)
+	}
+	if readPending(f.w.DataDir) != nil || exists(f.w.NewSetup) || exists(f.w.OldSetup) {
+		t.Fatal("an old record under a live PID was left in place")
+	}
+}
+
+// A fresh record whose PID is alive is the watcher's own run: recovery leaves it alone.
+func TestRecoverPendingLeavesAFreshRecordWhosePIDIsAlive(t *testing.T) {
+	old := pidAlive
+	pidAlive = func(int) bool { return true }
+	t.Cleanup(func() { pidAlive = old })
+	f := newWatchFixture(t, func(int) bool { return true }, nil, nil)
+	f.w.RunSetup = func(string) error { panic(killed{}) }
+	runKilled(t, func() { f.w.Watch() })
+	p := readPending(f.w.DataDir)
+	if p == nil {
+		t.Fatal("no record after the kill")
+	}
+
+	if err := RecoverPending(f.w.DataDir, "0.2.0", p.At.Add(watchMaxLife-time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if readPending(f.w.DataDir) == nil || !exists(f.w.NewSetup) || !exists(f.w.OldSetup) {
+		t.Fatal("a fresh record under a live PID was cleared while its watcher may run")
+	}
+}
+
 // The record's paths are read back from disk: recovery removes only installers in the update folder.
 func TestRecoverPendingWontRemoveFilesOutsideTheUpdateFolder(t *testing.T) {
 	watcherDead(t)

@@ -5,6 +5,7 @@ package update
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -30,14 +31,15 @@ type pendingUpdate struct {
 }
 
 // pidAlive reports whether a process with pid is running (tests replace it). On Windows FindProcess fails when
-// the process is gone; elsewhere a signal 0 asks (EPERM means it exists). A pid of 0 is never alive.
+// the process is gone, or when it exists but may not be opened (access denied); elsewhere a signal 0 asks (EPERM
+// means it exists). A pid of 0 is never alive.
 var pidAlive = func(pid int) bool {
 	if pid <= 0 {
 		return false
 	}
 	p, err := os.FindProcess(pid)
 	if err != nil {
-		return false
+		return errors.Is(err, fs.ErrPermission)
 	}
 	defer p.Release()
 	if runtime.GOOS == "windows" {
@@ -76,7 +78,8 @@ func clearPending(dataDir string) error {
 // RecoverPending finishes an update whose watcher was killed, at the start of a program running as running.
 // It does nothing when there is no record. While the watcher is still running it does nothing at all: the new
 // program can start while the installer is still inside the watcher's run, and the old installer is what the
-// watcher needs if the new program fails. Otherwise:
+// watcher needs if the new program fails. "Running" means its PID is alive and the record is younger than
+// watchMaxLife; an older record is left over whatever holds the PID now. Otherwise:
 //   - running is the new version: the update is done; only the record and installers are left to clear.
 //   - the app's marker for this update is still there: the watcher had put the old version back, and Settle
 //     (which runs next) writes the result. Nothing is written here.
@@ -89,7 +92,7 @@ func RecoverPending(dataDir, running string, now time.Time) error {
 	if p == nil {
 		return nil
 	}
-	if pidAlive(p.Watcher) {
+	if pidAlive(p.Watcher) && now.Sub(p.At) < watchMaxLife {
 		log.Printf("update to %s is still running under its watcher (pid %d); leaving it to finish", p.To, p.Watcher)
 		return nil
 	}
