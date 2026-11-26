@@ -3,6 +3,7 @@ import type { FolderCheck, FolderListing, Library, LibraryDetail, LibraryInput, 
 import { ApiError } from "./errors.ts";
 import { getForcedState, respond } from "./mockState.ts";
 import { FOLDERS, LIBRARIES, PREVIEW, SHARE_FOLDERS, WORKFLOW_SUMMARY, WORKFLOWS } from "./fixtures/libraries.ts";
+import { nextScanFor } from "./schedule.ts";
 
 let rows: Library[] = LIBRARIES.map((l) => ({ ...l }));
 let seq = 0;
@@ -72,11 +73,11 @@ export function createLibrary(input: LibraryInput): Promise<Library> {
       waiting: 0,
       savedBytes: 0,
       savedPct: 0,
-      lastScan: { at: "just now", found: videos, new: videos, changed: 0 },
+      lastScan: { at: new Date().toISOString(), found: videos, new: videos, changed: 0 },
       status: "needs_workflow",
       watch: input.watch ?? "daily",
       paused: false,
-      nextScanAt: null,
+      nextScanAt: nextScanFor(input.watch ?? "daily"),
     };
     rows = [...rows, lib];
     return { ...lib };
@@ -122,11 +123,6 @@ export function patchLibrary(id: string, patch: LibraryPatch): Promise<LibraryDe
     rows = rows.map((r) => (r.id === id ? next : r));
     return { ...next, workers: [{ id: "this-server", name: "this server" }] };
   });
-}
-
-function nextScanFor(w: Watch): string {
-  const hours = w === "hourly" ? 1 : w === "daily" ? 24 : 168;
-  return new Date(Date.now() + hours * 3600_000).toISOString();
 }
 
 export function deleteLibrary(id: string): Promise<{ ok: true }> {

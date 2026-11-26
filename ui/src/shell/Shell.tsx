@@ -1,3 +1,4 @@
+import { ago, dayClock } from "../format/time.ts";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api, formatBytes, formatCount, type Summary } from "../api/index.ts";
 import { useApi } from "../api/useApi.ts";
@@ -89,10 +90,10 @@ function StatusLine({ summary, ok }: { summary?: Summary; ok: boolean }) {
         queue <b>{s ? formatCount(s.queue) : "—"}</b>
       </Link>
       <span className="lg-only">
-        last done <b>{s?.lastDoneAt ?? "—"}</b>
+        last done <b>{s ? ago(s.lastDoneAt) : "—"}</b>
       </span>
       <Link className="lg-only" to="/libraries">
-        next scan <b>{s?.nextScanAt ?? "—"}</b>
+        next scan <b>{s ? dayClock(s.nextScanAt) : "—"}</b>
       </Link>
       <Link className="lg-only" to="/settings/processing">
         disk free <b>{s ? formatBytes(s.diskFreeBytes) : "—"}</b>

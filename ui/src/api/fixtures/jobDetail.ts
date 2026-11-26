@@ -1,4 +1,5 @@
 import type { HistoryLine, Job, JobDetail, JobStep, LogLine, LogStep, LogValue, MediaRow, StepOutcome } from "../types.ts";
+import { minsAgo, plus } from "./clock.ts";
 
 // One job's detail, built from its list row. Shapes follow page 03; the wording is mock text.
 // Mock: finished jobs whose detailed log retention has dropped it (page 03 "no longer kept").
@@ -15,15 +16,6 @@ const DECISIONS = [
 ];
 const DURATIONS = [1100, 3200, 252000, 4000, 900, 1400];
 const BEFORE_BYTES = 38.4e9;
-
-// "14:02" → seconds since midnight; "11:48" or "0:42" (took) → seconds; seconds → "HH:MM:SS".
-const clockSec = (hm: string) => {
-  const [h, m] = hm.split(":").map(Number);
-  return h * 3600 + m * 60;
-};
-const durSec = (t: string) => t.split(":").map(Number).reduce((a, n) => a * 60 + n, 0);
-const clock = (t: number) =>
-  [Math.floor(t / 3600), Math.floor((t % 3600) / 60), t % 60].map((n) => String(n).padStart(2, "0")).join(":");
 
 // The settings and measurements each step used (page 03 "values used").
 const VALUES: LogValue[][] = [
@@ -55,7 +47,9 @@ function outcomesFor(job: Job): StepOutcome[] {
 }
 
 function linesFor(i: number, outcome: StepOutcome, job: Job): LogLine[] {
-  const t = (s: number) => `14:${String(2 + i).padStart(2, "0")}:${String(10 + s).padStart(2, "0")}.204`;
+  // Each step's lines fall a minute apart from the job's start, a few seconds in.
+  const base = job.startedAt ?? minsAgo(0);
+  const t = (s: number) => plus(base, (i * 60 + 10 + s) * 1000 + 204);
   if (outcome === "failed") {
     return [
       { time: t(0), level: "info", text: `Started ${STEP_NAMES[i]}` },
@@ -98,19 +92,16 @@ export function jobDetail(job: Job): JobDetail {
     done && pct
       ? Math.round(BEFORE_BYTES * (pct[2] === "smaller" ? 1 - Number(pct[1]) / 100 : 1 + Number(pct[1]) / 100))
       : null;
-  const sizeAfter = afterBytes != null ? `${(afterBytes / 1e9).toFixed(1)} GB` : null;
   const path = `/media/${job.library.toLowerCase().replace(/\s+/g, "-")}/${job.file}`;
 
   // Finish = start + took, so Took always matches Started → Finished.
-  const startSec = clockSec(job.started ?? "14:02");
-  const tookSec = job.when.startsWith("took") ? durSec(job.when.replace("took ", "")) : null;
-  const startedAt = job.state === "waiting" || job.state === "skipped" ? null : clock(startSec);
-  const finishedAt = (done || failed) && tookSec != null ? clock(startSec + tookSec) : null;
+  const startedAt = job.startedAt;
+  const finishedAt = (done || failed) && startedAt && job.tookMs != null ? plus(startedAt, job.tookMs) : null;
 
   // Before and after, in the order the page groups them. Changed rows say what happened ("removed", "new").
   const media: MediaRow[] = [
-    { group: "General", field: "Duration", before: "1:58:12", after: done ? "1:58:12" : null, changed: false },
-    { group: "General", field: "Size", before: "38.4 GB", after: sizeAfter, changed: true },
+    { group: "General", field: "Duration", kind: "duration", before: 7_092_000, after: done ? 7_092_000 : null, changed: false },
+    { group: "General", field: "Size", kind: "bytes", before: BEFORE_BYTES, after: afterBytes, changed: true },
     { group: "Video", field: "Codec", before: "H.264", after: done ? "HEVC" : null, changed: true },
     { group: "Video", field: "Resolution", before: "1920×1080", after: done ? "1920×1080" : null, changed: false },
     { group: "Audio", field: "Track 1 · English · AC-3 5.1", before: "AC-3 5.1", after: done ? "AC-3 5.1" : null, changed: false },
@@ -118,13 +109,14 @@ export function jobDetail(job: Job): JobDetail {
     { group: "Audio", field: "Stereo · AAC 2.0", before: "—", after: done ? "new" : null, changed: true },
     { group: "Subtitles", field: "Track 1 · English · SRT", before: "SRT", after: done ? "SRT" : null, changed: false },
   ];
+  const base = job.startedAt ?? job.queuedAt ?? minsAgo(0);
   const history: HistoryLine[] = [
-    { time: "14:00", level: "info", text: `Queued by the ${job.library} scan` },
-    { time: "14:01", level: "info", text: `Picked up by ${job.worker || "a worker"}` },
+    { time: plus(base, -2 * 60_000), level: "info", text: `Queued by the ${job.library} scan` },
+    { time: plus(base, -60_000), level: "info", text: `Picked up by ${job.worker || "a worker"}` },
     ...(failed
-      ? [{ time: finishedAt ?? "14:06", level: "error" as const, text: `Failed: ${job.step}` }]
+      ? [{ time: finishedAt ?? base, level: "error" as const, text: `Failed: ${job.step}` }]
       : done
-        ? [{ time: finishedAt ?? "14:18", level: "info" as const, text: "Finished · original moved to the trash" }]
+        ? [{ time: finishedAt ?? base, level: "info" as const, text: "Finished · original moved to the trash" }]
         : []),
   ];
   return {
@@ -135,15 +127,13 @@ export function jobDetail(job: Job): JobDetail {
     attempt: failed ? 2 : 1,
     // A waiting or skipped job never started.
     startedAt,
-    took: job.when.startsWith("took") ? job.when.replace("took ", "") : null,
+    tookMs: job.tookMs,
     finishedAt,
-    sizeBefore: "38.4 GB",
-    sizeAfter,
     sizeBeforeBytes: BEFORE_BYTES,
     sizeAfterBytes: afterBytes,
     writtenAt: done ? finishedAt : null,
     outputPath: done ? path : null,
-    timeLeft: job.state === "running" ? "3 min left" : null,
+    timeLeftMs: job.state === "running" ? 180_000 : null,
     original: done ? "In the trash until 16 Nov" : job.state === "running" ? "Not yet" : failed ? "Kept as it was" : "Not touched",
     failure: failed
       ? { step: job.step.split(" · ")[0], reason: job.step.split(" · ")[1] ?? "The step didn't work", nextAction: "Check that the file plays in another player, then retry.", actionLabel: "Retry" }

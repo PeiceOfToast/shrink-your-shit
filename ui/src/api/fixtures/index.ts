@@ -1,5 +1,8 @@
 import type { Attention, Overview, Summary } from "../types.ts";
 import seriesRaw from "./series.json" with { type: "json" };
+import { localAt, minsAgo } from "./clock.ts";
+import { nextScanFor } from "../schedule.ts";
+import { clock } from "../../format/time.ts";
 
 // Numbers from draft-b/dashboard.html and draft-b/jobs.html (the status line, KPIs, cards and table).
 export const SERIES = seriesRaw as { saved: Overview["savedSeries"]; converted: Overview["filesSeries"] };
@@ -10,7 +13,7 @@ export const OVERVIEW: Overview = {
   converted: 4812,
   convertedPerDay: 11,
   waiting: 1284,
-  nextScan: "02:00",
+  nextScan: nextScanFor("daily"),
   failed24h: 3,
   failedRatePct: 0.6,
   avgShrinkPct: 38,
@@ -30,7 +33,7 @@ export const ATTENTION: Attention[] = [
     id: "enc",
     tile: { icon: "alert", tone: "bad" },
     title: "This computer's graphics encoder failed 3 times today",
-    hint: { text: "It converts on the processor until 18:10, which is slower.", link: { label: "Test the encoders", action: "test-encoders" } },
+    hint: { text: `It converts on the processor until ${clock(localAt(0, 18, 10))}, which is slower.`, link: { label: "Test the encoders", action: "test-encoders" } },
     side: { pill: { label: "Slower", tone: "warn" } },
   },
   {
@@ -46,7 +49,7 @@ export const ATTENTION: Attention[] = [
     tile: { icon: "lib", tone: "warn" },
     title: "Home videos",
     titleHref: "/libraries",
-    hint: { text: "Share not connected since 13:40. Nothing from it converts until it is." },
+    hint: { text: `Share not connected since ${clock(minsAgo(40))}. Nothing from it converts until it is.` },
     side: { pill: { label: "Share not connected", tone: "warn" } },
   },
 ];
@@ -54,8 +57,8 @@ export const ATTENTION: Attention[] = [
 export const SUMMARY: Summary = {
   converting: { running: 2, workers: 3 },
   queue: 1284,
-  lastDoneAt: "4 min ago",
-  nextScanAt: "02:00",
+  lastDoneAt: minsAgo(4),
+  nextScanAt: nextScanFor("daily"),
   diskFreeBytes: 412e9,
   failed24h: 3,
   workersOffline: 1,

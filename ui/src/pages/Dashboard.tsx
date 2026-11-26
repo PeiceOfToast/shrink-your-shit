@@ -1,3 +1,4 @@
+import { clock, dayClock } from "../format/time.ts";
 import { Fragment, useEffect, useState, type MouseEvent } from "react";
 import { api, formatCount, formatGB, type Attention, type Job, type Library } from "../api/index.ts";
 import { useApi } from "../api/useApi.ts";
@@ -125,7 +126,7 @@ function ConvertingRow({ j }: { j: Job }) {
             <Icon name="worker" />
             {j.worker}
           </span>
-          <span>started {j.started}</span>
+          <span>started {j.startedAt ? clock(j.startedAt) : "—"}</span>
         </div>
         <span className="hint">{j.hint}</span>
       </div>
@@ -246,7 +247,7 @@ export function Dashboard() {
             <div className="kpi">
               <span className="l">Waiting</span>
               <span className="v ">{formatCount(o.waiting)}</span>
-              <span className="d">next {o.nextScan}</span>
+              <span className="d">next {dayClock(o.nextScan)}</span>
             </div>
             <div className="kpi">
               <span className="l">Failed 24 h</span>

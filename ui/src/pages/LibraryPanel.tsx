@@ -1,3 +1,4 @@
+import { clock } from "../format/time.ts";
 import { useEffect, useRef, useState } from "react";
 import { navigate, Link } from "../router.tsx";
 import { api, formatCount, formatGB, type LibraryDetail, type LibraryPatch, type Watch } from "../api/index.ts";
@@ -185,7 +186,7 @@ export function LibraryPanel({ id, onChange }: { id: string; onChange?: () => vo
               {L.status === "share_down" && (
                 <div className="note">
                   <span>
-                    Share not connected{L.shareDownAt ? ` since ${L.shareDownAt}` : ""}.{" "}
+                    Share not connected{L.shareDownAt ? ` since ${clock(L.shareDownAt)}` : ""}.{" "}
                     <button type="button" className="btn sm" onClick={retry} disabled={busy}>Try again</button>
                   </span>
                 </div>

@@ -27,6 +27,7 @@ export interface Library {
   waiting: number;
   savedBytes: number;
   savedPct: number;
+  // RFC 3339 UTC time of the last scan.
   lastScan: { at: string; found: number; new: number; changed: number } | null;
   status: LibraryStatus;
   watch: Watch;
@@ -34,6 +35,7 @@ export interface Library {
   // ISO time of the next scan; null while paused.
   nextScanAt: string | null;
   scanPct?: number;
+  // RFC 3339 UTC time the share dropped.
   shareDownAt?: string;
 }
 
@@ -100,6 +102,7 @@ export interface Overview {
   converted: number;
   convertedPerDay: number;
   waiting: number;
+  // RFC 3339 UTC time of the next scan.
   nextScan: string;
   failed24h: number;
   failedRatePct: number;
@@ -128,6 +131,7 @@ export interface Attention {
 export interface Summary {
   converting: { running: number; workers: number };
   queue: number;
+  // RFC 3339 UTC times.
   lastDoneAt: string;
   nextScanAt: string;
   diskFreeBytes: number;
@@ -146,13 +150,16 @@ export interface Job {
   worker: string;
   step: string;
   progress: number | null;
-  when: string;
+  // RFC 3339 UTC times; null until the step happens. Durations are whole milliseconds.
+  queuedAt: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  tookMs: number | null;
   result: string;
   resultTone: "ok" | "bad" | "";
   // Converting-now card (dashboard) only.
   tileLines?: string[];
   hint?: string;
-  started?: string;
 }
 
 export interface JobCounts {
@@ -187,6 +194,7 @@ export interface JobStep {
 }
 
 export interface LogLine {
+  // RFC 3339 UTC, with milliseconds.
   time: string;
   level: "info" | "warn" | "error" | "detail";
   text: string;
@@ -209,12 +217,15 @@ export interface LogStep extends JobStep {
 export interface MediaRow {
   group: "General" | "Video" | "Audio" | "Subtitles";
   field: string;
-  before: string;
-  after: string | null;
+  // "duration" values are milliseconds and "bytes" values are whole bytes; the screen formats them.
+  kind?: "text" | "duration" | "bytes";
+  before: string | number;
+  after: string | number | null;
   changed: boolean;
 }
 
 export interface HistoryLine {
+  // RFC 3339 UTC.
   time: string;
   level: "info" | "warn" | "error";
   text: string;
@@ -226,18 +237,17 @@ export interface JobDetail {
   workflow: string;
   worker: string;
   attempt: number;
+  // RFC 3339 UTC; null for a job that never started.
   startedAt: string | null;
-  took: string | null;
-  sizeBefore: string;
-  sizeAfter: string | null;
+  tookMs: number | null;
   sizeBeforeBytes: number;
   sizeAfterBytes: number | null;
   finishedAt: string | null;
   writtenAt: string | null;
   // Where the new file went; null until one is written.
   outputPath: string | null;
-  // Shown on the head while a job runs.
-  timeLeft: string | null;
+  // Shown on the head while a job runs; milliseconds left.
+  timeLeftMs: number | null;
   original: string;
   failure: { step: string; reason: string; nextAction: string; actionLabel: string } | null;
   skipReason: string | null;

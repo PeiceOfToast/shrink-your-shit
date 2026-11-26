@@ -1,3 +1,4 @@
+import { ago } from "../format/time.ts";
 import { navigate, useLocation } from "../router.tsx";
 import { api, formatCount, formatGB, formatPct, type Library } from "../api/index.ts";
 import { useApi } from "../api/useApi.ts";
@@ -23,7 +24,7 @@ function LibraryRow({ l }: { l: Library }) {
       <td className="num tnum" data-l="Saved">
         {l.savedBytes > 0 ? `${formatGB(l.savedBytes / 1e9)} · ${formatPct(l.savedPct)}` : "—"}
       </td>
-      <td data-l="Last scan">{l.lastScan ? l.lastScan.at : "Never"}</td>
+      <td data-l="Last scan">{l.lastScan ? ago(l.lastScan.at) : "Never"}</td>
       <td>
         <span className={`pill ${st.kind}`}>{st.label}</span>
       </td>

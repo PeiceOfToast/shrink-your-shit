@@ -1,3 +1,4 @@
+import { jobWhen } from "../format/time.ts";
 import { navigate, Link, useLocation } from "../router.tsx";
 import { api, formatCount, type Job, type JobCounts, type JobState } from "../api/index.ts";
 import { useApi } from "../api/useApi.ts";
@@ -37,7 +38,7 @@ function JobRow({ j, filter }: { j: Job; filter: string }) {
         <span className="nowrap">{j.step}</span>
       </td>
       <td className="num tnum" data-l="Progress">{j.progress != null ? `${j.progress} %` : "—"}</td>
-      <td className="num tnum" data-l="When">{j.when}</td>
+      <td className="num tnum" data-l="When">{jobWhen(j)}</td>
       <td className="num tnum" data-l="Result">
         <span className={j.resultTone}>{j.result}</span>
       </td>

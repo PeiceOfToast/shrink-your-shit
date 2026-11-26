@@ -1,3 +1,11 @@
+import { clock, clockPrecise, duration, timeLeft } from "../format/time.ts";
+import { formatGB } from "../api/index.ts";
+
+// Sizes read as GB in the job panel; bytes come from the server.
+const gb = (bytes: number) => formatGB(bytes / 1e9);
+// Media rows: text as is; durations (ms) and sizes (bytes) formatted here.
+const mediaValue = (r: MediaRow, v: string | number) =>
+  r.kind === "duration" ? duration(Number(v)) : r.kind === "bytes" ? gb(Number(v)) : String(v);
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api, type Job, type JobDetail as Detail, type LogLine, type LogStep, type MediaRow, type StepOutcome } from "../api/index.ts";
 import { useApi } from "../api/useApi.ts";
@@ -55,7 +63,7 @@ async function copyText(text: string): Promise<boolean> {
 // The text of the whole panel, for Copy all and the .txt download.
 function logText(d: Detail): string {
   const head = `${d.job.file}\n${d.path}\n${d.job.result}\n`;
-  const history = d.history.map((h) => `${h.time} ${h.text}`).join("\n");
+  const history = d.history.map((h) => `${clock(h.time)} ${h.text}`).join("\n");
   if (!d.logs) return `${head}\nThe detailed log is no longer kept.\n\nHistory\n${history}\n`;
   const steps = d.logs.map((s) =>
     [
@@ -63,7 +71,7 @@ function logText(d: Detail): string {
       `   ${s.decision}`,
       ...s.values.map((v) => `   ${v.name}: ${v.value} (${v.from})`),
       ...(s.command ? [`   $ ${s.command}`] : []),
-      ...s.lines.map((l) => `   ${l.time} ${LEVEL_LABEL[l.level]} ${l.text}`),
+      ...s.lines.map((l) => `   ${clockPrecise(l.time)} ${LEVEL_LABEL[l.level]} ${l.text}`),
     ].join("\n"),
   );
   return `${head}\n${steps.join("\n\n")}\n\nHistory\n${history}\n`;
@@ -178,7 +186,7 @@ export function JobDetail({ id, initialTab }: { id: string; initialTab: "summary
               <span className={`pill ${PILL[job.state].cls}`}>{PILL[job.state].label}</span>
               <span className={`sm ${job.resultTone}`}>{job.result}</span>
               {job.state === "running" && d && (
-                <span className="muted sm tnum">{job.progress ?? 0}% · {d.timeLeft ?? "—"}</span>
+                <span className="muted sm tnum">{job.progress ?? 0}% · {timeLeft(d.timeLeftMs) ?? "—"}</span>
               )}
             </span>
           )}
@@ -330,8 +338,8 @@ function SummaryTab({ d, busy, onRetry }: { d: Detail; busy: boolean; onRetry: (
             <Fact label="Workflow" value={<Link to="/workflows">{d.workflow}</Link>} />
           </div>
           <div className="jd-bar-wrap">
-            <span className="sm tnum">{d.sizeBefore} → {d.sizeAfter ?? "—"}</span>
-            <div className="jd-bar" role="img" aria-label={`Size ${d.sizeBefore} before, ${d.sizeAfter ?? "not yet"} after`}>
+            <span className="sm tnum">{gb(d.sizeBeforeBytes)} → {d.sizeAfterBytes != null ? gb(d.sizeAfterBytes) : "—"}</span>
+            <div className="jd-bar" role="img" aria-label={`Size ${gb(d.sizeBeforeBytes)} before, ${d.sizeAfterBytes != null ? gb(d.sizeAfterBytes) : "not yet"} after`}>
               <span style={{ width: `${ratio * 100}%` }} />
             </div>
           </div>
@@ -340,10 +348,10 @@ function SummaryTab({ d, busy, onRetry }: { d: Detail; busy: boolean; onRetry: (
           <h3>Run</h3>
           <div>
             <Fact label="State" value={PILL[d.job.state].label} />
-            <Fact label="Took" value={d.took ?? "—"} />
+            <Fact label="Took" value={d.tookMs != null ? duration(d.tookMs) : "—"} />
             <Fact label="Worker" value={d.worker} />
-            <Fact label="Started" value={d.startedAt ?? "—"} />
-            <Fact label="Finished" value={d.finishedAt ?? "—"} />
+            <Fact label="Started" value={d.startedAt ? clock(d.startedAt) : "—"} />
+            <Fact label="Finished" value={d.finishedAt ? clock(d.finishedAt) : "—"} />
             <Fact label="Attempt" value={d.attempt} />
           </div>
         </section>
@@ -351,7 +359,7 @@ function SummaryTab({ d, busy, onRetry }: { d: Detail; busy: boolean; onRetry: (
           <h3>Result</h3>
           <div>
             <Fact label="Written to" value={d.outputPath ?? "—"} />
-            <Fact label="Written at" value={d.writtenAt ?? "—"} />
+            <Fact label="Written at" value={d.writtenAt ? clock(d.writtenAt) : "—"} />
             <Fact label="Original" value={d.original} />
           </div>
         </section>
@@ -395,7 +403,7 @@ function CopyButton({ text, label }: { text: string; label: string }) {
 function LogLineRow({ l, step }: { l: LogLine; step?: LogStep }) {
   return (
     <div className={`ln ${l.level}`}>
-      <span className="t">{l.time}</span>
+      <span className="t">{clockPrecise(l.time)}</span>
       <span className="lv">{LEVEL_LABEL[l.level]}</span>
       <span>
         {step && <span className="muted">{step.index}. {step.name} · </span>}
@@ -606,8 +614,8 @@ function BeforeTab({ rows }: { rows: MediaRow[] }) {
                       {hit && <span className="jd-dot" aria-hidden />}
                       {r.field}
                     </td>
-                    <td className="muted">{r.before}</td>
-                    <td>{r.after ?? "—"}</td>
+                    <td className="muted">{mediaValue(r, r.before)}</td>
+                    <td>{r.after != null ? mediaValue(r, r.after) : "—"}</td>
                   </tr>
                 );
               })}
@@ -624,7 +632,7 @@ function HistoryTab({ d }: { d: Detail }) {
     <div className="log">
       {d.history.map((h, i) => (
         <div key={i} className={`ln ${h.level}`}>
-          <span className="t">{h.time}</span>
+          <span className="t">{clock(h.time)}</span>
           <span className="lv">{LEVEL_LABEL[h.level]}</span>
           <span>{h.text}</span>
         </div>
