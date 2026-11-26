@@ -16,6 +16,13 @@ export function shareText(share: number): string {
   return share > 0 ? "under 0.1%" : "0%";
 }
 
+// The dashboard headline's first item: "<X> more, frees from <day>" once something is freed, "<X> frees from <day>" before that,
+// and the bare "<X> more" / "<X> frees" when no day is known. X and the day come in already formatted.
+export function headlineMore(waiting: string, freed: number, day: string | null): string {
+  if (!day) return waiting + (freed > 0 ? " more" : " frees");
+  return waiting + (freed > 0 ? " more, frees from " : " frees from ") + day;
+}
+
 // A library's right side as two parts: the green figure (the saved bytes, empty when nothing is saved) and the rest of the
 // line. What is saved (with its share of the total), else what waits to free, else nothing.
 export function libraryRight(l: { saved: number; waitingToFree: number; bytesNow: number }, nextFreeDay: string | null, bytes: (n: number) => string): { gain: string; rest: string } {

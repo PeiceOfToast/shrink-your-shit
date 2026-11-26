@@ -18,7 +18,7 @@ import { filesFoot, shrinkLine, spaceFoot, spaceHeadline } from "../cardLines";
 import { getStartedSteps, nextStep, showGetStarted } from "../getStarted";
 import { runFields, startedAt } from "../jobCards";
 import { filesFact, freshFact, lastDoneFact, nextScanFact, nothingFact, stateWord, workersFact, type Fact } from "../statusStrip";
-import { convertingEmpty, libraryRight, shareText } from "../dashRowText";
+import { convertingEmpty, headlineMore, libraryRight, shareText } from "../dashRowText";
 import { attentionRows, LIBRARY_WORD } from "../attention";
 const HEALTH_HIDDEN = "syp-health-dismissed"; // the failed checks the Dismiss was for
 import { onLive } from "../live";
@@ -217,7 +217,7 @@ export function Overview() {
   const libOf = new Map((libs.data && !failed(libs.data) ? libs.data : []).map((l) => [String(l.id), l] as const));
   const runOf = new Map((running.data && !failed(running.data) ? running.data.items : []).map((j) => [j.jobId ?? j.id, j] as const));
   const perDay = convertedLine(v.daily);
-  const more = [h.waitingToFree > 0 && bytes(h.waitingToFree) + (h.freed > 0 ? " more" : " frees") + (h.nextFreeAt ? " by " + dayName(h.nextFreeAt.slice(0, 10)) : ""), h.couldFree > 0 && <Link to="/jobs?tab=completed&left=1">{"could free " + bytes(h.couldFree) + " if you remove the originals"}</Link>, v.trash.bytes > 0 && <Link to="/settings/safety">{bytes(v.trash.bytes) + " in the trash"}</Link>].filter(Boolean).map((p, i) => <Fragment key={i}>{i > 0 && " · "}{p}</Fragment>);
+  const more = [h.waitingToFree > 0 && headlineMore(bytes(h.waitingToFree), h.freed, h.nextFreeAt ? dayName(h.nextFreeAt.slice(0, 10)) : null), h.couldFree > 0 && <Link to="/jobs?tab=completed&left=1">{"could free " + bytes(h.couldFree) + " if you remove the originals"}</Link>, v.trash.bytes > 0 && <Link to="/settings/safety">{bytes(v.trash.bytes) + " in the trash"}</Link>].filter(Boolean).map((p, i) => <Fragment key={i}>{i > 0 && " · "}{p}</Fragment>);
   // Needs attention (D2): one list from the page's own data; the card and the Status strip's "Nothing needs you" both read attn.none
   const healthShown = failedNow.length > 0 && failKey !== hidKey, summaryOk = !!sum.data && !failed(sum.data), libsOk = !!libs.data && !failed(libs.data);
   const attn = attentionRows({ failures: sum.data && !failed(sum.data) ? sum.data.recentFailures : [], libraryIds: libsOk ? new Set([...libOf.keys()]) : null, healthShown, fallbacks: v.encoderFallbacks?.length ?? 0, libraries: v.libraries });

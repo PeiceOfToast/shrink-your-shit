@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { convertingEmpty, libraryRight, shareText } from "./dashRowText.ts";
+import { convertingEmpty, headlineMore, libraryRight, shareText } from "./dashRowText.ts";
 
 const bytes = (n: number) => n + " B";
 const at = (t: string) => "at " + t;
@@ -41,6 +41,19 @@ test("library right side: saved gives the green figure and the share of the tota
 test("library right side: nothing saved, waiting to free shows the smaller bytes and the day", () => {
   assert.deepEqual(libraryRight({ saved: 0, waitingToFree: 410, bytesNow: 900 }, "Nov 28", bytes), { gain: "", rest: "410 B smaller · frees from Nov 28" });
   assert.deepEqual(libraryRight({ saved: 0, waitingToFree: 410, bytesNow: 900 }, null, bytes), { gain: "", rest: "410 B smaller" });
+});
+
+test("headline first item: freed already with a day says more, frees from the day", () => {
+  assert.equal(headlineMore("410 B", 5, "Nov 28"), "410 B more, frees from Nov 28");
+});
+
+test("headline first item: nothing freed yet with a day says frees from the day", () => {
+  assert.equal(headlineMore("410 B", 0, "Nov 28"), "410 B frees from Nov 28");
+});
+
+test("headline first item: no day keeps the bare more / frees", () => {
+  assert.equal(headlineMore("410 B", 5, null), "410 B more");
+  assert.equal(headlineMore("410 B", 0, null), "410 B frees");
 });
 
 test("library right side: nothing saved and nothing waiting says so", () => {
