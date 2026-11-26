@@ -14,11 +14,14 @@ import (
 func TestDataFolderMissingSaysSoAndHintsRestart(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "gone")
 	c := dataCheck(dir)
-	if c.Status != "bad" || !strings.Contains(c.Detail, "does not exist") || c.Hint == nil || !strings.Contains(*c.Hint, "Restart") {
-		t.Fatalf("missing folder: status %q detail %q hint %v; want bad, says it does not exist, hints a restart", c.Status, c.Detail, c.Hint)
+	if c.Status != "bad" || !strings.Contains(c.Detail, "does not exist") || c.Hint == nil || *c.Hint != missingDataAdvice {
+		t.Fatalf("missing folder: status %q detail %q hint %v; want bad, says it does not exist, the missing-folder advice", c.Status, c.Detail, c.Hint)
 	}
 	if strings.Contains(c.Detail, "Cannot write") || strings.Contains(*c.Hint, "write access") {
 		t.Errorf("missing folder is described as unwritable: detail %q hint %q", c.Detail, *c.Hint)
+	}
+	if !strings.Contains(*c.Hint, "reconnect") || !strings.Contains(*c.Hint, "new, empty") {
+		t.Errorf("hint %q must say to reconnect a drive or share, and that a restart makes a new, empty folder", *c.Hint)
 	}
 }
 

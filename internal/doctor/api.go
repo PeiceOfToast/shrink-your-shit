@@ -211,9 +211,8 @@ func dataCheck(dir string) DoctorCheck {
 	err := writeProbe(dir)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		// The program makes this folder when it starts, so a folder removed while it runs comes back on restart.
 		return DoctorCheck{ID: "data", Label: "Data folder", Status: "bad",
-			Detail: "The data folder " + dir + " does not exist.", Hint: hint("Restart shrink-your-shit: it makes the data folder when it starts.")}
+			Detail: "The data folder " + dir + " does not exist.", Hint: hint(missingDataAdvice)}
 	case err != nil:
 		return DoctorCheck{ID: "data", Label: "Data folder", Status: "bad",
 			Detail: "Cannot write to " + dir + ". " + ReadOnlyMessage(dir), Hint: hint("Give the app's user write access to the data folder.")}
