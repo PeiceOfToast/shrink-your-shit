@@ -34,6 +34,11 @@ FROM jobs`, Running, Queued, Failed, Kept).Scan(&a.FreedBytes, &a.WaitingBytes, 
 		return a, err
 	}
 	err = s.db.QueryRow(`SELECT COUNT(*) FROM files WHERE reason<>'' AND reason<>'` + rules.SkipStillChanging + `' AND NOT ` + convertedSQL).Scan(&a.Skipped)
+	if err != nil {
+		return a, err
+	}
+	n, err := s.settlingAll()
+	a.WaitingFiles += n
 	return a, err
 }
 

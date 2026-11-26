@@ -4,7 +4,9 @@ package doctor
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"math"
 	"runtime"
 	"strings"
@@ -206,7 +208,12 @@ func encoderChecks(in APIInput, probes map[string]Probe, inUse string) []DoctorC
 }
 
 func dataCheck(dir string) DoctorCheck {
-	if err := writeProbe(dir); err != nil {
+	err := writeProbe(dir)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return DoctorCheck{ID: "data", Label: "Data folder", Status: "bad",
+			Detail: "The data folder " + dir + " does not exist.", Hint: hint(missingDataAdvice)}
+	case err != nil:
 		return DoctorCheck{ID: "data", Label: "Data folder", Status: "bad",
 			Detail: "Cannot write to " + dir + ". " + ReadOnlyMessage(dir), Hint: hint("Give the app's user write access to the data folder.")}
 	}
@@ -268,8 +275,11 @@ func (c *Checker) libraryChecks(ctx context.Context, l Library) []DoctorCheck {
 			}
 			if key == "access" {
 				s.detail += where + ": " + is.Message
-				if is.Code == "unreadable" { // the app cannot read the folder at all: say read access, not just write
-					s.hint = "Check that " + l.Path + " exists, and give the app's user read and write access to it."
+				switch is.Code { // each folder code says the access it lacks, or that the folder is the wrong one
+				case "unreadable": // the app cannot read the folder at all
+					s.hint = "Check that " + l.Path + " exists, and give the app's user read access to it."
+				case "system_folder":
+					s.hint = "Change the folder on the Libraries page, then press Check again."
 				}
 			} else {
 				s.detail += l.Name + ": " + is.Message

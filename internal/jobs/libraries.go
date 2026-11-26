@@ -664,7 +664,19 @@ FROM jobs WHERE library_id IS NOT NULL GROUP BY library_id`, Running, Queued, Fa
 		}
 		out[id] = c
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	settling, err := s.settlingByLibrary()
+	if err != nil {
+		return nil, err
+	}
+	for id, n := range settling {
+		c := out[id]
+		c.Waiting += n
+		out[id] = c
+	}
+	return out, nil
 }
 
 // Meta reads a value from app_meta ("" and false if it is not set).

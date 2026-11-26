@@ -247,6 +247,9 @@ func TestChangedStepListIsRefusedNotDropped(t *testing.T) {
 	if code != 409 || errCode(out) != "edit_in_new_ui" {
 		t.Fatalf("changed step list: %d %s, want 409 edit_in_new_ui", code, out)
 	}
+	if !strings.Contains(out, "language list") || !strings.Contains(out, "workflow editor") {
+		t.Errorf("the refusal must name the language list and the workflow editor: %s", out)
+	}
 	if f, _ := st.GetFlow(l.FlowID); f.Template.Selectors == nil || !slices.Equal(f.Template.Selectors.AudioLangs, []string{"eng", "ger"}) {
 		t.Errorf("the refused save changed the stored list: %+v", f.Template.Selectors)
 	}
