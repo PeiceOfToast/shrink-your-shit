@@ -25,6 +25,7 @@ import { closeMenuToSummary, menuEscape, useCloseOnOutside } from "../menuFocus"
 import { runFields, runningFor } from "../jobCards";
 import { keepShown, libraryOptions } from "../libraryList";
 import { cancelOnTab, selectOnTab } from "../jobTabActions";
+import { SETTLING_WORD, isSettling } from "../jobSettling";
 import { detailLibraryGone, libraryGone } from "../jobLibrary";
 
 const TABS: [Tab, string][] = [["waiting", "Waiting"], ["running", "Running"], ["completed", "Done"], ["skipped", "Skipped"], ["failed", "Failed"]];
@@ -54,7 +55,7 @@ const fell = (j: PillJob) => j.state === "completed" && !!j.warning; // #323: do
 const libPaused = (j: PillJob) => j.state === "queued" && j.subState === "library_disabled";
 // de2f664: a check that refused the new file kept the original; the server lists it as failed, it reads "Original kept" and is neutral, not a failure
 const keptOrig = (j: PillJob) => j.state === "failed" && (j.newFileRefused === true || j.reason?.code === "kept_original" || j.reason?.code === "check_failed");
-const words = (j: PillJob) => (libPaused(j) ? "Library paused" : keptOrig(j) ? "Original kept" : fell(j) ? "Done, with a warning" : j.state === "retry_wait" && j.retryAt ? "Retry at " + clock(j.retryAt) : WORD[j.state]);
+const words = (j: PillJob) => (isSettling(j) ? SETTLING_WORD : libPaused(j) ? "Library paused" : keptOrig(j) ? "Original kept" : fell(j) ? "Done, with a warning" : j.state === "retry_wait" && j.retryAt ? "Retry at " + clock(j.retryAt) : WORD[j.state]);
 function Pill({ j, pct }: { j: PillJob; pct?: number | null }) {
   return <span className={"pill " + (libPaused(j) || fell(j) ? "warn" : keptOrig(j) ? "" : PILL[j.state] ?? "")} title={keptOrig(j) ? j.reason?.message ?? undefined : j.reason?.code === "workflow_stopped" ? stoppedTitle(j.reason.message ?? "") : undefined}><Icon id={libPaused(j) ? "i-pause" : keptOrig(j) ? "i-info" : fell(j) ? "i-alert" : ICON[j.state] ?? "i-play"} />{words(j)}{pct != null && " · " + Math.round(pct) + "%"}</span>;
 }
@@ -159,6 +160,7 @@ export function Jobs() {
   const firstRun = noLibs && !kept && !left && !!counts && TABS.every(([t]) => !counts[t]); // every tab empty: no bulk actions to offer
   shown.current = { tab, rows: new Map((current?.items ?? []).map((j) => [j.jobId ?? j.id, j.state])) };
   const picked = items.filter((j) => sel.includes(j.id)), none = !picked.length || busy;
+  const pickable = items.filter((j) => !isSettling(j)); // a file still changing has no checkbox: select-all skips it
   // Select mode keeps only the rows still shown: a tab, library or search change drops the rest (and their ticks)
   const shownKey = items.map((j) => j.id).join("\n");
   // a tab that offers no Select (done) also drops select mode and its ticks, so coming back starts clean
@@ -207,7 +209,7 @@ export function Jobs() {
         {TABS.map(([t, label]) => <button key={t} role="tab" type="button" aria-selected={tab === t} onClick={() => tab !== t && go(t)}>{label}{counts && <span className="n">{count(t === "completed" && (kept || left) && current ? current.total : counts[t])}</span>}</button>)}
       </div>
       {!firstRun && selectOnTab(tab) && (selecting || sel.length > 0) && <div className="ltools" role="toolbar" aria-label="Jobs selection">
-        <label className="hit selall"><input type="checkbox" aria-label="Select all files" checked={items.length > 0 && sel.length === items.length} onChange={(e) => setSel(e.target.checked ? items.map((j) => j.id) : [])} /><span className="sm">All</span></label>
+        <label className="hit selall"><input type="checkbox" aria-label="Select all files" checked={pickable.length > 0 && sel.length === pickable.length} onChange={(e) => setSel(e.target.checked ? pickable.map((j) => j.id) : [])} /><span className="sm">All</span></label>
         <span className="desk">{actions}</span>
         {selecting && <details className="menu phone" ref={phoneMenu} onKeyDown={menuEscape}><summary className="btn sm icon ghost" aria-label="More actions"><Icon id="i-more" /></summary><div className="pop" role="menu" onClick={(e) => { if ((e.target as Element).closest("button")) closeMenuToSummary(e.currentTarget); }}>{actions}</div></details>}
         {picked.length > 0 && <span className="muted sm">{picked.length} selected</span>}
@@ -244,17 +246,18 @@ export function Jobs() {
               <span className="mchip">{libraryGone(j.libraryId, libs.data) ? "Library removed" : j.library}</span>
               {j.folder !== "." && <span className="mchip">{j.folder}</span>}
               {j.pin && <span className="mchip prio">{j.pin === "first" ? "First" : "Last"}</span>}
-              {tab === "waiting" && (j.position != null ? <span className="mchip">Place {j.position} in the queue</span> : <span className="mchip">Not taken now</span>)}
+              {tab === "waiting" && !isSettling(j) && (j.position != null ? <span className="mchip">Place {j.position} in the queue</span> : <span className="mchip">Not taken now</span>)}
               {j.worker && <span className="mchip">{workerLabel(j.worker)}</span>}
             </div>);
             return (
             <li key={j.id} className={"lcard" + (checked ? " sel" : "")}>
-              {selecting && <label className="hit lcheck"><input type="checkbox" aria-label={"Select " + j.name} checked={checked} onChange={(e) => setSel(e.target.checked ? [...sel, j.id] : sel.filter((x) => x !== j.id))} /></label>}
+              {selecting && !isSettling(j) && <label className="hit lcheck"><input type="checkbox" aria-label={"Select " + j.name} checked={checked} onChange={(e) => setSel(e.target.checked ? [...sel, j.id] : sel.filter((x) => x !== j.id))} /></label>}
               <span className="ltile codec">{tileOf(j)}</span>
               <div className="lmain">
-                <div className="lname"><a className="ttl" href={"/jobs?tab=" + tab + "&job=" + encodeURIComponent(key(j))} data-job={key(j)} title={j.path}
-                  onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); go(tab, key(j)); } }}><FileName n={j.name} /></a><span className="lchev" aria-hidden="true">›</span></div>
-                {!f && <span className="lpath sm" title={reasonText(j) || undefined}><Detail j={j} /></span>}
+                {/* a file still changing has no drawer and no link: its name is plain text, so a click does nothing and it isn't a focus stop */}
+                <div className="lname">{isSettling(j) ? <span className="ttl" title={j.path}><FileName n={j.name} /></span> : <><a className="ttl" href={"/jobs?tab=" + tab + "&job=" + encodeURIComponent(key(j))} data-job={key(j)} title={j.path}
+                  onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); go(tab, key(j)); } }}><FileName n={j.name} /></a><span className="lchev" aria-hidden="true">›</span></>}</div>
+                {!f && <span className={"lpath sm" + (isSettling(j) ? " settling" : "")} title={reasonText(j) || undefined}><Detail j={j} /></span>}
                 {facts}
                 {f && <div className="rfields" role="group" aria-label="Conversion progress">
                   {([["Step", f.step], ["Frames/s", f.fps], ["Speed", f.speed], ["Time left", f.timeLeft], ["Bitrate", f.bitrate]] as const).map(([label, value]) => <div className="rf" key={label}><span className="muted sm">{label}</span><span className="rfv">{value}</span></div>)}
