@@ -103,8 +103,10 @@ func v2Guide(api *http.ServeMux, store *jobs.Store, svc *integrations.Service, n
 		}
 		res := workflow.ValidateWith(doc, sc)
 		out := map[string]any{"summary": workflow.Summary(a), "steps": workflow.Steps(doc), "validation": res.Issues}
-		// Answers that do not validate have no setting to preview: the samples are left out, not guessed.
-		if withSamples && len(res.Issues) == 0 {
+		// Answers that do not validate compile to no setting: each file says so, and nothing is guessed.
+		if withSamples && len(res.Issues) > 0 {
+			out["samples"] = answersInvalid(in.SampleFiles)
+		} else if withSamples {
 			samples, err := guideSamples(store, prev, lib, in.SampleFiles, doc, sc, r)
 			if err != nil {
 				serverError(w, err)

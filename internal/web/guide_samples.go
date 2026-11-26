@@ -27,6 +27,16 @@ type sampleError struct {
 	Message string `json:"message"`
 }
 
+// answersInvalid is each file's entry when the answers do not validate: the same error for every file, and
+// no lines.
+func answersInvalid(files []string) []guideSample {
+	out := make([]guideSample, 0, len(files))
+	for _, f := range files {
+		out = append(out, guideSample{File: f, Error: &sampleError{"answers_invalid", "Fix the answers above, then try them on a file."}})
+	}
+	return out
+}
+
 // guideSamples previews the answers' compiled setting on each file of lib (S1). Nothing is converted or
 // saved. The setting is compiled as a save would compile it: the library's saved workflow keeps what the
 // answers do not own, and the languages are the person's. Encoder speeds come from this computer's

@@ -136,3 +136,45 @@ func TestLibraryFilesSortNewest(t *testing.T) {
 		t.Errorf("A to Z after touching old: %s", got)
 	}
 }
+
+// Answers that do not validate compile to no setting: the response keeps the samples key with one entry
+// per file, each answers_invalid and no lines, and the validation says why.
+func TestGuidePreviewSamplesOnAnswersThatDoNotValidate(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "Dune.mkv"), make([]byte, 2_000_000), 0o644)
+	os.WriteFile(filepath.Join(dir, "Arrival.mkv"), make([]byte, 2_000_000), 0o644)
+	l, _ := st.AddLibrary("Movies", dir, rules.SliderTemplate(3), false)
+	dir, _ = jobs.RealPath(dir)
+	files := fmt.Sprintf(`["%s","%s"]`, filepath.Join(dir, "Dune.mkv"), filepath.Join(dir, "Arrival.mkv"))
+
+	code, body := post(t, srv, "POST", "/api/v2/workflows/guide/preview",
+		`{"answers":{"goal":"smaller","format":"h264"},"libraryId":`+fmt.Sprint(l.ID)+`,"sampleFiles":`+files+`}`)
+	var out struct {
+		Validation []json.RawMessage `json:"validation"`
+		Samples    []struct {
+			File  string `json:"file"`
+			Error *struct {
+				Code string `json:"code"`
+			} `json:"error"`
+			Lines []json.RawMessage `json:"lines"`
+		} `json:"samples"`
+	}
+	if err := json.Unmarshal([]byte(body), &out); err != nil || code != 200 {
+		t.Fatalf("%d %s", code, body)
+	}
+	if len(out.Validation) == 0 {
+		t.Fatalf("the H.264 answers should not validate on this server: %s", body)
+	}
+	if len(out.Samples) != 2 {
+		t.Fatalf("want one entry per file, got %s", body)
+	}
+	for i, s := range out.Samples {
+		if s.Error == nil || s.Error.Code != "answers_invalid" || len(s.Lines) != 0 {
+			t.Errorf("sample %d: %+v; want answers_invalid with no lines", i, s)
+		}
+	}
+	if out.Samples[0].File != filepath.Join(dir, "Dune.mkv") || out.Samples[1].File != filepath.Join(dir, "Arrival.mkv") {
+		t.Errorf("order: %s", body)
+	}
+}
