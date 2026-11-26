@@ -3,10 +3,13 @@
 package update
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
+	"syscall"
 	"time"
 )
 
@@ -22,7 +25,26 @@ type pendingUpdate struct {
 	To       string    `json:"to"`
 	NewSetup string    `json:"newSetup"`
 	OldSetup string    `json:"oldSetup"`
+	Watcher  int       `json:"watcher"` // the watcher's process: while it runs, the update is its business
 	At       time.Time `json:"at"`
+}
+
+// pidAlive reports whether a process with pid is running (tests replace it). On Windows FindProcess fails when
+// the process is gone; elsewhere a signal 0 asks (EPERM means it exists). A pid of 0 is never alive.
+var pidAlive = func(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	p, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	defer p.Release()
+	if runtime.GOOS == "windows" {
+		return true
+	}
+	err = p.Signal(syscall.Signal(0))
+	return err == nil || errors.Is(err, syscall.EPERM)
 }
 
 func pendingPath(dataDir string) string { return filepath.Join(dataDir, updateDir, pendingFile) }
@@ -52,7 +74,9 @@ func clearPending(dataDir string) error {
 }
 
 // RecoverPending finishes an update whose watcher was killed, at the start of a program running as running.
-// It does nothing when there is no record. Otherwise:
+// It does nothing when there is no record. While the watcher is still running it does nothing at all: the new
+// program can start while the installer is still inside the watcher's run, and the old installer is what the
+// watcher needs if the new program fails. Otherwise:
 //   - running is the new version: the update is done; only the record and installers are left to clear.
 //   - the app's marker for this update is still there: the watcher had put the old version back, and Settle
 //     (which runs next) writes the result. Nothing is written here.
@@ -63,6 +87,10 @@ func clearPending(dataDir string) error {
 func RecoverPending(dataDir, running string, now time.Time) error {
 	p := readPending(dataDir)
 	if p == nil {
+		return nil
+	}
+	if pidAlive(p.Watcher) {
+		log.Printf("update to %s is still running under its watcher (pid %d); leaving it to finish", p.To, p.Watcher)
 		return nil
 	}
 	m := ReadMarker(dataDir)
@@ -82,7 +110,17 @@ func RecoverPending(dataDir, running string, now time.Time) error {
 	if err := clearPending(dataDir); err != nil {
 		return err
 	}
-	os.Remove(p.NewSetup)
-	os.Remove(p.OldSetup)
+	removeInstaller(dataDir, p.NewSetup)
+	removeInstaller(dataDir, p.OldSetup)
 	return nil
+}
+
+// removeInstaller removes an installer only when it is a file directly in the update folder. The record is read
+// back from disk, so its paths are not trusted.
+func removeInstaller(dataDir, path string) {
+	if filepath.Dir(filepath.Clean(path)) != filepath.Clean(filepath.Join(dataDir, updateDir)) {
+		log.Printf("update record names %s outside the update folder; not removed", path)
+		return
+	}
+	os.Remove(path)
 }

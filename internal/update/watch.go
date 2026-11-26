@@ -58,7 +58,10 @@ const unsavedNote = "could not be saved"
 // The pending record is written before the app is stopped and cleared once a program is serving or the
 // failed result is saved. If that result cannot be saved, the record and the installers stay for the next start.
 func (w *Watcher) Watch() error {
-	if err := writePending(w.DataDir, pendingUpdate{From: w.From, To: w.To, NewSetup: w.NewSetup, OldSetup: w.OldSetup, At: time.Now().UTC()}); err != nil {
+	if err := writePending(w.DataDir, pendingUpdate{From: w.From, To: w.To, NewSetup: w.NewSetup, OldSetup: w.OldSetup, Watcher: os.Getpid(), At: time.Now().UTC()}); err != nil {
+		// Nothing was stopped and nothing will use the installers: they go with the failed update.
+		os.Remove(w.NewSetup)
+		os.Remove(w.OldSetup)
 		return w.fail(fmt.Sprintf("Update to %s not started: its record could not be saved (%v)", w.To, err))
 	}
 	err := w.run()

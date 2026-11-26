@@ -27,6 +27,15 @@ func runKilled(t *testing.T, f func()) {
 	f()
 }
 
+// watcherDead makes the record's watcher look gone for the rest of the test: the kill tests model a watcher
+// that was killed, so recovery is allowed to act.
+func watcherDead(t *testing.T) {
+	t.Helper()
+	old := pidAlive
+	pidAlive = func(int) bool { return false }
+	t.Cleanup(func() { pidAlive = old })
+}
+
 func exists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
@@ -47,6 +56,7 @@ func TestWatchWritesTheRecordBeforeStoppingTheApp(t *testing.T) {
 
 // A kill while the app is stopped leaves the record and the old installer; the next start puts it right.
 func TestWatchKilledAfterTheAppStoppedRecoversToTheOldVersion(t *testing.T) {
+	watcherDead(t)
 	f := newWatchFixture(t, func(int) bool { return true }, nil, nil)
 	f.w.RunSetup = func(string) error { panic(killed{}) }
 	runKilled(t, func() { f.w.Watch() })
@@ -69,6 +79,7 @@ func TestWatchKilledAfterTheAppStoppedRecoversToTheOldVersion(t *testing.T) {
 
 // A kill with no marker (the app's own record of the update is gone) is a cut-off update: the result says so.
 func TestRecoverPendingCutOffWritesAResult(t *testing.T) {
+	watcherDead(t)
 	f := newWatchFixture(t, func(int) bool { return true }, nil, nil)
 	f.w.RunSetup = func(string) error { panic(killed{}) }
 	runKilled(t, func() { f.w.Watch() })
@@ -90,6 +101,7 @@ func TestRecoverPendingCutOffWritesAResult(t *testing.T) {
 
 // The new version is serving when the start finds the record: the update is done, nothing is reported as failed.
 func TestRecoverPendingNewVersionFinishesQuietly(t *testing.T) {
+	watcherDead(t)
 	f := newWatchFixture(t, func(int) bool { return true }, nil, nil)
 	f.w.RunSetup = func(string) error { panic(killed{}) }
 	runKilled(t, func() { f.w.Watch() })
@@ -107,6 +119,7 @@ func TestRecoverPendingNewVersionFinishesQuietly(t *testing.T) {
 
 // When the failed result cannot be saved, the record and the installers stay, so the next start can try again.
 func TestRecoverPendingKeepsTheRecordWhenTheResultCannotBeSaved(t *testing.T) {
+	watcherDead(t)
 	f := newWatchFixture(t, func(int) bool { return true }, nil, nil)
 	f.w.RunSetup = func(string) error { panic(killed{}) }
 	runKilled(t, func() { f.w.Watch() })
@@ -148,5 +161,64 @@ func TestWatchClearsTheRecordOnceAProgramIsServing(t *testing.T) {
 	}
 	if readPending(f.w.DataDir) != nil || exists(f.w.NewSetup) || exists(f.w.OldSetup) {
 		t.Fatal("a serving program must leave no record and no installers")
+	}
+}
+
+// While the watcher runs, recovery leaves the record and both installers alone, whatever the app's version: the
+// new app starts inside the installer's run, and the old app can be relaunched during it. (Findings 1 and 2.)
+func TestRecoverPendingLeavesAnUpdateItsWatcherIsRunning(t *testing.T) {
+	old := pidAlive
+	pidAlive = func(int) bool { return true }
+	t.Cleanup(func() { pidAlive = old })
+	for _, running := range []string{"0.2.0", "0.1.0"} {
+		f := newWatchFixture(t, func(int) bool { return true }, nil, nil)
+		f.w.RunSetup = func(string) error { panic(killed{}) }
+		runKilled(t, func() { f.w.Watch() })
+		if err := RecoverPending(f.w.DataDir, running, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		if readPending(f.w.DataDir) == nil || !exists(f.w.NewSetup) || !exists(f.w.OldSetup) {
+			t.Fatalf("running %s: recovery cleared the record or an installer while the watcher runs", running)
+		}
+		if LastResult(f.w.DataDir) != nil {
+			t.Fatalf("running %s: recovery wrote a result while the watcher runs", running)
+		}
+	}
+}
+
+// The record's paths are read back from disk: recovery removes only installers in the update folder.
+func TestRecoverPendingWontRemoveFilesOutsideTheUpdateFolder(t *testing.T) {
+	watcherDead(t)
+	dir := t.TempDir()
+	victim := filepath.Join(dir, "syp.db")
+	if err := os.WriteFile(victim, []byte("data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := writePending(dir, pendingUpdate{From: "0.1.0", To: "0.2.0", NewSetup: victim, OldSetup: filepath.Join(dir, updateDir, "old.exe"), At: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := RecoverPending(dir, "0.2.0", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if !exists(victim) {
+		t.Fatal("recovery removed a file outside the update folder")
+	}
+}
+
+// When the record cannot be written the update never starts: the installers go with it, and the app is not stopped.
+func TestWatchRemovesTheInstallersWhenTheRecordCannotBeWritten(t *testing.T) {
+	f := newWatchFixture(t, func(int) bool { return true }, nil, nil)
+	// A folder where the record file goes makes its save fail.
+	if err := os.Mkdir(filepath.Join(f.w.DataDir, updateDir, pendingFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.w.Watch(); err == nil {
+		t.Fatal("no error when the record could not be written")
+	}
+	if f.stops != 0 {
+		t.Fatalf("the app was stopped %d times without a record", f.stops)
+	}
+	if exists(f.w.NewSetup) || exists(f.w.OldSetup) {
+		t.Fatal("the installers were left behind after the update did not start")
 	}
 }
