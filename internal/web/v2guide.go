@@ -10,13 +10,14 @@ import (
 	"github.com/shrink-your-shit/shrink-your-shit/internal/integrations"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/notify"
+	"github.com/shrink-your-shit/shrink-your-shit/internal/preview"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/workflow"
 )
 
 // The guided builder's API (slice 12, G1). The screen asks these for the defaults and what this
 // computer can make, previews the answers as sentences, and saves answers into a draft; it never builds
 // a workflow document itself. Creating a workflow from answers is POST /api/v2/workflows with "answers".
-func v2Guide(api *http.ServeMux, store *jobs.Store, svc *integrations.Service, notifier *notify.Service) {
+func v2Guide(api *http.ServeMux, store *jobs.Store, svc *integrations.Service, notifier *notify.Service, prev *preview.Previewer) {
 	// GET: the defaults per goal, the choices this computer can make, what exists for the cards after the
 	// save, and the person's languages (the picker's starting list).
 	api.HandleFunc("GET /api/v2/workflows/guide", func(w http.ResponseWriter, r *http.Request) {
@@ -59,9 +60,36 @@ func v2Guide(api *http.ServeMux, store *jobs.Store, svc *integrations.Service, n
 	// Preview: the answers as the sentences the last page shows, the steps they build, and what validation
 	// says. Nothing is saved.
 	api.HandleFunc("POST /api/v2/workflows/guide/preview", func(w http.ResponseWriter, r *http.Request) {
-		var in struct{ Answers workflow.Answers }
+		var in struct {
+			Answers     workflow.Answers
+			LibraryID   int64    `json:"libraryId"`
+			SampleFiles []string `json:"sampleFiles"`
+		}
 		if !readJSON(w, r, &in) {
 			return
+		}
+		// S1: "Try it on one file" (optional): 1 to 4 files of one library, previewed under these answers.
+		withSamples := in.SampleFiles != nil || in.LibraryID != 0
+		if withSamples && (in.LibraryID <= 0 || len(in.SampleFiles) < 1 || len(in.SampleFiles) > 4) {
+			apiError(w, http.StatusBadRequest, "invalid_samples", "Choose 1 to 4 sample files from one library.")
+			return
+		}
+		var lib jobs.Library
+		if withSamples {
+			if prev == nil {
+				apiError(w, http.StatusServiceUnavailable, "not_available", "The preview is not available.")
+				return
+			}
+			l, err := store.GetLibrary(in.LibraryID)
+			if errors.Is(err, jobs.ErrNotFound) {
+				apiError(w, http.StatusNotFound, "not_found", "There is no such library.")
+				return
+			}
+			if err != nil {
+				serverError(w, err)
+				return
+			}
+			lib = l
 		}
 		a := workflow.Fill(in.Answers)
 		if !answersOK(w, a) {
@@ -74,7 +102,17 @@ func v2Guide(api *http.ServeMux, store *jobs.Store, svc *integrations.Service, n
 			return
 		}
 		res := workflow.ValidateWith(doc, sc)
-		writeJSON(w, map[string]any{"summary": workflow.Summary(a), "steps": workflow.Steps(doc), "validation": res.Issues})
+		out := map[string]any{"summary": workflow.Summary(a), "steps": workflow.Steps(doc), "validation": res.Issues}
+		// Answers that do not validate have no setting to preview: the samples are left out, not guessed.
+		if withSamples && len(res.Issues) == 0 {
+			samples, err := guideSamples(store, prev, lib, in.SampleFiles, doc, sc, r)
+			if err != nil {
+				serverError(w, err)
+				return
+			}
+			out["samples"] = samples
+		}
+		writeJSON(w, out)
 	})
 	// Save answers into a draft: only the steps the questions own change; the rest stays. The draft's
 	// version (If-Match) is required, as for a draft save.

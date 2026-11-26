@@ -207,12 +207,29 @@ func previewTemplate(w http.ResponseWriter, store *jobs.Store, l jobs.Library, s
 // folder (root) is stored resolved (/var is /private/var on macOS, RUNNER~1 a long name on Windows),
 // so the file is resolved the same way before it is compared: a missing file through its folder.
 func sampleFile(w http.ResponseWriter, root, p string) (string, os.FileInfo, bool) {
-	outside := func() (string, os.FileInfo, bool) {
-		apiError(w, http.StatusBadRequest, "outside_library", "Pick a video inside this library's folder.")
+	real, st, prob := resolveSample(root, p)
+	if !prob.ok() {
+		apiError(w, prob.status, prob.code, prob.message)
 		return "", nil, false
 	}
+	return real, st, true
+}
+
+// sampleProblem is why a chosen sample file cannot be used: the status and error code the library
+// Preview gives, and its message. The zero value means the file is fine.
+type sampleProblem struct {
+	status        int
+	code, message string
+}
+
+func (p sampleProblem) ok() bool { return p.code == "" }
+
+// resolveSample is sampleFile without the response: the resolved path and its info, or the problem.
+// The guide's samples (S1) use it so one bad file does not fail the others.
+func resolveSample(root, p string) (string, os.FileInfo, sampleProblem) {
+	outside := sampleProblem{http.StatusBadRequest, "outside_library", "Pick a video inside this library's folder."}
 	if !filepath.IsAbs(p) {
-		return outside()
+		return "", nil, outside
 	}
 	real, err := jobs.RealPath(p)
 	missing := err != nil
@@ -225,16 +242,14 @@ func sampleFile(w http.ResponseWriter, root, p string) (string, os.FileInfo, boo
 	}
 	rel, err := filepath.Rel(root, real)
 	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return outside() // also a link inside that leads out of the folder
+		return "", nil, outside // also a link inside that leads out of the folder
 	}
 	if missing {
-		apiError(w, http.StatusNotFound, "not_found", "That file is not there any more.")
-		return "", nil, false
+		return "", nil, sampleProblem{http.StatusNotFound, "not_found", "That file is not there any more."}
 	}
 	st, err := os.Stat(real)
 	if err != nil || !st.Mode().IsRegular() || !scanner.IsVideo(real) {
-		apiError(w, http.StatusBadRequest, "not_a_video", "Pick a video file.")
-		return "", nil, false
+		return "", nil, sampleProblem{http.StatusBadRequest, "not_a_video", "Pick a video file."}
 	}
-	return real, st, true
+	return real, st, sampleProblem{}
 }
