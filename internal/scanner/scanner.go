@@ -209,16 +209,17 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 			// A folder that had videos at the last walk and is now empty is a bare mount point, not a library the
 			// person emptied: it records no count and sets no gone marks, until a walk finds videos again. A folder
 			// that still holds other files (a deleted video, say) is recorded as it is.
-			if prev, err := s.Store.GetLibrary(t.LibraryID); err == nil && videos == 0 && prev.LastScanVideos > 0 && folderEmpty(t.Path) {
+			// A missing folder (a disk not mounted) is not a walk whole either: nothing is recorded or marked gone for it.
+			if !isDir(lib) {
+				log.Printf("scan: %s: the folder is missing (disk not mounted?): not recorded, the next scan tries again", lib)
+			} else if prev, err := s.Store.GetLibrary(t.LibraryID); err == nil && videos == 0 && prev.LastScanVideos > 0 && folderEmpty(t.Path) {
 				log.Printf("scan: %s: the folder is empty, though the last scan found %d videos: not recorded, the next scan tries again", lib, prev.LastScanVideos)
 			} else {
 				if err := s.Store.SetLibraryScanned(t.LibraryID, videos); err != nil {
 					log.Printf("scan: %s: %v", lib, err)
 				}
 				walked = append(walked, t.LibraryID)
-				if isDir(lib) { // a missing folder (a disk not mounted) is not walked whole: its settling rows stay
-					walkedPaths = append(walkedPaths, lib)
-				}
+				walkedPaths = append(walkedPaths, lib)
 			}
 		}
 	}
