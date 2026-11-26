@@ -117,25 +117,23 @@ export interface LibraryPatch {
 // GET /api/v2/overview, in pages/08 "Data and API" nesting. Sizes are whole bytes; times are RFC 3339 UTC.
 export interface Overview {
   freed: {
-    total: number;
-    today: number;
+    totalBytes: number;
+    todayBytes: number;
     // Space that frees up when originals leave the trash, and the day it happens. Both null when the trash is empty.
     nextReleaseBytes: number | null;
     nextReleaseAt: string | null;
-    // NOT on pages/08 yet (the Dashboard shows it): the bytes in the trash now.
-    inTrash: number;
+    // The saving still waiting in the trash now.
+    inTrashBytes: number;
   };
-  // NOT on pages/08 yet: `total` is the all-time count the Dashboard shows.
   converted: { total: number; perDay: number };
   waiting: { count: number; nextScanAt: string };
-  // rate is a percent, as the Dashboard shows it.
-  failed24h: { count: number; rate: number };
+  // pct is a percent: 0.6 means 0.6 %.
+  failed24h: { count: number; pct: number };
   avgShrink: { pct: number; secPerGB: number };
   series: { days: DaySeries[] };
-  // Ids of the jobs converting now.
-  running: string[];
+  // The jobs converting now, in the same shape as the Jobs list.
+  running: Job[];
   workersOn: boolean;
-  // NOT on pages/08 yet: the last 24 h counts the Dashboard shows.
   last24h: { done: number; skipped: number; failed: number };
   libraries: Library[];
 }
@@ -143,8 +141,8 @@ export interface Overview {
 // One day of the charts. Freed and in-trash are bytes; the rest are job counts. null = no data that day.
 export interface DaySeries {
   day: string; // local calendar day, YYYY-MM-DD
-  freed: number | null;
-  trash: number | null;
+  freedBytes: number | null;
+  trashBytes: number | null;
   done: number | null;
   skipped: number | null;
   failed: number | null;

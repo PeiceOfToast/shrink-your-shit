@@ -89,7 +89,7 @@ test("originalText builds the Summary's Original line from action and until", ()
   assert.equal(originalText({ action: "trashed", until }), `In the trash until ${dayOf(until)}`);
   assert.equal(originalText({ action: "trashed", until: null }), "In the trash");
   assert.equal(originalText({ action: "deleted", until: null }), "Deleted");
-  assert.equal(originalText({ action: "restored", until: null }), "Restored");
-  assert.equal(originalText({ action: "not_yet", until: null }), "Not yet");
-  assert.equal(originalText({ action: "not_touched", until: null }), "Not touched");
+  assert.equal(originalText({ action: "restored", until: null }), "Put back; the converted file was removed");
+  assert.equal(originalText({ action: "not_yet", until: null }), "Not touched yet");
+  assert.equal(originalText({ action: "not_touched", until: null }), "Left where it was");
 });

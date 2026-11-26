@@ -50,15 +50,15 @@ export function jobHint(job: Job): string {
 export function originalText(o: JobOriginal): string {
   switch (o.action) {
     case "not_yet":
-      return "Not yet";
+      return "Not touched yet";
     case "not_touched":
-      return "Not touched";
+      return "Left where it was";
     case "trashed":
       return o.until ? `In the trash until ${dayOf(o.until)}` : "In the trash";
     case "deleted":
       return "Deleted";
     case "restored":
-      return "Restored";
+      return "Put back; the converted file was removed";
     default: {
       const unknown: never = o.action;
       throw new Error(`Unknown original action: ${unknown}`);

@@ -3,6 +3,7 @@ import seriesRaw from "./series.json" with { type: "json" };
 import { minsAgo, plus, trashUntil } from "./clock.ts";
 import { nextScanFor } from "../schedule.ts";
 import { clock } from "../../format/time.ts";
+import { JOBS } from "./jobs.ts";
 
 // Numbers from draft-b/dashboard.html and draft-b/jobs.html (the status line, KPIs, cards and table).
 // series.json holds the chart heights: saved[0] freed and saved[1] in the trash (GB), converted[0..2] done, skipped, failed.
@@ -15,8 +16,8 @@ const dayString = (offset: number) => {
 };
 const DAYS: DaySeries[] = raw.saved[0].v.map((_, i) => ({
   day: dayString(i - (raw.saved[0].v.length - 1)),
-  freed: toBytes(raw.saved[0].v[i]),
-  trash: toBytes(raw.saved[1].v[i]),
+  freedBytes: toBytes(raw.saved[0].v[i]),
+  trashBytes: toBytes(raw.saved[1].v[i]),
   done: raw.converted[0].v[i],
   skipped: raw.converted[1].v[i],
   failed: raw.converted[2].v[i],
@@ -24,19 +25,19 @@ const DAYS: DaySeries[] = raw.saved[0].v.map((_, i) => ({
 
 export const OVERVIEW: Overview = {
   freed: {
-    total: 36_400_000_000,
-    today: 1_900_000_000,
+    totalBytes: 36_400_000_000,
+    todayBytes: 1_900_000_000,
     // The newest done job (finished 12 min after it started, see jobs.ts j5) plus 30 days in the trash.
     nextReleaseBytes: 3_200_000_000,
     nextReleaseAt: trashUntil(plus(minsAgo(200), 708_000)),
-    inTrash: 61_000_000_000,
+    inTrashBytes: 61_000_000_000,
   },
   converted: { total: 4812, perDay: 11 },
   waiting: { count: 1284, nextScanAt: nextScanFor("daily") },
-  failed24h: { count: 3, rate: 0.6 },
+  failed24h: { count: 3, pct: 0.6 },
   avgShrink: { pct: 38, secPerGB: 130 },
   series: { days: DAYS },
-  running: ["j1", "j2"],
+  running: JOBS.filter((j) => j.state === "running"),
   workersOn: true,
   last24h: { done: 14, skipped: 2, failed: 3 },
   libraries: [],

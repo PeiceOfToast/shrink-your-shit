@@ -19,8 +19,8 @@ function paceLabel(secPerGB: number): string {
 
 // The charts draw GB and job counts; the day records are bytes and counts.
 const savedBars = (days: DaySeries[]): Series[] => [
-  { c: "ok", v: days.map((d) => (d.freed == null ? null : d.freed / 1e9)) },
-  { c: "accent", v: days.map((d) => (d.trash == null ? null : d.trash / 1e9)) },
+  { c: "ok", v: days.map((d) => (d.freedBytes == null ? null : d.freedBytes / 1e9)) },
+  { c: "accent", v: days.map((d) => (d.trashBytes == null ? null : d.trashBytes / 1e9)) },
 ];
 const filesBars = (days: DaySeries[]): Series[] => [
   { c: "ok", v: days.map((d) => d.done) },
@@ -177,7 +177,6 @@ function LibraryRow({ l }: { l: Library }) {
 export function Dashboard() {
   const overview = useApi(() => api.getOverview(), []);
   const attention = useApi(() => api.getAttention(), []);
-  const running = useApi(() => api.getJobs({ state: "running" }), []);
   const [workersOverride, setWorkersOverride] = useState<boolean | null>(null);
   const o = overview.data;
   // The last state the server reported. It stays when a later call fails, so the switch can show it disabled.
@@ -249,8 +248,8 @@ export function Dashboard() {
           <div className="kpis">
             <div className="kpi">
               <span className="l">Freed</span>
-              <span className="v ok">{formatGB(o.freed.total / 1e9)}</span>
-              <span className="d">+{formatGB(o.freed.today / 1e9)} today</span>
+              <span className="v ok">{formatGB(o.freed.totalBytes / 1e9)}</span>
+              <span className="d">+{formatGB(o.freed.todayBytes / 1e9)} today</span>
             </div>
             <div className="kpi">
               <span className="l">Converted</span>
@@ -265,7 +264,7 @@ export function Dashboard() {
             <div className="kpi">
               <span className="l">Failed 24 h</span>
               <span className="v bad">{o.failed24h.count}</span>
-              <span className="d">{o.failed24h.rate} %</span>
+              <span className="d">{o.failed24h.pct} %</span>
             </div>
             <div className="kpi">
               <span className="l">Avg shrink</span>
@@ -296,7 +295,7 @@ export function Dashboard() {
                 <Link className="more" to="/jobs?state=done">Done jobs</Link>
               </h2>
               <div className="big tnum ok">
-                {formatGB(o.freed.total / 1e9)}
+                {formatGB(o.freed.totalBytes / 1e9)}
                 <small>freed</small>
               </div>
               <div className="sub tnum">
@@ -304,7 +303,7 @@ export function Dashboard() {
                   {o.freed.nextReleaseBytes != null && o.freed.nextReleaseAt && (
                     <>{sizeText(o.freed.nextReleaseBytes)} more on {dayOf(o.freed.nextReleaseAt)}, when originals leave the trash · </>
                   )}
-                  <Link to="/settings/processing">{formatBytes(o.freed.inTrash)} in the trash</Link>
+                  <Link to="/settings/processing">{formatBytes(o.freed.inTrashBytes)} in the trash</Link>
                 </span>
                 <span>
                   New files are <b>{o.avgShrink.pct}% smaller</b> on average
@@ -371,10 +370,10 @@ export function Dashboard() {
                 </span>
                 <Link className="more" to="/jobs?state=running">all jobs →</Link>
               </h2>
-              {running.data && running.data.items.length === 0 && <p className="muted">Nothing is converting right now.</p>}
-              {running.data && running.data.items.length > 0 && (
+              {o.running.length === 0 && <p className="muted">Nothing is converting right now.</p>}
+              {o.running.length > 0 && (
                 <ul className="rows">
-                  {running.data.items.map((j) => (
+                  {o.running.map((j) => (
                     <ConvertingRow key={j.id} j={j} />
                   ))}
                 </ul>
