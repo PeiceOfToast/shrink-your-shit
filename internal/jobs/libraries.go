@@ -103,13 +103,19 @@ func (s *Store) FolderClash(p string, except int64) (l Library, same bool, ok bo
 		}
 		lp := canonical(l.Path)
 		switch {
-		case lp == p:
+		case strings.EqualFold(lp, p):
 			return l, true, true, nil
-		case Within(p, lp) || Within(lp, p):
+		case withinFold(p, lp) || withinFold(lp, p):
 			return l, false, true, nil
 		}
 	}
 	return Library{}, false, false, nil
+}
+
+// withinFold is Within ignoring letter case, for the overlap checks only: macOS and SMB or NAS mounts are
+// case-insensitive, so "films/sub" is inside "Films" there (#767 review finding 2). Within itself stays exact.
+func withinFold(p, dir string) bool {
+	return Within(strings.ToLower(p), strings.ToLower(dir))
 }
 
 // Within reports whether p is inside dir (not equal to it).
@@ -347,9 +353,9 @@ func (s *Store) EnsureLibraries(paths []string, legacy rules.Template) (added in
 		for _, l := range libs {
 			lp := canonical(l.Path)
 			switch {
-			case lp == p || l.Path == given:
+			case strings.EqualFold(lp, p) || l.Path == given:
 				have = true
-			case Within(p, lp) || Within(lp, p):
+			case withinFold(p, lp) || withinFold(lp, p):
 				clash = l.Path
 			}
 		}

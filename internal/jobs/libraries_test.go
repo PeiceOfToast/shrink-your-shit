@@ -498,3 +498,37 @@ func TestDuplicateFlowKeepsDescriptionAndTags(t *testing.T) {
 		t.Errorf("copy meta = %+v, want description %q, tags [films 4k], no favourite", m, desc)
 	}
 }
+
+// Overlap is judged ignoring letter case (#767 review finding 2): on a case-insensitive disk "films" is the
+// library "Films", and "FILMS/sub" is inside it. "Films2" only starts the same way and is not a clash.
+func TestOverlapIgnoresCase(t *testing.T) {
+	s := open(t)
+	root := t.TempDir()
+	films := realDir(t, filepath.Join(root, "Films"))
+	if _, err := s.AddLibrary("Films", films, rules.SliderTemplate(3), false); err != nil {
+		t.Fatal(err)
+	}
+	if l, same, ok, err := s.FolderClash(filepath.Join(root, "films"), 0); err != nil || !ok || !same || l.Name != "Films" {
+		t.Errorf("films: library %q same %v ok %v err %v, want Films, the same folder", l.Name, same, ok, err)
+	}
+	if _, same, ok, _ := s.FolderClash(filepath.Join(root, "FILMS", "sub"), 0); !ok || same {
+		t.Errorf("FILMS/sub: same %v ok %v, want inside Films", same, ok)
+	}
+	if _, _, ok, _ := s.FolderClash(filepath.Join(root, "Films2"), 0); ok {
+		t.Error("Films2 clashed with Films")
+	}
+	// adding a folder by another case of the library's own folder adds nothing
+	realDir(t, filepath.Join(root, "films"))
+	legacy := rules.LegacyTemplate(rules.Default(), "replace")
+	if n, _, _ := s.EnsureLibraries([]string{filepath.Join(root, "films")}, legacy); n != 0 {
+		t.Errorf("films: added %d", n)
+	}
+	// a folder inside it, by another case, is skipped as inside
+	realDir(t, filepath.Join(root, "FILMS", "sub"))
+	if n, skipped, _ := s.EnsureLibraries([]string{filepath.Join(root, "FILMS", "sub")}, legacy); n != 0 || len(skipped) != 1 || !strings.Contains(skipped[0], "inside") {
+		t.Errorf("FILMS/sub: added %d, skipped %q", n, skipped)
+	}
+	if libs, _ := s.Libraries(); len(libs) != 1 {
+		t.Errorf("libraries %d, want 1", len(libs))
+	}
+}

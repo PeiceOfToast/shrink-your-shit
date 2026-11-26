@@ -489,3 +489,28 @@ func TestFreeSpaceTimeLimit(t *testing.T) {
 		t.Errorf("%d reads, want 1 (cached)", calls.Load())
 	}
 }
+
+// The overlap checks on add and on a path change ignore letter case (#767 review finding 2): "films" is
+// the library Films, and "FILMS/sub" is inside it.
+func TestLibraryOverlapIgnoresCase(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	root := t.TempDir()
+	for _, d := range []string{"Films", "films", filepath.Join("FILMS", "sub")} {
+		os.MkdirAll(filepath.Join(root, d), 0o755)
+	}
+	if _, err := st.AddLibrary("Films", filepath.Join(root, "Films"), rules.SliderTemplate(3), false); err != nil {
+		t.Fatal(err)
+	}
+	other, _ := st.AddLibrary("Other", t.TempDir(), rules.SliderTemplate(3), false)
+	for _, c := range []struct{ path, code string }{
+		{filepath.Join(root, "films"), "path_taken"},
+		{filepath.Join(root, "FILMS", "sub"), "path_overlaps"},
+	} {
+		if code, body := post(t, srv, "POST", "/api/libraries", fmt.Sprintf(`{"name":"x","path":%q}`, c.path)); code != 409 || errCode(body) != c.code {
+			t.Errorf("add %s: %d %s, want 409 %s", c.path, code, body, c.code)
+		}
+	}
+	if code, body := post(t, srv, "PATCH", fmt.Sprintf("/api/libraries/%d", other.ID), fmt.Sprintf(`{"path":%q}`, filepath.Join(root, "FILMS", "sub"))); code != 409 || errCode(body) != "path_overlaps" {
+		t.Errorf("path change to FILMS/sub: %d %s, want 409 path_overlaps", code, body)
+	}
+}
