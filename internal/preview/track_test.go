@@ -96,6 +96,33 @@ func TestTrackEstimatesFromTheSpeedItIsGiven(t *testing.T) {
 	}
 }
 
+// a file in a subfolder of the library goes to the same subfolder of the new folder, as the worker puts it
+func TestTrackNamesTheSubfolderOfAFileInAFolder(t *testing.T) {
+	dir := library(t)
+	p := &Previewer{Store: store(t), Exec: &probes{}, FFprobe: "ffprobe"}
+	path := filepath.Join(dir, "sub", "b.mp4")
+	st, _ := os.Stat(path)
+	last := func(dest Destination) string {
+		s := rules.DefaultSelectors(3)
+		s.AfterConverting = "folder"
+		s.FolderMode = rules.NextToLibrary
+		tr := p.Track(context.Background(), dir, path, st, s.Template(), dest, nil)
+		return tr.Lines[len(tr.Lines)-1].Text
+	}
+	for _, c := range []struct {
+		name, want string
+		dest       Destination
+	}{
+		{"folder", "Original: stays as it is; the new file goes to /media/movies (shrunk)/sub", Destination{Folder: "/media/movies (shrunk)"}},
+		{"folder with a trailing slash", "Original: stays as it is; the new file goes to /media/movies/sub", Destination{Folder: "/media/movies/"}},
+		{"folder template", "Original: stays as it is; the new file goes to /media/Movies/out/sub", Destination{Pattern: "/media/{{library}}/out", Library: "Movies"}},
+	} {
+		if got := last(c.dest); got != c.want {
+			t.Errorf("%s:\n got %q\nwant %q", c.name, got, c.want)
+		}
+	}
+}
+
 // the original line says where the new file goes: a folder, why there is none yet, beside, or replaced
 func TestTrackSaysWhereTheNewFileGoes(t *testing.T) {
 	dir := library(t)
@@ -122,6 +149,8 @@ func TestTrackSaysWhereTheNewFileGoes(t *testing.T) {
 			Destination{Pattern: "/media/{{library}}/out", Library: "Movies"}},
 		{"folder template with a name the preview can't know", "folder", "Original: stays as it is; the new file goes to a folder named from your pattern /media/{{worker}}/out",
 			Destination{Pattern: "/media/{{worker}}/out", Library: "Movies"}},
+		{"folder template with a piece too long for the worker", "folder", "Original: stays as it is; the new file goes to a folder named from your pattern /media/{{library}}/" + strings.Repeat("x", 201),
+			Destination{Pattern: "/media/{{library}}/" + strings.Repeat("x", 201), Library: "Movies"}},
 		{"beside", "beside", "Original: stays as it is, next to the new file", Destination{}},
 		{"replace", "replace", "Original: kept in a .syp-trash folder beside it", Destination{}},
 	} {

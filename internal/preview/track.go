@@ -104,23 +104,42 @@ func folderOriginal(d Destination, root, path string, st fs.FileInfo, info media
 		return "Original: stays as it is; " + d.Problem
 	case d.Pattern != "":
 		if f, ok := fillFolder(d, root, path, st, info); ok {
-			return "Original: stays as it is; the new file goes to " + f
+			return "Original: stays as it is; the new file goes to " + folderFor(f, root, path)
 		}
 		return "Original: stays as it is; the new file goes to a folder named from your pattern " + d.Pattern
 	case d.Folder != "":
-		return "Original: stays as it is; the new file goes to " + d.Folder
+		return "Original: stays as it is; the new file goes to " + folderFor(d.Folder, root, path)
 	}
 	return "Original: stays as it is; the new file goes to a folder"
 }
 
+// folderFor is the folder the new file goes into: dir, joined with this file's folder inside the library,
+// as the worker's FolderPathAs (internal/worker/worker.go) joins them. A file outside the library goes to dir.
+func folderFor(dir, root, path string) string {
+	if rel, err := filepath.Rel(root, filepath.Dir(path)); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return filepath.Join(dir, rel)
+	}
+	return filepath.Clean(dir)
+}
+
+// maxNameLen is the longest name the worker accepts (worker.go's maxNameLen): a copy, because this package
+// does not import the worker.
+const maxNameLen = 200
+
 // fillFolder is the folder the template makes for this file: vars.Folder over the file's values, as the
 // worker makes them. ok is false when the template uses a name this preview can't know (the worker's own
-// name, the workflow's revision, the run's variables), or when the folder would not be a full path.
+// name, the workflow's revision, the run's variables), when a piece of the folder is too long for the worker
+// to accept, or when the folder would not be a full path.
 func fillFolder(d Destination, root, path string, st fs.FileInfo, info media.Info) (string, bool) {
 	src := vars.Source{Path: path, Library: d.Library, LibraryRoot: root, SizeBytes: st.Size(), Info: &info}
 	f, empty := vars.Folder(d.Pattern, src.Values())
 	if len(empty) > 0 || !filepath.IsAbs(f) || vars.HasDotDot(f) {
 		return "", false
+	}
+	for _, piece := range strings.Split(filepath.ToSlash(f), "/") {
+		if len(piece) > maxNameLen {
+			return "", false
+		}
 	}
 	return f, true
 }
