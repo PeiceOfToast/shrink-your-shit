@@ -4,7 +4,9 @@ package doctor
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"math"
 	"runtime"
 	"strings"
@@ -206,7 +208,12 @@ func encoderChecks(in APIInput, probes map[string]Probe, inUse string) []DoctorC
 }
 
 func dataCheck(dir string) DoctorCheck {
-	if err := writeProbe(dir); err != nil {
+	err := writeProbe(dir)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return DoctorCheck{ID: "data", Label: "Data folder", Status: "bad",
+			Detail: "The data folder " + dir + " does not exist.", Hint: hint(missingDataAdvice)}
+	case err != nil:
 		return DoctorCheck{ID: "data", Label: "Data folder", Status: "bad",
 			Detail: "Cannot write to " + dir + ". " + ReadOnlyMessage(dir), Hint: hint("Give the app's user write access to the data folder.")}
 	}
