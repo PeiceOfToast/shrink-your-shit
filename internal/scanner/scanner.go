@@ -160,7 +160,7 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 			}
 			if err != nil {
 				unread = append(unread, path)
-				log.Printf("scan: %s: cannot read the folder %s: its files are not seen, the library is not recorded this scan; the next scan tries again", lib, path)
+				log.Printf("scan: %s: cannot read the folder %s: its files are not seen, the library is not recorded this scan; the next scan tries again (if it is not media, add it to the flow's Ignore list)", lib, path)
 				return nil
 			}
 			if rel, err := filepath.Rel(lib, path); err == nil && rel != "." && t.Template.Ignored(rel) {
@@ -170,7 +170,9 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 				return nil
 			}
 			if d.IsDir() {
-				if path != lib && SkipDir(d.Name()) {
+				// lost+found is a disk's root folder, root-only and never media: skipped here, not in SkipDir, which
+				// the doctor's unreadable-folder note also uses
+				if path != lib && (SkipDir(d.Name()) || d.Name() == "lost+found") {
 					return fs.SkipDir
 				}
 				return nil
@@ -345,7 +347,11 @@ func (s *Scanner) forgetUnseen(seen map[string]bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for p := range s.firstLook {
-		if _, err := os.Lstat(p); !seen[p] && errors.Is(err, fs.ErrNotExist) { // a file in an unreadable folder is not seen, and not gone
+		if seen[p] {
+			continue
+		}
+		// a file in an unreadable folder is not seen, and not gone: only a file that is really not there loses its look
+		if _, err := os.Lstat(p); errors.Is(err, fs.ErrNotExist) {
 			delete(s.firstLook, p)
 		}
 	}
