@@ -11,6 +11,7 @@ import { currentLibraries } from "./mockLibraries.ts";
 export { setForcedState, getForcedState, onForcedStateChange } from "./mockState.ts";
 export type { ForcedState } from "./mockState.ts";
 export * from "./mockLibraries.ts";
+export * from "./mockWorkflows.ts";
 
 // The status line reads this even when a page's own call is forced to fail, so it keeps its counts.
 export function getSummary(): Promise<Summary> {

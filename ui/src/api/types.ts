@@ -55,6 +55,24 @@ export interface Workflow {
   usedBy: { libraryId: string; name: string }[];
 }
 
+// Page 04 "Data and API": one row per workflow on the list. Only the video kind is built so far (decisions.md:57).
+export type WorkflowKind = "video" | "audio" | "other" | "failure" | "part";
+export type WorkflowState = "published" | "draft" | "problems";
+
+export interface WorkflowRow {
+  id: string;
+  name: string;
+  description: string;
+  kind: WorkflowKind;
+  usedBy: { id: string; name: string }[];
+  // RFC 3339 UTC time of the last change.
+  updatedAt: string;
+  state: WorkflowState;
+  problemCount: number;
+  madeWith: "guided" | "editor";
+  fitsGuided: boolean;
+}
+
 export interface WorkflowSummary {
   id: string;
   name: string;
