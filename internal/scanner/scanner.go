@@ -152,12 +152,15 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 	for _, t := range targets {
 		lib := t.Path
 		videos := 0
+		var unread []string // folders under the library the walk could not read: its files were not seen
 		s.setScanning(t.LibraryID, 0, false)
 		filepath.WalkDir(lib, func(path string, d fs.DirEntry, err error) error {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
 			if err != nil {
+				unread = append(unread, path)
+				log.Printf("scan: %s: cannot read the folder %s: its files are not seen, the library is not recorded this scan; the next scan tries again", lib, path)
 				return nil
 			}
 			if rel, err := filepath.Rel(lib, path); err == nil && rel != "." && t.Template.Ignored(rel) {
@@ -213,6 +216,8 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 			// A missing folder (a disk not mounted) is not a walk whole either: nothing is recorded or marked gone for it.
 			if !readableFolder(lib) {
 				log.Printf("scan: %s: the folder is missing or cannot be read (disk not mounted? permissions?): not recorded, the next scan tries again", lib)
+			} else if len(unread) > 0 {
+				// a folder under it was not read (logged above): the count and time of the last whole walk stand
 			} else if prev, err := s.Store.GetLibrary(t.LibraryID); err == nil && videos == 0 && prev.LastScanVideos > 0 && folderEmpty(t.Path) {
 				log.Printf("scan: %s: the folder is empty, though the last scan found %d videos: not recorded, the next scan tries again", lib, prev.LastScanVideos)
 			} else {
@@ -340,7 +345,7 @@ func (s *Scanner) forgetUnseen(seen map[string]bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for p := range s.firstLook {
-		if !seen[p] {
+		if _, err := os.Lstat(p); !seen[p] && errors.Is(err, fs.ErrNotExist) { // a file in an unreadable folder is not seen, and not gone
 			delete(s.firstLook, p)
 		}
 	}
