@@ -224,7 +224,7 @@ function SignInForm({ cur, saved }: { cur: AuthState; saved: () => void }) {
 function Access({ auth }: { auth: boolean }) {
   const [tok, setTok] = useState<string | null>(null), [ask, setAsk] = useState(false), [said, setSaid] = useState("");
   const mode = useData(getAuth, []);
-  // useData's reload rethrows a failed load; the listener catches it so an auth change can't leave an unhandled rejection
+  // reload rethrows non-SignedOut errors; nothing to show here
   useEffect(() => onAuthChanged(() => { mode.reload().catch(() => {}); }), [mode.reload]);
   const show = async () => { if (tok) return setTok(null); const r = await act(getToken(), setSaid); if (r) setTok(r.token); };
   const make = async () => { setAsk(false); const r = await act(rotateToken(), setSaid); if (r) (setTok(r.token), setSaid("New token made. Use it to sign in on other devices.")); };

@@ -12,7 +12,7 @@ test("a failure from a library the page doesn't have is dropped", () => {
   assert.equal(r.none, false);
 });
 
-test("while the libraries have not loaded (null), every failure is kept and none is counted as removed", () => {
+test("while the libraries have not loaded (null), every failure is kept", () => {
   const r = attentionRows({ ...base, libraryIds: null, failures: [f("a", "l9", "2026-11-25T10:00:00Z"), f("b", null, null)] });
   assert.deepEqual(r.failures.map((x) => x.id), ["a", "b"]);
   assert.equal(r.none, false);
