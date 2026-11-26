@@ -36,7 +36,7 @@ func TestGuidePreviewSkippedSampleHasEmptyChecks(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "bad.mkv"), make([]byte, 100_000), 0o644)
 	l, _ := st.AddLibrary("Movies", dir, rules.SliderTemplate(3), false)
 	dir, _ = jobs.RealPath(dir)
-	body := fmt.Sprintf(`{"answers":{"goal":"smaller"},"libraryId":%d,"sampleFiles":[%q]}`, l.ID, filepath.Join(dir, "bad.mkv"))
+	body := fmt.Sprintf(`{"answers":{"goal":"smaller"},"libraryId":%d,"sampleFiles":%s}`, l.ID, mustBody(t, []string{filepath.Join(dir, "bad.mkv")}))
 
 	code, b := post(t, srv, "POST", "/api/v2/workflows/guide/preview", body)
 	if code != 200 || !strings.Contains(b, `"skipped":true`) || !strings.Contains(b, `"checks":[]`) {

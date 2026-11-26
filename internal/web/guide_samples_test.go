@@ -40,9 +40,9 @@ func TestGuidePreviewSamplesOnUnsavedAnswers(t *testing.T) {
 	refused := map[string]string{
 		`{` + answers + `,"libraryId":` + fmt.Sprint(l.ID) + `,"sampleFiles":[]}`:                    "invalid_samples",
 		`{` + answers + `,"libraryId":` + fmt.Sprint(l.ID) + `,"sampleFiles":["a","b","c","d","e"]}`: "invalid_samples",
-		`{` + answers + `,"sampleFiles":["` + dune + `"]}`:                                           "invalid_samples",
+		`{` + answers + `,"sampleFiles":` + mustBody(t, []string{dune}) + `}`:                        "invalid_samples",
 		`{` + answers + `,"libraryId":` + fmt.Sprint(l.ID) + `}`:                                     "invalid_samples",
-		`{` + answers + `,"libraryId":99999,"sampleFiles":["` + dune + `"]}`:                         "not_found",
+		`{` + answers + `,"libraryId":99999,"sampleFiles":` + mustBody(t, []string{dune}) + `}`:      "not_found",
 	}
 	for body, want := range refused {
 		code, b := post(t, srv, "POST", guide, body)
@@ -56,7 +56,7 @@ func TestGuidePreviewSamplesOnUnsavedAnswers(t *testing.T) {
 	}
 
 	// one good file and three refused ones: each answered on its own, in the order asked
-	files := fmt.Sprintf(`["%s","%s","%s","%s"]`, dune, filepath.Join(dir, "notes.txt"), outside, filepath.Join(dir, "gone.mkv"))
+	files := mustBody(t, []string{dune, filepath.Join(dir, "notes.txt"), outside, filepath.Join(dir, "gone.mkv")})
 	code, body = post(t, srv, "POST", guide, `{`+answers+`,"libraryId":`+fmt.Sprint(l.ID)+`,"sampleFiles":`+files+`}`)
 	var out struct {
 		Samples []struct {
@@ -146,7 +146,7 @@ func TestGuidePreviewSamplesOnAnswersThatDoNotValidate(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "Arrival.mkv"), make([]byte, 2_000_000), 0o644)
 	l, _ := st.AddLibrary("Movies", dir, rules.SliderTemplate(3), false)
 	dir, _ = jobs.RealPath(dir)
-	files := fmt.Sprintf(`["%s","%s"]`, filepath.Join(dir, "Dune.mkv"), filepath.Join(dir, "Arrival.mkv"))
+	files := mustBody(t, []string{filepath.Join(dir, "Dune.mkv"), filepath.Join(dir, "Arrival.mkv")})
 
 	code, body := post(t, srv, "POST", "/api/v2/workflows/guide/preview",
 		`{"answers":{"goal":"smaller","format":"h264"},"libraryId":`+fmt.Sprint(l.ID)+`,"sampleFiles":`+files+`}`)

@@ -109,13 +109,15 @@ func TestTrackNamesTheSubfolderOfAFileInAFolder(t *testing.T) {
 		tr := p.Track(context.Background(), dir, path, st, s.Template(), dest, nil)
 		return tr.Lines[len(tr.Lines)-1].Text
 	}
+	// folders are absolute on this OS; the line is built with its separators, as the product does
+	base := t.TempDir()
 	for _, c := range []struct {
 		name, want string
 		dest       Destination
 	}{
-		{"folder", "Original: stays as it is; the new file goes to /media/movies (shrunk)/sub", Destination{Folder: "/media/movies (shrunk)"}},
-		{"folder with a trailing slash", "Original: stays as it is; the new file goes to /media/movies/sub", Destination{Folder: "/media/movies/"}},
-		{"folder template", "Original: stays as it is; the new file goes to /media/Movies/out/sub", Destination{Pattern: "/media/{{library}}/out", Library: "Movies"}},
+		{"folder", "Original: stays as it is; the new file goes to " + filepath.Join(base, "movies (shrunk)", "sub"), Destination{Folder: filepath.Join(base, "movies (shrunk)")}},
+		{"folder with a trailing slash", "Original: stays as it is; the new file goes to " + filepath.Join(base, "movies", "sub"), Destination{Folder: filepath.Join(base, "movies") + string(filepath.Separator)}},
+		{"folder template", "Original: stays as it is; the new file goes to " + filepath.Join(base, "Movies", "out", "sub"), Destination{Pattern: filepath.Join(base, "{{library}}", "out"), Library: "Movies"}},
 	} {
 		if got := last(c.dest); got != c.want {
 			t.Errorf("%s:\n got %q\nwant %q", c.name, got, c.want)
@@ -138,19 +140,20 @@ func TestTrackSaysWhereTheNewFileGoes(t *testing.T) {
 		tr := p.Track(context.Background(), dir, path, st, s.Template(), dest, nil)
 		return tr.Lines[len(tr.Lines)-1].Text
 	}
+	base := t.TempDir() // absolute on this OS; the line is built with its separators, as the product does
 	for _, c := range []struct {
 		name, after, want string
 		dest              Destination
 	}{
-		{"folder", "folder", "Original: stays as it is; the new file goes to /media/movies (shrunk)", Destination{Folder: "/media/movies (shrunk)"}},
+		{"folder", "folder", "Original: stays as it is; the new file goes to " + filepath.Join(base, "movies (shrunk)"), Destination{Folder: filepath.Join(base, "movies (shrunk)")}},
 		{"folder with a problem", "folder", "Original: stays as it is; No folder for new files for Movies yet: /media is on a different disk. Pick a folder.",
 			Destination{Problem: "No folder for new files for Movies yet: /media is on a different disk. Pick a folder."}},
-		{"folder template, filled for this file", "folder", "Original: stays as it is; the new file goes to /media/Movies/out",
-			Destination{Pattern: "/media/{{library}}/out", Library: "Movies"}},
-		{"folder template with a name the preview can't know", "folder", "Original: stays as it is; the new file goes to a folder named from your pattern /media/{{worker}}/out",
-			Destination{Pattern: "/media/{{worker}}/out", Library: "Movies"}},
-		{"folder template with a piece too long for the worker", "folder", "Original: stays as it is; the new file goes to a folder named from your pattern /media/{{library}}/" + strings.Repeat("x", 201),
-			Destination{Pattern: "/media/{{library}}/" + strings.Repeat("x", 201), Library: "Movies"}},
+		{"folder template, filled for this file", "folder", "Original: stays as it is; the new file goes to " + filepath.Join(base, "Movies", "out"),
+			Destination{Pattern: filepath.Join(base, "{{library}}", "out"), Library: "Movies"}},
+		{"folder template with a name the preview can't know", "folder", "Original: stays as it is; the new file goes to a folder named from your pattern " + filepath.Join(base, "{{worker}}", "out"),
+			Destination{Pattern: filepath.Join(base, "{{worker}}", "out"), Library: "Movies"}},
+		{"folder template with a piece too long for the worker", "folder", "Original: stays as it is; the new file goes to a folder named from your pattern " + filepath.Join(base, "{{library}}", strings.Repeat("x", 201)),
+			Destination{Pattern: filepath.Join(base, "{{library}}", strings.Repeat("x", 201)), Library: "Movies"}},
 		{"beside", "beside", "Original: stays as it is, next to the new file", Destination{}},
 		{"replace", "replace", "Original: kept in a .syp-trash folder beside it", Destination{}},
 	} {
