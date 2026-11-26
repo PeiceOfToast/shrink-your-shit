@@ -582,6 +582,9 @@ func KeptUntil(keptAt string, days int) (time.Time, bool) {
 }
 
 // TrashNow sums the kept originals and when they go, with days the keep-originals setting now.
+// PurgeEvery is how often the service purges kept originals that are due (main.go).
+const PurgeEvery = time.Hour
+
 func (s *Store) TrashNow(days int) (Trash, error) {
 	rows, err := s.Originals(OriginalKept)
 	if err != nil {
@@ -589,12 +592,23 @@ func (s *Store) TrashNow(days int) (Trash, error) {
 	}
 	var t Trash
 	var first, last time.Time
+	now := time.Now()
 	for _, o := range rows {
 		t.Files++
 		t.Bytes += o.Bytes
 		due, ok := KeptUntil(o.KeptAt, days)
 		if !ok {
 			continue
+		}
+		if due.Before(now) {
+			// Overdue by less than one hourly purge (main.go): the next purge takes it, so it goes now. Overdue by
+			// more: the purge held it back (its share isn't connected, its folder isn't found, a job uses it) and
+			// there is no date to promise, so it is left out of both dates rather than shown as past (manager
+			// 11-26) or as now for as long as the hold lasts (review 746).
+			if now.Sub(due) > PurgeEvery {
+				continue
+			}
+			due = now
 		}
 		if first.IsZero() || due.Before(first) {
 			first = due
@@ -604,15 +618,6 @@ func (s *Store) TrashNow(days int) (Trash, error) {
 		}
 	}
 	if !first.IsZero() {
-		// A due date already past is an original the purge holds back (its share isn't connected, its folder
-		// isn't found, a job uses it) or that the next hourly purge takes: the soonest it goes is now, never
-		// a past date (manager 11-26: a past nextDeleteAt after the U-B originals were held).
-		if now := time.Now(); first.Before(now) {
-			first = now
-			if last.Before(now) {
-				last = now
-			}
-		}
 		f, l := first.UTC().Format(time.RFC3339), last.UTC().Format(time.RFC3339)
 		t.NextDeleteAt, t.LastDeleteAt = &f, &l
 	}

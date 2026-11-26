@@ -301,7 +301,7 @@ func main() {
 	}
 	// Kept originals are purged every hour whether or not converting can run (review 172f049).
 	go func() {
-		t := time.NewTicker(time.Hour)
+		t := time.NewTicker(jobs.PurgeEvery)
 		defer t.Stop()
 		for {
 			select {

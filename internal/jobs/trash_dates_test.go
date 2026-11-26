@@ -8,7 +8,8 @@ import (
 )
 
 // Manager 11-26 (b): originals the purge held back past their due date (U-B) made nextDeleteAt a past date.
-// The soonest a kept original goes is now; a due date still ahead is unchanged.
+// Overdue by more than one purge means held: it is counted but left out of both dates (review 746: "now" stays
+// false while a hold lasts). Overdue by less goes in the next purge: now. A due date still ahead is unchanged.
 func TestTrashDatesAreNeverPast(t *testing.T) {
 	s := open(t)
 	keep := func(path string, keptAt time.Time) {
@@ -41,13 +42,20 @@ func TestTrashDatesAreNeverPast(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n, l := at(tr.NextDeleteAt), at(tr.LastDeleteAt); !near(n, 0) || !near(l, 0) {
-		t.Errorf("all overdue: next %v, last %v from now; want both now", n, l)
+	if tr.Files != 1 || tr.NextDeleteAt != nil || tr.LastDeleteAt != nil {
+		t.Errorf("all overdue: %+v; want 1 file counted and no dates", tr)
 	}
+
+	keep("/m/just.mkv", time.Now().Add(-7*24*time.Hour-10*time.Minute)) // due 10 minutes ago: the next purge
+	tr, _ = s.TrashNow(7)
+	if n, l := at(tr.NextDeleteAt), at(tr.LastDeleteAt); tr.Files != 2 || !near(n, 0) || !near(l, 0) {
+		t.Errorf("held and just due: %d files, next %v, last %v from now; want 2 files, both now", tr.Files, n, l)
+	}
+	s.db.Exec(`DELETE FROM originals WHERE path='/m/just.mkv'`)
 
 	keep("/m/new.mkv", time.Now().Add(-24*time.Hour)) // due in 6 days
 	tr, _ = s.TrashNow(7)
-	if n, l := at(tr.NextDeleteAt), at(tr.LastDeleteAt); !near(n, 0) || !near(l, 6*24*time.Hour) {
-		t.Errorf("one overdue, one ahead: next %v, last %v from now; want now and 6 days", n, l)
+	if n, l := at(tr.NextDeleteAt), at(tr.LastDeleteAt); tr.Files != 2 || !near(n, 6*24*time.Hour) || !near(l, 6*24*time.Hour) {
+		t.Errorf("one overdue, one ahead: %d files, next %v, last %v from now; want 2 files, both 6 days", tr.Files, n, l)
 	}
 }
