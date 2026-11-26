@@ -61,6 +61,7 @@ function writeQuery(patch: Record<string, string | null>, replace = false) {
 // A line the live stream adds is shown only if it matches the filters on screen.
 function matches(e: LogEvent, p: LogParams): boolean {
   if (e.level === "debug" && !p.detail) return false;
+  if (p.since != null && e.seq <= p.since) return false;
   if (p.level && e.level !== p.level) return false;
   if (p.source && e.source !== p.source) return false;
   if (p.library && e.libraryId !== p.library) return false;
@@ -144,6 +145,7 @@ export function SystemLog() {
   const from = query.get("from") ?? "";
   const to = query.get("to") ?? "";
   const q = query.get("q") ?? "";
+  const since = query.get("since") ?? "";
   const detail = query.get("detail") === "1";
   const paramKey = query.toString();
 
@@ -157,6 +159,7 @@ export function SystemLog() {
       library: library || undefined,
       q: q || undefined,
       detail: detail || undefined,
+      since: since ? Number(since) : undefined,
       from: range === "custom" ? localToIso(from) : rangeFrom(range, now),
       to: range === "custom" ? localToIso(to) : undefined,
     };
@@ -260,7 +263,7 @@ export function SystemLog() {
     }
   };
 
-  const hasFilters = Boolean(level || source || worker || library || q || detail || range !== DEFAULT_RANGE);
+  const hasFilters = Boolean(level || source || worker || library || q || detail || since || range !== DEFAULT_RANGE);
   const sourceNames = sources.data ?? [];
   const sourceMissing = source && !sourceNames.includes(source);
 
@@ -350,6 +353,11 @@ export function SystemLog() {
         </div>
       )}
 
+      {since && (
+        <p className="syslog-since">
+          Showing only the lines after the ones you last saw. <button type="button" className="btn ghost sm" onClick={() => writeQuery({ since: "" })}>Show all lines</button>
+        </p>
+      )}
       {log.data && items.length === 0 && !hasFilters && <p className="muted">Nothing logged yet.</p>}
 
       {log.data && items.length === 0 && hasFilters && (

@@ -824,3 +824,7 @@
     max-height: 60vh;
   }
 }
+
+.syslog-since {
+  margin: 0 0 8px;
+}

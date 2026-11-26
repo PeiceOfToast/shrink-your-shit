@@ -113,6 +113,7 @@ const all = (): LogEvent[] => [...BASE, ...streamed];
 // The filter every line goes through. The level is skipped when counting, so each level shows its own count.
 function keep(e: LogEvent, p: LogParams, skipLevel: boolean): boolean {
   if (e.level === "debug" && !p.detail) return false;
+  if (p.since != null && e.seq <= p.since) return false;
   if (!skipLevel && p.level && e.level !== p.level) return false;
   if (p.source && e.source !== p.source) return false;
   if (p.library && e.libraryId !== p.library) return false;
@@ -163,6 +164,9 @@ export function subscribeAppEvents(cb: (e: LogEvent) => void): () => void {
 
 // POST /api/v2/log/seen {seq}: opening the page clears the status line's new errors up to that seq.
 let seenSeq = 0;
+export function getSeenSeq(): number {
+  return seenSeq;
+}
 export function markLogSeen(seq: number): Promise<{ ok: true }> {
   return respond(() => {
     seenSeq = Math.max(seenSeq, seq);

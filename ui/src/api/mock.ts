@@ -7,7 +7,7 @@ import { getForcedState, respond } from "./mockState.ts";
 import { currentLibraries } from "./mockLibraries.ts";
 import { setAllWorkers, workerName } from "./mockWorkers.ts";
 import { healthFailing } from "./mockSettings.ts";
-import { newErrorCount } from "./mockLog.ts";
+import { getSeenSeq, newErrorCount } from "./mockLog.ts";
 
 // Mock implementation of the API. Route-named functions; shapes come from the page specs.
 // The dev state switcher sets a forced state (mockState.ts); pages see it only through these calls.
@@ -27,7 +27,7 @@ export function getSummary(): Promise<Summary> {
       // New errors are error lines the System log hasn't been opened past yet (mockLog.ts).
       // Fresh install: no job has finished and no library is watched yet.
       const fresh = s === "fresh" ? { lastDoneAt: null, nextScanAt: null } : {};
-      return { ...SUMMARY, ...fresh, newErrors: s === "empty" ? 0 : newErrorCount(), healthFailing: healthFailing() };
+      return { ...SUMMARY, ...fresh, newErrors: s === "empty" ? 0 : newErrorCount(), seenSeq: getSeenSeq(), healthFailing: healthFailing() };
     },
     { failInError: false },
   );

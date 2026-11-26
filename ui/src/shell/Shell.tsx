@@ -99,7 +99,7 @@ function StatusLine({ summary, ok }: { summary?: Summary; ok: boolean }) {
         disk free <b>{s ? formatBytes(s.diskFreeBytes) : "—"}</b>
       </Link>
       {s && s.newErrors > 0 && (
-        <Link className="lg-only" to="/settings/log?level=error">
+        <Link className="lg-only" to={`/settings/log?level=error&since=${s.seenSeq}`}>
           {s.newErrors} new errors
         </Link>
       )}

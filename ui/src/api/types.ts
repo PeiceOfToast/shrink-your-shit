@@ -169,6 +169,8 @@ export interface Summary {
   failed24h: number;
   workersOffline: number;
   newErrors: number;
+  // The last error line the System log was opened past (0 on a fresh install). newErrors counts errors above it.
+  seenSeq: number;
   healthFailing: boolean;
 }
 
@@ -586,4 +588,6 @@ export interface LogParams {
   limit?: number;
   // Shows debug lines.
   detail?: boolean;
+  // Only lines with a seq above this.
+  since?: number;
 }
