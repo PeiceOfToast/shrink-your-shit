@@ -1,8 +1,9 @@
 // Libraries, workflows and folders for the mock. Writes change an in-memory copy, so a session behaves like the app.
-import type { FolderCheck, FolderListing, Library, LibraryDetail, LibraryInput, LibraryPatch, Preview, Watch, Workflow, WorkflowSummary } from "./types.ts";
+import type { FolderCheck, FolderListing, Library, LibraryDetail, LibraryInput, LibraryPatch, Preview, Watch, WorkflowSummary } from "./types.ts";
 import { ApiError } from "./errors.ts";
 import { getForcedState, respond } from "./mockState.ts";
-import { FOLDERS, LIBRARIES, PREVIEW, SHARE_FOLDERS, WORKFLOW_SUMMARY, WORKFLOWS } from "./fixtures/libraries.ts";
+import { FOLDERS, LIBRARIES, PREVIEW, SHARE_FOLDERS, WORKFLOW_SUMMARY } from "./fixtures/libraries.ts";
+import { WORKFLOW_ROWS } from "./fixtures/workflowRows.ts";
 import { nextScanFor } from "./schedule.ts";
 
 let rows: Library[] = LIBRARIES.map((l) => ({ ...l }));
@@ -103,7 +104,7 @@ export function patchLibrary(id: string, patch: LibraryPatch): Promise<LibraryDe
         next.workflow = null;
         next.status = "needs_workflow";
       } else {
-        const wf = WORKFLOWS.find((w) => w.id === patch.workflowId);
+        const wf = WORKFLOW_ROWS.find((w) => w.id === patch.workflowId);
         if (!wf) throw new ApiError("workflow_not_found", "That workflow doesn't exist.", "workflowId");
         next.workflow = { id: wf.id, name: wf.name };
         if (cur.status === "needs_workflow") {
@@ -191,13 +192,9 @@ export function createShare(input: { address: string; user?: string; password?: 
   return respond(() => ({ id: `share-${input.address.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`, address: input.address }));
 }
 
-export function getWorkflows(): Promise<Workflow[]> {
-  return respond(() => WORKFLOWS.map((w) => ({ ...w, usedBy: [...w.usedBy] })));
-}
-
 export function getWorkflow(id: string): Promise<WorkflowSummary> {
   return respond(() => {
-    const wf = WORKFLOWS.find((w) => w.id === id);
+    const wf = WORKFLOW_ROWS.find((w) => w.id === id);
     if (!wf) throw new ApiError("workflow_not_found", "That workflow doesn't exist.");
     return { id: wf.id, name: wf.name, summary: WORKFLOW_SUMMARY[id] };
   });

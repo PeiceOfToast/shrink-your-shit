@@ -259,7 +259,7 @@ export function Dashboard() {
             <div className="kpi">
               <span className="l">Waiting</span>
               <span className="v ">{formatCount(o.waiting.count)}</span>
-              <span className="d">next {dayClock(o.waiting.nextScanAt)}</span>
+              <span className="d">{o.waiting.nextScanAt ? <>next {dayClock(o.waiting.nextScanAt)}</> : "no scan scheduled"}</span>
             </div>
             <div className="kpi">
               <span className="l">Failed 24 h</span>

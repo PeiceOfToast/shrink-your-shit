@@ -48,23 +48,23 @@ export interface LibraryDetail extends Library {
   workers?: { id: string; name: string }[];
 }
 
-export interface Workflow {
-  id: string;
-  name: string;
-  line: string;
-  usedBy: { libraryId: string; name: string }[];
-}
-
 // Page 04 "Data and API": one row per workflow on the list. Only the video kind is built so far (decisions.md:57).
 export type WorkflowKind = "video" | "audio" | "other" | "failure" | "part";
 export type WorkflowState = "published" | "draft" | "problems";
+
+// Who uses a workflow: a library today, and a workflow once workflows can nest (page 04 "Data and API").
+export interface WorkflowUse {
+  type: "library" | "workflow";
+  id: string;
+  name: string;
+}
 
 export interface WorkflowRow {
   id: string;
   name: string;
   description: string;
   kind: WorkflowKind;
-  usedBy: { id: string; name: string }[];
+  usedBy: WorkflowUse[];
   // RFC 3339 UTC time of the last change.
   updatedAt: string;
   state: WorkflowState;
@@ -126,7 +126,8 @@ export interface Overview {
     inTrashBytes: number;
   };
   converted: { total: number; perDay: number };
-  waiting: { count: number; nextScanAt: string };
+  // null when no library is watched, so no scan is scheduled.
+  waiting: { count: number; nextScanAt: string | null };
   // pct is a percent: 0.6 means 0.6 %.
   failed24h: { count: number; pct: number };
   avgShrink: { pct: number; secPerGB: number };

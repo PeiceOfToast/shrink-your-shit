@@ -1,4 +1,4 @@
-import type { Library, Workflow, WorkflowSummary } from "../types.ts";
+import type { Library, WorkflowSummary } from "../types.ts";
 import { localAt, minsAgo } from "./clock.ts";
 import { nextScanFor } from "../schedule.ts";
 
@@ -9,14 +9,8 @@ export const LIBRARIES: Library[] = [
   { id: "home-videos", name: "Home videos", path: "/media/home-videos", workflow: { id: "keep-surround", name: "Keep surround" }, files: 164, waiting: 46, savedBytes: 28.3e9, savedPct: 29, lastScan: { at: localAt(-1, 22, 10), found: 164, new: 0, changed: 0 }, status: "share_down", shareDownAt: minsAgo(40), watch: "weekly", paused: true, nextScanAt: null },
 ];
 
-// The three workflows from the library panel draft (a-side-panel.html, WF data). Summary sentences are the page's
-// three lines; "original" for Keep surround is an assumption (its draft has no line for it).
-export const WORKFLOWS: Workflow[] = [
-  { id: "shrink-videos", name: "Shrink videos", line: "HEVC on the graphics card, Balanced · Movies, TV Shows", usedBy: [{ libraryId: "movies", name: "Movies" }, { libraryId: "tv", name: "TV Shows" }] },
-  { id: "keep-surround", name: "Keep surround", line: "HEVC, keeps 5.1 and 7.1 tracks · Home videos", usedBy: [{ libraryId: "home-videos", name: "Home videos" }] },
-  { id: "shrink-anime", name: "Shrink anime", line: "HEVC tuned for animation · not used yet", usedBy: [] },
-];
-
+// The chosen workflow's three lines in the library panel (a-side-panel.html). The list itself is fixtures/workflowRows.ts.
+// "original" for Keep surround is an assumption (its draft has no line for it).
 export const WORKFLOW_SUMMARY: Record<string, WorkflowSummary["summary"]> = {
   "shrink-videos": { converts: "Converts files over 1 GB to HEVC on the graphics card, at Balanced quality.", leavesAlone: "Leaves alone files under 1 GB, samples and extras.", original: "The original goes to the trash for 30 days." },
   "keep-surround": { converts: "Converts to HEVC and keeps every 5.1 and 7.1 audio track.", leavesAlone: "Leaves alone files that are already HEVC.", original: "The original goes to the trash for 30 days." },
