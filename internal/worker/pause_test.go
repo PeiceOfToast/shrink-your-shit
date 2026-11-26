@@ -425,7 +425,7 @@ type positionExec struct {
 
 // maxStuckReports is how many reports a stuck encode sends before it holds still and waits for the stall stop (at
 // most 5 s of wall time, then it fails). The reports come faster than the watchdog's wall-clock tick, so the stop
-// usually lands in that wait when there is no length.
+// can land in that wait.
 const maxStuckReports = 1000
 
 func (x positionExec) Stream(ctx context.Context, onLine func(string), name string, args ...string) (string, error) {
@@ -463,6 +463,23 @@ func (x positionExec) Stream(ctx context.Context, onLine func(string), name stri
 	return x.FakeExec.Stream(ctx, onLine, name, args...) // then the new file, as the fake makes it
 }
 
+// waitStuckCancelled waits up to 60 s for a stuck encode's job to end, and fails unless the worker cancelled the
+// encode, on the timeout path too, so a stop that never cancels is named as that rather than as a hang.
+func waitStuckCancelled(t *testing.T, what string, done chan struct{}, cancelled *atomic.Bool) {
+	t.Helper()
+	select {
+	case <-done:
+	case <-time.After(60 * time.Second):
+		if !cancelled.Load() {
+			t.Fatalf("%s: the stuck encode was never cancelled (the job did not stop)", what)
+		}
+		t.Fatalf("%s: the job did not stop", what)
+	}
+	if !cancelled.Load() {
+		t.Errorf("%s: the stuck encode was never cancelled", what)
+	}
+}
+
 // An ffmpeg whose position, frames and bytes all hold still is stuck, and the stall stop ends it. One whose
 // position and frames move on slowly, for longer than StallAfter in all, is not stopped. One whose position moves
 // while its frame count holds still is not stopped either: the position alone counts as progress.
@@ -476,12 +493,9 @@ func TestStallStopWaitsForAMovingEncode(t *testing.T) {
 	w.Exec = positionExec{FakeExec: s.exec, clock: clock, cancelled: cancelled}
 	done := make(chan struct{})
 	go func() { w.RunOne(context.Background()); close(done) }()
-	waitDoneWithin(t, done, 60*time.Second)
+	waitStuckCancelled(t, "one position", done, cancelled)
 	if j := s.job(); j.Status != jobs.Failed || !strings.Contains(j.Error, "no progress for 2s") {
 		t.Errorf("one position: %s %q", j.Status, j.Error)
-	}
-	if !cancelled.Load() {
-		t.Error("one position: the stuck encode was never cancelled")
 	}
 	s.assertOriginalSafe()
 
@@ -527,16 +541,17 @@ func TestStallStopWaitsForAMovingEncode(t *testing.T) {
 		w.Exec = positionExec{FakeExec: s.exec, step: c.step, steps: 30, clock: clock, cancelled: cancelled}
 		done := make(chan struct{})
 		go func() { w.RunOne(context.Background()); close(done) }()
-		waitDoneWithin(t, done, 60*time.Second)
+		if c.want == jobs.Failed {
+			waitStuckCancelled(t, "no length, stuck", done, cancelled)
+		} else {
+			waitDoneWithin(t, done, 60*time.Second)
+		}
 		j := s.job()
 		if j.Status != c.want || j.DurationSec != 0 {
 			t.Errorf("no length, step %d: %s %q (duration %v)", c.step, j.Status, j.Error, j.DurationSec)
 		}
 		if c.want == jobs.Failed && !strings.Contains(j.Error, "no progress for 2s") { // the stall stop, not maxStuckReports
 			t.Errorf("no length, stuck: stopped for %q, want the stall stop", j.Error)
-		}
-		if c.want == jobs.Failed && !cancelled.Load() {
-			t.Error("no length, stuck: the stuck encode was never cancelled")
 		}
 	}
 }
