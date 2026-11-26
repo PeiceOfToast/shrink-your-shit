@@ -4,6 +4,7 @@ package scanner
 
 import (
 	"os"
+	"path/filepath"
 	"runtime"
 	"testing"
 )
@@ -25,7 +26,12 @@ func TestUnreadableLibraryRootKeepsItsState(t *testing.T) {
 		t.Fatal("the first scan found no videos; the test needs some")
 	}
 
-	if err := os.Chmod(l.Path, 0o000); err != nil {
+	// The original is deleted while the root can't be listed. 0o311 keeps search (x) and takes away read (r), so
+	// a file's Lstat still answers "not there": without the gate, this scan would mark the original gone.
+	if err := os.Remove(filepath.Join(l.Path, "kept.mkv")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(l.Path, 0o311); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.Chmod(l.Path, 0o755) }) // so TempDir can be removed
@@ -41,14 +47,17 @@ func TestUnreadableLibraryRootKeepsItsState(t *testing.T) {
 			c1[l.ID].FreedBytes, c1[l.ID].CouldFreeBytes, c0[l.ID].FreedBytes, c0[l.ID].CouldFreeBytes)
 	}
 
-	// Readable again: the next scan records the library again.
+	// Readable again: the next scan records the library again, without the deleted original, which is now gone.
 	if err := os.Chmod(l.Path, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	scanLibrary(s, l)
 	again, _ := st.GetLibrary(l.ID)
-	if again.LastScanVideos != before.LastScanVideos || again.LastScan == "" {
+	if again.LastScanVideos != before.LastScanVideos-1 || again.LastScan == "" {
 		t.Errorf("after the root is readable again: last scan %d at %q; want %d recorded",
-			again.LastScanVideos, again.LastScan, before.LastScanVideos)
+			again.LastScanVideos, again.LastScan, before.LastScanVideos-1)
+	}
+	if c2, _ := st.Counts(); c2[l.ID].FreedBytes == c0[l.ID].FreedBytes {
+		t.Errorf("freed %d after the root is readable again; want the deleted original counted as freed", c2[l.ID].FreedBytes)
 	}
 }
