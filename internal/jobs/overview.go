@@ -209,7 +209,7 @@ FROM jobs GROUP BY library_id, d`, Running, Queued, Failed, Kept)
 	if err := s.savedByDay(&t); err != nil {
 		return t, err
 	}
-	err = s.reader().QueryRow(`SELECT COUNT(*) FROM files WHERE reason<>'' AND NOT ` + convertedSQL).Scan(&t.Summary.Skipped)
+	err = s.reader().QueryRow(`SELECT COUNT(*) FROM files WHERE reason<>'' AND reason<>'still_changing' AND NOT ` + convertedSQL).Scan(&t.Summary.Skipped)
 	return t, err
 }
 

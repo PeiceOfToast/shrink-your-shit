@@ -5,7 +5,7 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent as RPointer, type ReactNode } from "react";
 import { Icon } from "../Icon";
 import { MOCK, SignedOut, failed, type Answer } from "../api";
-import { bytes, clock, count, dayClock, encoderName, lastScan, plural } from "../format";
+import { bytes, clock, count, dayClock, dayName, encoderName, lastScan, plural } from "../format";
 import { getSummary, scanAllLibraries, type RealSummary } from "../dashApi";
 import { getDoctor } from "../doctorApi";
 import { listJobs } from "../jobsApi";
@@ -34,7 +34,6 @@ import type { JobProgressEvent } from "../types/jobs";
 const slots = (w: O["workers"][number]) => w.slots.cpu ?? { used: w.slots.used ?? 0, total: w.slots.total ?? 0 };
 const pct = (n: number | null) => (n == null ? null : Math.max(0, Math.min(100, Math.round(n))));
 const perGB = (s: number | null) => (s == null ? "not recorded" : s < 60 ? Math.round(s) + " s" : Math.floor(s / 60) + " min" + (Math.round(s % 60) ? " " + Math.round(s % 60) + " s" : ""));
-const dayName = (d: string) => new Date(d + "T12:00:00").toLocaleDateString(undefined, { day: "numeric", month: "short" }).replace(" ", "\u00a0"); // "Nov 20" never splits
 
 
 type Day = O["daily"][number];
@@ -267,7 +266,7 @@ export function Overview() {
           {attn.health && <li className="lcard">
             <span className="ltile" aria-hidden="true"><Icon id="i-alert" /></span>
             <div className="lmain"><div className="lname"><b>{failedNow.length === 1 ? "A health check failed" : plural(failedNow.length, "health check", "health checks") + " failed"}:</b></div>
-              <span className="sm">{failedNow[0].detail} <Link to="/settings/system#health">Open Health</Link></span></div>
+              <span className="sm brk">{failedNow[0].detail} <Link to="/settings/system#health">Open Health</Link></span></div>
             <div className="lside"><button className="btn sm ghost" type="button" aria-label="Dismiss the health check note" onClick={hideHealth}>Dismiss</button></div>
           </li>}
           {v.encoderFallbacks?.map((f) => <li key={f.workerId} className="lcard">
@@ -378,12 +377,12 @@ export function Overview() {
               const nextFreeDay = h.nextFreeAt ? dayName(h.nextFreeAt.slice(0, 10)) : null;
               const lib = libOf.get(String(l.id)); // the Libraries page's workflow and scan figures
               const facts = [l.saved > 0 && l.waitingToFree > 0 ? bytes(l.waitingToFree) + " more" + frees : null, (l.grew ?? 0) > 0 ? bytes(l.grew!) + " added by bigger files" : null].filter(Boolean);
-              const files = l.counts.done + l.counts.waiting + l.counts.skipped + l.counts.failed, right = libraryRight(l, nextFreeDay, bytes);
+              const right = libraryRight(l, nextFreeDay, bytes);
               return <li key={l.id} className="lcard">
                 <span className="ltile" aria-hidden="true"><Icon id="i-library" /></span>
                 <div className="lmain">
                   <div className="lname"><Link className="ttl" to={"/libraries/" + l.id}>{l.name}</Link><span className="lchev" aria-hidden="true">›</span></div>
-                  <div className="chips"><span className="mchip">{count(l.counts.waiting)} waiting</span><span className="mchip">{plural(files, "file", "files")}</span>{lib?.workflowName && <span className="mchip"><Icon id="i-workflow" />{lib.workflowName}</span>}{lib && <span className="mchip">{lib.scan.lastScanAt ? "scanned " + lastScan(lib.scan.lastScanAt) : "not scanned yet"}</span>}{facts.map((f) => <span key={f} className="mchip">{f}</span>)}</div>
+                  <div className="chips"><span className="mchip">{count(l.counts.waiting)} waiting</span>{lib && <span className="mchip">{plural(lib.counts.files, "file", "files")}</span>}{lib?.workflowName && <span className="mchip"><Icon id="i-workflow" />{lib.workflowName}</span>}{lib && <span className="mchip">{lib.scan.lastScanAt ? "scanned " + lastScan(lib.scan.lastScanAt) : "not scanned yet"}</span>}{facts.map((f) => <span key={f} className="mchip">{f}</span>)}</div>
                 </div>
                 <div className="lside">
                   <span className={l.saved > 0 ? "saved nowrap" : "sm nowrap"}>{right.gain && <b className="gain">{right.gain}</b>}{right.rest}</span>

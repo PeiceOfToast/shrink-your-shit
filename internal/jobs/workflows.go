@@ -566,7 +566,9 @@ FROM jobs j JOIN libraries l ON l.id=j.library_id WHERE l.flow_id=?`, since, sin
 type Trash struct {
 	Bytes        int64   `json:"bytes"`
 	Files        int     `json:"files"`
-	NextDeleteAt *string `json:"nextDeleteAt"`
+	NextDeleteAt *string `json:"nextDeleteAt"` // earliest due date among originals the purge can free (now if one is due)
+	// LastDeleteAt is the latest due date among the same originals. An original the purge holds back (overdue by
+	// more than PurgeEvery) is counted in Files and Bytes but in neither date, so this is not "all freed by then".
 	LastDeleteAt *string `json:"lastDeleteAt"`
 }
 
@@ -582,6 +584,9 @@ func KeptUntil(keptAt string, days int) (time.Time, bool) {
 }
 
 // TrashNow sums the kept originals and when they go, with days the keep-originals setting now.
+// PurgeEvery is how often the service purges kept originals that are due (main.go).
+const PurgeEvery = time.Hour
+
 func (s *Store) TrashNow(days int) (Trash, error) {
 	rows, err := s.Originals(OriginalKept)
 	if err != nil {
@@ -589,12 +594,23 @@ func (s *Store) TrashNow(days int) (Trash, error) {
 	}
 	var t Trash
 	var first, last time.Time
+	now := time.Now()
 	for _, o := range rows {
 		t.Files++
 		t.Bytes += o.Bytes
 		due, ok := KeptUntil(o.KeptAt, days)
 		if !ok {
 			continue
+		}
+		if due.Before(now) {
+			// Overdue by less than one hourly purge (main.go): the next purge takes it, so it goes now. Overdue by
+			// more: the purge held it back (its share isn't connected, its folder isn't found, a job uses it) and
+			// there is no date to promise, so it is left out of both dates rather than shown as past (manager
+			// 11-26) or as now for as long as the hold lasts (review 746).
+			if now.Sub(due) > PurgeEvery {
+				continue
+			}
+			due = now
 		}
 		if first.IsZero() || due.Before(first) {
 			first = due
