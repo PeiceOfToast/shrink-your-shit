@@ -265,17 +265,37 @@ func TestTokenAddrNeedsData(t *testing.T) {
 	}
 }
 
-// A service started with its own -data folder gets the command that names it; the default folder gets the plain one.
-func TestTokenHintNamesAFolderTheSearchMisses(t *testing.T) {
-	if got := tokenHint(defaultDataDir()); got != "shrink-your-shit token" {
-		t.Errorf("default folder: want the plain command, got %q", got)
+// The plain command prints the first folder in tokenDirs with a token, so the hint is plain only when that
+// folder is this service's. An earlier folder with a token, or no token at all, gets the -data form.
+func TestTokenHintMatchesTheFolderTokenCommandReads(t *testing.T) {
+	writeToken := func(dir string) {
+		if err := os.WriteFile(filepath.Join(dir, web.TokenFile), []byte("tok\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
-	dir := filepath.Join(t.TempDir(), "my data")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	mine := t.TempDir()
+	t.Setenv("SYP_DATA", mine) // the service's folder is first in tokenDirs
+	writeToken(mine)
+	if got := tokenHint(mine); got != "shrink-your-shit token" {
+		t.Errorf("own token is the first found: want the plain command, got %q", got)
+	}
+
+	earlier := t.TempDir()
+	t.Setenv("SYP_DATA", earlier) // now an earlier folder holds a token
+	writeToken(earlier)
+	own := filepath.Join(t.TempDir(), "my data") // a folder the default search would not reach
+	if err := os.MkdirAll(own, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	want := `shrink-your-shit token -data "` + dir + `"`
-	if got := tokenHint(dir); got != want {
-		t.Errorf("own folder: want %q, got %q", want, got)
+	if got, want := tokenHint(own), "shrink-your-shit token -data "+shellQuote(own); got != want {
+		t.Errorf("earlier folder has a token: want %q, got %q", want, got)
+	}
+	if got := tokenHint(earlier); got != "shrink-your-shit token" {
+		t.Errorf("the folder that is first with a token: want the plain command, got %q", got)
+	}
+
+	t.Setenv("SYP_DATA", t.TempDir()) // no token in any folder searched first
+	if got, want := tokenHint(own), "shrink-your-shit token -data "+shellQuote(own); got != want {
+		t.Errorf("no token found: want %q, got %q", want, got)
 	}
 }

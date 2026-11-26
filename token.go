@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/web"
@@ -180,8 +181,9 @@ func tokenDirs(env map[string]string) []string {
 	return out
 }
 
-// tokenHint is the command a startup line shows for a service's access token: the plain command when the
-// default search finds dataDir, otherwise the command that names it with -data.
+// tokenHint is the command a startup line shows for a service's access token. The plain command prints the
+// first folder in tokenDirs that holds a token, so it is named only when that folder is dataDir; otherwise
+// the command names dataDir with -data.
 func tokenHint(dataDir string) string {
 	abs := func(p string) string {
 		if a, err := filepath.Abs(p); err == nil {
@@ -191,14 +193,24 @@ func tokenHint(dataDir string) string {
 	}
 	want := abs(dataDir)
 	for _, d := range tokenDirs(envFile(linuxEnvFile)) {
+		if tok, err := web.ReadToken(d); err != nil || tok == "" {
+			continue
+		}
 		if abs(d) == want {
 			return "shrink-your-shit token"
 		}
+		break
 	}
-	if strings.ContainsAny(want, " \t") {
-		want = `"` + want + `"`
+	return "shrink-your-shit token -data " + shellQuote(want)
+}
+
+// shellQuote quotes a path for the shell the person most likely types in: single quotes on Unix (no $ or
+// backtick expansion), double quotes on Windows (PowerShell and cmd have no single-quote form).
+func shellQuote(p string) string {
+	if runtime.GOOS == "windows" {
+		return `"` + p + `"`
 	}
-	return "shrink-your-shit token -data " + want
+	return "'" + strings.ReplaceAll(p, "'", `'\''`) + "'"
 }
 
 // envFile reads KEY=VALUE lines (missing file: empty).
