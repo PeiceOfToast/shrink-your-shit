@@ -264,3 +264,18 @@ func TestTokenAddrNeedsData(t *testing.T) {
 		t.Errorf("rc %d: %q", rc, errOut.String())
 	}
 }
+
+// A service started with its own -data folder gets the command that names it; the default folder gets the plain one.
+func TestTokenHintNamesAFolderTheSearchMisses(t *testing.T) {
+	if got := tokenHint(defaultDataDir()); got != "shrink-your-shit token" {
+		t.Errorf("default folder: want the plain command, got %q", got)
+	}
+	dir := filepath.Join(t.TempDir(), "my data")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	want := `shrink-your-shit token -data "` + dir + `"`
+	if got := tokenHint(dir); got != want {
+		t.Errorf("own folder: want %q, got %q", want, got)
+	}
+}

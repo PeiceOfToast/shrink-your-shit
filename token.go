@@ -180,6 +180,27 @@ func tokenDirs(env map[string]string) []string {
 	return out
 }
 
+// tokenHint is the command a startup line shows for a service's access token: the plain command when the
+// default search finds dataDir, otherwise the command that names it with -data.
+func tokenHint(dataDir string) string {
+	abs := func(p string) string {
+		if a, err := filepath.Abs(p); err == nil {
+			return a
+		}
+		return p
+	}
+	want := abs(dataDir)
+	for _, d := range tokenDirs(envFile(linuxEnvFile)) {
+		if abs(d) == want {
+			return "shrink-your-shit token"
+		}
+	}
+	if strings.ContainsAny(want, " \t") {
+		want = `"` + want + `"`
+	}
+	return "shrink-your-shit token -data " + want
+}
+
 // envFile reads KEY=VALUE lines (missing file: empty).
 func envFile(path string) map[string]string {
 	m := map[string]string{}
