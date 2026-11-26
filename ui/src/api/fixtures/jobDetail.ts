@@ -1,6 +1,8 @@
 import type { HistoryLine, Job, JobDetail, JobStep, LogLine, LogStep, MediaRow, StepOutcome } from "../types.ts";
 
 // One job's detail, built from its list row. Shapes follow page 03; the wording is mock text.
+// Mock: finished jobs whose detailed log retention has dropped it (page 03 "no longer kept").
+const LOG_GONE = new Set(["j10"]);
 const STEP_NAMES = ["Library", "Audio", "Convert video", "Check the result", "Save"];
 const DECISIONS = [
   "Found the file in its library; one video track, one audio track",
@@ -51,17 +53,17 @@ export function jobDetail(job: Job): JobDetail {
     outcome: outcomes[i],
     durationMs: outcomes[i] === "done" || outcomes[i] === "nothing" || outcomes[i] === "failed" ? DURATIONS[i] : null,
   }));
-  const ran = outcomes.some((o) => o === "done" || o === "nothing" || o === "failed");
-  const logs: LogStep[] | null = ran
-    ? steps
+  // A waiting job has no log yet (an empty list); a finished job in LOG_GONE has had its log dropped by retention.
+  const logs: LogStep[] | null = LOG_GONE.has(job.id)
+    ? null
+    : steps
         .filter((s) => s.outcome !== "skipped" && s.outcome !== "waiting")
         .map((s) => ({
           ...s,
           decision: s.outcome === "failed" ? "Couldn't read the file past 00:41:12" : DECISIONS[s.index - 1],
           command: s.index === 3 ? `ffmpeg -i "${job.file}" -c:v hevc_qsv -global_quality 26 -c:a copy out.mkv` : null,
           lines: linesFor(s.index - 1, s.outcome, job),
-        }))
-    : null;
+        }));
   const pct = /(\d+)% smaller/.exec(job.result);
   const failed = job.state === "failed";
   const media: MediaRow[] = [
@@ -88,7 +90,8 @@ export function jobDetail(job: Job): JobDetail {
     workflow: job.workflow,
     worker: job.worker || "—",
     attempt: failed ? 2 : 1,
-    startedAt: job.started ?? "14:02",
+    // A waiting or skipped job never started.
+    startedAt: job.state === "waiting" || job.state === "skipped" ? null : (job.started ?? "14:02"),
     took: job.when.startsWith("took") ? job.when.replace("took ", "") : null,
     sizeBefore: "38.4 GB",
     sizeAfter: job.state === "done" ? "21.9 GB" : null,

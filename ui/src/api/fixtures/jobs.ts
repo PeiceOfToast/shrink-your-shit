@@ -10,4 +10,6 @@ export const JOBS: Job[] = [
   { id: "j6", state: "done", file: "Better.Call.Saul.S06E13.1080p.mkv", library: "TV Shows", workflow: "Shrink videos", worker: "NAS box", step: "—", progress: null, when: "took 4:30", result: "8% bigger · original kept", resultTone: "" },
   { id: "j7", state: "skipped", file: "Blade.Runner.2049.2017.2160p.DV.mkv", library: "Movies", workflow: "Shrink videos", worker: "", step: "Dolby Vision is left alone", progress: null, when: "today 13:10", result: "—", resultTone: "" },
   { id: "j8", state: "done", file: "Severance.S02E07.1080p.WEB-DL.mkv", library: "TV Shows", workflow: "Shrink videos", worker: "NAS box", step: "—", progress: null, when: "took 9:12", result: "37% smaller · 1.4 GB freed", resultTone: "ok" },
+  { id: "j9", state: "waiting", file: "Ghostbusters.1984.1080p.BluRay.mkv", library: "Movies", workflow: "Shrink videos", worker: "", step: "Waiting for a worker", progress: null, when: "queued 13:20", result: "—", resultTone: "" },
+  { id: "j10", state: "done", file: "Alien.1979.1080p.BluRay.mkv", library: "Movies", workflow: "Shrink videos", worker: "This computer", step: "—", progress: null, when: "took 6:05", result: "52% smaller · 3.1 GB freed", resultTone: "ok" },
 ];

@@ -320,7 +320,8 @@ function LogTab({ d }: { d: Detail }) {
         <label className="sm"><input type="checkbox" checked={warnOnly} onChange={(e) => setWarnOnly(e.target.checked)} /> Warnings and errors only</label>
         <label className="sm"><input type="checkbox" checked={details} onChange={(e) => setDetails(e.target.checked)} /> Show details</label>
       </div>
-      {sections.length === 0 && <p className="muted">Nothing matches.</p>}
+      {d.logs.length === 0 && <p className="muted">Not started yet. The log fills in once a worker picks the file up.</p>}
+      {d.logs.length > 0 && sections.length === 0 && <p className="muted">Nothing matches.</p>}
       {sections.map(({ s, lines }) => (
         <section className="log-step" key={s.index}>
           <header>
