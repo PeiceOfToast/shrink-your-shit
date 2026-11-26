@@ -107,7 +107,8 @@ func (t Transport) trusted(a netip.Addr) bool {
 // forwardedByProxy reports whether r carries a proxy's signature (the forwarding headers). A proxy on this
 // host forwards the internet's address in them, so an untrusted peer that sends one is not a private client.
 func forwardedByProxy(r *http.Request) bool {
-	return r.Header.Get("X-Forwarded-For") != "" || r.Header.Get("X-Real-IP") != "" || r.Header.Get("Forwarded") != ""
+	return r.Header.Get("X-Forwarded-For") != "" || r.Header.Get("X-Real-IP") != "" || r.Header.Get("Forwarded") != "" ||
+		r.Header.Get("X-Forwarded-Proto") != ""
 }
 
 // Allowed reports whether r may reach the worker API (or pairing).
@@ -241,7 +242,7 @@ func (t Transport) Client(r *http.Request) netip.Addr {
 	return peer
 }
 
-const httpsWords = "Use https:// for a worker outside your network (this server's own HTTPS, or a proxy listed in its trusted proxies)."
+const httpsWords = "Use https:// for a worker outside your network (through a proxy listed in this server's trusted proxies)."
 
 // workerVersion reads the worker header: its version and API level.
 func workerVersion(r *http.Request) (string, int) {

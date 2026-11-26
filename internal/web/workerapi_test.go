@@ -65,7 +65,7 @@ func TestWorkerTransport(t *testing.T) {
 			t.Errorf("%s: %v, want %v", c.name, got, c.want)
 		}
 	}
-	for _, h := range []string{"X-Real-IP", "Forwarded"} {
+	for _, h := range []string{"X-Real-IP", "Forwarded", "X-Forwarded-Proto"} {
 		r := req("192.168.1.20:5000", false, "", "")
 		r.Header.Set(h, "203.0.113.9")
 		if none.Allowed(r) {
