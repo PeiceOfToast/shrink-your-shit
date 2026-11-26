@@ -2,11 +2,14 @@ import type { Library, WorkflowSummary } from "../types.ts";
 import { localAt, minsAgo } from "./clock.ts";
 import { nextScanFor } from "../schedule.ts";
 
+// The Home videos share's id (page 09 shareId, not the library id). Attention's reconnect path uses it.
+export const HOME_VIDEOS_SHARE = "home-videos-share";
+
 // Draft-b libraries table (draft-b/libraries.html) as page 09 "Data and API" rows. One folder per library.
 export const LIBRARIES: Library[] = [
   { id: "movies", name: "Movies", path: "/media/movies", workflow: { id: "shrink-videos", name: "Shrink videos" }, files: 1204, waiting: 640, savedBytes: 8.1e9, savedPct: 0.4, lastScan: { at: minsAgo(20), found: 1204, new: 3, changed: 0 }, status: "watching", watch: "daily", paused: false, nextScanAt: nextScanFor("daily") },
   { id: "tv", name: "TV Shows", path: "/media/tv", workflow: { id: "shrink-videos", name: "Shrink videos" }, files: 2430, waiting: 598, savedBytes: 0, savedPct: 0, lastScan: { at: minsAgo(18), found: 2430, new: 12, changed: 1 }, status: "scanning", scanPct: 40, watch: "hourly", paused: false, nextScanAt: nextScanFor("hourly") },
-  { id: "home-videos", name: "Home videos", path: "/media/home-videos", workflow: { id: "keep-surround", name: "Keep surround" }, files: 164, waiting: 46, savedBytes: 28.3e9, savedPct: 29, lastScan: { at: localAt(-1, 22, 10), found: 164, new: 0, changed: 0 }, status: "share_down", shareDownAt: minsAgo(40), watch: "weekly", paused: true, nextScanAt: null },
+  { id: "home-videos", name: "Home videos", path: "/media/home-videos", shareId: HOME_VIDEOS_SHARE, workflow: { id: "keep-surround", name: "Keep surround" }, files: 164, waiting: 46, savedBytes: 28.3e9, savedPct: 29, lastScan: { at: localAt(-1, 22, 10), found: 164, new: 0, changed: 0 }, status: "share_down", shareDownAt: minsAgo(40), watch: "weekly", paused: true, nextScanAt: null },
 ];
 
 // The chosen workflow's three lines in the library panel (a-side-panel.html). The list itself is fixtures/workflowRows.ts.

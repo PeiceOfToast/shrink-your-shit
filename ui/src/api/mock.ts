@@ -94,15 +94,26 @@ export function testEncoders(workerId: string): Promise<{ line: string }> {
   return respond(() => ({ line: `Test finished: the graphics encoder failed on ${workerName(workerId) ?? workerId}.` }));
 }
 
-// The generic action behind a Needs attention row: it calls the method and path the server named.
-// Only the routes this mock knows answer; anything else fails with a sentence the row shows as it is.
-// The encoder test answers with one result sentence; the other routes answer with nothing to show.
-export function runAction(method: string, path: string): Promise<{ line?: string }> {
+// The generic action behind a Needs attention row: it calls the method and path the server named, sending the
+// body as JSON when there is one. Only the routes this mock knows answer; anything else fails with a sentence the
+// row shows as it is. The encoder test answers with one result sentence; the other routes answer with nothing to show.
+export function runAction(method: string, path: string, body?: unknown): Promise<{ line?: string }> {
   const enc = /^\/api\/v2\/workers\/([^/]+)\/capabilities\/test$/.exec(path);
   if (method === "POST" && enc) return testEncoders(enc[1]);
   const share = /^\/api\/v2\/shares\/([^/]+)\/reconnect$/.exec(path);
-  if (method === "POST" && share) return reconnectShare(share[1]).then(() => ({}));
-  if (method === "POST" && path === "/api/v2/jobs/actions") return respond(() => ({}));
+  if (method === "POST" && share) {
+    // The path carries the share's id; the library it belongs to is what reconnects.
+    const lib = currentLibraries().find((l) => l.shareId === share[1]);
+    if (!lib) return Promise.reject(new ApiError("share_not_found", "That share doesn't exist."));
+    return reconnectShare(lib.id).then(() => ({}));
+  }
+  if (method === "POST" && path === "/api/v2/jobs/actions") {
+    const b = body as { action?: unknown; ids?: unknown } | undefined;
+    if (!b || b.action !== "retry" || !Array.isArray(b.ids) || b.ids.length === 0) {
+      return Promise.reject(new ApiError("bad_request", "Pick the jobs to retry."));
+    }
+    return respond(() => ({}));
+  }
   return Promise.reject(new ApiError("unknown_action", "That action isn't available here."));
 }
 

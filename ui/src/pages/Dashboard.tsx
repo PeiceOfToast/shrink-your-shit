@@ -49,8 +49,10 @@ function AttentionRow({ a }: { a: Attention }) {
   const [state, setState] = useState<ActionState>({ s: "idle" });
   const tone = a.level === "error" ? "bad" : "warn";
   const run = () => {
+    const act = a.action;
+    if (!act) return;
     setState({ s: "busy" });
-    api.runAction(a.action.method, a.action.path).then(
+    api.runAction(act.method, act.path, act.body).then(
       (r) => setState({ s: "done", line: r.line }),
       (e: unknown) => setState({ s: "failed", message: e instanceof ApiError ? e.message : "Couldn't do that." }),
     );
@@ -71,7 +73,7 @@ function AttentionRow({ a }: { a: Attention }) {
         )}
         <span className="hint">
           {a.means}{" "}
-          {state.s === "busy" && (a.action.path.endsWith("/capabilities/test") ? "Testing…" : "Working…")}
+          {state.s === "busy" && (a.action?.path.endsWith("/capabilities/test") ? "Testing…" : "Working…")}
           {state.s === "done" &&
             (state.line ? (
               <>
@@ -80,7 +82,7 @@ function AttentionRow({ a }: { a: Attention }) {
             ) : (
               "Started."
             ))}
-          {(state.s === "idle" || state.s === "failed") && (
+          {(state.s === "idle" || state.s === "failed") && a.action && (
             <button type="button" className="linklike" onClick={run}>
               {a.action.label}
             </button>

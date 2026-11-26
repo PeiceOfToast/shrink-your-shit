@@ -4,6 +4,7 @@ import { minsAgo, plus, trashUntil } from "./clock.ts";
 import { nextScanFor } from "../schedule.ts";
 import { clock } from "../../format/time.ts";
 import { JOBS } from "./jobs.ts";
+import { HOME_VIDEOS_SHARE } from "./libraries.ts";
 
 // Numbers from draft-b/dashboard.html and draft-b/jobs.html (the status line, KPIs, cards and table).
 // series.json holds the chart heights: saved[0] freed and saved[1] in the trash (GB), converted[0..2] done, skipped, failed.
@@ -61,7 +62,7 @@ export const ATTENTION: Attention[] = [
     means: "The new file was shorter than the original.",
     count: 1,
     latestAt: minsAgo(95),
-    action: { label: "Retry", method: "POST", path: "/api/v2/jobs/actions" },
+    action: { label: "Retry", method: "POST", path: "/api/v2/jobs/actions", body: { action: "retry", ids: ["j9"] } },
     link: "/jobs?state=failed",
   },
   {
@@ -71,7 +72,7 @@ export const ATTENTION: Attention[] = [
     means: `Nothing from it converts until it is connected. Not connected since ${clock(minsAgo(40))}.`,
     count: 1,
     latestAt: minsAgo(40),
-    action: { label: "Reconnect the share", method: "POST", path: "/api/v2/shares/home-videos/reconnect" },
+    action: { label: "Reconnect the share", method: "POST", path: `/api/v2/shares/${HOME_VIDEOS_SHARE}/reconnect` },
     link: "/libraries",
   },
 ];

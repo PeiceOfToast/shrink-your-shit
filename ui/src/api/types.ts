@@ -149,7 +149,8 @@ export interface DaySeries {
 }
 
 // GET /api/v2/attention (page 08). what, means and action.label are server sentences shown as they are;
-// count and latestAt are values the UI formats.
+// count and latestAt are values the UI formats. action is null when the row has no button; body, when present,
+// is sent as JSON as it is.
 export interface Attention {
   id: string;
   level: "warn" | "error";
@@ -157,7 +158,7 @@ export interface Attention {
   means: string;
   count: number;
   latestAt: string;
-  action: { label: string; method: string; path: string };
+  action: { label: string; method: string; path: string; body?: unknown } | null;
   link: string | null;
 }
 
