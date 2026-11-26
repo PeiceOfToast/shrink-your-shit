@@ -294,3 +294,17 @@ func TestGuideTwoErrorLinksOnAConvertAreUnreadable(t *testing.T) {
 		t.Errorf("the error links changed: %s", mustJSON(outOf(got, conv.ID)))
 	}
 }
+
+// A stale notify target with notify off on both sides is not a change: the page keeps the target when the box
+// is unchecked, and a save that changes nothing is not refused.
+func TestGuideStaleNotifyTargetWithNotifyOffIsNoChange(t *testing.T) {
+	d := Build(DefaultAnswers(GoalSmaller))
+	commit := nodeOf(d, TypeCommit)
+	d.Edges = append(d.Edges, link(commit.ID, "success", "gone-step"))
+	basic := DefaultAnswers(GoalSmaller)
+	basic.Flow = FlowBasic
+	basic.After = After{Notify: false, NotifyTarget: "Phone"}
+	if ChangesUnreadable(d, basic) {
+		t.Errorf("notify off with a stale target: refused as a change")
+	}
+}

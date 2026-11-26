@@ -400,7 +400,16 @@ func ChangesUnreadable(d Doc, a Answers) bool {
 		return false
 	}
 	g := GuideOf(d)
-	return g.Answers != nil && g.Answers.After != a.After
+	return g.Answers != nil && afterKey(g.Answers.After) != afterKey(a.After)
+}
+
+// afterKey is the after-save answers as they change the stretch: a notify target counts only while notify is on,
+// so a target left over from an unchecked box is not a change.
+func afterKey(x After) After {
+	if !x.Notify {
+		x.NotifyTarget = ""
+	}
+	return x
 }
 
 // inOrder keeps the steps and links that were there in their old places, new ones after them, so
