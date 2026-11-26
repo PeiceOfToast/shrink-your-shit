@@ -167,10 +167,12 @@ func (f FileFilter) settleFilters() (string, []any) {
 // separator (Windows: review 43e6f66). The caller binds l.
 const inLibrarySQL = `substr(replace(files.path,'\','/'),1,length(rtrim(replace(l.path,'\','/'),'/'))+1)=rtrim(replace(l.path,'\','/'),'/')||'/'`
 
-// settlingAll is how many files are still changing: waiting to settle, not skipped (settleFilters' condition).
+// settlingAll is how many files are still changing inside a library: waiting to settle, not skipped
+// (settleFilters' condition). A row left outside every library (its library deleted or its path edited) is not counted.
 func (s *Store) settlingAll() (int, error) {
 	var n int
-	err := s.reader().QueryRow(`SELECT COUNT(*) FROM files WHERE files.reason=? AND NOT `+convertedSQL, rules.SkipStillChanging).Scan(&n)
+	err := s.reader().QueryRow(`SELECT COUNT(*) FROM files WHERE files.reason=? AND NOT `+convertedSQL+
+		` AND EXISTS (SELECT 1 FROM libraries l WHERE `+inLibrarySQL+`)`, rules.SkipStillChanging).Scan(&n)
 	return n, err
 }
 

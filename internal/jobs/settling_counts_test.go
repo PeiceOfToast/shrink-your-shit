@@ -58,3 +58,29 @@ func TestSettlingFilesCountAsWaiting(t *testing.T) {
 		t.Errorf("activity waiting files = %d, want 3", a.WaitingFiles)
 	}
 }
+
+// A settling row left behind when its library is deleted (DeleteLibrary keeps it) is in no library, so it is not waiting.
+func TestSettlingRowOfDeletedLibraryIsNotWaiting(t *testing.T) {
+	s := open(t)
+	lib, _ := s.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	if err := s.PutFile(File{Path: filepath.Join(lib.Path, "copying.mkv"), Size: 7, ModTime: 1, Decision: "skip: " + rules.SkipWords[rules.SkipStillChanging], Reason: rules.SkipStillChanging}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteLibrary(lib.ID); err != nil {
+		t.Fatal(err)
+	}
+	tot, err := s.TotalsOf()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := tot.Summary.WaitingFiles; got != 0 {
+		t.Errorf("overview waiting files = %d, want 0", got)
+	}
+	a, err := s.ActivitySummary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.WaitingFiles != 0 {
+		t.Errorf("activity waiting files = %d, want 0", a.WaitingFiles)
+	}
+}
