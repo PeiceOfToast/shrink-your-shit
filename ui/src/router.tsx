@@ -25,12 +25,13 @@ export type Route =
   | { name: "jobs" }
   | { name: "job"; id: string }
   | { name: "jobLog"; id: string }
+  | { name: "workflows" }
+  | { name: "workflowEditor"; id: string }
   | { name: "libraries" }
   | { name: "library"; id: string }
   | { name: "placeholder"; title: string };
 
 const TITLES: Record<string, string> = {
-  workflows: "Workflows",
   workers: "Workers",
   settings: "Settings",
   start: "Start",
@@ -45,6 +46,10 @@ export function resolve(pathname: string): Route {
     if (parts.length === 1) return { name: "jobs" };
     if (parts.length === 2) return { name: "job", id: parts[1] };
     if (parts.length === 3 && parts[2] === "log") return { name: "jobLog", id: parts[1] };
+  }
+  if (parts[0] === "workflows") {
+    if (parts.length === 1) return { name: "workflows" };
+    if (parts.length === 2) return { name: "workflowEditor", id: parts[1] };
   }
   if (parts[0] === "libraries") {
     if (parts.length === 1) return { name: "libraries" };

@@ -219,8 +219,8 @@ export function LibraryPanel({ id, onChange }: { id: string; onChange?: () => vo
                   </span>
                 )}
                 <div className="row">
-                  {form.workflowId && <Link to="/workflows">Edit this workflow</Link>}
-                  <Link to="/workflows">New workflow</Link>
+                  {form.workflowId && <Link to={`/workflows/${form.workflowId}`}>Edit this workflow</Link>}
+                  <Link to="/workflows/new">New workflow</Link>
                 </div>
               </div>
 

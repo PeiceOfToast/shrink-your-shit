@@ -5,6 +5,7 @@ import { Jobs } from "./pages/Jobs.tsx";
 import { JobDetail } from "./pages/JobDetail.tsx";
 import { Libraries } from "./pages/Libraries.tsx";
 import { Placeholder } from "./pages/Placeholder.tsx";
+import { Workflows } from "./pages/Workflows.tsx";
 import { resolve, useLocation } from "./router.tsx";
 
 export function App() {
@@ -34,6 +35,13 @@ export function App() {
           <JobDetail id={route.id} initialTab="log" />
         </>
       );
+      break;
+    case "workflows":
+      page = <Workflows />;
+      break;
+    // The editor (pages 05-07) is on hold: a row, Edit, New workflow and an import all land here.
+    case "workflowEditor":
+      page = <Placeholder title="Workflows" note="The workflow editor is being redesigned." back={{ to: "/workflows", label: "Back to Workflows" }} />;
       break;
     case "libraries":
       page = <Libraries />;
