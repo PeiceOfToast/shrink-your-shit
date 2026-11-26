@@ -195,7 +195,7 @@ export async function purgeTrash(libraryId?: string): Promise<Answer<PurgeResult
   if (!MOCK) return call("POST", "/api/v2/trash/purge", libraryId ? { libraryId } : {});
   const s = mock.mockState(), t = s.trash, q = new URLSearchParams(location.search), skip = q.has("purgeskip"), unreach = q.has("purgeunreach");
   const left = skip ? { files: 3, bytes: 2e9 } : unreach ? { files: 3, bytes: 3e9 } : { files: 0, bytes: 0 };
-  s.trash = { ...t, files: left.files, bytes: left.bytes, nextDeleteAt: left.files ? t.nextDeleteAt : null, lastDeleteAt: new Date().toISOString() };
+  s.trash = { ...t, files: left.files, bytes: left.bytes, nextDeleteAt: left.files ? t.nextDeleteAt : null, lastDeleteAt: left.files ? t.lastDeleteAt : null };
   return M({ deletedFiles: t.files - left.files, freedBytes: t.bytes - left.bytes, skipped: skip ? [{ library: "Archive disk", reason: "Its share isn't connected, so nothing in it was touched." }] : [], unreachable: unreach ? mockUnreachable() : [] });
 }
 const mockUnreachable = (): Unreachable[] => [
