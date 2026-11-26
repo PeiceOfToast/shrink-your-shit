@@ -1,5 +1,7 @@
 /* Parts the draft does not have: menus, search, dev switcher, placeholder notes. Tokens come from draft-b.css. */
 .app{min-height:100vh}
+/* Paths, card names and file names. The class was used on several pages but never defined. */
+.mono{font-family:var(--mono)}
 .topbar .brand{text-decoration:none;color:var(--text)}
 button.search{background:none;border:1px solid var(--border);color:var(--text2);width:300px;font:inherit;font-size:13px;cursor:pointer;text-align:left}
 .topbar kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--border);border-radius:3px;padding:0 4px;margin-left:auto}
@@ -56,4 +58,52 @@ button.search{background:none;border:1px solid var(--border);color:var(--text2);
   table.tbl.wft td.wft-changed::before { content: "· "; color: var(--text2) }
   .pagehead.wft-head .sp { display: none }
   .pagehead.wft-head .btn { flex: 1 1 0 }
+}
+
+/* Workers (page 10): confirm dialogs, the Add worker command, and the libraries rows on a worker page. */
+.dlg{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:12;width:min(440px,calc(100vw - 32px));background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px;box-shadow:0 12px 40px rgba(0,0,0,.35)}
+.dlg h2{margin:0 0 14px;font-size:17px;font-weight:700}
+.dlg-actions{justify-content:flex-end;gap:8px;flex-wrap:wrap}
+pre.cmd{margin:8px 0 14px;padding:12px 14px;border:1px solid var(--border);border-radius:calc(var(--radius) - 4px);background:var(--bg);font-family:var(--mono);font-size:13px;white-space:pre-wrap;word-break:break-all;user-select:all}
+/* Fixed columns so every path field starts at the same x: name | path field | Test and status. A failure or
+   "save first" note sits under the field on desktop, and under the last line on a phone. */
+.librow{display:grid;grid-template-columns:240px minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)}
+.librow > label{min-width:0}
+.librow input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent);vertical-align:middle}
+.librow-path{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.librow-field{min-width:0}
+/* The path field fills its column, so Test and the chip sit right after it. Placeholders stay in sans. */
+.librow-field .inp{width:100%}
+.librow-field .inp::placeholder{font-family:var(--sans)}
+/* A disabled button shows as disabled: muted text and border, no opacity. */
+.btn:disabled{cursor:not-allowed;color:var(--text2);border-color:var(--border)}
+.librow-act{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.librow-msg{grid-column:2;font-size:13px}
+.librow-msg span{display:block}
+@media (max-width:640px){
+  .librow{grid-template-columns:1fr}
+  .librow-msg{grid-column:auto}
+}
+
+/* Worker settings: the number inputs are about 120px, not full width. */
+.inp.narrow{width:120px;max-width:100%}
+
+/* Worker page recent jobs at phone width: the Jobs card, with the labelled facts wrapping in one run. */
+@media (max-width:900px){
+  table.tbl.wk-jobs tr{display:flex;flex-wrap:wrap;column-gap:14px;row-gap:4px;padding:10px 14px}
+  table.tbl.wk-jobs td.full{flex-basis:100%}
+  table.tbl.wk-jobs td[data-l]{flex:none}
+}
+
+/* Worker settings: the same gap between every setting. */
+section.card > .field + .field{margin-top:14px}
+
+/* Workers list: the phone card. Line 1 is name and state chip; line 2 is address · graphics card · Now. */
+table.tbl.wkr td.wk-sub{display:none}
+@media (max-width:900px){
+  table.tbl.wkr tr{display:flex;flex-wrap:wrap;align-items:center;column-gap:10px;padding:10px 14px}
+  table.tbl.wkr td.wk-name{order:1;flex:1 1 0;min-width:0}
+  table.tbl.wkr td.wk-state{order:2;flex:none}
+  table.tbl.wkr td.wk-sub{display:block;order:3;flex:1 0 100%;margin-top:2px}
+  table.tbl.wkr td.wk-slots,table.tbl.wkr td.wk-gpu,table.tbl.wkr td.wk-now,table.tbl.wkr td.wk-done,table.tbl.wkr .wk-addr{display:none}
 }

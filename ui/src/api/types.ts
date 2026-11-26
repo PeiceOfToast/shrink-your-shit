@@ -234,6 +234,7 @@ export interface JobsPage {
 
 export interface JobsParams {
   state?: JobState | "all";
+  worker?: string; // a worker id; the jobs it ran or is running
   limit?: number;
   cursor?: string;
 }
@@ -317,4 +318,62 @@ export interface JobDetail {
   logs: LogStep[] | null;
   media: MediaRow[];
   history: HistoryLine[];
+}
+
+// Workers (page 10 "Data and API"). GET /api/v2/workers returns Worker items; GET /api/v2/workers/{id} returns WorkerDetail.
+export type WorkerState = "converting" | "idle" | "paused" | "offline";
+
+export interface Worker {
+  id: string;
+  name: string;
+  address: string; // "" for this computer
+  local: boolean;
+  state: WorkerState;
+  since: string | null; // RFC 3339; when the state began (offline and paused show it)
+  slots: number; // files at once
+  gpuSlots: number;
+  gpu: { name: string } | null;
+  now: { jobId: string; file: string; step: JobStepRef } | null;
+  doneToday: number;
+}
+
+export interface WorkerLibrary {
+  libraryId: string;
+  name: string;
+  serverPath: string;
+  workerPath: string;
+  mode: "read" | "read_write";
+  test: { state: "untested" | "pending" | "ok" | "failed"; at?: string; message?: string };
+}
+
+// One encoder the worker has. Only the ones whose test passed are offered as a choice.
+export interface WorkerEncoder {
+  name: string; // e.g. "hevc_qsv"
+  label: string;
+  testOk: boolean;
+}
+
+export interface WorkerDetail extends Worker {
+  hours: { from: string; to: string } | null; // "HH:MM" in the server's local time; null = any time. from > to runs overnight.
+  primaryEncoder: string | null; // null = automatic; "cpu" or an encoder name
+  encoders: WorkerEncoder[];
+  // Remote workers only: the libraries it takes. This computer takes every library and sends none.
+  libraries: WorkerLibrary[];
+  // Libraries added since this worker's list was last saved and not on it. The next PATCH {libraries} clears it.
+  newLibraries: { libraryId: string; name: string }[];
+}
+
+export interface Pairing {
+  id: string;
+  code: string;
+  expiresAt: string; // RFC 3339
+  command: string; // the line to run on the other machine
+  plainHTTP: boolean; // the server is reached without TLS
+}
+
+// A worker asking to join after its command ran. Allow or Deny answers it.
+export interface JoinRequest {
+  id: string;
+  name: string;
+  address: string;
 }

@@ -49,7 +49,7 @@ function EncoderTestLink({ state, onRun }: { state: EncoderTest; onRun: () => vo
   if (state.s === "done")
     return (
       <>
-        {state.line} <Link to="/workers">See on Workers</Link>
+        {state.line} <Link to="/workers/this-computer">See on Workers</Link>
       </>
     );
   return (

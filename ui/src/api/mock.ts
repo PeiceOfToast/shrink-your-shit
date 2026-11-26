@@ -5,6 +5,7 @@ import { jobDetail } from "./fixtures/jobDetail.ts";
 import { ApiError } from "./errors.ts";
 import { getForcedState, respond } from "./mockState.ts";
 import { currentLibraries } from "./mockLibraries.ts";
+import { setAllWorkers, workerName } from "./mockWorkers.ts";
 
 // Mock implementation of the API. Route-named functions; shapes come from the page specs.
 // The dev state switcher sets a forced state (mockState.ts); pages see it only through these calls.
@@ -12,6 +13,7 @@ export { setForcedState, getForcedState, onForcedStateChange } from "./mockState
 export type { ForcedState } from "./mockState.ts";
 export * from "./mockLibraries.ts";
 export * from "./mockWorkflows.ts";
+export * from "./mockWorkers.ts";
 
 // The status line reads this even when a page's own call is forced to fail, so it keeps its counts.
 export function getSummary(): Promise<Summary> {
@@ -63,6 +65,11 @@ export function getJobs(params: JobsParams = {}): Promise<JobsPage> {
     if (forced === "running") items = JOBS.filter((j) => j.state === "running");
     const state = params.state ?? "all";
     if (state !== "all") items = items.filter((j) => j.state === state);
+    // Jobs carry the worker's name, so a worker's page filters by it.
+    if (params.worker) {
+      const name = workerName(params.worker);
+      items = items.filter((j) => j.worker === name);
+    }
     return { counts: forced === "running" ? { ...counts, all: 2, waiting: 0, failed: 0, done: 0, skipped: 0 } : counts, items, next: null };
   });
 }
@@ -72,7 +79,10 @@ export function runJobsAction(action: "retry" | "cancel" | "top", ids: string[])
 }
 
 export function runWorkersAction(action: "on" | "off"): Promise<{ ok: true; action: string }> {
-  return respond(() => ({ ok: true as const, action: `workers ${action}` }));
+  return respond(() => {
+    setAllWorkers(action === "on");
+    return { ok: true as const, action: `workers ${action}` };
+  });
 }
 
 export function scanAllLibraries(): Promise<{ ok: true }> {
@@ -81,7 +91,7 @@ export function scanAllLibraries(): Promise<{ ok: true }> {
 
 // Test the encoders on one worker (POST /api/v2/workers/{id}/capabilities/test). The result is one line.
 export function testEncoders(workerId: string): Promise<{ line: string }> {
-  return respond(() => ({ line: `Test finished: the graphics encoder failed on ${workerId === "this-computer" ? "This computer" : workerId}.` }));
+  return respond(() => ({ line: `Test finished: the graphics encoder failed on ${workerName(workerId) ?? workerId}.` }));
 }
 
 // GET /api/v2/jobs/{id}: the head, Summary, Steps, log, media and history of one job.

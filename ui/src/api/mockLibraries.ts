@@ -5,6 +5,7 @@ import { getForcedState, respond } from "./mockState.ts";
 import { FOLDERS, LIBRARIES, PREVIEW, SHARE_FOLDERS, WORKFLOW_SUMMARY } from "./fixtures/libraries.ts";
 import { WORKFLOW_ROWS } from "./fixtures/workflowRows.ts";
 import { nextScanFor } from "./schedule.ts";
+import { workersTaking } from "./mockWorkers.ts";
 
 let rows: Library[] = LIBRARIES.map((l) => ({ ...l }));
 let seq = 0;
@@ -50,7 +51,7 @@ export function getLibraries(): Promise<Library[]> {
 }
 
 export function getLibrary(id: string): Promise<LibraryDetail> {
-  return respond(() => ({ ...findRow(id), workers: [{ id: "this-server", name: "this server" }] }));
+  return respond(() => ({ ...findRow(id), workers: workersTaking(id) }));
 }
 
 export function createLibrary(input: LibraryInput): Promise<Library> {
@@ -122,7 +123,7 @@ export function patchLibrary(id: string, patch: LibraryPatch): Promise<LibraryDe
     // nextScanAt is null while paused, and follows the chosen interval otherwise.
     next.nextScanAt = next.paused ? null : nextScanFor(next.watch);
     rows = rows.map((r) => (r.id === id ? next : r));
-    return { ...next, workers: [{ id: "this-server", name: "this server" }] };
+    return { ...next, workers: workersTaking(id) };
   });
 }
 

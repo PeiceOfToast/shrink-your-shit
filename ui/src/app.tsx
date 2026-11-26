@@ -5,6 +5,8 @@ import { Jobs } from "./pages/Jobs.tsx";
 import { JobDetail } from "./pages/JobDetail.tsx";
 import { Libraries } from "./pages/Libraries.tsx";
 import { Placeholder } from "./pages/Placeholder.tsx";
+import { Workers } from "./pages/Workers.tsx";
+import { WorkerPage } from "./pages/WorkerPage.tsx";
 import { Workflows } from "./pages/Workflows.tsx";
 import { resolve, useLocation } from "./router.tsx";
 
@@ -48,6 +50,16 @@ export function App() {
       break;
     case "library":
       page = <Libraries selected={route.id} />;
+      break;
+    case "workers":
+      page = <Workers />;
+      break;
+    case "worker":
+      page = <WorkerPage id={route.id} />;
+      break;
+    // The System log is not built yet; the worker page's link lands here so it doesn't 404.
+    case "systemLog":
+      page = <Placeholder title="System log" note="The System log isn't built yet." back={{ to: "/workers", label: "Back to Workers" }} />;
       break;
     case "placeholder":
       page = <Placeholder title={route.title} />;
