@@ -268,8 +268,11 @@ func (c *Checker) libraryChecks(ctx context.Context, l Library) []DoctorCheck {
 			}
 			if key == "access" {
 				s.detail += where + ": " + is.Message
-				if is.Code == "unreadable" { // the app cannot read the folder at all: say read access, not just write
-					s.hint = "Check that " + l.Path + " exists, and give the app's user read and write access to it."
+				switch is.Code { // each folder code says the access it lacks, or that the folder is the wrong one
+				case "unreadable": // the app cannot read the folder at all
+					s.hint = "Check that " + l.Path + " exists, and give the app's user read access to it."
+				case "system_folder":
+					s.hint = "Change the folder on the Libraries page, then press Check again."
 				}
 			} else {
 				s.detail += l.Name + ": " + is.Message
