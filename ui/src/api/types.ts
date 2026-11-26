@@ -192,9 +192,17 @@ export interface LogLine {
   text: string;
 }
 
+// A setting or measurement a step used, shown as a row under the step's decision.
+export interface LogValue {
+  name: string;
+  value: string;
+  from: string;
+}
+
 export interface LogStep extends JobStep {
   decision: string;
   command: string | null;
+  values: LogValue[];
   lines: LogLine[];
 }
 
@@ -222,7 +230,14 @@ export interface JobDetail {
   took: string | null;
   sizeBefore: string;
   sizeAfter: string | null;
-  savedPct: number | null;
+  sizeBeforeBytes: number;
+  sizeAfterBytes: number | null;
+  finishedAt: string | null;
+  writtenAt: string | null;
+  // Where the new file went; null until one is written.
+  outputPath: string | null;
+  // Shown on the head while a job runs.
+  timeLeft: string | null;
   original: string;
   failure: { step: string; reason: string; nextAction: string; actionLabel: string } | null;
   skipReason: string | null;
