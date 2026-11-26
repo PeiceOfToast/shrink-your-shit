@@ -158,7 +158,7 @@ export function Variables() {
       <div className="row">
         <button
           type="button"
-          className="btn ghost sm"
+          className="btn sm"
           onClick={() => {
             setOpen(list.length);
             edit([...list, { name: "", type: "string", value: "", usedBy: [] }]);
