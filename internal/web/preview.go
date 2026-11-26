@@ -139,7 +139,7 @@ func previewRoutes(api *http.ServeMux, store *jobs.Store, eng Engine) {
 		root, err := jobs.RealPath(l.Path)
 		if err == nil {
 			var files []preview.Candidate
-			if files, err = preview.Files(root, r.URL.Query().Get("q")); err == nil {
+			if files, err = preview.Files(root, r.URL.Query().Get("q"), r.URL.Query().Get("sort") == "newest"); err == nil {
 				// a list: {items, total}, paged with ?limit=&offset= (default 50; UI-API-CONTRACT.md)
 				limit, offset := 50, 0
 				if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 {

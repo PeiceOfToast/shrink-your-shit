@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
@@ -98,5 +99,40 @@ func TestGuidePreviewSamplesOnUnsavedAnswers(t *testing.T) {
 	}
 	if strings.Contains(body, `"error":null`) {
 		t.Errorf("an answered file must leave the error out: %s", body)
+	}
+}
+
+// GET .../files?sort=newest lists the newest first; without it the list stays A to Z by path.
+func TestLibraryFilesSortNewest(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "old.mkv"), []byte("x"), 0o644)
+	os.WriteFile(filepath.Join(dir, "new.mkv"), []byte("x"), 0o644)
+	os.Chtimes(filepath.Join(dir, "old.mkv"), time.Unix(1_000_000, 0), time.Unix(1_000_000, 0))
+	os.Chtimes(filepath.Join(dir, "new.mkv"), time.Unix(2_000_000, 0), time.Unix(2_000_000, 0))
+	l, _ := st.AddLibrary("Movies", dir, rules.SliderTemplate(3), false)
+	names := func(q string) string {
+		_, body, _ := do(t, nil, srv, call{method: "GET", path: fmt.Sprintf("/api/libraries/%d/files%s", l.ID, q)})
+		var out struct{ Items []struct{ Name string } }
+		json.Unmarshal([]byte(body), &out)
+		var s []string
+		for _, i := range out.Items {
+			s = append(s, i.Name)
+		}
+		return strings.Join(s, ",")
+	}
+	if got := names(""); got != "new.mkv,old.mkv" {
+		t.Errorf("default: %s", got)
+	}
+	if got := names("?sort=newest"); got != "new.mkv,old.mkv" {
+		t.Errorf("newest: %s", got)
+	}
+	// the names sort to the other order, so the modified time is what decides
+	os.Chtimes(filepath.Join(dir, "old.mkv"), time.Unix(3_000_000, 0), time.Unix(3_000_000, 0))
+	if got := names("?sort=newest"); got != "old.mkv,new.mkv" {
+		t.Errorf("newest after touching old: %s", got)
+	}
+	if got := names(""); got != "new.mkv,old.mkv" {
+		t.Errorf("A to Z after touching old: %s", got)
 	}
 }
