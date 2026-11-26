@@ -7,9 +7,11 @@ import (
 	"strings"
 )
 
-// Inside reports whether path is dir itself or inside it.
+// Inside reports whether path is dir itself or inside it. Letters are compared folded on every OS: macOS and
+// SMB or NAS mounts are case-insensitive, so "Films/out" is inside "films", and a miss converts files twice
+// (#766 follow-up). A rare false refusal between two folders differing only in case is visible and fixable.
 func Inside(path, dir string) bool {
-	rel, err := filepath.Rel(dir, path)
+	rel, err := filepath.Rel(strings.ToLower(dir), strings.ToLower(path))
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 

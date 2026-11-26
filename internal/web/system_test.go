@@ -101,6 +101,26 @@ func TestLibraryCheckRefusesAnOutputFolderInside(t *testing.T) {
 	}
 }
 
+// A folder for new files that differs from the library only in letter case is inside it too (#766 follow-up):
+// the check refuses it as inside_library.
+func TestLibraryCheckRefusesAnOutputFolderInsideIgnoringCase(t *testing.T) {
+	srv, _, _ := doctorServer(t, false)
+	lib := filepath.Join(t.TempDir(), "films")
+	if err := os.MkdirAll(lib, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(lib, "a.mkv"), make([]byte, 2048), 0o644)
+	folder := filepath.Join(filepath.Dir(lib), "FILMS", "converted")
+	code, body := post(t, srv, "POST", "/api/libraries/check", fmt.Sprintf(`{"path":%q,"outputFolder":%q}`, lib, folder))
+	var r doctor.FolderReport
+	if json.Unmarshal([]byte(body), &r); code != 200 {
+		t.Fatalf("%d %s", code, body)
+	}
+	if r.OK || len(r.Blockers) != 1 || r.Blockers[0].Code != "inside_library" {
+		t.Fatalf("other case: %+v", r)
+	}
+}
+
 func TestSystemHealth(t *testing.T) {
 	srv, st, _ := doctorServer(t, false)
 	st.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
