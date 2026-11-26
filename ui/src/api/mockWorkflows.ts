@@ -13,7 +13,7 @@ let seq = 0;
 function usedBy(id: string): WorkflowRow["usedBy"] {
   return currentLibraries()
     .filter((l) => l.workflow?.id === id)
-    .map((l) => ({ id: l.id, name: l.name }));
+    .map((l) => ({ type: "library" as const, id: l.id, name: l.name }));
 }
 
 const withUsage = (r: Omit<WorkflowRow, "usedBy">): WorkflowRow => ({ ...r, usedBy: usedBy(r.id) });
@@ -38,7 +38,7 @@ export function duplicateWorkflow(id: string): Promise<WorkflowRow> {
 }
 
 // Refused while a library uses the workflow (the 409 "in_use" of page 04); the page shows the names.
-export function deleteWorkflow(id: string): Promise<{ ok: true } | { ok: false; code: "in_use"; usedBy: { id: string; name: string }[] }> {
+export function deleteWorkflow(id: string): Promise<{ ok: true } | { ok: false; code: "in_use"; usedBy: WorkflowRow["usedBy"] }> {
   return respond(() => {
     find(id);
     const users = usedBy(id);

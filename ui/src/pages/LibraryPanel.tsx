@@ -24,7 +24,7 @@ function toForm(l: LibraryDetail): Form {
 
 export function LibraryPanel({ id, onChange }: { id: string; onChange?: () => void }) {
   const lib = useApi(() => api.getLibrary(id), [id]);
-  const wfs = useApi(() => api.getWorkflows(), []);
+  const wfs = useApi(() => api.listWorkflows(), []);
   const [form, setForm] = useState<Form | null>(null);
   const [saved, setSaved] = useState<Form | null>(null);
   const [browsing, setBrowsing] = useState(false);
