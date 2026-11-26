@@ -135,9 +135,9 @@ The web page has two sign-in choices, set on the setup or settings page:
 
 - **Home** (a new install's choice, except a new Docker install, which starts in password): a computer on your home network uses the page with no sign-in.
   Home network means this computer or a private address (such as 192.168.x.x or 10.x.x.x). Any other
-  address must sign in. A request that carries `X-Forwarded-For`, `Forwarded` or `X-Real-IP` from a peer that
+  address must sign in. On the web page, a request that carries `X-Forwarded-For`, `Forwarded` or `X-Real-IP` from a peer that
   is not a trusted proxy is not admitted by address, so a reverse proxy on your LAN does not expose the page.
-  A proxy must be listed in `-trusted-proxies` and must append to `X-Forwarded-For`. Docker Desktop and rootless
+  Every proxy between the client and this server must be listed in `-trusted-proxies`. Each must append to `X-Forwarded-For` (the first may set it to the client address instead). The first must set `X-Forwarded-Proto`, and the others must keep it; a proxy that passes on what the client sent lets the client claim any address or HTTPS. Docker Desktop and rootless
   Docker show every client as private, which is why a new Docker install starts in password mode.
 - **Password**: everyone signs in with the password, or with the access token. Pick this if this computer can be
   reached from the internet, for example through a forwarded port or a reverse proxy.
