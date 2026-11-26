@@ -1,0 +1,344 @@
+import { useEffect, useState } from "react";
+import { Link, navigate } from "../router.tsx";
+import { clock } from "../format/time.ts";
+import { api, type Job, type WorkerDetail, type WorkerLibrary } from "../api/index.ts";
+import { useApi } from "../api/useApi.ts";
+import { JobRow } from "./Jobs.tsx";
+import { PauseDialog, RemoveDialog, StatePill, errorText } from "./workerParts.tsx";
+
+// One worker's page (pages/10-workers.md, the worker panel). Changed fields only go to the server on Save.
+
+type Settings = { slots: number; gpuSlots: number; from: number; to: number; encoder: string };
+type Lib = { ticked: boolean; workerPath: string; mode: WorkerLibrary["mode"] };
+
+const ENCODERS: { value: string; label: string }[] = [
+  { value: "auto", label: "Choose automatically" },
+  { value: "graphics", label: "Graphics card" },
+  { value: "processor", label: "Processor" },
+];
+
+const TEST_TEXT: Record<WorkerLibrary["test"]["state"], string> = {
+  untested: "Not tested",
+  pending: "Testing…",
+  ok: "Works",
+  failed: "Failed",
+};
+
+const settingsOf = (w: WorkerDetail): Settings => ({
+  slots: w.slots,
+  gpuSlots: w.gpuSlots,
+  from: w.hours.from,
+  to: w.hours.to,
+  encoder: w.encoder,
+});
+
+export function WorkerPage({ id }: { id: string }) {
+  const worker = useApi(() => api.getWorker(id), [id]);
+  const libs = useApi(() => api.getLibraries(), []);
+  const jobs = useApi(() => api.getJobs({ worker: id }), [id]);
+  const [saved, setSaved] = useState<Settings | null>(null);
+  const [form, setForm] = useState<Settings | null>(null);
+  const [libForm, setLibForm] = useState<Record<string, Lib>>({});
+  const [libSaved, setLibSaved] = useState<Record<string, Lib>>({});
+  const [tests, setTests] = useState<Record<string, WorkerLibrary["test"]>>({});
+  const [dialog, setDialog] = useState<"pause" | "remove" | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const w = worker.data;
+
+  useEffect(() => {
+    if (!w) return;
+    const s = settingsOf(w);
+    setSaved(s);
+    setForm(s);
+    const byLib: Record<string, Lib> = {};
+    for (const l of libs.data ?? []) {
+      const have = w.libraries.find((x) => x.libraryId === l.id);
+      byLib[l.id] = { ticked: !!have, workerPath: have?.workerPath ?? "", mode: have?.mode ?? "read_write" };
+    }
+    setLibSaved(byLib);
+    setLibForm(byLib);
+    setTests(Object.fromEntries(w.libraries.map((x) => [x.libraryId, x.test])));
+  }, [w, libs.data]);
+
+  const run = async (fn: () => Promise<unknown>, after?: () => void) => {
+    setBusy(true);
+    setErr(null);
+    setMsg(null);
+    try {
+      await fn();
+      after?.();
+    } catch (e) {
+      setErr(errorText(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const reloadAll = () => {
+    worker.reload();
+    jobs.reload();
+  };
+
+  const settingsDirty = !!form && !!saved && JSON.stringify(form) !== JSON.stringify(saved);
+  const saveSettings = () => {
+    if (!form || !saved) return;
+    const patch: Parameters<typeof api.patchWorker>[1] = {};
+    if (form.slots !== saved.slots) patch.slots = form.slots;
+    if (form.gpuSlots !== saved.gpuSlots) patch.gpuSlots = form.gpuSlots;
+    if (form.from !== saved.from || form.to !== saved.to) patch.hours = { from: form.from, to: form.to };
+    if (form.encoder !== saved.encoder) patch.encoder = form.encoder as WorkerDetail["encoder"];
+    if (Object.keys(patch).length === 0) return;
+    run(() => api.patchWorker(id, patch), () => {
+      setMsg("Saved.");
+      worker.reload();
+    });
+  };
+
+  const libsDirty = JSON.stringify(libForm) !== JSON.stringify(libSaved);
+  const tickedList = () =>
+    Object.entries(libForm)
+      .filter(([, l]) => l.ticked)
+      .map(([libraryId, l]) => ({ libraryId, workerPath: l.workerPath.trim(), mode: l.mode }));
+  const saveLibs = () => {
+    run(() => api.patchWorker(id, { libraries: tickedList() }), () => {
+      setMsg("Saved.");
+      worker.reload();
+    });
+  };
+
+  const testPath = (libraryId: string) => {
+    setTests((t) => ({ ...t, [libraryId]: { state: "pending" } }));
+    api
+      .testWorkerPath(id, libraryId)
+      .then(() => api.waitForPathTest(id, libraryId))
+      .then((res) => setTests((t) => ({ ...t, [libraryId]: res })))
+      .catch((e: unknown) => setTests((t) => ({ ...t, [libraryId]: { state: "failed", message: errorText(e) } })));
+  };
+
+  const testEncoders = () =>
+    run(async () => {
+      const r = await api.testEncoders(id);
+      setMsg(r.line);
+    });
+
+  if (!w) {
+    return (
+      <>
+        <p className="muted">
+          <Link to="/workers">← Workers</Link>
+        </p>
+        {worker.error && !worker.loading ? (
+          <p className="bad">
+            Can't load this worker.{" "}
+            <button type="button" className="btn ghost sm" onClick={worker.reload}>Try now</button>
+          </p>
+        ) : (
+          <span className="skel" style={{ height: 120 }} />
+        )}
+      </>
+    );
+  }
+
+  const offline = w.state === "offline";
+  const unticked = (libs.data ?? []).filter((l) => !libSaved[l.id]?.ticked);
+  const trimmedHour = (n: number) => Math.min(24, Math.max(0, Math.round(n)));
+
+  return (
+    <>
+      <p className="muted sm" style={{ margin: "0 0 8px" }}>
+        <Link to="/workers">← Workers</Link>
+      </p>
+      <div className="pagehead">
+        <div style={{ minWidth: 0 }}>
+          <h1>{w.name}</h1>
+          <div className="muted sm">{w.local ? "This computer" : w.address}</div>
+        </div>
+        <span className="sp"></span>
+        <StatePill w={w} />
+        {!offline && w.state !== "paused" && (
+          <button type="button" className="btn sm" onClick={() => setDialog("pause")} disabled={busy}>Pause</button>
+        )}
+        {w.state === "paused" && (
+          <button type="button" className="btn sm" onClick={() => run(() => api.resumeWorker(id), reloadAll)} disabled={busy}>
+            Resume
+          </button>
+        )}
+        {offline && (
+          <button type="button" className="btn bad sm" onClick={() => setDialog("remove")} disabled={busy}>Remove</button>
+        )}
+      </div>
+
+      {offline && (
+        <div className="note">
+          <span>
+            {w.name} is offline{w.since ? ` since ${clock(w.since)}` : ""}. Its jobs moved back to the queue.
+          </span>
+        </div>
+      )}
+      {err && <p className="err" role="alert">{err}</p>}
+      {msg && <p className="muted sm" role="status">{msg}</p>}
+
+      {form && (
+        <section className="card">
+          <h2 className="h3">Settings</h2>
+          <div className="field">
+            <label className="lbl" htmlFor="w-slots">Files at once</label>
+            <input
+              id="w-slots"
+              className="inp"
+              type="number"
+              min={1}
+              max={8}
+              value={form.slots}
+              onChange={(e) => setForm({ ...form, slots: Number(e.target.value) })}
+            />
+          </div>
+          <div className="field">
+            <label className="lbl" htmlFor="w-gpu">Graphics slots</label>
+            <input
+              id="w-gpu"
+              className="inp"
+              type="number"
+              min={0}
+              max={8}
+              value={form.gpuSlots}
+              onChange={(e) => setForm({ ...form, gpuSlots: Number(e.target.value) })}
+              disabled={!w.gpu}
+            />
+            {w.gpu ? (
+              <div className="hint">
+                <span className="mono">{w.gpu.name}</span>.{" "}
+                <button type="button" className="btn ghost sm" onClick={testEncoders} disabled={busy}>Test the encoders</button>
+              </div>
+            ) : (
+              <div className="hint">No graphics card found, so files convert on the processor.</div>
+            )}
+          </div>
+          <div className="field">
+            <span className="lbl">Hours it may work</span>
+            <div className="row">
+              <input
+                aria-label="From hour"
+                className="inp"
+                type="number"
+                min={0}
+                max={24}
+                value={form.from}
+                onChange={(e) => setForm({ ...form, from: trimmedHour(Number(e.target.value)) })}
+              />
+              <span className="muted">to</span>
+              <input
+                aria-label="To hour"
+                className="inp"
+                type="number"
+                min={0}
+                max={24}
+                value={form.to}
+                onChange={(e) => setForm({ ...form, to: trimmedHour(Number(e.target.value)) })}
+              />
+            </div>
+          </div>
+          <div className="field">
+            <label className="lbl" htmlFor="w-enc">Encoder</label>
+            <select id="w-enc" className="sel" value={form.encoder} onChange={(e) => setForm({ ...form, encoder: e.target.value })}>
+              {ENCODERS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </div>
+          <div className="row" style={{ justifyContent: "flex-end" }}>
+            <button type="button" className="btn primary sm" onClick={saveSettings} disabled={!settingsDirty || busy}>Save</button>
+          </div>
+        </section>
+      )}
+
+      {!w.local && (
+        <section className="card">
+          <h2 className="h3">Libraries</h2>
+          {(libs.data ?? []).length === 0 && <p className="muted">No libraries yet. Add one on Libraries, then tick it here.</p>}
+          {(libs.data ?? []).map((l) => {
+            const row = libForm[l.id];
+            if (!row) return null;
+            const t = tests[l.id] ?? { state: "untested" as const };
+            return (
+              <div className="librow" key={l.id}>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={row.ticked}
+                    onChange={(e) => setLibForm({ ...libForm, [l.id]: { ...row, ticked: e.target.checked } })}
+                  />{" "}
+                  <b>{l.name}</b>
+                  <span className="muted xs mono"> {l.path}</span>
+                </label>
+                <input
+                  aria-label={`Path on ${w.name} for ${l.name}`}
+                  className="inp mono"
+                  placeholder="Path on this worker"
+                  value={row.workerPath}
+                  disabled={!row.ticked}
+                  onChange={(e) => setLibForm({ ...libForm, [l.id]: { ...row, workerPath: e.target.value } })}
+                />
+                <span className="xs">
+                  <span className={`pill ${t.state === "ok" ? "ok" : t.state === "failed" ? "bad" : t.state === "pending" ? "run" : ""}`}>
+                    {TEST_TEXT[t.state]}
+                  </span>
+                  {t.state === "failed" && t.message && <span className="bad"> {t.message}</span>}
+                </span>
+                <button type="button" className="btn ghost sm" onClick={() => testPath(l.id)} disabled={!row.ticked || !row.workerPath.trim() || t.state === "pending"}>
+                  Test
+                </button>
+              </div>
+            );
+          })}
+          {unticked.length > 0 && (
+            <p className="muted sm">New: {unticked.map((l) => l.name).join(", ")}, not taken yet.</p>
+          )}
+          <div className="row" style={{ justifyContent: "flex-end" }}>
+            <button type="button" className="btn primary sm" onClick={saveLibs} disabled={!libsDirty || busy}>Save</button>
+          </div>
+        </section>
+      )}
+      {w.local && <p className="muted">Takes every library, at the same paths.</p>}
+
+      <section className="card" style={{ padding: 0 }}>
+        <div className="row" style={{ padding: "12px 14px" }}>
+          <h2 className="h3" style={{ margin: 0 }}>Recent jobs</h2>
+          <span className="sp"></span>
+          <Link to={`/system-log?source=worker&worker=${id}`}>System log</Link>
+        </div>
+        {jobs.error && !jobs.data && <p className="bad pad">Can't load this worker's jobs.</p>}
+        {jobs.data && jobs.data.items.length === 0 && <p className="muted pad">No jobs yet.</p>}
+        {jobs.data && jobs.data.items.length > 0 && (
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>Status</th>
+                <th>File</th>
+                <th>Step</th>
+                <th className="num">Progress</th>
+                <th className="num">When</th>
+                <th className="num">Result</th>
+              </tr>
+            </thead>
+            <tbody>
+              {jobs.data.items.slice(0, 10).map((j: Job) => (
+                <JobRow key={j.id} j={j} filter="" />
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+
+      {dialog === "pause" && (
+        <PauseDialog w={w} onClose={() => setDialog(null)} onDone={() => { setDialog(null); reloadAll(); }} />
+      )}
+      {dialog === "remove" && (
+        <RemoveDialog w={w} onClose={() => setDialog(null)} onDone={() => navigate("/workers")} />
+      )}
+    </>
+  );
+}

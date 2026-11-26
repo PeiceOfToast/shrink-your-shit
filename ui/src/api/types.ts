@@ -234,6 +234,7 @@ export interface JobsPage {
 
 export interface JobsParams {
   state?: JobState | "all";
+  worker?: string; // a worker id; the jobs it ran or is running
   limit?: number;
   cursor?: string;
 }
@@ -317,4 +318,37 @@ export interface JobDetail {
   logs: LogStep[] | null;
   media: MediaRow[];
   history: HistoryLine[];
+}
+
+// Workers (page 10 "Data and API"). GET /api/v2/workers returns Worker items; GET /api/v2/workers/{id} returns WorkerDetail.
+export type WorkerState = "converting" | "idle" | "paused" | "offline";
+
+export interface Worker {
+  id: string;
+  name: string;
+  address: string; // "" for this computer
+  local: boolean;
+  state: WorkerState;
+  since: string | null; // RFC 3339; when the state began (offline and paused show it)
+  slots: number; // files at once
+  gpuSlots: number;
+  gpu: { name: string } | null;
+  now: { jobId: string; file: string; step: JobStepRef } | null;
+  doneToday: number;
+}
+
+export interface WorkerLibrary {
+  libraryId: string;
+  name: string;
+  serverPath: string;
+  workerPath: string;
+  mode: "read" | "read_write";
+  test: { state: "untested" | "pending" | "ok" | "failed"; at?: string; message?: string };
+}
+
+export interface WorkerDetail extends Worker {
+  hours: { from: number; to: number }; // whole hours of the day it may work, 0 to 24
+  encoder: "auto" | "graphics" | "processor";
+  // Remote workers only: the libraries it takes. This computer takes every library and sends none.
+  libraries: WorkerLibrary[];
 }

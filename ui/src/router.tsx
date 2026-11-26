@@ -28,6 +28,8 @@ export type Route =
   | { name: "workflows" }
   | { name: "workflowEditor"; id: string }
   | { name: "libraries" }
+  | { name: "workers" }
+  | { name: "worker"; id: string }
   | { name: "library"; id: string }
   | { name: "placeholder"; title: string };
 
@@ -37,6 +39,7 @@ const TITLES: Record<string, string> = {
   start: "Start",
   signin: "Sign in",
   process: "Process one file",
+  "system-log": "System log",
 };
 
 export function resolve(pathname: string): Route {
@@ -50,6 +53,10 @@ export function resolve(pathname: string): Route {
   if (parts[0] === "workflows") {
     if (parts.length === 1) return { name: "workflows" };
     if (parts.length === 2) return { name: "workflowEditor", id: parts[1] };
+  }
+  if (parts[0] === "workers") {
+    if (parts.length === 1) return { name: "workers" };
+    if (parts.length === 2) return { name: "worker", id: parts[1] };
   }
   if (parts[0] === "libraries") {
     if (parts.length === 1) return { name: "libraries" };

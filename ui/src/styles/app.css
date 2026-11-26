@@ -57,3 +57,15 @@ button.search{background:none;border:1px solid var(--border);color:var(--text2);
   .pagehead.wft-head .sp { display: none }
   .pagehead.wft-head .btn { flex: 1 1 0 }
 }
+
+/* Workers (page 10): confirm dialogs, the Add worker command, and the libraries rows on a worker page. */
+.dlg{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:12;width:min(440px,calc(100vw - 32px));background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px;box-shadow:0 12px 40px rgba(0,0,0,.35)}
+.dlg h2{margin:0 0 14px;font-size:17px;font-weight:700}
+.dlg-actions{justify-content:flex-end;gap:8px;flex-wrap:wrap}
+pre.cmd{margin:8px 0 14px;padding:12px 14px;border:1px solid var(--border);border-radius:calc(var(--radius) - 4px);background:var(--bg);font-family:var(--mono);font-size:13px;white-space:pre-wrap;word-break:break-all;user-select:all}
+.librow{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1.4fr) auto auto;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)}
+.librow > label{min-width:0}
+.librow input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent);vertical-align:middle}
+@media (max-width:640px){
+  .librow{grid-template-columns:1fr}
+}

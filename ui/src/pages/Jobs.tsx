@@ -23,7 +23,7 @@ export const PILL: Record<JobState, { cls: string; label: string }> = {
   skipped: { cls: "skip", label: "Skipped" },
 };
 
-function JobRow({ j, filter }: { j: Job; filter: string }) {
+export function JobRow({ j, filter }: { j: Job; filter: string }) {
   const open = () => navigate(`/jobs/${j.id}${filter}`);
   return (
     <tr className="row-link" tabIndex={0} onClick={open} onKeyDown={(e) => e.key === "Enter" && open()}>
