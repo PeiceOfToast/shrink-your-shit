@@ -1644,7 +1644,8 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 				return "", failed(problem.Message+" Your original was not touched.", errors.New(problem.Code))
 			}
 			dir = d
-		} else if strings.Contains(dir, "{{") { // W4b: the folder as a template, filled in for this file
+		}
+		if strings.Contains(dir, "{{") { // W4b: the folder as a template, filled in for this file (an override folder too: the preview fills it the same way)
 			d, empty := vars.Folder(dir, vals)
 			vEmpty = append(vEmpty, empty...)
 			for _, piece := range strings.Split(filepath.ToSlash(d), "/") {
