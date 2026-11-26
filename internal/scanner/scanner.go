@@ -147,6 +147,7 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 	seen := map[string]bool{}
 	sizes := map[string]int64{} // each seen file's size: an original left in place that changed (V5c)
 	var walked []int64          // libraries walked whole in this pass
+	var walkedPaths []string    // their folders, for the settling rows gone from them
 	for _, t := range targets {
 		lib := t.Path
 		videos := 0
@@ -215,6 +216,7 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 					log.Printf("scan: %s: %v", lib, err)
 				}
 				walked = append(walked, t.LibraryID)
+				walkedPaths = append(walkedPaths, lib)
 			}
 		}
 	}
@@ -222,8 +224,19 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 		s.forgetUnseen(seen)
 		s.markOriginalsGone(walked, sizes)
 		s.markOutputsGone(walked, sizes)
+		s.forgetSettlingGone(walkedPaths, seen)
 	}
 	return queued
+}
+
+// forgetSettlingGone clears the settling rows of the libraries walked whole whose file is gone: one copied and then
+// renamed or deleted while it settled. Not after a cancelled scan (ScanOnce skips it then).
+func (s *Scanner) forgetSettlingGone(walkedPaths []string, seen map[string]bool) {
+	for _, lib := range walkedPaths {
+		if err := s.Store.ForgetSettlingGone(lib, seen); err != nil {
+			log.Printf("scan: settling files gone: %v", err)
+		}
+	}
 }
 
 // recordSkip records a file the guards leave alone (unless it is recorded so already).

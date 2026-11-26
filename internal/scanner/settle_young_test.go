@@ -47,3 +47,30 @@ func TestYoungFileIsSettlingAtOnceAndDecidedAsBefore(t *testing.T) {
 		t.Errorf("queued file's record %+v", r)
 	}
 }
+
+// A settling file that is renamed or deleted while it settles loses its row on the next complete walk of its library.
+// A cancelled walk is not complete, so it leaves the row.
+func TestSettlingRowOfRemovedFileIsForgotten(t *testing.T) {
+	s, st, lib, _ := setup(t, h264Big)
+	clock := time.Now()
+	s.Now, s.MinAge = func() time.Time { return clock }, time.Minute
+	a := filepath.Join(lib, "a.mkv")
+	os.Chtimes(a, clock, clock)
+	s.ScanOnce(context.Background()) // young: settling
+	if r, _ := st.GetFile(a); r == nil {
+		t.Fatal("no settling row for a young file")
+	}
+	os.Remove(a)
+
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	s.ScanOnce(cancelled)
+	if r, _ := st.GetFile(a); r == nil {
+		t.Error("a cancelled walk cleared the settling row")
+	}
+
+	s.ScanOnce(context.Background())
+	if r, _ := st.GetFile(a); r != nil {
+		t.Errorf("settling row of a removed file kept: %+v", r)
+	}
+}
