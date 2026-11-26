@@ -27,7 +27,9 @@ export function getSummary(): Promise<Summary> {
       // New errors are error lines the System log hasn't been opened past yet (mockLog.ts).
       // Fresh install: no job has finished and no library is watched yet.
       const fresh = s === "fresh" ? { lastDoneAt: null, nextScanAt: null } : {};
-      return { ...SUMMARY, ...fresh, newErrors: s === "empty" ? 0 : newErrorCount(), seenSeq: getSeenSeq(), healthFailing: healthFailing() };
+      // A fresh install has no log lines yet, so no new errors.
+      const none = s === "empty" || s === "fresh";
+      return { ...SUMMARY, ...fresh, newErrors: none ? 0 : newErrorCount(), seenSeq: getSeenSeq(), healthFailing: healthFailing() };
     },
     { failInError: false },
   );

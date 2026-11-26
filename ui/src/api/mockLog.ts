@@ -126,7 +126,7 @@ function keep(e: LogEvent, p: LogParams, skipLevel: boolean): boolean {
 
 export function getLog(params: LogParams = {}): Promise<LogPage> {
   return respond(() => {
-    if (getForcedState() === "empty") return { items: [], counts: { info: 0, warn: 0, error: 0 } };
+    if (getForcedState() === "empty" || getForcedState() === "fresh") return { items: [], counts: { info: 0, warn: 0, error: 0 } };
     const counts = { info: 0, warn: 0, error: 0 };
     for (const e of all()) {
       if (keep(e, params, true) && e.level !== "debug") counts[e.level]++;
