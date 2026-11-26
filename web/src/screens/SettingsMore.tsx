@@ -18,7 +18,7 @@ import { useSetup } from "./Enroll";
 import { useData } from "../useData";
 import { holdLost } from "../live";
 import { ModeChoice, PasswordFields } from "../SignInChoice";
-import { getAuth, setAuthMode } from "../signinApi";
+import { getAuth, onAuthChanged, setAuthMode } from "../signinApi";
 import { accessTokenWords, authWord, canSave, passwordProblem, type AuthMode, type AuthState } from "../signinRules";
 
 async function act<T>(p: Promise<Answer<T>>, say: (m: string) => void): Promise<T | null> {
@@ -224,6 +224,7 @@ function SignInForm({ cur, saved }: { cur: AuthState; saved: () => void }) {
 function Access({ auth }: { auth: boolean }) {
   const [tok, setTok] = useState<string | null>(null), [ask, setAsk] = useState(false), [said, setSaid] = useState("");
   const mode = useData(getAuth, []);
+  useEffect(() => onAuthChanged(mode.reload), [mode.reload]);
   const show = async () => { if (tok) return setTok(null); const r = await act(getToken(), setSaid); if (r) setTok(r.token); };
   const make = async () => { setAsk(false); const r = await act(rotateToken(), setSaid); if (r) (setTok(r.token), setSaid("New token made. Use it to sign in on other devices.")); };
   const out = async () => { if (await act(signOut(), setSaid)) navigate("/signin"); };
