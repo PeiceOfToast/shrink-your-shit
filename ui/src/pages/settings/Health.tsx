@@ -3,6 +3,9 @@ import { api, type CheckStatus, type Doctor, type HealthCheck } from "../../api/
 import { useApi } from "../../api/useApi.ts";
 import { LoadState, errText } from "./parts.tsx";
 
+// Tells the shell to re-fetch the summary, so the red dot clears without a reload.
+const refreshSummary = () => window.dispatchEvent(new Event("summary:refresh"));
+
 const WORD: Record<CheckStatus, string> = { ok: "OK", warn: "Warning", bad: "Problem", absent: "Not found" };
 
 function Check({ c, onDoc }: { c: HealthCheck; onDoc: (d: Doctor) => void }) {
@@ -12,7 +15,7 @@ function Check({ c, onDoc }: { c: HealthCheck; onDoc: (d: Doctor) => void }) {
     if (!c.fix) return;
     setBusy(true);
     setErr(null);
-    api.runHealthFix(c.fix.path).then(onDoc, (e: unknown) => setErr(errText(e))).finally(() => setBusy(false));
+    api.runHealthFix(c.fix.path).then((d) => { onDoc(d); refreshSummary(); }, (e: unknown) => setErr(errText(e))).finally(() => setBusy(false));
   };
   return (
     <section className="set-group hc">
@@ -41,7 +44,7 @@ export function Health() {
   const again = () => {
     setBusy(true);
     setErr(null);
-    api.getDoctor(true).then(setDoc, (e: unknown) => setErr(errText(e))).finally(() => setBusy(false));
+    api.getDoctor(true).then((d) => { setDoc(d); refreshSummary(); }, (e: unknown) => setErr(errText(e))).finally(() => setBusy(false));
   };
   return (
     <>

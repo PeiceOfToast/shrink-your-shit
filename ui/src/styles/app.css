@@ -110,6 +110,8 @@ table.tbl.wkr td.wk-sub{display:none}
 
 /* Settings (page 11): a section list beside the section; on a phone the list is the first screen. */
 .set{display:grid;grid-template-columns:200px minmax(0,1fr);gap:28px;align-items:start}
+/* Room under the last row, so the sticky save bar never covers it at the end of a section. */
+.set-main{padding-bottom:96px}
 .set-nav{display:flex;flex-direction:column;gap:2px;position:sticky;top:12px}
 .set-nav a{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--text2);text-decoration:none;padding:7px 10px;border-radius:4px}
 .set-nav a[aria-current=page]{color:var(--text);background:var(--raised)}

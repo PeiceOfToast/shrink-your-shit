@@ -10,6 +10,7 @@ const REASON: Record<BackupItem["reason"], string> = {
   before_import: "Before an import",
 };
 const size = (n: number) => (n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : n >= 1e6 ? `${Math.round(n / 1e6)} MB` : `${Math.max(1, Math.round(n / 1e3))} KB`);
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 const dayMonth = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 
 export function Backup() {
@@ -75,9 +76,7 @@ export function Backup() {
     <>
       <h2 className="set-title">Backup</h2>
       <Row id="b-keep" label="Backups kept" hint="The oldest backups are removed past this number." field="backupKeep" problem={null}>
-        <select id="b-keep" className="sel" value={keep.draft} onChange={(e) => keep.setDraft(Number(e.target.value))}>
-          {[3, 5, 10, 20].map((n) => <option key={n} value={n}>{n}</option>)}
-        </select>
+        <input id="b-keep" type="number" className="inp narrow" min={1} max={50} value={keep.draft} onChange={(e) => keep.setDraft(e.target.valueAsNumber)} />
       </Row>
       <SaveBar dirty={keep.dirty} busy={saving} saved={saved} text={text} onSave={saveKeep} onUndo={keep.undo} />
 
@@ -112,7 +111,7 @@ export function Backup() {
         <div className="dlg" role="dialog" aria-modal="true" aria-labelledby="restore-q">
           <h2 id="restore-q">Replace all settings and workflows with this backup from {dayMonth(preview.createdAt)}?</h2>
           <p className="muted sm">
-            {preview.contents.workflows} workflows, {preview.contents.libraries} libraries, {preview.contents.shares} shares, {preview.contents.connections} connections. Jobs and files aren't touched.
+            {plural(preview.contents.workflows, "workflow", "workflows")}, {plural(preview.contents.libraries, "library", "libraries")}, {plural(preview.contents.shares, "share", "shares")}, {plural(preview.contents.connections, "connection", "connections")}. Jobs and files aren't touched.
           </p>
           {preview.warnings.map((w) => <p className="bad sm" key={w}>{w}</p>)}
           <div className="row dlg-actions">

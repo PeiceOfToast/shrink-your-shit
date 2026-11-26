@@ -119,6 +119,13 @@ export function Shell({ children }: { children: ReactNode }) {
     applyTheme(theme);
   }, [theme]);
 
+  // Settings' health check refreshes this summary after a fix or re-run, so the red dot clears at once.
+  const reloadSummary = summary.reload;
+  useEffect(() => {
+    window.addEventListener("summary:refresh", reloadSummary);
+    return () => window.removeEventListener("summary:refresh", reloadSummary);
+  }, [reloadSummary]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
