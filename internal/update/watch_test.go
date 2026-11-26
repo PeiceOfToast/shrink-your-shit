@@ -33,7 +33,7 @@ func newWatchFixture(t *testing.T, healthOK func(ran int) bool, runErr map[strin
 	dir := t.TempDir()
 	f := &watchFixture{}
 	f.w = &Watcher{PID: 4242, From: "0.1.0", To: "0.2.0", DataDir: dir, Health: "http://unused/healthz",
-		NewSetup: filepath.Join(dir, "new.exe"), OldSetup: filepath.Join(dir, "old.exe"),
+		NewSetup: filepath.Join(dir, updateDir, "new.exe"), OldSetup: filepath.Join(dir, updateDir, "old.exe"),
 		Wait: 20 * time.Millisecond, Poll: time.Millisecond,
 		AppStarted: func(pid int) (time.Time, error) { return appStart, nil },
 		StopApp: func(pid int) error {
@@ -61,6 +61,9 @@ func newWatchFixture(t *testing.T, healthOK func(ran int) bool, runErr map[strin
 		},
 		Healthy: func(string) bool { return healthOK(len(f.ran)) },
 		Logf:    func(string, ...any) {},
+	}
+	if err := os.MkdirAll(filepath.Join(dir, updateDir), 0o755); err != nil {
+		t.Fatal(err)
 	}
 	for _, p := range []string{f.w.NewSetup, f.w.OldSetup} {
 		if err := os.WriteFile(p, []byte("setup"), 0o755); err != nil {
