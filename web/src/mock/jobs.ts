@@ -18,6 +18,7 @@ const settle = (id: string, name: string, bytes: number): JobItem => ({
   id, origin: "scan", state: "queued", subState: "settling", name, folder: ".", path: "/media/movies/" + name, library: MOV[0], libraryId: MOV[1],
   bytes, codec: null, resolution: null, durationSec: null, attempts: 0, retryAt: null, priority: null, pin: null, position: null,
   reason: { code: "still_changing", message: "It may still be copying. It joins the queue once it stops changing for a scan." },
+  jobId: null, tags: [], warning: null, failure: null, logState: "none",
   detail: "It may still be copying. It joins the queue once it stops changing for a scan.",
 });
 let items: JobItem[] = [
