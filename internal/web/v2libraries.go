@@ -65,7 +65,7 @@ func v2Libraries(api *http.ServeMux, store *jobs.Store, eng Engine, libTotals *l
 				} else {
 					folder = dir
 					for _, lp := range otherLibraries(store, l.ID) {
-						if outputInside(dir, lp) {
+						if jobs.OutputInside(dir, lp) {
 							problem = map[string]string{"code": "inside_library", "message": "New files for " + l.Name + " would go to " + dir + ", which is inside the library at " + lp + " (or holds it). Pick a folder in the library's Output tab."}
 						}
 					}
