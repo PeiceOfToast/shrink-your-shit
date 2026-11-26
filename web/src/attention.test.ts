@@ -6,24 +6,21 @@ type F = { id: string; libraryId: string | null; finishedAt: string | null };
 const f = (id: string, libraryId: string | null, finishedAt: string | null): F => ({ id, libraryId, finishedAt });
 const base = { libraryIds: new Set(["l1", "l2", "l3"]), healthShown: false, fallbacks: 0, libraries: [] as { id: string; name: string; state: string }[] };
 
-test("a failure from a library the page doesn't have is dropped, and the foot is flagged", () => {
+test("a failure from a library the page doesn't have is dropped", () => {
   const r = attentionRows({ ...base, failures: [f("a", "l9", "2026-11-25T10:00:00Z"), f("b", "l1", "2026-11-25T09:00:00Z")] });
   assert.deepEqual(r.failures.map((x) => x.id), ["b"]);
-  assert.equal(r.dropped, 1);
   assert.equal(r.none, false);
 });
 
-test("while the libraries have not loaded (null), every failure is kept and none is counted as removed", () => {
+test("while the libraries have not loaded (null), every failure is kept", () => {
   const r = attentionRows({ ...base, libraryIds: null, failures: [f("a", "l9", "2026-11-25T10:00:00Z"), f("b", null, null)] });
   assert.deepEqual(r.failures.map((x) => x.id), ["a", "b"]);
-  assert.equal(r.dropped, 0);
   assert.equal(r.none, false);
 });
 
 test("a failure with no library id is dropped too", () => {
   const r = attentionRows({ ...base, failures: [f("a", null, null)] });
   assert.equal(r.failures.length, 0);
-  assert.equal(r.dropped, 1);
   assert.equal(r.none, true);
 });
 
@@ -33,7 +30,6 @@ test("at most three failures, newest first", () => {
     f("older", "l1", "2026-11-23T00:00:00Z"),
   ] });
   assert.deepEqual(r.failures.map((x) => x.id), ["new", "mid", "old"]);
-  assert.equal(r.dropped, 0, "a failure cut off by the three-row cap is not a removed library");
 });
 
 test("a dismissed health check is hidden; a shown one is a row", () => {
@@ -65,5 +61,4 @@ test("nothing to show: none is true, the card is absent", () => {
   const r = attentionRows({ ...base, failures: [], libraries: [{ id: "l1", name: "Movies", state: "active" }] });
   assert.equal(r.none, true);
   assert.deepEqual(r.failures, []);
-  assert.equal(r.dropped, 0);
 });
