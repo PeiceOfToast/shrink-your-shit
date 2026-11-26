@@ -207,11 +207,14 @@ export function getWorkflow(id: string): Promise<WorkflowSummary> {
   });
 }
 
+// The preview counts this library's own files: the workflow's share of them, so "of N" matches the library's videos.
 export function getPreview(libraryId: string, workflowId: string): Promise<Preview> {
   return respond(() => {
-    findRow(libraryId);
+    const lib = findRow(libraryId);
     const p = PREVIEW[workflowId];
     if (!p) throw new ApiError("workflow_not_found", "That workflow doesn't exist.", "workflowId");
-    return p;
+    const total = lib.files;
+    const wouldConvert = Math.round((total * p.wouldConvert) / p.total);
+    return { wouldConvert, total, skipped: [{ reason: p.skipped[0].reason, count: total - wouldConvert }] };
   });
 }

@@ -281,9 +281,6 @@ export function LibraryPanel({ id }: { id: string }) {
               </details>
 
               <p className="hint" style={{ margin: 0 }}>
-                Workers that take its files: {L.workers?.map((w) => w.name).join(", ") || "none"}. Set on Workers.
-              </p>
-              <p className="hint" style={{ margin: 0 }}>
                 <Link to={`/system-log?source=scanner&library=${id}`}>Show its lines in the system log</Link>
               </p>
 
