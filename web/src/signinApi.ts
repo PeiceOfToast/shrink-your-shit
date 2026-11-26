@@ -2,7 +2,7 @@
 // POST /api/login. The server half isn't built yet, so ?mock=1 answers from a mock that follows the contract, steered by
 // URL switches: authMode=home|password, passwordSet=true|false, open=true|false, and authErr=<code> (password_needed,
 // password_too_short or would_lock_out on a mode save; bad_password or too_many_tries on a password sign-in).
-import { MOCK, call, type Answer } from "./api";
+import { MOCK, call, failed, type Answer } from "./api";
 import { MIN_PASSWORD, authWord, type AuthMode, type AuthState } from "./signinRules";
 import type { Issue } from "./types/v1";
 
@@ -15,13 +15,24 @@ let mock: AuthState = {
   passwordSet: q.get("passwordSet") !== "false",
   signedIn: true,
   open: q.get("open") !== "false",
+  addressesHidden: q.get("addressesHidden") === "true",
 };
 const M = <T,>(v: T) => Promise.resolve(v);
 const fail = (code: string, extra: Partial<SignInError> = {}): { error: SignInError } => ({ error: { code, message: authWord(code, code), ...extra } });
 
 export const getAuth = (): Promise<Answer<AuthState>> => (MOCK ? M({ ...mock }) : call<AuthState>("GET", "/api/auth"));
 
+// Pages that show the sign-in state (the Access token words) subscribe, so a saved change reaches them without a reload.
+const authChanged = new Set<() => void>();
+export const onAuthChanged = (f: () => void) => (authChanged.add(f), () => void authChanged.delete(f));
+
 export async function setAuthMode(body: { mode: AuthMode; password?: string }): Promise<Answer<AuthState>> {
+  const r = await saveAuthMode(body);
+  if (!failed(r)) authChanged.forEach((f) => f());
+  return r;
+}
+
+async function saveAuthMode(body: { mode: AuthMode; password?: string }): Promise<Answer<AuthState>> {
   if (!MOCK) return call<AuthState>("POST", "/api/auth/mode", body);
   const e = q.get("authErr");
   if (e === "would_lock_out" && body.mode === "home") return fail(e);
