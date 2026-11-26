@@ -71,6 +71,9 @@ pre.cmd{margin:8px 0 14px;padding:12px 14px;border:1px solid var(--border);borde
   .librow{grid-template-columns:1fr}
 }
 
+/* Worker settings: the same gap between every setting. */
+section.card > .field + .field{margin-top:14px}
+
 /* Workers list: the phone card. Line 1 is name and state chip; line 2 is address · graphics card · Now. */
 table.tbl.wkr td.wk-sub{display:none}
 @media (max-width:900px){

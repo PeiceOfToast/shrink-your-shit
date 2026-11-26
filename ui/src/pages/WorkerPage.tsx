@@ -156,7 +156,7 @@ export function WorkerPage({ id }: { id: string }) {
       <div className="pagehead">
         <div style={{ minWidth: 0 }}>
           <h1>{w.name}</h1>
-          <div className="muted sm">{w.local ? "This computer" : w.address}</div>
+          {!w.local && <div className="muted sm">{w.address}</div>}
         </div>
         <span className="sp"></span>
         <StatePill w={w} />
@@ -229,26 +229,28 @@ export function WorkerPage({ id }: { id: string }) {
               />
               Any time
             </label>
-            <div className="row" style={{ marginTop: 8 }}>
-              <input
-                aria-label="From"
-                className="inp"
-                type="time"
-                value={form.from}
-                disabled={form.anyTime}
-                onChange={(e) => setForm({ ...form, from: e.target.value })}
-              />
-              <span className="muted">to</span>
-              <input
-                aria-label="To"
-                className="inp"
-                type="time"
-                value={form.to}
-                disabled={form.anyTime}
-                onChange={(e) => setForm({ ...form, to: e.target.value })}
-              />
-            </div>
-            <div className="hint">From later than To runs overnight, such as 22:00 to 06:00.</div>
+            {!form.anyTime && (
+              <>
+                <div className="row" style={{ marginTop: 8 }}>
+                  <input
+                    aria-label="From"
+                    className="inp"
+                    type="time"
+                    value={form.from}
+                    onChange={(e) => setForm({ ...form, from: e.target.value })}
+                  />
+                  <span className="muted">to</span>
+                  <input
+                    aria-label="To"
+                    className="inp"
+                    type="time"
+                    value={form.to}
+                    onChange={(e) => setForm({ ...form, to: e.target.value })}
+                  />
+                </div>
+                <div className="hint">From later than To runs overnight, such as 22:00 to 06:00.</div>
+              </>
+            )}
           </div>
           <div className="field">
             <label className="lbl" htmlFor="w-enc">Graphics card or processor</label>
@@ -272,6 +274,9 @@ export function WorkerPage({ id }: { id: string }) {
             const row = libForm[l.id];
             if (!row) return null;
             const t = tests[l.id] ?? { state: "untested" as const };
+            // Test checks the saved path (page 10), so it waits until the field matches what is saved.
+            const savedPath = w.libraries.find((x) => x.libraryId === l.id)?.workerPath ?? "";
+            const unsaved = row.workerPath.trim() !== savedPath.trim();
             return (
               <div className="librow" key={l.id}>
                 <label>
@@ -296,8 +301,14 @@ export function WorkerPage({ id }: { id: string }) {
                     {TEST_TEXT[t.state]}
                   </span>
                   {t.state === "failed" && t.message && <span className="bad"> {t.message}</span>}
+                  {unsaved && row.ticked && row.workerPath.trim() && <span className="muted"> Save to test this path</span>}
                 </span>
-                <button type="button" className="btn ghost sm" onClick={() => testPath(l.id)} disabled={!row.ticked || !row.workerPath.trim() || t.state === "pending"}>
+                <button
+                  type="button"
+                  className="btn ghost sm"
+                  onClick={() => testPath(l.id)}
+                  disabled={!row.ticked || !row.workerPath.trim() || unsaved || t.state === "pending"}
+                >
                   Test
                 </button>
               </div>

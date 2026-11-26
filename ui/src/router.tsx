@@ -31,6 +31,7 @@ export type Route =
   | { name: "workers" }
   | { name: "worker"; id: string }
   | { name: "library"; id: string }
+  | { name: "systemLog" }
   | { name: "placeholder"; title: string };
 
 const TITLES: Record<string, string> = {

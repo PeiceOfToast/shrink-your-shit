@@ -57,6 +57,10 @@ export function App() {
     case "worker":
       page = <WorkerPage id={route.id} />;
       break;
+    // The System log is not built yet; the worker page's link lands here so it doesn't 404.
+    case "systemLog":
+      page = <Placeholder title="System log" note="The System log isn't built yet." back={{ to: "/workers", label: "Back to Workers" }} />;
+      break;
     case "placeholder":
       page = <Placeholder title={route.title} />;
       break;
