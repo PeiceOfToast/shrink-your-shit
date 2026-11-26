@@ -294,6 +294,18 @@ func TestTokenHintMatchesTheFolderTokenCommandReads(t *testing.T) {
 		t.Errorf("the folder that is first with a token: want the plain command, got %q", got)
 	}
 
+	// A folder in the search list after the earlier token folder: the old hint named it plain, but the
+	// plain command reads the earlier folder's token, so this folder needs -data.
+	la := t.TempDir()
+	t.Setenv("LOCALAPPDATA", la)
+	laData := filepath.Join(la, "shrink-your-shit", "data")
+	if err := os.MkdirAll(laData, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := tokenHint(laData), "shrink-your-shit token -data "+shellQuote(laData); got != want {
+		t.Errorf("LOCALAPPDATA folder after an earlier token: want %q, got %q", want, got)
+	}
+
 	t.Setenv("SYP_DATA", t.TempDir()) // no token in any folder searched first
 	if got, want := tokenHint(own), "shrink-your-shit token -data "+shellQuote(own); got != want {
 		t.Errorf("no token found: want %q, got %q", want, got)
