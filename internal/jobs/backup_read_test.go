@@ -26,7 +26,6 @@ const hangBound = 30 * time.Second
 // duringDump runs a manual backup and holds it open after its first table is read, then runs fn while it is held.
 // fn must finish within hangBound while the dump is held, or the store was waiting for the dump. It returns the
 // finished backup.
-
 func duringDump(t *testing.T, s *Store, fn func() error) BackupInfo {
 	t.Helper()
 	paused, resume := make(chan struct{}), make(chan struct{})
