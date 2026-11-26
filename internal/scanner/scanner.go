@@ -156,7 +156,7 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 		noteUnread := func(folder string) {
 			if !unread[folder] { // once per folder, however many of its files fail
 				unread[folder] = true
-				log.Printf("scan: %s: cannot read the folder %s: its files are not seen, the library is not recorded this scan; the next scan tries again (if it is not media, add it to the flow's Ignore list)", lib, folder)
+				log.Printf("scan: %s: cannot read the folder %s: its files are not seen, the library is not recorded this scan; the next scan tries again (if it is not media, add it to the workflow's ignore list (Library files step))", lib, folder)
 			}
 		}
 		s.setScanning(t.LibraryID, 0, false)
@@ -170,7 +170,7 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 			}
 			if rel, err := filepath.Rel(lib, path); err == nil && rel != "." && t.Template.Ignored(rel) {
 				if d.IsDir() {
-					return fs.SkipDir // the flow's Ignore list: not looked at
+					return fs.SkipDir // the workflow's ignore list: not looked at
 				}
 				return nil
 			}

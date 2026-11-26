@@ -50,8 +50,8 @@ func TestUnreadableLostFoundStillRecordsTheLibrary(t *testing.T) {
 	}
 }
 
-// A folder on the flow's Ignore list is not looked at, so an unreadable one there is never read, and the library is
-// recorded as usual. This pins that the Ignore list is the way out for any other always-unreadable folder.
+// A folder on the workflow's ignore list is not looked at, so an unreadable one there is never read, and the library is
+// recorded as usual. This pins that the ignore list is the way out for any other always-unreadable folder.
 func TestUnreadableIgnoredFolderStillRecordsTheLibrary(t *testing.T) {
 	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
 		t.Skip("chmod does not stop reads on Windows or as root")

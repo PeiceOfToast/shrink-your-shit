@@ -23,7 +23,7 @@ import (
 // runs in the background per folder; each call answers what it has found so far, and the page calls
 // again until stillLooking is false (the walk and the 5 probes done). The same rules as the scanner:
 // video names only, hidden and system folders left out, links never followed or listed (scanner.Guard),
-// a library's Ignore list applied. A finished answer is kept for firstFilesTTL.
+// a library's ignore list applied. A finished answer is kept for firstFilesTTL.
 
 // FirstFile is one of the first 5 videos.
 type FirstFile struct {
@@ -89,8 +89,8 @@ func (r *firstRun) fresh() bool {
 }
 
 // Get answers for root (a resolved folder), starting a walk if none is running or recent. key names the
-// walk: the folder, plus the Ignore list when ignored is a library's (a path relative to root), so a
-// library's answer never comes from a walk without its Ignore list or with an older one.
+// walk: the folder, plus the ignore list when ignored is a library's (a path relative to root), so a
+// library's answer never comes from a walk without its ignore list or with an older one.
 func (f *FirstLister) Get(key, root string, ignored func(rel string) bool) FirstFiles {
 	f.mu.Lock()
 	if f.runs == nil {
