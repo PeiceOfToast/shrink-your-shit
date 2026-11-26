@@ -324,7 +324,8 @@ func (s *Store) Upgraded() (bool, error) {
 // named "<folder> - Legacy". On a fresh install each is NOT started and gets a slider flow named after
 // it: first-run shows it and nothing is converted before Start (DESIGN/FIRST-RUN.md). A folder inside,
 // or around, another library's folder is not added: skipped says why, for a log line (their files
-// would belong to two libraries). Jobs made before libraries were records are linked to the library
+// would belong to two libraries). A folder that differs from a library's folder only in letter case is
+// skipped too, with a line saying so. Jobs made before libraries were records are linked to the library
 // whose folder holds them.
 func (s *Store) EnsureLibraries(paths []string, legacy rules.Template) (added int, skipped []string, err error) {
 	upgraded, err := s.Upgraded()

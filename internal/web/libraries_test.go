@@ -491,7 +491,8 @@ func TestFreeSpaceTimeLimit(t *testing.T) {
 }
 
 // The overlap checks on add and on a path change ignore letter case (#767 review finding 2): "films" is
-// the library Films, and "FILMS/sub" is inside it.
+// the library Films, and "FILMS/sub" is inside it. On Linux the two spellings below are two folders, so the
+// add is refused as the same library; on Windows they are one folder, and the outcome is the same.
 func TestLibraryOverlapIgnoresCase(t *testing.T) {
 	srv, st, _, _ := libServer(t, false)
 	root, err := filepath.EvalSymlinks(t.TempDir()) // macOS: the temp folder is under a link
@@ -515,5 +516,28 @@ func TestLibraryOverlapIgnoresCase(t *testing.T) {
 	}
 	if code, body := post(t, srv, "PATCH", fmt.Sprintf("/api/libraries/%d", other.ID), fmt.Sprintf(`{"path":%q}`, filepath.Join(root, "FILMS", "sub"))); code != 409 || errCode(body) != "path_overlaps" {
 		t.Errorf("path change to FILMS/sub: %d %s, want 409 path_overlaps", code, body)
+	}
+}
+
+// A library that already holds a case-twin of another library's folder (possible on Linux, which keeps both)
+// can still be saved with its own folder: the overlap is already stored, and a rename is not a move.
+func TestSaveKeepingItsOwnFolderIsNotRefusedByACaseTwin(t *testing.T) {
+	srv, st, _, _ := libServer(t, false)
+	root, err := filepath.EvalSymlinks(t.TempDir()) // macOS: the temp folder is under a link
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range []string{"Films", "films"} {
+		os.MkdirAll(filepath.Join(root, d), 0o755)
+	}
+	if _, err := st.AddLibrary("Films", filepath.Join(root, "Films"), rules.SliderTemplate(3), false); err != nil {
+		t.Fatal(err)
+	}
+	twin, err := st.AddLibrary("Films two", filepath.Join(root, "films"), rules.SliderTemplate(3), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, body := post(t, srv, "PATCH", fmt.Sprintf("/api/libraries/%d", twin.ID), fmt.Sprintf(`{"name":"Films again","path":%q}`, filepath.Join(root, "films"))); code != 200 {
+		t.Errorf("rename keeping its own folder: %d %s, want 200", code, body)
 	}
 }
