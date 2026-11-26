@@ -129,9 +129,10 @@ export interface Overview {
   running: number;
   workersOn: boolean;
   trashGB: number;
-  // Space that frees up when originals leave the trash, and the day it happens (RFC 3339).
-  savedMoreGB: number;
-  savedMoreAt: string;
+  // Space that frees up when originals leave the trash: whole bytes, and the day it happens (RFC 3339).
+  // Both null when the trash is empty; the Dashboard hides the sentence then.
+  nextReleaseBytes: number | null;
+  nextReleaseAt: string | null;
   savedSeries: Series[];
   filesSeries: Series[];
   filesLast24h: { done: number; skipped: number; failed: number };
@@ -275,6 +276,12 @@ export interface HistoryLine {
   text: string;
 }
 
+// The Summary's "Original" line. action is what happened to the original file; until is RFC 3339, null when it doesn't apply.
+export interface JobOriginal {
+  action: "trashed" | "kept" | "not_touched" | "not_yet";
+  until: string | null;
+}
+
 export interface JobDetail {
   job: Job;
   path: string;
@@ -292,7 +299,7 @@ export interface JobDetail {
   outputPath: string | null;
   // Shown on the head while a job runs; milliseconds left.
   timeLeftMs: number | null;
-  original: string;
+  original: JobOriginal;
   failure: { step: string; reason: string; nextAction: string; actionLabel: string } | null;
   skipReason: string | null;
   steps: JobStep[];

@@ -21,9 +21,9 @@ export const OVERVIEW: Overview = {
   running: 2,
   workersOn: true,
   trashGB: 61,
-  savedMoreGB: 3.2,
   // The newest done job (finished 12 min after it started, see jobs.ts j5) plus 30 days in the trash.
-  savedMoreAt: trashUntil(plus(minsAgo(200), 708_000)),
+  nextReleaseBytes: 3_200_000_000,
+  nextReleaseAt: trashUntil(plus(minsAgo(200), 708_000)),
   savedSeries: SERIES.saved,
   filesSeries: SERIES.converted,
   filesLast24h: { done: 14, skipped: 2, failed: 3 },

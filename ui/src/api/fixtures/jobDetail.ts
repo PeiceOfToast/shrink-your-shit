@@ -1,6 +1,5 @@
 import type { HistoryLine, Job, JobDetail, JobStep, LogLine, LogStep, LogValue, MediaRow, StepOutcome } from "../types.ts";
 import { minsAgo, plus, trashUntil } from "./clock.ts";
-import { dayOf } from "../../format/time.ts";
 
 // One job's detail, built from its list row. Shapes follow page 03; the wording is mock text.
 // Mock: finished jobs whose detailed log retention has dropped it (page 03 "no longer kept").
@@ -132,7 +131,9 @@ export function jobDetail(job: Job): JobDetail {
     writtenAt: done ? finishedAt : null,
     outputPath: done ? path : null,
     timeLeftMs: job.state === "running" ? 180_000 : null,
-    original: done && finishedAt ? `In the trash until ${dayOf(trashUntil(finishedAt))}` : job.state === "running" ? "Not yet" : failed ? "Kept as it was" : "Not touched",
+    original: done && finishedAt
+      ? { action: "trashed", until: trashUntil(finishedAt) }
+      : { action: job.state === "running" ? "not_yet" : failed ? "kept" : "not_touched", until: null },
     failure: failed
       ? { step: job.step?.name ?? "A step", reason: job.result.reason ?? "The step didn't work", nextAction: "Check that the file plays in another player, then retry.", actionLabel: "Retry" }
       : null,

@@ -1,4 +1,5 @@
-import type { Job } from "../api/types.ts";
+import type { Job, JobOriginal } from "../api/types.ts";
+import { dayOf } from "./time.ts";
 
 // Text the job list and panels build from a job's structured fields. The server sends names and numbers only.
 
@@ -43,4 +44,18 @@ export function jobResultTone(job: Job): "ok" | "bad" | "" {
 export function jobHint(job: Job): string {
   const result = job.state === "running" ? jobResultText(job) : "—";
   return [jobStepText(job), result === "—" ? "" : result].filter(Boolean).join(" · ");
+}
+
+// The Summary's "Original" line, from the server's {action, until}.
+export function originalText(o: JobOriginal): string {
+  switch (o.action) {
+    case "trashed":
+      return o.until ? `In the trash until ${dayOf(o.until)}` : "In the trash";
+    case "kept":
+      return "Kept as it was";
+    case "not_yet":
+      return "Not yet";
+    default:
+      return "Not touched";
+  }
 }
