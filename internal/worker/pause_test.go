@@ -4,6 +4,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -44,9 +45,17 @@ func runHung(t *testing.T, s *scenario, w *Worker) chan struct{} {
 
 func waitDone(t *testing.T, done chan struct{}) {
 	t.Helper()
+	waitDoneWithin(t, done, 10*time.Second)
+}
+
+// waitDoneWithin is waitDone with its own bound: a stall stop takes a few seconds of wall time here, so a slow
+// runner needs more than the shared 10 s. The bound only ends a run that would hang; it decides nothing the test
+// checks.
+func waitDoneWithin(t *testing.T, done chan struct{}, d time.Duration) {
+	t.Helper()
 	select {
 	case <-done:
-	case <-time.After(10 * time.Second):
+	case <-time.After(d):
 		t.Fatal("the job did not stop")
 	}
 }
@@ -402,25 +411,44 @@ func TestLibraryRemovalInsideTheSwapFinishesIt(t *testing.T) {
 	}
 }
 
-// positionExec makes the encode report its position every 10 ms until it ends: step 0 is an ffmpeg
-// stuck on one position (it runs until stopped); step > 0 moves on each time and ends after steps.
+// positionExec makes the encode report its position every 100 ms of the watchdog's clock until it ends: step 0 is an
+// ffmpeg stuck on one position (it runs until stopped); step > 0 moves on each time and ends after steps. The
+// clock is the test's fake one, moved by each report: wall-clock timers slip on a loaded CI runner, and a slipped
+// timer is not a stall.
 type positionExec struct {
 	*media.FakeExec
 	step, steps int64
+	holdFrame   bool // the frame count holds still while the position moves: only the position is liveness
+	clock       *fakeClockAt
+	cancelled   *atomic.Bool // set when the worker cancels the encode; a stuck one must end that way
 }
+
+// maxStuckReports is how many reports a stuck encode sends before it holds still and waits for the stall stop (at
+// most 5 s of wall time, then it fails). The reports come faster than the watchdog's wall-clock tick, so the stop
+// can land in that wait.
+const maxStuckReports = 1000
 
 func (x positionExec) Stream(ctx context.Context, onLine func(string), name string, args ...string) (string, error) {
 	if name != "ffmpeg" || !slices.Contains(args, "libx265") {
 		return x.FakeExec.Stream(ctx, onLine, name, args...)
 	}
 	for i := int64(0); x.step == 0 || i < x.steps; i++ {
-		select {
-		case <-ctx.Done():
-			return "", ctx.Err()
-		case <-time.After(10 * time.Millisecond):
+		if err := ctx.Err(); err != nil {
+			x.cancelled.Store(true)
+			return "", err
 		}
+		if x.step == 0 && i >= maxStuckReports { // the reports outrun the watchdog's 100 ms wall tick: hold still until it acts
+			select {
+			case <-ctx.Done():
+				x.cancelled.Store(true)
+				return "", ctx.Err()
+			case <-time.After(5 * time.Second):
+				return "", errors.New("a stuck encode was never stopped")
+			}
+		}
+		x.clock.add(100 * time.Millisecond) // this report comes 100 ms of the watchdog's time after the last
 		frame := i
-		if x.step == 0 { // stuck: no frame moves either (a frame count that goes on is an encode that is alive)
+		if x.step == 0 || x.holdFrame { // stuck: no frame moves either (a frame count that goes on is an encode that is alive)
 			frame = 0
 		}
 		onLine("frame=" + strconv.FormatInt(frame, 10)) // the rest of a progress block
@@ -435,25 +463,48 @@ func (x positionExec) Stream(ctx context.Context, onLine func(string), name stri
 	return x.FakeExec.Stream(ctx, onLine, name, args...) // then the new file, as the fake makes it
 }
 
-// Row 17:40Z: an ffmpeg whose position, frames and bytes all hold still is stuck, and the stall stop ends it;
-// one whose position moves on slowly, for longer than StallAfter in all, is not stopped.
+// waitStuckCancelled waits up to 60 s for a stuck encode's job to end, and fails unless the worker cancelled the
+// encode, on the timeout path too, so a stop that never cancels is named as that rather than as a hang.
+func waitStuckCancelled(t *testing.T, what string, done chan struct{}, cancelled *atomic.Bool) {
+	t.Helper()
+	select {
+	case <-done:
+	case <-time.After(60 * time.Second):
+		if !cancelled.Load() {
+			t.Fatalf("%s: the stuck encode was never cancelled (the job did not stop)", what)
+		}
+		t.Fatalf("%s: the job did not stop", what)
+	}
+	if !cancelled.Load() {
+		t.Errorf("%s: the stuck encode was never cancelled", what)
+	}
+}
+
+// An ffmpeg whose position, frames and bytes all hold still is stuck, and the stall stop ends it. One whose
+// position and frames move on slowly, for longer than StallAfter in all, is not stopped. One whose position moves
+// while its frame count holds still is not stopped either: the position alone counts as progress.
 func TestStallStopWaitsForAMovingEncode(t *testing.T) {
+	clock := &fakeClockAt{t: time.Date(2026, 11, 26, 5, 0, 0, 0, time.UTC)}
 	s := newScenario(t)
 	w := s.worker(Replace)
+	w.stallClock = clock.now
 	w.StallAfter = 2 * time.Second
-	w.Exec = positionExec{FakeExec: s.exec}
+	cancelled := new(atomic.Bool)
+	w.Exec = positionExec{FakeExec: s.exec, clock: clock, cancelled: cancelled}
 	done := make(chan struct{})
 	go func() { w.RunOne(context.Background()); close(done) }()
-	waitDone(t, done)
+	waitStuckCancelled(t, "one position", done, cancelled)
 	if j := s.job(); j.Status != jobs.Failed || !strings.Contains(j.Error, "no progress for 2s") {
 		t.Errorf("one position: %s %q", j.Status, j.Error)
 	}
 	s.assertOriginalSafe()
 
+	clock = &fakeClockAt{t: time.Date(2026, 11, 26, 5, 0, 0, 0, time.UTC)}
 	s = newScenario(t)
 	w = s.worker(Replace)
+	w.stallClock = clock.now
 	w.StallAfter = 2 * time.Second
-	w.Exec = positionExec{FakeExec: s.exec, step: 1000, steps: 300} // ~3 s, longer than StallAfter; a report every 10 ms, 1 ms of the film each
+	w.Exec = positionExec{FakeExec: s.exec, step: 1000, steps: 30, clock: clock, cancelled: new(atomic.Bool)} // 3 s of the watchdog's time in 30 reports, longer than StallAfter; 1 ms of the film each
 	if _, err := w.RunOne(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -461,23 +512,46 @@ func TestStallStopWaitsForAMovingEncode(t *testing.T) {
 		t.Errorf("moving on slowly: %s %q", j.Status, j.Error)
 	}
 
-	// a length we don't know (orch-lead 17:43Z): the position still counts, so one moving on finishes
-	// and one stuck is stopped
+	clock = &fakeClockAt{t: time.Date(2026, 11, 26, 5, 0, 0, 0, time.UTC)}
+	s = newScenario(t)
+	w = s.worker(Replace)
+	w.stallClock = clock.now
+	w.StallAfter = 2 * time.Second
+	w.Exec = positionExec{FakeExec: s.exec, step: 1000, steps: 30, holdFrame: true, clock: clock, cancelled: new(atomic.Bool)}
+	if _, err := w.RunOne(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if j := s.job(); j.Status != jobs.Done {
+		t.Errorf("position moving, frame held: %s %q", j.Status, j.Error)
+	}
+
+	// a length we don't know: a moving encode finishes and a stuck one is stopped
 	for _, c := range []struct {
 		step int64
 		want jobs.Status
 	}{{1000, jobs.Done}, {0, jobs.Failed}} {
 		scenarioDuration = 0
+		clock = &fakeClockAt{t: time.Date(2026, 11, 26, 5, 0, 0, 0, time.UTC)}
 		s = newScenario(t)
 		scenarioDuration = 100
 		w = s.worker(Replace)
+		w.stallClock = clock.now
 		w.StallAfter = 2 * time.Second
-		w.Exec = positionExec{FakeExec: s.exec, step: c.step, steps: 300}
+		cancelled := new(atomic.Bool)
+		w.Exec = positionExec{FakeExec: s.exec, step: c.step, steps: 30, clock: clock, cancelled: cancelled}
 		done := make(chan struct{})
 		go func() { w.RunOne(context.Background()); close(done) }()
-		waitDone(t, done)
-		if j := s.job(); j.Status != c.want || j.DurationSec != 0 {
+		if c.want == jobs.Failed {
+			waitStuckCancelled(t, "no length, stuck", done, cancelled)
+		} else {
+			waitDoneWithin(t, done, 60*time.Second)
+		}
+		j := s.job()
+		if j.Status != c.want || j.DurationSec != 0 {
 			t.Errorf("no length, step %d: %s %q (duration %v)", c.step, j.Status, j.Error, j.DurationSec)
+		}
+		if c.want == jobs.Failed && !strings.Contains(j.Error, "no progress for 2s") { // the stall stop, not maxStuckReports
+			t.Errorf("no length, stuck: stopped for %q, want the stall stop", j.Error)
 		}
 	}
 }
