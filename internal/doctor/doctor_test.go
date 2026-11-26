@@ -308,7 +308,7 @@ func TestUnreadableFoldersInsideAreANote(t *testing.T) {
 		t.Skip("needs a folder this user cannot read (POSIX, not root)")
 	}
 	dir := videosIn(t, 1000)
-	for _, sub := range []string{"private", "lost+found"} {
+	for _, sub := range []string{"private", "locked"} {
 		p := filepath.Join(dir, sub)
 		os.Mkdir(p, 0o755)
 		os.WriteFile(filepath.Join(p, "hidden.mkv"), []byte("x"), 0o644)
@@ -321,6 +321,28 @@ func TestUnreadableFoldersInsideAreANote(t *testing.T) {
 	}
 	if n := r.Notes[0]; n.Code != "unreadable_folders" || n.Message != "2 folders inside couldn't be read; files in them won't be converted. Until they can be read or are on the flow's Ignore list, the library's count and last scan time can stay as they were." {
 		t.Errorf("%+v", r.Notes)
+	}
+}
+
+// A lost+found folder that cannot be read is never looked in, so alone it gives no note: a disk's root holds one.
+func TestLostFoundAloneIsNoNote(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("needs a folder this user cannot read (POSIX, not root)")
+	}
+	dir := videosIn(t, 1000)
+	p := filepath.Join(dir, "lost+found")
+	os.Mkdir(p, 0o755)
+	os.WriteFile(filepath.Join(p, "hidden.mkv"), []byte("x"), 0o644)
+	os.Chmod(p, 0)
+	t.Cleanup(func() { os.Chmod(p, 0o755) })
+	r := checker(1<<40).Folder(context.Background(), dir)
+	if !r.OK || r.VideoCount != 1 {
+		t.Fatalf("%+v", r)
+	}
+	for _, n := range r.Notes {
+		if n.Code == "unreadable_folders" {
+			t.Errorf("a lost+found alone gave the note %q; want none", n.Message)
+		}
 	}
 }
 
