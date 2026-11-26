@@ -461,8 +461,12 @@ func settingTemplate(w http.ResponseWriter, store *jobs.Store, body map[string]j
 			return rules.Template{}, false
 		}
 	}
-	if changedEcho(body, cur.Selectors) { // this page cannot set these, Basic or Standard: a changed value is refused, not dropped
-		apiError(w, http.StatusConflict, "edit_in_new_ui", "Keep rate control, hardware and keep-if-bigger in the new workflow editor. Nothing was changed.")
+	if kind := changedEcho(body, cur.Selectors); kind != "" { // this page cannot set these, Basic or Standard: a changed value is refused, not dropped
+		msg := "Keep rate control, hardware and keep-if-bigger in the new workflow editor. Nothing was changed."
+		if kind == echoLanguages {
+			msg = "This step's language list changed. Edit the list in the workflow editor; this page cannot set it. Nothing was changed."
+		}
+		apiError(w, http.StatusConflict, "edit_in_new_ui", msg)
 		return rules.Template{}, false
 	}
 	if q, audio, basic := readBasic(body); basic {
@@ -630,14 +634,22 @@ func notEditableHere(t rules.Template) (code, message string) {
 	return "", ""
 }
 
-// changedEcho reports whether a body changes one of the echoed fields this page cannot set. An echo of the stored value is fine.
-func changedEcho(body map[string]json.RawMessage, s *rules.Selectors) bool {
+const (
+	echoOther     = "other"     // rate control, hardware or keep-if-bigger changed
+	echoLanguages = "languages" // the step's audio or subtitle language list changed
+)
+
+// changedEcho reports which kind of echoed field this page cannot set a body changes ("" if none): an echo
+// of the stored value is fine. A language list is reported first, as it is the one the message names.
+func changedEcho(body map[string]json.RawMessage, s *rules.Selectors) string {
 	var cur rules.Selectors
 	if s != nil {
 		cur = *s
 	}
+	found := ""
 	for k, v := range body {
 		var same bool
+		kind := echoOther
 		switch strings.ToLower(k) {
 		case "ratecontrol":
 			var x string
@@ -651,15 +663,20 @@ func changedEcho(body map[string]json.RawMessage, s *rules.Selectors) bool {
 		case "audiolanguages": // G2: the step's own list, echoed; a changed list is refused, not dropped
 			var x []string
 			same = json.Unmarshal(v, &x) == nil && slices.Equal(x, cur.AudioLangs)
+			kind = echoLanguages
 		case "subtitlelanguages":
 			var x []string
 			same = json.Unmarshal(v, &x) == nil && slices.Equal(x, cur.SubLangs)
+			kind = echoLanguages
 		default:
 			continue
 		}
+		if !same && kind == echoLanguages {
+			return echoLanguages
+		}
 		if !same {
-			return true
+			found = echoOther
 		}
 	}
-	return false
+	return found
 }
