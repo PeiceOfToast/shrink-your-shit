@@ -22,6 +22,7 @@ import { afterHeader, fileFacts, newFileVideo, queuedLine, ruleName, savedPercen
 import type { Failure, JobAction, JobDetail, JobItem, JobProgressEvent, JobState, Probe, Tab, Pin } from "../types/jobs";
 import { stepLabel } from "../stepLabel";
 import { closeMenuToSummary, menuEscape, useCloseOnOutside } from "../menuFocus";
+import { tablistKey } from "../tablistKeys";
 import { runFields, runningFor } from "../jobCards";
 import { keepShown, libraryOptions } from "../libraryList";
 import { cancelOnTab, selectOnTab } from "../jobTabActions";
@@ -205,8 +206,8 @@ export function Jobs() {
         <button className="btn sm icon ghost" type="button" aria-label="Clear the original-in-the-trash filter" onClick={() => navigate(query(tab, library, ""))}><Icon id="i-x" /></button></span></div>}
       {left && <div className="row" style={{ gap: 6 }}><span className="mchip">{LEFT_WORDS}
         <button className="btn sm icon ghost" type="button" aria-label="Clear the original-left-in-place filter" onClick={() => navigate(query(tab, library, ""))}><Icon id="i-x" /></button></span></div>}
-      <div className="tabs" role="tablist" aria-label="Jobs">
-        {TABS.map(([t, label]) => <button key={t} role="tab" type="button" aria-selected={tab === t} onClick={() => tab !== t && go(t)}>{label}{counts && <span className="n">{count(t === "completed" && (kept || left) && current ? current.total : counts[t])}</span>}</button>)}
+      <div className="tabs" role="tablist" aria-label="Jobs" onKeyDown={tablistKey}>
+        {TABS.map(([t, label]) => <button key={t} role="tab" type="button" tabIndex={tab === t ? 0 : -1} aria-selected={tab === t} onClick={() => tab !== t && go(t)}>{label}{counts && <span className="n">{count(t === "completed" && (kept || left) && current ? current.total : counts[t])}</span>}</button>)}
       </div>
       {!firstRun && selectOnTab(tab) && (selecting || sel.length > 0) && <div className="ltools" role="toolbar" aria-label="Jobs selection">
         <label className="hit selall"><input type="checkbox" aria-label="Select all files" checked={pickable.length > 0 && sel.length === pickable.length} onChange={(e) => setSel(e.target.checked ? pickable.map((j) => j.id) : [])} /><span className="sm">All</span></label>

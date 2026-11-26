@@ -17,7 +17,7 @@ import { ACCENTS, THEMES, keep, keepRail, railCollapsed, useAppearance } from ".
 import { Link, usePath } from "./router";
 import { noWorker } from "./workersApi";
 import { convertingLabel, problemWorkers } from "./topbarBadges";
-import { installMenuEscape, menuEscape } from "./menuFocus";
+import { closeMenuToSummary, installMenuEscape, menuEscape } from "./menuFocus";
 
 const mac = /Mac|iPhone|iPad/.test(navigator.platform);
 
@@ -51,7 +51,7 @@ export function ThemeMenu() {
           </button>
         ))}
         <hr />
-        <Link className="it" role="menuitem" to="/settings/general#appearance" onClick={close}><Icon id="i-settings" />More appearance settings</Link>
+        <Link className="it" role="menuitem" to="/settings/general#appearance" onClick={(e) => closeMenuToSummary(e.currentTarget)}><Icon id="i-settings" />More appearance settings</Link>
       </div>
     </details>
   );
