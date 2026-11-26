@@ -72,6 +72,11 @@ pre.cmd{margin:8px 0 14px;padding:12px 14px;border:1px solid var(--border);borde
 .librow input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent);vertical-align:middle}
 .librow-path{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .librow-field{min-width:0}
+/* The path field fills its column, so Test and the chip sit right after it. Placeholders stay in sans. */
+.librow-field .inp{width:100%}
+.librow-field .inp::placeholder{font-family:var(--sans)}
+/* A disabled button shows as disabled: muted text and border, no opacity. */
+.btn:disabled{cursor:not-allowed;color:var(--text2);border-color:var(--border)}
 .librow-act{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .librow-msg{grid-column:2;font-size:13px}
 .librow-msg span{display:block}
