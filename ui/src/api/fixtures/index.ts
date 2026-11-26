@@ -62,7 +62,7 @@ export const ATTENTION: Attention[] = [
     means: "The new file was shorter than the original.",
     count: 1,
     latestAt: minsAgo(95),
-    action: { label: "Retry", method: "POST", path: "/api/v2/jobs/actions", body: { action: "retry", ids: ["j9"] } },
+    action: { label: "Retry", method: "POST", path: "/api/v2/jobs/actions", body: { action: "retry", ids: ["j11"] } },
     link: "/jobs?state=failed",
   },
   {
