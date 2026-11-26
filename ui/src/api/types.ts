@@ -126,7 +126,8 @@ export interface Overview {
     inTrashBytes: number;
   };
   converted: { total: number; perDay: number };
-  waiting: { count: number; nextScanAt: string };
+  // null when no library is watched, so no scan is scheduled.
+  waiting: { count: number; nextScanAt: string | null };
   // pct is a percent: 0.6 means 0.6 %.
   failed24h: { count: number; pct: number };
   avgShrink: { pct: number; secPerGB: number };
