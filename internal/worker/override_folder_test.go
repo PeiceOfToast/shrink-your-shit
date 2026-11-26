@@ -56,6 +56,10 @@ func TestDefaultFolderIsLiteral(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	dir, err := filepath.EvalSymlinks(dir) // macOS: the temp folder is under /var, a link to /private/var, and the job's path is resolved
+	if err != nil {
+		t.Fatal(err)
+	}
 	s := newScenarioAt(t, dir, "movie.mkv")
 	j := runOverride(t, s, "", "Films")
 	out := filepath.Join(dir+" (shrunk)", "movie.mkv")
