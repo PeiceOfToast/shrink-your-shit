@@ -19,11 +19,13 @@ func openBackupStore(t *testing.T) *Store {
 	return s
 }
 
-// duringDump runs a manual backup and holds it open after its first table is read, then runs fn while it is held.
-// fn must finish within a few seconds, or the store was waiting for the dump. It returns the finished backup.
 // hangBound is only how long a step may take before the test calls it hung. Both waits are on events, so a slow
 // runner just takes longer; nothing here depends on the dump finishing within it.
 const hangBound = 30 * time.Second
+
+// duringDump runs a manual backup and holds it open after its first table is read, then runs fn while it is held.
+// fn must finish within hangBound while the dump is held, or the store was waiting for the dump. It returns the
+// finished backup.
 
 func duringDump(t *testing.T, s *Store, fn func() error) BackupInfo {
 	t.Helper()
