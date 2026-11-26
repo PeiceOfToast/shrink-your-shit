@@ -377,7 +377,7 @@ function Form({ l, v, workflows, reload, taken }: { l: LibraryItem | null; v: Li
         {l && <SeeJobs id={l.id} />}
         {l && <button className="btn" type="button" disabled={noWfNow || v?.scan.state === "scanning"} aria-describedby={noWfNow ? "lib-nowf-hint" : undefined} onClick={scan}><Icon id="i-refresh" />{v?.scan.state === "scanning" ? "Scanning…" : "Scan now"}</button>}
       </PageHead>
-      {note && <p className="muted" role="status">{note}</p>}
+      <p className={note ? "muted" : "sr"} role="status">{note}</p>
       {noWfNow && <p className="muted" role="note" id="lib-nowf-hint">{NOWF_HINT}</p>}
       {v && notStarted(v) && <p className="muted" role="note">This library isn't started yet: nothing is looked for or converted until you press Scan now.</p>}
       {v && paused(v) && <p className="muted" role="note">While paused, its files wait in the queue and aren't converted. Scans add no new files. Files already converting finish.</p>}
