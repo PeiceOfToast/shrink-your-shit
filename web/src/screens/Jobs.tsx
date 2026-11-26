@@ -246,7 +246,7 @@ export function Jobs() {
               <span className="mchip">{libraryGone(j.libraryId, libs.data) ? "Library removed" : j.library}</span>
               {j.folder !== "." && <span className="mchip">{j.folder}</span>}
               {j.pin && <span className="mchip prio">{j.pin === "first" ? "First" : "Last"}</span>}
-              {tab === "waiting" && (j.position != null ? <span className="mchip">Place {j.position} in the queue</span> : <span className="mchip">Not taken now</span>)}
+              {tab === "waiting" && !isSettling(j) && (j.position != null ? <span className="mchip">Place {j.position} in the queue</span> : <span className="mchip">Not taken now</span>)}
               {j.worker && <span className="mchip">{workerLabel(j.worker)}</span>}
             </div>);
             return (
@@ -257,7 +257,7 @@ export function Jobs() {
                 {/* a file still changing has no drawer and no link: its name is plain text, so a click does nothing and it isn't a focus stop */}
                 <div className="lname">{isSettling(j) ? <span className="ttl" title={j.path}><FileName n={j.name} /></span> : <><a className="ttl" href={"/jobs?tab=" + tab + "&job=" + encodeURIComponent(key(j))} data-job={key(j)} title={j.path}
                   onClick={(e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); go(tab, key(j)); } }}><FileName n={j.name} /></a><span className="lchev" aria-hidden="true">›</span></>}</div>
-                {!f && <span className="lpath sm" title={reasonText(j) || undefined}><Detail j={j} /></span>}
+                {!f && <span className={"lpath sm" + (isSettling(j) ? " settling" : "")} title={reasonText(j) || undefined}><Detail j={j} /></span>}
                 {facts}
                 {f && <div className="rfields" role="group" aria-label="Conversion progress">
                   {([["Step", f.step], ["Frames/s", f.fps], ["Speed", f.speed], ["Time left", f.timeLeft], ["Bitrate", f.bitrate]] as const).map(([label, value]) => <div className="rf" key={label}><span className="muted sm">{label}</span><span className="rfv">{value}</span></div>)}
