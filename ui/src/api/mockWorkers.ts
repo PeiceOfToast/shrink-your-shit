@@ -1,13 +1,13 @@
 // Workers for the mock. Writes change an in-memory copy, so a session behaves like the app.
-import type { Worker, WorkerDetail, WorkerLibrary, WorkerState } from "./types.ts";
+import type { JoinRequest, Pairing, Worker, WorkerDetail, WorkerLibrary, WorkerState } from "./types.ts";
 import { ApiError } from "./errors.ts";
 import { getForcedState, respond } from "./mockState.ts";
 import { WORKERS } from "./fixtures/workers.ts";
 import { currentLibraries } from "./mockLibraries.ts";
 
-let rows: WorkerDetail[] = WORKERS.map((w) => ({ ...w, libraries: w.libraries.map((l) => ({ ...l })) }));
+let rows: WorkerDetail[] = WORKERS.map(copy);
 
-// A worker that joins after a pairing command is run. The mock joins one after a few seconds.
+// A worker that asks to join after its pairing command is run. The mock asks after two seconds.
 const JOINER: WorkerDetail = {
   id: "den-pc",
   name: "Den PC",
@@ -20,9 +20,11 @@ const JOINER: WorkerDetail = {
   gpu: null,
   now: null,
   doneToday: 0,
-  hours: { from: 0, to: 24 },
-  encoder: "auto",
+  hours: null,
+  primaryEncoder: null,
+  encoders: [],
   libraries: [],
+  newLibraries: [],
 };
 
 const summary = (w: WorkerDetail): Worker => ({
@@ -39,7 +41,9 @@ const summary = (w: WorkerDetail): Worker => ({
   doneToday: w.doneToday,
 });
 
-const copy = (w: WorkerDetail): WorkerDetail => ({ ...w, libraries: w.libraries.map((l) => ({ ...l })) });
+function copy(w: WorkerDetail): WorkerDetail {
+  return { ...w, libraries: w.libraries.map((l) => ({ ...l })), newLibraries: w.newLibraries.map((l) => ({ ...l })), encoders: w.encoders.map((e) => ({ ...e })) };
+}
 
 function find(id: string): WorkerDetail {
   const w = rows.find((r) => r.id === id);
@@ -58,8 +62,14 @@ export function workerName(id: string): string | undefined {
   return rows.find((r) => r.id === id)?.name;
 }
 
+// The workers that take a library, for the library page: this computer takes every library.
+export function workersTaking(libraryId: string): { id: string; name: string }[] {
+  return rows.filter((w) => w.local || w.libraries.some((l) => l.libraryId === libraryId)).map((w) => ({ id: w.id, name: w.name }));
+}
+
 // A folder on the worker must be a full path there: from the root, or a drive letter or a network share.
 const isAbsolute = (p: string) => /^\//.test(p) || /^[A-Za-z]:[\\/]/.test(p) || /^\\\\/.test(p);
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 export function getWorkers(): Promise<Worker[]> {
   return respond(() => {
@@ -73,7 +83,7 @@ export function getWorker(id: string): Promise<WorkerDetail> {
   return respond(() => copy(find(id)));
 }
 
-export type WorkerPatch = Partial<Pick<WorkerDetail, "slots" | "gpuSlots" | "hours" | "encoder">> & {
+export type WorkerPatch = Partial<Pick<WorkerDetail, "slots" | "gpuSlots" | "hours" | "primaryEncoder">> & {
   libraries?: { libraryId: string; workerPath: string; mode: WorkerLibrary["mode"] }[];
 };
 
@@ -86,8 +96,16 @@ export function patchWorker(id: string, patch: WorkerPatch): Promise<WorkerDetai
     if (patch.gpuSlots !== undefined && (!Number.isInteger(patch.gpuSlots) || patch.gpuSlots < 0)) {
       throw new ApiError("invalid_setting", "Graphics slots is 0 or more.", "gpuSlots");
     }
-    if (patch.hours && (patch.hours.from < 0 || patch.hours.to > 24 || patch.hours.from >= patch.hours.to)) {
-      throw new ApiError("invalid_setting", "Pick hours inside one day.", "hours");
+    if (patch.hours) {
+      const { from, to } = patch.hours;
+      if (!HHMM.test(from) || !HHMM.test(to) || from === to) {
+        throw new ApiError("invalid_setting", "Pick two different times. From later than To runs overnight.", "hours");
+      }
+    }
+    if (patch.primaryEncoder !== undefined && patch.primaryEncoder !== null && patch.primaryEncoder !== "cpu") {
+      const enc = w.encoders.find((e) => e.name === patch.primaryEncoder);
+      if (!enc) throw new ApiError("invalid_encoder", "This worker has no such encoder.", "primaryEncoder");
+      if (!enc.testOk) throw new ApiError("encoder_not_working", "That encoder failed its test. Test the encoders, then pick it again.", "primaryEncoder");
     }
     if (patch.libraries) {
       if (w.local) throw new ApiError("local_worker", "This computer takes every library, at the same paths.");
@@ -109,11 +127,13 @@ export function patchWorker(id: string, patch: WorkerPatch): Promise<WorkerDetai
         });
       });
       w.libraries = next;
+      // Saving the list is what makes the new libraries count as seen.
+      w.newLibraries = [];
     }
     if (patch.slots !== undefined) w.slots = patch.slots;
     if (patch.gpuSlots !== undefined) w.gpuSlots = patch.gpuSlots;
-    if (patch.hours) w.hours = patch.hours;
-    if (patch.encoder) w.encoder = patch.encoder;
+    if (patch.hours !== undefined) w.hours = patch.hours;
+    if (patch.primaryEncoder !== undefined) w.primaryEncoder = patch.primaryEncoder;
     return copy(w);
   });
 }
@@ -137,18 +157,33 @@ export function resumeWorker(id: string): Promise<Worker> {
   return setState(id, "converting", null);
 }
 
-// The command the other machine runs. The join is the mock's worker.joined event, see waitForJoin.
-export function createPairing(): Promise<{ id: string; command: string }> {
-  return respond(() => ({ id: "pair-1", command: "syp worker join 10.10.2.201 --code 4821-067" }));
+// The command the other machine runs. The mock's join request appears after the command runs (see waitForJoinRequest).
+export function createPairing(): Promise<Pairing> {
+  return respond(() => ({
+    id: "pair-1",
+    code: "4821-067",
+    expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+    command: "syp worker join 10.10.2.201 --code 4821-067",
+    plainHTTP: true,
+  }));
 }
 
-export function waitForJoin(_pairingId: string): Promise<Worker> {
+export function waitForJoinRequest(_pairingId: string): Promise<JoinRequest> {
   return new Promise((resolve) => {
-    setTimeout(() => {
-      if (!rows.some((r) => r.id === JOINER.id)) rows = [...rows, { ...JOINER, libraries: [] }];
-      resolve(summary(find(JOINER.id)));
-    }, 3000);
+    setTimeout(() => resolve({ id: "join-1", name: JOINER.name, address: JOINER.address }), 2000);
   });
+}
+
+// Allow adds the worker. It shows on the list from then on.
+export function allowJoinRequest(_requestId: string): Promise<Worker> {
+  return respond(() => {
+    if (!rows.some((r) => r.id === JOINER.id)) rows = [...rows, copy(JOINER)];
+    return summary(find(JOINER.id));
+  });
+}
+
+export function denyJoinRequest(_requestId: string): Promise<void> {
+  return respond(() => undefined);
 }
 
 export function removeWorker(id: string): Promise<void> {

@@ -1,28 +1,41 @@
 import { useEffect, useState } from "react";
 import { navigate } from "../router.tsx";
-import { api, type Worker } from "../api/index.ts";
+import { api, type JoinRequest, type Worker } from "../api/index.ts";
 import { useApi } from "../api/useApi.ts";
 import { useKeys } from "../ui/useKeys.ts";
+import { clock } from "../format/time.ts";
 import { errorText } from "./workerParts.tsx";
 
-// Add worker (page 10): shows the command to run on the other machine, then waits for it to join.
+// Add worker (page 10): shows the command to run on the other machine, then waits for its join request.
+// A join request is answered with Allow or Deny; the worker appears only after Allow.
 export function AddWorker({ onClose }: { onClose: () => void }) {
   const pair = useApi(() => api.createPairing(), []);
+  const [request, setRequest] = useState<JoinRequest | null>(null);
   const [joined, setJoined] = useState<Worker | null>(null);
-  const [waitErr, setWaitErr] = useState<string | null>(null);
+  const [denied, setDenied] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const pairId = pair.data?.id;
 
   useEffect(() => {
     if (!pairId) return;
     let alive = true;
-    api.waitForJoin(pairId).then(
-      (w) => alive && setJoined(w),
-      (e: unknown) => alive && setWaitErr(errorText(e)),
+    api.waitForJoinRequest(pairId).then(
+      (r) => alive && setRequest(r),
+      (e: unknown) => alive && setErr(errorText(e)),
     );
     return () => {
       alive = false;
     };
   }, [pairId]);
+
+  const decide = (allow: boolean) => {
+    if (!request) return;
+    setBusy(true);
+    setErr(null);
+    const done = allow ? api.allowJoinRequest(request.id).then(setJoined) : api.denyJoinRequest(request.id).then(() => setDenied(true));
+    done.catch((e: unknown) => setErr(errorText(e))).finally(() => setBusy(false));
+  };
 
   useKeys((e) => {
     if (e.key === "Escape") onClose();
@@ -48,16 +61,32 @@ export function AddWorker({ onClose }: { onClose: () => void }) {
             <>
               <p>Run this on the other machine:</p>
               <pre className="cmd">{pair.data.command}</pre>
-              {joined ? (
+              <p className="muted sm">The code works until {clock(pair.data.expiresAt)}.</p>
+              {pair.data.plainHTTP && (
+                <div className="note">
+                  <span>This server is reached over plain HTTP, so the code travels unencrypted. Only join on a network you trust.</span>
+                </div>
+              )}
+
+              {joined && (
                 <div className="note">
                   <span>
                     <b>{joined.name} joined.</b>
                   </span>
                 </div>
-              ) : (
-                <p className="muted">Waiting for the other machine to join…</p>
               )}
-              {waitErr && <p className="err" role="alert">{waitErr}</p>}
+              {denied && <p className="muted">Denied.</p>}
+              {!joined && !denied && request && (
+                <div className="note">
+                  <span>
+                    <b>{request.name}</b> ({request.address}) asks to join.{" "}
+                    <button type="button" className="btn primary sm" onClick={() => decide(true)} disabled={busy}>Allow</button>{" "}
+                    <button type="button" className="btn ghost sm" onClick={() => decide(false)} disabled={busy}>Deny</button>
+                  </span>
+                </div>
+              )}
+              {!joined && !denied && !request && <p className="muted">Waiting for the other machine to ask to join…</p>}
+              {err && <p className="err" role="alert">{err}</p>}
             </>
           )}
         </div>

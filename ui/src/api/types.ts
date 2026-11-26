@@ -346,9 +346,34 @@ export interface WorkerLibrary {
   test: { state: "untested" | "pending" | "ok" | "failed"; at?: string; message?: string };
 }
 
+// One encoder the worker has. Only the ones whose test passed are offered as a choice.
+export interface WorkerEncoder {
+  name: string; // e.g. "hevc_qsv"
+  label: string;
+  testOk: boolean;
+}
+
 export interface WorkerDetail extends Worker {
-  hours: { from: number; to: number }; // whole hours of the day it may work, 0 to 24
-  encoder: "auto" | "graphics" | "processor";
+  hours: { from: string; to: string } | null; // "HH:MM" in the server's local time; null = any time. from > to runs overnight.
+  primaryEncoder: string | null; // null = automatic; "cpu" or an encoder name
+  encoders: WorkerEncoder[];
   // Remote workers only: the libraries it takes. This computer takes every library and sends none.
   libraries: WorkerLibrary[];
+  // Libraries added since this worker's list was last saved and not on it. The next PATCH {libraries} clears it.
+  newLibraries: { libraryId: string; name: string }[];
+}
+
+export interface Pairing {
+  id: string;
+  code: string;
+  expiresAt: string; // RFC 3339
+  command: string; // the line to run on the other machine
+  plainHTTP: boolean; // the server is reached without TLS
+}
+
+// A worker asking to join after its command ran. Allow or Deny answers it.
+export interface JoinRequest {
+  id: string;
+  name: string;
+  address: string;
 }

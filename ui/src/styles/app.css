@@ -63,9 +63,20 @@ button.search{background:none;border:1px solid var(--border);color:var(--text2);
 .dlg h2{margin:0 0 14px;font-size:17px;font-weight:700}
 .dlg-actions{justify-content:flex-end;gap:8px;flex-wrap:wrap}
 pre.cmd{margin:8px 0 14px;padding:12px 14px;border:1px solid var(--border);border-radius:calc(var(--radius) - 4px);background:var(--bg);font-family:var(--mono);font-size:13px;white-space:pre-wrap;word-break:break-all;user-select:all}
-.librow{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1.4fr) auto auto;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)}
+/* Fixed columns so every path field starts at the same x, whatever each row's status says. */
+.librow{display:grid;grid-template-columns:220px minmax(0,1fr) 150px 72px;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)}
 .librow > label{min-width:0}
 .librow input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent);vertical-align:middle}
 @media (max-width:640px){
   .librow{grid-template-columns:1fr}
+}
+
+/* Workers list: the phone card. Line 1 is name and state chip; line 2 is address · graphics card · Now. */
+table.tbl.wkr td.wk-sub{display:none}
+@media (max-width:900px){
+  table.tbl.wkr tr{display:flex;flex-wrap:wrap;align-items:center;column-gap:10px;padding:10px 14px}
+  table.tbl.wkr td.wk-name{order:1;flex:1 1 0;min-width:0}
+  table.tbl.wkr td.wk-state{order:2;flex:none}
+  table.tbl.wkr td.wk-sub{display:block;order:3;flex:1 0 100%;margin-top:2px}
+  table.tbl.wkr td.wk-slots,table.tbl.wkr td.wk-gpu,table.tbl.wkr td.wk-now,table.tbl.wkr td.wk-done,table.tbl.wkr .wk-addr{display:none}
 }

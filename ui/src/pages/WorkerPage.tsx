@@ -8,14 +8,9 @@ import { PauseDialog, RemoveDialog, StatePill, errorText } from "./workerParts.t
 
 // One worker's page (pages/10-workers.md, the worker panel). Changed fields only go to the server on Save.
 
-type Settings = { slots: number; gpuSlots: number; from: number; to: number; encoder: string };
+// encoder is "auto" for automatic (sent as null), else "cpu" or an encoder name. Hours are "HH:MM" unless anyTime.
+type Settings = { slots: number; gpuSlots: number; anyTime: boolean; from: string; to: string; encoder: string };
 type Lib = { ticked: boolean; workerPath: string; mode: WorkerLibrary["mode"] };
-
-const ENCODERS: { value: string; label: string }[] = [
-  { value: "auto", label: "Choose automatically" },
-  { value: "graphics", label: "Graphics card" },
-  { value: "processor", label: "Processor" },
-];
 
 const TEST_TEXT: Record<WorkerLibrary["test"]["state"], string> = {
   untested: "Not tested",
@@ -24,12 +19,15 @@ const TEST_TEXT: Record<WorkerLibrary["test"]["state"], string> = {
   failed: "Failed",
 };
 
+const hoursOf = (s: Settings) => (s.anyTime ? null : { from: s.from, to: s.to });
+
 const settingsOf = (w: WorkerDetail): Settings => ({
   slots: w.slots,
   gpuSlots: w.gpuSlots,
-  from: w.hours.from,
-  to: w.hours.to,
-  encoder: w.encoder,
+  anyTime: w.hours === null,
+  from: w.hours?.from ?? "09:00",
+  to: w.hours?.to ?? "17:00",
+  encoder: w.primaryEncoder ?? "auto",
 });
 
 export function WorkerPage({ id }: { id: string }) {
@@ -88,8 +86,8 @@ export function WorkerPage({ id }: { id: string }) {
     const patch: Parameters<typeof api.patchWorker>[1] = {};
     if (form.slots !== saved.slots) patch.slots = form.slots;
     if (form.gpuSlots !== saved.gpuSlots) patch.gpuSlots = form.gpuSlots;
-    if (form.from !== saved.from || form.to !== saved.to) patch.hours = { from: form.from, to: form.to };
-    if (form.encoder !== saved.encoder) patch.encoder = form.encoder as WorkerDetail["encoder"];
+    if (JSON.stringify(hoursOf(form)) !== JSON.stringify(hoursOf(saved))) patch.hours = hoursOf(form);
+    if (form.encoder !== saved.encoder) patch.primaryEncoder = form.encoder === "auto" ? null : form.encoder;
     if (Object.keys(patch).length === 0) return;
     run(() => api.patchWorker(id, patch), () => {
       setMsg("Saved.");
@@ -143,8 +141,12 @@ export function WorkerPage({ id }: { id: string }) {
   }
 
   const offline = w.state === "offline";
-  const unticked = (libs.data ?? []).filter((l) => !libSaved[l.id]?.ticked);
-  const trimmedHour = (n: number) => Math.min(24, Math.max(0, Math.round(n)));
+  // The choices are the encoders whose test passed, and the processor, which always works.
+  const encoderChoices = [
+    { value: "auto", label: "Choose automatically" },
+    ...w.encoders.filter((e) => e.testOk).map((e) => ({ value: e.name, label: e.label })),
+    { value: "cpu", label: "Processor" },
+  ];
 
   return (
     <>
@@ -219,32 +221,39 @@ export function WorkerPage({ id }: { id: string }) {
           </div>
           <div className="field">
             <span className="lbl">Hours it may work</span>
-            <div className="row">
+            <label className="row" style={{ gap: 8 }}>
               <input
-                aria-label="From hour"
+                type="checkbox"
+                checked={form.anyTime}
+                onChange={(e) => setForm({ ...form, anyTime: e.target.checked })}
+              />
+              Any time
+            </label>
+            <div className="row" style={{ marginTop: 8 }}>
+              <input
+                aria-label="From"
                 className="inp"
-                type="number"
-                min={0}
-                max={24}
+                type="time"
                 value={form.from}
-                onChange={(e) => setForm({ ...form, from: trimmedHour(Number(e.target.value)) })}
+                disabled={form.anyTime}
+                onChange={(e) => setForm({ ...form, from: e.target.value })}
               />
               <span className="muted">to</span>
               <input
-                aria-label="To hour"
+                aria-label="To"
                 className="inp"
-                type="number"
-                min={0}
-                max={24}
+                type="time"
                 value={form.to}
-                onChange={(e) => setForm({ ...form, to: trimmedHour(Number(e.target.value)) })}
+                disabled={form.anyTime}
+                onChange={(e) => setForm({ ...form, to: e.target.value })}
               />
             </div>
+            <div className="hint">From later than To runs overnight, such as 22:00 to 06:00.</div>
           </div>
           <div className="field">
-            <label className="lbl" htmlFor="w-enc">Encoder</label>
+            <label className="lbl" htmlFor="w-enc">Graphics card or processor</label>
             <select id="w-enc" className="sel" value={form.encoder} onChange={(e) => setForm({ ...form, encoder: e.target.value })}>
-              {ENCODERS.map((o) => (
+              {encoderChoices.map((o) => (
                 <option key={o.value} value={o.value}>{o.label}</option>
               ))}
             </select>
@@ -294,8 +303,8 @@ export function WorkerPage({ id }: { id: string }) {
               </div>
             );
           })}
-          {unticked.length > 0 && (
-            <p className="muted sm">New: {unticked.map((l) => l.name).join(", ")}, not taken yet.</p>
+          {w.newLibraries.length > 0 && (
+            <p className="muted sm">New: {w.newLibraries.map((l) => l.name).join(", ")}, not taken yet.</p>
           )}
           <div className="row" style={{ justifyContent: "flex-end" }}>
             <button type="button" className="btn primary sm" onClick={saveLibs} disabled={!libsDirty || busy}>Save</button>
@@ -308,7 +317,7 @@ export function WorkerPage({ id }: { id: string }) {
         <div className="row" style={{ padding: "12px 14px" }}>
           <h2 className="h3" style={{ margin: 0 }}>Recent jobs</h2>
           <span className="sp"></span>
-          <Link to={`/system-log?source=worker&worker=${id}`}>System log</Link>
+          <Link to={`/settings/log?worker=${id}`}>System log</Link>
         </div>
         {jobs.error && !jobs.data && <p className="bad pad">Can't load this worker's jobs.</p>}
         {jobs.data && jobs.data.items.length === 0 && <p className="muted pad">No jobs yet.</p>}

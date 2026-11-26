@@ -6,22 +6,23 @@ import { AddWorker } from "./AddWorker.tsx";
 import { StatePill, errorText } from "./workerParts.tsx";
 
 // Built from pages/10-workers.md. A row click opens the worker's page; ?add=1 opens Add worker.
+// On a phone (see .wkr in app.css) each worker is two lines: name and state, then address · graphics card · Now.
 
 function WorkerRow({ w }: { w: Worker }) {
   const open = () => navigate(`/workers/${w.id}`);
+  const where = w.local ? "this computer" : w.address;
   return (
     <tr className="row-link" tabIndex={0} onClick={open} onKeyDown={(e) => e.key === "Enter" && open()}>
-      <td className="full">
+      <td className="wk-name">
         <b>{w.name}</b>
-        <br />
-        <span className="muted sm">{w.local ? "this computer" : w.address}</span>
+        <div className="muted sm wk-addr">{where}</div>
       </td>
-      <td data-l="State">
+      <td className="wk-state">
         <StatePill w={w} />
       </td>
-      <td className="num tnum" data-l="Files at once">{w.slots}</td>
-      <td data-l="Graphics card">{w.gpu ? <span className="mono sm">{w.gpu.name}</span> : "None found"}</td>
-      <td data-l="Now">
+      <td className="num tnum wk-slots">{w.slots}</td>
+      <td className="wk-gpu">{w.gpu ? <span className="mono sm">{w.gpu.name}</span> : "None found"}</td>
+      <td className="wk-now">
         {w.now ? (
           <>
             {w.now.file}
@@ -34,7 +35,10 @@ function WorkerRow({ w }: { w: Worker }) {
           "—"
         )}
       </td>
-      <td className="num tnum" data-l="Done today">{formatCount(w.doneToday)}</td>
+      <td className="num tnum wk-done">{formatCount(w.doneToday)}</td>
+      <td className="wk-sub muted sm">
+        {[where, w.gpu?.name, w.now && `Now: ${w.now.file}`].filter(Boolean).join(" · ")}
+      </td>
     </tr>
   );
 }
@@ -99,7 +103,7 @@ export function Workers() {
           </table>
         )}
         {data && data.length > 0 && (
-          <table className="tbl">
+          <table className="tbl wkr">
             <thead>
               <tr>
                 <th>Worker</th>
