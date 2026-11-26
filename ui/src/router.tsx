@@ -25,10 +25,11 @@ export type Route =
   | { name: "jobs" }
   | { name: "job"; id: string }
   | { name: "jobLog"; id: string }
+  | { name: "libraries" }
+  | { name: "library"; id: string }
   | { name: "placeholder"; title: string };
 
 const TITLES: Record<string, string> = {
-  libraries: "Libraries",
   workflows: "Workflows",
   workers: "Workers",
   settings: "Settings",
@@ -44,6 +45,10 @@ export function resolve(pathname: string): Route {
     if (parts.length === 1) return { name: "jobs" };
     if (parts.length === 2) return { name: "job", id: parts[1] };
     if (parts.length === 3 && parts[2] === "log") return { name: "jobLog", id: parts[1] };
+  }
+  if (parts[0] === "libraries") {
+    if (parts.length === 1) return { name: "libraries" };
+    if (parts.length === 2) return { name: "library", id: parts[1] };
   }
   return { name: "placeholder", title: TITLES[parts[0]] ?? "Not found" };
 }

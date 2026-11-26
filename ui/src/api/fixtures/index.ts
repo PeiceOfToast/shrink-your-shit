@@ -1,4 +1,4 @@
-import type { Attention, LibrarySummary, Overview, Summary } from "../types.ts";
+import type { Attention, Overview, Summary } from "../types.ts";
 import seriesRaw from "./series.json" with { type: "json" };
 
 // Numbers from draft-b/dashboard.html and draft-b/jobs.html (the status line, KPIs, cards and table).
@@ -24,12 +24,6 @@ export const OVERVIEW: Overview = {
   filesLast24h: { done: 14, skipped: 2, failed: 3 },
   libraries: [],
 };
-
-export const LIBRARIES: LibrarySummary[] = [
-  { id: "movies", name: "Movies", path: "/media/movies", workflow: "Shrink videos", files: 1204, waiting: 640, saved: "8.1 GB · 0.4%", status: { kind: "ok", label: "Watching" } },
-  { id: "tv", name: "TV Shows", path: "/media/tv", workflow: "Shrink videos", files: 2430, waiting: 598, saved: "—", status: { kind: "run", label: "Scanning · 40%" } },
-  { id: "home-videos", name: "Home videos", path: "/media/home-videos", workflow: "Keep surround", files: 164, waiting: 46, saved: "28.3 GB · 29%", status: { kind: "warn", label: "Share not connected" } },
-];
 
 export const ATTENTION: Attention[] = [
   {

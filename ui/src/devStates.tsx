@@ -10,12 +10,17 @@ const STATES: { key: ForcedState; label: string }[] = [
   { key: "running", label: "Running" },
 ];
 
+// ?states=0 hides the switcher; in dev it shows, or in a preview with ?states=1.
 export function showDevStates(): boolean {
-  return import.meta.env.DEV || new URLSearchParams(location.search).has("states");
+  const v = new URLSearchParams(location.search).get("states");
+  if (v === "0") return false;
+  return import.meta.env.DEV || v !== null;
 }
 
 export function DevStates() {
   const [current, setCurrent] = useState<ForcedState>(() => getForcedState());
+  // Collapsed to a small chip in the bottom-left corner, clear of the panel footers, until opened.
+  const [open, setOpen] = useState(false);
   useEffect(() => {
     // Reset to normal when the page changes, so a state never leaks across screens.
     const onPop = () => {
@@ -25,9 +30,18 @@ export function DevStates() {
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, []);
+  if (!open) {
+    return (
+      <button type="button" className="btn sm ghost dev-chip" aria-expanded={false} onClick={() => setOpen(true)}>
+        states
+      </button>
+    );
+  }
   return (
     <div className="dev-states" role="group" aria-label="Dev state">
-      <span className="muted sm">state</span>
+      <button type="button" className="btn sm ghost" aria-expanded={true} onClick={() => setOpen(false)}>
+        hide
+      </button>
       {STATES.map((s) => (
         <button
           key={s.key}

@@ -1,0 +1,725 @@
+/* Side panels and the job panel. Rules come from Plan draft A (drafts/add-library), trimmed to what the screens use.
+   .scrim and .skel are in app.css; .seg, .sw, .field, .inp, .sel and .hint are in draft-b.css. */
+
+.ov {
+  position: fixed;
+  z-index: 11;
+  background: var(--surface);
+  border: 1px solid var(--strong);
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.ov.panel {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 520px;
+  border-radius: 0;
+  border-width: 0 0 0 1px;
+}
+.ovh {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+.ovh h2 {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 14px;
+  font-weight: 600;
+}
+.ovh .sp {
+  flex: 1;
+}
+.ovb {
+  padding: 16px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  flex: 1;
+  min-height: 0;
+}
+.ovb > * {
+  flex: none;
+}
+.ovf {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+}
+.ovf .sp {
+  flex: 1;
+}
+.ovf .hint {
+  min-width: 0;
+}
+.lbl {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text2);
+}
+.row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.row > .inp {
+  flex: 1;
+  min-width: 0;
+}
+.err {
+  color: var(--badtxt);
+  font-size: 13px;
+}
+.tree {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  font-family: var(--mono);
+  font-size: 13px;
+  max-height: 220px;
+  overflow: auto;
+}
+.tree button {
+  display: flex;
+  width: 100%;
+  gap: 8px;
+  align-items: center;
+  background: none;
+  border: 0;
+  color: var(--text);
+  padding: 6px 10px;
+  text-align: left;
+}
+.tree button:hover {
+  background: var(--raised);
+}
+.tree button .n {
+  margin-left: auto;
+  color: var(--text2);
+  font-size: 11.5px;
+}
+.check {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--bg);
+}
+.check .nums {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.check .nums div {
+  display: flex;
+  flex-direction: column;
+}
+.check .nums b {
+  font-family: var(--mono);
+  font-size: 18px;
+  font-weight: 600;
+}
+.check .nums span {
+  font-size: 12px;
+  color: var(--text2);
+}
+.wfsum {
+  border-left: 2px solid var(--accent);
+  padding: 4px 0 4px 10px;
+  font-size: 13px;
+  color: var(--text2);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.wfsum b {
+  color: var(--text);
+  font-weight: 600;
+}
+.adv {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.adv > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 10px 12px;
+  display: flex;
+  gap: 8px;
+  font-size: 13.5px;
+  color: var(--text2);
+}
+.adv > summary::before {
+  content: "▸";
+}
+.adv[open] > summary::before {
+  content: "▾";
+}
+.adv > div {
+  padding: 0 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.facts3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.facts3 div {
+  background: var(--surface);
+  padding: 8px 10px;
+}
+.facts3 b {
+  display: block;
+  font-family: var(--mono);
+  font-size: 16px;
+  font-weight: 600;
+}
+.facts3 span {
+  font-size: 12px;
+  color: var(--text2);
+}
+.danger {
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.btn.bad {
+  border-color: var(--bad);
+  color: var(--badtxt);
+  background: transparent;
+  align-self: flex-start;
+}
+.tabs button {
+  background: none;
+  border: 0;
+  color: var(--text2);
+  font: inherit;
+  font-weight: 600;
+  font-size: 14px;
+  padding: 10px 12px;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  cursor: pointer;
+}
+.tabs button[aria-selected="true"] {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.tabs button b {
+  margin-left: 6px;
+  color: var(--text2);
+  font-weight: 600;
+}
+
+/* Job details: a large panel over the Jobs list. */
+.ov.panel.jd {
+  top: 24px;
+  right: 24px;
+  bottom: 24px;
+  left: auto;
+  width: min(1100px, calc(100vw - 48px));
+  border-width: 1px;
+  border-radius: 4px;
+}
+.jd .ovb {
+  gap: 14px;
+}
+.jd-cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.jd-cards .card h3 {
+  margin: 0 0 8px;
+  font-family: var(--mono);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text2);
+  font-weight: 600;
+}
+.jd-cards .card h3 + div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.jd-cards .card h3 + div > span {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13.5px;
+}
+.jd-cards .card h3 + div > span > span:first-child {
+  color: var(--text2);
+}
+.jd-fail {
+  border: 1px solid var(--bad);
+  border-radius: 4px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--surface);
+}
+.jd-fail b {
+  color: var(--badtxt);
+}
+.jd-confirm {
+  border: 1px solid var(--strong);
+  border-radius: 4px;
+  padding: 10px 12px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  background: var(--raised);
+  font-size: 13.5px;
+}
+.jd-confirm span {
+  flex: 1;
+  min-width: 200px;
+}
+.log {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.log .ln {
+  display: grid;
+  grid-template-columns: 96px 58px minmax(0, 1fr);
+  gap: 10px;
+  padding: 2px 0;
+}
+.log .ln .t {
+  color: var(--text2);
+}
+.log .ln .lv {
+  color: var(--text2);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  align-self: center;
+}
+.log .ln.warn .lv {
+  color: var(--warntxt);
+}
+.log .ln.error .lv {
+  color: var(--badtxt);
+}
+.log .ln.warn {
+  color: var(--warntxt);
+}
+.log .ln.error {
+  color: var(--badtxt);
+}
+.log .ln.detail {
+  color: var(--text2);
+}
+.log-step {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.log-step header {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+.log-step header b {
+  font-family: var(--sans);
+  font-size: 14px;
+}
+.log-step header .sp {
+  flex: 1;
+}
+.log-step pre {
+  margin: 0;
+  padding: 8px 10px;
+  background: var(--bg);
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text2);
+}
+
+/* Job panel, PR 2 design fixes: one-line head, summary bar, log toolbar and timeline, grouped before/after. */
+.jd-title {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+.jd .ovh h2 {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.jd-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.jd-acts {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  min-width: 0;
+}
+.jd-close {
+  flex: none;
+}
+/* Desktop: the ⋯ menu is not used; its actions sit in the head row as before. */
+.jd-more {
+  display: contents;
+}
+.jd-more-btn {
+  display: none;
+}
+.jd-menu-wrap {
+  position: relative;
+}
+.jd-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  min-width: 110px;
+  padding: 4px;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.jd-menu button {
+  background: none;
+  border: 0;
+  text-align: left;
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--text);
+  padding: 6px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.jd-menu button:hover,
+.jd-menu button:focus-visible {
+  background: var(--surface);
+}
+.jd .tabs button {
+  font-family: var(--mono);
+  font-variant-caps: all-small-caps;
+  letter-spacing: 0.04em;
+}
+.jd-bar-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+.jd-bar {
+  height: 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--raised);
+  overflow: hidden;
+}
+.jd-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--ok);
+}
+.jd-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.jd-seg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.jd-seg button {
+  background: none;
+  border: 0;
+  border-right: 1px solid var(--border);
+  color: var(--text2);
+  font: inherit;
+  font-size: 13px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+.jd-seg button:last-child {
+  border-right: 0;
+}
+.jd-seg button[aria-pressed="true"] {
+  background: var(--raised);
+  color: var(--text);
+}
+.jd-search {
+  flex: 1 1 200px;
+  max-width: 280px;
+}
+.jd-logwrap {
+  display: grid;
+  grid-template-columns: 170px minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+.jd-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  position: sticky;
+  top: 0;
+}
+.jd-timeline button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  background: none;
+  border: 0;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text2);
+  text-align: left;
+  padding: 4px 0;
+  cursor: pointer;
+}
+.jd-timeline button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.jd-dot {
+  display: inline-block;
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1px solid var(--text2);
+}
+.jd-timeline li.ok .jd-dot {
+  background: var(--ok);
+  border-color: var(--ok);
+}
+.jd-timeline li.bad .jd-dot {
+  background: var(--bad);
+  border-color: var(--bad);
+}
+.jd-logmain {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.jd-sec-toggle {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.jd-values {
+  margin: 0;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 3px 12px;
+  font-size: 13px;
+}
+.jd-values > div {
+  display: contents;
+}
+.jd-values dt {
+  color: var(--text2);
+}
+.jd-values dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.jd-group th {
+  text-align: left;
+  font-family: var(--mono);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text2);
+  padding-top: 14px;
+}
+.jd-changed td {
+  font-weight: 600;
+}
+.jd-changed .jd-dot {
+  background: var(--accent);
+  border-color: var(--accent);
+  margin-right: 8px;
+  vertical-align: middle;
+}
+
+@media (max-width: 900px) {
+  .jd-logwrap {
+    grid-template-columns: 1fr;
+  }
+  .jd-timeline {
+    display: none;
+  }
+  .jd-search {
+    flex: 1 1 100%;
+    max-width: none;
+  }
+}
+
+/* Phone: head is two rows (name, state and X; then ‹ › Retry and ⋯), tabs scroll sideways on one row. */
+@media (max-width: 900px) {
+  .jd .ovh {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 6px 8px;
+  }
+  .jd-title {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .jd-state {
+    grid-column: 2;
+    grid-row: 1;
+    flex-wrap: nowrap;
+  }
+  .jd-state .sm {
+    display: none;
+  }
+  .jd-close {
+    grid-column: 3;
+    grid-row: 1;
+  }
+  .jd-acts {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    position: relative;
+    flex-wrap: nowrap;
+  }
+  .jd-more-btn {
+    display: inline-flex;
+    margin-left: auto;
+  }
+  .jd-more {
+    display: none;
+  }
+  .jd-more.open {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    z-index: 6;
+    min-width: 200px;
+    padding: 4px;
+    background: var(--raised);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+  }
+  .jd-more.open .btn {
+    justify-content: flex-start;
+  }
+  .jd-more .jd-menu-wrap {
+    display: flex;
+    flex-direction: column;
+  }
+  .jd-more .jd-menu {
+    position: static;
+    border: 0;
+    padding: 0;
+    background: none;
+  }
+  .jd .tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+  .jd .tabs button {
+    flex: none;
+    white-space: nowrap;
+  }
+  /* The dev state chip never sits over an open panel. */
+  body:has(.ov.panel) .dev-chip,
+  body:has(.ov.panel) .dev-states {
+    display: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .ov.panel,
+  .ov.panel.jd {
+    inset: 0;
+    width: auto;
+    border-radius: 0;
+    border: 0;
+  }
+  .ovf {
+    position: sticky;
+    bottom: 0;
+    background: var(--surface);
+  }
+  .ovf .btn {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+  .facts3 b {
+    font-size: 14px;
+  }
+  .check .nums b {
+    font-size: 16px;
+  }
+  .jd-cards {
+    grid-template-columns: 1fr;
+  }
+  /* Phone: time and level share a row; the message wraps under them. */
+  .log .ln {
+    display: flex;
+    flex-wrap: wrap;
+    column-gap: 10px;
+  }
+  .log .ln > :last-child {
+    flex-basis: 100%;
+    overflow-wrap: anywhere;
+  }
+}
