@@ -40,14 +40,19 @@ button.search{background:none;border:1px solid var(--border);color:var(--text2);
 .sw.dis .k,.sw.dis .k.on{background:var(--strong)}
 .sw.dis .k::after{background:var(--text2)}
 
-/* Workflows list at phone width (page 04): name, state and menu on line 1; used by and last changed on line 2. */
+/* Workflows list (page 04): the filter is 320px wide on desktop. */
+.wft-filter { max-width: 320px }
+
+/* Workflows list at phone width: line 1 is name, state chip and menu; line 2 is used by · last changed. */
 @media (max-width: 600px) {
-  table.tbl.wft tr { grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "name state act" "used used changed"; align-items: center }
-  table.tbl.wft td.wft-name { grid-area: name }
-  table.tbl.wft td.wft-state { grid-area: state }
-  table.tbl.wft td.wft-act { grid-area: act }
-  table.tbl.wft td.wft-used { grid-area: used }
-  table.tbl.wft td.wft-changed { grid-area: changed }
+  .wft-filter { max-width: none; width: 100% }
+  table.tbl.wft tr { display: flex; flex-wrap: wrap; align-items: flex-start; column-gap: 10px; padding: 10px 14px }
+  table.tbl.wft tr::after { content: ""; order: 3; flex-basis: 100% }
+  table.tbl.wft td.wft-name { order: 1; flex: 1 1 0; min-width: 0 }
+  table.tbl.wft td.wft-state { order: 2; flex: none }
+  table.tbl.wft td.wft-act { order: 2; flex: none }
+  table.tbl.wft td.wft-used { order: 4 }
+  table.tbl.wft td.wft-changed { order: 5 }
   table.tbl.wft td.wft-changed::before { content: "· "; color: var(--text2) }
   .pagehead.wft-head .sp { display: none }
   .pagehead.wft-head .btn { flex: 1 1 0 }

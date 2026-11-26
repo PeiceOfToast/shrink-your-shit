@@ -120,7 +120,7 @@ export function Workflows() {
       </div>
 
       <div className="row" style={{ marginBottom: 12 }}>
-        <input className="inp" type="search" placeholder="Filter workflows" aria-label="Filter workflows" value={q} onChange={(e) => setQ(e.target.value)} style={{ maxWidth: 320 }} />
+        <input className="inp wft-filter" type="search" placeholder="Filter workflows" aria-label="Filter workflows" value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
 
       {actErr && <p className="err" role="alert">{actErr}</p>}
