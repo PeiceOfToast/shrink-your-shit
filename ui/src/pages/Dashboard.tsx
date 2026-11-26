@@ -1,7 +1,8 @@
-import { jobHint } from "../format/job.ts";
+import { jobHint, sizeText } from "../format/job.ts";
 import { clock, dayClock, dayOf } from "../format/time.ts";
 import { Fragment, useEffect, useState, type MouseEvent } from "react";
-import { api, formatCount, formatGB, type Attention, type Job, type Library } from "../api/index.ts";
+import { api, formatBytes, formatCount, formatGB, type Attention, type Job, type Library } from "../api/index.ts";
+import type { DaySeries, Series } from "../api/types.ts";
 import { useApi } from "../api/useApi.ts";
 import { Bars } from "../ui/Bars.tsx";
 import { Icon } from "../ui/Icon.tsx";
@@ -15,6 +16,17 @@ function paceLabel(secPerGB: number): string {
   const s = Math.round(secPerGB % 60);
   return `${m}:${String(s).padStart(2, "0")}`;
 }
+
+// The charts draw GB and job counts; the day records are bytes and counts.
+const savedBars = (days: DaySeries[]): Series[] => [
+  { c: "ok", v: days.map((d) => (d.freedBytes == null ? null : d.freedBytes / 1e9)) },
+  { c: "accent", v: days.map((d) => (d.trashBytes == null ? null : d.trashBytes / 1e9)) },
+];
+const filesBars = (days: DaySeries[]): Series[] => [
+  { c: "ok", v: days.map((d) => d.done) },
+  { c: "text2", v: days.map((d) => d.skipped) },
+  { c: "bad", v: days.map((d) => d.failed) },
+];
 
 function Lines({ lines }: { lines: string[] }) {
   return (
@@ -165,7 +177,6 @@ function LibraryRow({ l }: { l: Library }) {
 export function Dashboard() {
   const overview = useApi(() => api.getOverview(), []);
   const attention = useApi(() => api.getAttention(), []);
-  const running = useApi(() => api.getJobs({ state: "running" }), []);
   const [workersOverride, setWorkersOverride] = useState<boolean | null>(null);
   const o = overview.data;
   // The last state the server reported. It stays when a later call fails, so the switch can show it disabled.
@@ -237,28 +248,28 @@ export function Dashboard() {
           <div className="kpis">
             <div className="kpi">
               <span className="l">Freed</span>
-              <span className="v ok">{formatGB(o.freedGB)}</span>
-              <span className="d">+{o.freedTodayGB} GB today</span>
+              <span className="v ok">{formatGB(o.freed.totalBytes / 1e9)}</span>
+              <span className="d">+{formatGB(o.freed.todayBytes / 1e9)} today</span>
             </div>
             <div className="kpi">
               <span className="l">Converted</span>
-              <span className="v ">{formatCount(o.converted)}</span>
-              <span className="d">{o.convertedPerDay} / day</span>
+              <span className="v ">{formatCount(o.converted.total)}</span>
+              <span className="d">{o.converted.perDay} / day</span>
             </div>
             <div className="kpi">
               <span className="l">Waiting</span>
-              <span className="v ">{formatCount(o.waiting)}</span>
-              <span className="d">next {dayClock(o.nextScan)}</span>
+              <span className="v ">{formatCount(o.waiting.count)}</span>
+              <span className="d">next {dayClock(o.waiting.nextScanAt)}</span>
             </div>
             <div className="kpi">
               <span className="l">Failed 24 h</span>
-              <span className="v bad">{o.failed24h}</span>
-              <span className="d">{o.failedRatePct} %</span>
+              <span className="v bad">{o.failed24h.count}</span>
+              <span className="d">{o.failed24h.pct} %</span>
             </div>
             <div className="kpi">
               <span className="l">Avg shrink</span>
-              <span className="v ">{o.avgShrinkPct} %</span>
-              <span className="d">{paceLabel(o.convertSecPerGB)} / GB</span>
+              <span className="v ">{o.avgShrink.pct} %</span>
+              <span className="d">{paceLabel(o.avgShrink.secPerGB)} / GB</span>
             </div>
           </div>
 
@@ -284,15 +295,18 @@ export function Dashboard() {
                 <Link className="more" to="/jobs?state=done">Done jobs</Link>
               </h2>
               <div className="big tnum ok">
-                {formatGB(o.freedGB)}
+                {formatGB(o.freed.totalBytes / 1e9)}
                 <small>freed</small>
               </div>
               <div className="sub tnum">
                 <span>
-                  {o.savedMoreGB} GB more on {dayOf(o.savedMoreAt)}, when originals leave the trash · <Link to="/settings/processing">{o.trashGB} GB in the trash</Link>
+                  {o.freed.nextReleaseBytes != null && o.freed.nextReleaseAt && (
+                    <>{sizeText(o.freed.nextReleaseBytes)} more on {dayOf(o.freed.nextReleaseAt)}, when originals leave the trash · </>
+                  )}
+                  <Link to="/settings/processing">{formatBytes(o.freed.inTrashBytes)} in the trash</Link>
                 </span>
                 <span>
-                  New files are <b>{o.avgShrinkPct}% smaller</b> on average
+                  New files are <b>{o.avgShrink.pct}% smaller</b> on average
                 </span>
               </div>
               <ul className="legend">
@@ -303,7 +317,7 @@ export function Dashboard() {
                   <i style={{ background: "var(--accent)" }}></i>In the trash
                 </li>
               </ul>
-              <Bars series={o.savedSeries} />
+              <Bars series={savedBars(o.series.days)} />
               <div className="axis tnum">
                 <span>27 Oct</span>
                 <span>10 Nov</span>
@@ -317,13 +331,13 @@ export function Dashboard() {
                 <Link className="more" to="/jobs">All jobs</Link>
               </h2>
               <div className="big tnum">
-                {formatCount(o.converted)}
+                {formatCount(o.converted.total)}
                 <small>all time</small>
               </div>
               <div className="sub tnum">
                 <span>
-                  <b>{o.convertedPerDay} per day</b> lately · last 24 h: {o.filesLast24h.done} done, {o.filesLast24h.skipped} skipped,{" "}
-                  <Link to="/jobs?state=failed">{o.filesLast24h.failed} failed</Link>
+                  <b>{o.converted.perDay} per day</b> lately · last 24 h: {o.last24h.done} done, {o.last24h.skipped} skipped,{" "}
+                  <Link to="/jobs?state=failed">{o.last24h.failed} failed</Link>
                 </span>
                 <span>
                   About <b>2 min 10 s</b> of converting per GB on this computer
@@ -340,7 +354,7 @@ export function Dashboard() {
                   <i style={{ background: "var(--bad)" }}></i>Failed
                 </li>
               </ul>
-              <Bars series={o.filesSeries} />
+              <Bars series={filesBars(o.series.days)} />
               <div className="axis tnum">
                 <span>27 Oct</span>
                 <span>10 Nov</span>
@@ -352,14 +366,14 @@ export function Dashboard() {
               <h2>
                 Converting now
                 <span className="muted" style={{ textTransform: "none", letterSpacing: 0, fontFamily: "var(--sans)" }}>
-                  {o.running} / 3 slots
+                  {o.running.length} / 3 slots
                 </span>
                 <Link className="more" to="/jobs?state=running">all jobs →</Link>
               </h2>
-              {running.data && running.data.items.length === 0 && <p className="muted">Nothing is converting right now.</p>}
-              {running.data && running.data.items.length > 0 && (
+              {o.running.length === 0 && <p className="muted">Nothing is converting right now.</p>}
+              {o.running.length > 0 && (
                 <ul className="rows">
-                  {running.data.items.map((j) => (
+                  {o.running.map((j) => (
                     <ConvertingRow key={j.id} j={j} />
                   ))}
                 </ul>

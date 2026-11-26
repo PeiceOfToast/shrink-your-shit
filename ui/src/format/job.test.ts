@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { jobHint, jobResultText, jobResultTone, jobStepText, sizeText } from "./job.ts";
+import { jobHint, jobResultText, jobResultTone, jobStepText, originalText, sizeText } from "./job.ts";
+import { dayOf } from "./time.ts";
 import type { Job, JobResult } from "../api/types.ts";
 
 const GB = 1e9;
@@ -81,4 +82,14 @@ test("jobHint: the step, then the estimate while running", () => {
   assert.equal(jobHint(running), "Converting video · step 3 of 5 · about 18 GB saving");
   const done = job({ state: "done", step: converting, result: result({ sizeAfter: 5.9 * GB, outcome: "smaller" }) });
   assert.equal(jobHint(done), "Converting video · step 3 of 5");
+});
+
+test("originalText builds the Summary's Original line from action and until", () => {
+  const until = new Date(2026, 11, 26, 14, 0).toISOString();
+  assert.equal(originalText({ action: "trashed", until }), `In the trash until ${dayOf(until)}`);
+  assert.equal(originalText({ action: "trashed", until: null }), "In the trash");
+  assert.equal(originalText({ action: "deleted", until: null }), "Deleted");
+  assert.equal(originalText({ action: "restored", until: null }), "Put back; the converted file was removed");
+  assert.equal(originalText({ action: "not_yet", until: null }), "Not touched yet");
+  assert.equal(originalText({ action: "not_touched", until: null }), "Left where it was");
 });

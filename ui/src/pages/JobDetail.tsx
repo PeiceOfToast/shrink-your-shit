@@ -1,4 +1,4 @@
-import { jobResultText, jobResultTone } from "../format/job.ts";
+import { jobResultText, jobResultTone, originalText } from "../format/job.ts";
 import { clock, clockPrecise, duration, timeLeft } from "../format/time.ts";
 import { formatGB } from "../api/index.ts";
 
@@ -361,7 +361,7 @@ function SummaryTab({ d, busy, onRetry }: { d: Detail; busy: boolean; onRetry: (
           <div>
             <Fact label="Written to" value={d.outputPath ?? "—"} />
             <Fact label="Written at" value={d.writtenAt ? clock(d.writtenAt) : "—"} />
-            <Fact label="Original" value={d.original} />
+            <Fact label="Original" value={originalText(d.original)} />
           </div>
         </section>
       </div>

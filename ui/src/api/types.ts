@@ -114,28 +114,38 @@ export interface LibraryPatch {
   paused?: boolean;
 }
 
+// GET /api/v2/overview, in pages/08 "Data and API" nesting. Sizes are whole bytes; times are RFC 3339 UTC.
 export interface Overview {
-  freedGB: number;
-  freedTodayGB: number;
-  converted: number;
-  convertedPerDay: number;
-  waiting: number;
-  // RFC 3339 UTC time of the next scan.
-  nextScan: string;
-  failed24h: number;
-  failedRatePct: number;
-  avgShrinkPct: number;
-  convertSecPerGB: number;
-  running: number;
+  freed: {
+    totalBytes: number;
+    todayBytes: number;
+    // Space that frees up when originals leave the trash, and the day it happens. Both null when the trash is empty.
+    nextReleaseBytes: number | null;
+    nextReleaseAt: string | null;
+    // The saving still waiting in the trash now.
+    inTrashBytes: number;
+  };
+  converted: { total: number; perDay: number };
+  waiting: { count: number; nextScanAt: string };
+  // pct is a percent: 0.6 means 0.6 %.
+  failed24h: { count: number; pct: number };
+  avgShrink: { pct: number; secPerGB: number };
+  series: { days: DaySeries[] };
+  // The jobs converting now, in the same shape as the Jobs list.
+  running: Job[];
   workersOn: boolean;
-  trashGB: number;
-  // Space that frees up when originals leave the trash, and the day it happens (RFC 3339).
-  savedMoreGB: number;
-  savedMoreAt: string;
-  savedSeries: Series[];
-  filesSeries: Series[];
-  filesLast24h: { done: number; skipped: number; failed: number };
+  last24h: { done: number; skipped: number; failed: number };
   libraries: Library[];
+}
+
+// One day of the charts. Freed and in-trash are bytes; the rest are job counts. null = no data that day.
+export interface DaySeries {
+  day: string; // local calendar day, YYYY-MM-DD
+  freedBytes: number | null;
+  trashBytes: number | null;
+  done: number | null;
+  skipped: number | null;
+  failed: number | null;
 }
 
 export interface Attention {
@@ -275,6 +285,12 @@ export interface HistoryLine {
   text: string;
 }
 
+// The Summary's "Original" line (pages/03). until is RFC 3339, set only for "trashed", otherwise null.
+export interface JobOriginal {
+  action: "not_yet" | "not_touched" | "trashed" | "deleted" | "restored";
+  until: string | null;
+}
+
 export interface JobDetail {
   job: Job;
   path: string;
@@ -292,7 +308,7 @@ export interface JobDetail {
   outputPath: string | null;
   // Shown on the head while a job runs; milliseconds left.
   timeLeftMs: number | null;
-  original: string;
+  original: JobOriginal;
   failure: { step: string; reason: string; nextAction: string; actionLabel: string } | null;
   skipReason: string | null;
   steps: JobStep[];

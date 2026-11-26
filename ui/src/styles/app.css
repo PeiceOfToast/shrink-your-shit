@@ -52,7 +52,7 @@ button.search{background:none;border:1px solid var(--border);color:var(--text2);
   table.tbl.wft td.wft-state { order: 2; flex: none }
   table.tbl.wft td.wft-act { order: 2; flex: none }
   table.tbl.wft td.wft-used { order: 4 }
-  table.tbl.wft td.wft-changed { order: 5 }
+  table.tbl.wft td.wft-changed { order: 5; margin-left: -6px }
   table.tbl.wft td.wft-changed::before { content: "· "; color: var(--text2) }
   .pagehead.wft-head .sp { display: none }
   .pagehead.wft-head .btn { flex: 1 1 0 }
