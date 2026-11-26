@@ -153,9 +153,13 @@ func (f FileFilter) skipFilters() (string, []any) {
 }
 
 // settleFilters is the condition for the files still changing that the waiting card lists (FileRow.Settling),
-// under the same library, name and path filters as its jobs.
+// under the same library, name and path filters as its jobs. With no library, only files inside some library: a
+// row left outside every library (its library deleted or its path edited) is not waiting (settlingAll).
 func (f FileFilter) settleFilters() (string, []any) {
 	where, args := FileFilter{LibraryID: f.LibraryID, Q: f.Q}.fileFilters(`files.reason='` + rules.SkipStillChanging + `' AND NOT ` + convertedSQL)
+	if f.LibraryID <= 0 {
+		where += ` AND EXISTS (SELECT 1 FROM libraries l WHERE ` + inLibrarySQL + `)`
+	}
 	if f.Path != "" {
 		where += " AND files.path=?"
 		args = append(args, f.Path)
@@ -167,12 +171,12 @@ func (f FileFilter) settleFilters() (string, []any) {
 // separator (Windows: review 43e6f66). The caller binds l.
 const inLibrarySQL = `substr(replace(files.path,'\','/'),1,length(rtrim(replace(l.path,'\','/'),'/'))+1)=rtrim(replace(l.path,'\','/'),'/')||'/'`
 
-// settlingAll is how many files are still changing inside a library: waiting to settle, not skipped
-// (settleFilters' condition). A row left outside every library (its library deleted or its path edited) is not counted.
+// settlingAll is how many files are still changing inside a library: the waiting card's settling files with no
+// filter (settleFilters).
 func (s *Store) settlingAll() (int, error) {
 	var n int
-	err := s.reader().QueryRow(`SELECT COUNT(*) FROM files WHERE files.reason=? AND NOT `+convertedSQL+
-		` AND EXISTS (SELECT 1 FROM libraries l WHERE `+inLibrarySQL+`)`, rules.SkipStillChanging).Scan(&n)
+	where, args := FileFilter{}.settleFilters()
+	err := s.reader().QueryRow(`SELECT COUNT(*) FROM files WHERE `+where, args...).Scan(&n)
 	return n, err
 }
 

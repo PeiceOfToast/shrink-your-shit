@@ -83,4 +83,12 @@ func TestSettlingRowOfDeletedLibraryIsNotWaiting(t *testing.T) {
 	if a.WaitingFiles != 0 {
 		t.Errorf("activity waiting files = %d, want 0", a.WaitingFiles)
 	}
+	// the Jobs waiting tab with no library filter agrees: not listed, not counted
+	rows, total, counts, err := s.FileList(FileFilter{Show: CardUnprocessed, Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 0 || total != 0 || counts[CardUnprocessed] != 0 || counts["settling"] != 0 {
+		t.Errorf("waiting tab: %d rows, total %d, counts %v; want none", len(rows), total, counts)
+	}
 }
