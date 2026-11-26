@@ -18,8 +18,8 @@ import { useSetup } from "./Enroll";
 import { useData } from "../useData";
 import { holdLost } from "../live";
 import { ModeChoice, PasswordFields } from "../SignInChoice";
-import { getAuth, setAuthMode } from "../signinApi";
-import { authWord, canSave, passwordProblem, type AuthMode, type AuthState } from "../signinRules";
+import { getAuth, onAuthChanged, setAuthMode } from "../signinApi";
+import { accessTokenWords, authWord, canSave, passwordProblem, type AuthMode, type AuthState } from "../signinRules";
 
 async function act<T>(p: Promise<Answer<T>>, say: (m: string) => void): Promise<T | null> {
   try { const r = await p; if (failed(r)) return (say(r.error.message), null); return r; } catch (e) { if (e instanceof SignedOut) return null; throw e; }
@@ -202,7 +202,7 @@ function SignInForm({ cur, saved }: { cur: AuthState; saved: () => void }) {
   };
   return (<>
     <div className="bd stack" style={{ gap: 12, padding: 16 }}>
-      <ModeChoice mode={mode} hideLegend onMode={(m) => (setMode(m), setBad(false), setSaid(""))}>
+      <ModeChoice mode={mode} hideLegend addressesHidden={cur.addressesHidden} onMode={(m) => (setMode(m), setBad(false), setSaid(""))}>
         {mode === "password" && cur.passwordSet && !changing && (
           <div className="row" style={{ marginTop: 8 }}><button className="btn sm" type="button" onClick={() => (setChanging(true), setBad(false), setSaid(""))}>Change password</button></div>
         )}
@@ -224,11 +224,12 @@ function SignInForm({ cur, saved }: { cur: AuthState; saved: () => void }) {
 function Access({ auth }: { auth: boolean }) {
   const [tok, setTok] = useState<string | null>(null), [ask, setAsk] = useState(false), [said, setSaid] = useState("");
   const mode = useData(getAuth, []);
+  useEffect(() => onAuthChanged(mode.reload), [mode.reload]);
   const show = async () => { if (tok) return setTok(null); const r = await act(getToken(), setSaid); if (r) setTok(r.token); };
   const make = async () => { setAsk(false); const r = await act(rotateToken(), setSaid); if (r) (setTok(r.token), setSaid("New token made. Use it to sign in on other devices.")); };
   const out = async () => { if (await act(signOut(), setSaid)) navigate("/signin"); };
   return (<>
-    <SettingRow title={<label htmlFor="tok">Access token</label>} desc={<span id="tok-h">{auth ? "" : "Not needed on this computer. "}Needed to open the app from another device.</span>}>
+    <SettingRow title={<label htmlFor="tok">Access token</label>} desc={<span id="tok-h">{accessTokenWords(mode.data?.mode, !!mode.data?.addressesHidden)}</span>}>
       <input id="tok" className="input mono" readOnly value={tok ?? "••••••••••••"} aria-describedby="tok-h" style={{ width: 200, maxWidth: "100%", minWidth: 0 }} />
       <button className="btn" type="button" aria-controls="tok" onClick={show}>{tok ? "Hide" : "Show"}</button>
       {tok && navigator.clipboard && <button className="btn" type="button" onClick={() => navigator.clipboard.writeText(tok).then(() => setSaid("Copied."), () => {})}>Copy</button>}
