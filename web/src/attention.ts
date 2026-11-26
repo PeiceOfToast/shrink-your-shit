@@ -22,8 +22,7 @@ export function attentionRows<F extends AttentionFailure, L extends AttentionLib
   const ids = a.libraryIds;
   const loaded = ids === null ? a.failures : a.failures.filter((f) => f.libraryId != null && ids.has(String(f.libraryId)));
   const failures = loaded.slice().sort((x, y) => (y.finishedAt ?? "").localeCompare(x.finishedAt ?? "")).slice(0, 3);
-  const dropped = a.failures.length - loaded.length;
   const libraries = a.libraries.filter((l) => l.state !== "active");
   const none = failures.length === 0 && !a.healthShown && a.fallbacks === 0 && libraries.length === 0;
-  return { failures, dropped, health: a.healthShown, fallbacks: a.fallbacks, libraries, none };
+  return { failures, health: a.healthShown, fallbacks: a.fallbacks, libraries, none };
 }
