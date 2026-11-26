@@ -82,7 +82,7 @@ type Queue interface {
 	ShareDropped(id, shareID int64, mountPath, words string) error
 	// OutputFolder is a library's folder for new files with "Next to each library" (V5a), or why it has
 	// none.
-	OutputFolder(libraryID int64, libPath string) (string, *jobs.FolderProblem, error)
+	OutputFolder(libraryID int64, libPath string) (dir string, fromOverride bool, problem *jobs.FolderProblem, err error)
 	// LeaseOf, RenewLease and HoldsLease: a running job's lease (V7a).
 	LeaseOf(id int64) (string, error)
 	RenewLease(id int64, lease string) (bool, error)
@@ -1635,28 +1635,34 @@ func (w *Worker) process(ctx context.Context, job jobs.Job) (final string, err e
 		}
 	case Folder:
 		dir := plan.OutputDir
+		fill := true // a workflow's own folder is a template; the default folder beside a library is literal (#764)
+		where := "the workflow's Save the result step"
 		if plan.FolderMode == rules.NextToLibrary { // V5a: the library's own folder beside it, or its override
-			d, problem, err := w.Queue.OutputFolder(job.LibraryID, job.Library)
+			d, override, problem, err := w.Queue.OutputFolder(job.LibraryID, job.Library)
 			if err != nil {
 				return "", retryable(failed("This library's folder for new files could not be read, so converting did not start. Your original was not touched. Press Retry.", err), retryGeneral)
 			}
 			if problem != nil {
 				return "", failed(problem.Message+" Your original was not touched.", errors.New(problem.Code))
 			}
-			dir = d
-		} else if strings.Contains(dir, "{{") { // W4b: the folder as a template, filled in for this file
+			dir, fill = d, override
+			if override {
+				where = "the library's Output tab"
+			}
+		}
+		if fill && strings.Contains(dir, "{{") { // W4b: the folder as a template, filled in for this file (an override folder too: the preview fills it the same way)
 			d, empty := vars.Folder(dir, vals)
 			vEmpty = append(vEmpty, empty...)
 			for _, piece := range strings.Split(filepath.ToSlash(d), "/") {
 				if nameTooLong(piece) {
-					return "", failed(tooLongWords("Folder", piece), errors.New("the folder for new files has a piece that is too long"))
+					return "", failed(tooLongWordsIn("Folder", piece, where), errors.New("the folder for new files has a piece that is too long"))
 				}
 			}
 			if !filepath.IsAbs(d) {
-				return "", failed(fmt.Sprintf("The folder for new files came out as %q, which isn't a full path, so nothing was converted. Your original was not touched. Check the folder in the workflow's Save the result step, then press Retry.", d), errors.New("folder for new files: its template did not make a full path"))
+				return "", failed(fmt.Sprintf("The folder for new files came out as %q, which isn't a full path, so nothing was converted. Your original was not touched. Check the folder in %s, then press Retry.", d, where), errors.New("folder for new files: its template did not make a full path"))
 			}
 			if vars.HasDotDot(d) { // review-592 follow-up: a setting saved before publish refused '..' beside a template could still climb out once filled in
-				return "", failed(fmt.Sprintf("The folder for new files came out as %q, which has a '..' in it, so nothing was converted. Your original was not touched. Write the folder out in full in the workflow's Save the result step, then press Retry.", d), errors.New("folder for new files: its template made a '..' segment"))
+				return "", failed(fmt.Sprintf("The folder for new files came out as %q, which has a '..' in it, so nothing was converted. Your original was not touched. Write the folder out in full in %s, then press Retry.", d, where), errors.New("folder for new files: its template made a '..' segment"))
 			}
 			dir = d
 		}
@@ -2582,8 +2588,13 @@ func nameTooLong(name string) bool { return len(name) > maxNameLen }
 
 // tooLongWords says which setting made a name too long, in plain words, before anything is converted.
 func tooLongWords(field, name string) string {
-	return fmt.Sprintf("The name from “%s” would be %d characters long, and a file name can be at most %d, so nothing was converted. Nothing was changed. Shorten that setting in the workflow's Save the result step, then press Retry.",
-		field, len(name), maxNameLen)
+	return tooLongWordsIn(field, name, "the workflow's Save the result step")
+}
+
+// tooLongWordsIn is tooLongWords naming where the setting is changed (where: a place a person can find).
+func tooLongWordsIn(field, name, where string) string {
+	return fmt.Sprintf("The name from “%s” would be %d characters long, and a file name can be at most %d, so nothing was converted. Nothing was changed. Shorten that setting in %s, then press Retry.",
+		field, len(name), maxNameLen, where)
 }
 
 // takenWords is the failure for a file we didn't make at the new file's name.

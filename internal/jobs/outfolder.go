@@ -79,21 +79,22 @@ func WritableDir(dir string) error {
 }
 
 // OutputFolder is library id's folder for new files with "Next to each library": its override folder,
-// or the default beside it (libPath, for a job made before libraries had ids).
-func (s *Store) OutputFolder(id int64, libPath string) (string, *FolderProblem, error) {
+// or the default beside it (libPath, for a job made before libraries had ids). fromOverride says which:
+// only an override is a template ({{library}} and the like are filled in); the default is always literal.
+func (s *Store) OutputFolder(id int64, libPath string) (dir string, fromOverride bool, problem *FolderProblem, err error) {
 	name, override := filepath.Base(libPath), ""
 	if id > 0 {
 		l, err := s.GetLibrary(id)
 		if err != nil {
-			return "", nil, err
+			return "", false, nil, err
 		}
 		name, libPath, override = l.Name, l.Path, l.OverrideFolder
 	}
 	if override != "" {
-		return override, nil, nil
+		return override, true, nil, nil
 	}
 	dir, p := NextToLibrary(name, libPath)
-	return dir, p, nil
+	return dir, false, p, nil
 }
 
 // SetOverrideFolder sets library id's own folder for new files ("" goes back to the default).

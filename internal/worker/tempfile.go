@@ -192,7 +192,7 @@ func OutputFolders(store *jobs.Store) []string {
 			}
 			dir := s.OutputDir
 			if s.FolderMode == rules.NextToLibrary {
-				d, problem, err := store.OutputFolder(l.ID, l.Path)
+				d, _, problem, err := store.OutputFolder(l.ID, l.Path)
 				if err != nil || problem != nil {
 					continue
 				}
