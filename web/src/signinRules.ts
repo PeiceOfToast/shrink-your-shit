@@ -3,7 +3,14 @@
 export const MIN_PASSWORD = 8;
 export type AuthMode = "home" | "password";
 // GET /api/auth, answered without sign-in. Only these four fields.
-export interface AuthState { mode: AuthMode; passwordSet: boolean; signedIn: boolean; open: boolean }
+// addressesHidden: the server runs behind its default gateway (Docker's bridge), so "home network" can't be told from outside
+export interface AuthState { mode: AuthMode; passwordSet: boolean; signedIn: boolean; open: boolean; addressesHidden?: boolean }
+
+// The Settings access-token line. Home devices get in without the token only in home mode, and not when addresses are
+// hidden (the server can't tell home from outside). Keyed on the sign-in mode from GET /api/auth, not on authRequired,
+// which is always true because every install has a token. Undefined (still loading) gets the safe sentence.
+export const accessTokenWords = (mode: AuthMode | undefined, addressesHidden: boolean) =>
+  mode === "home" && !addressesHidden ? "Not needed on your home network. Needed to open the app from outside your home." : "Needed to open the app from another device.";
 
 // The field sentence for a password that can't be saved as typed (design's words).
 export const passwordProblem = (pw: string, again: string): string | null =>
