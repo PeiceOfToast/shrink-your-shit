@@ -20,12 +20,14 @@ func TestFilledFolderInsideALibraryIsRefused(t *testing.T) {
 	cases := []struct {
 		name     string
 		other    string // the other library's folder, under the temp dir's Films folder (the fill target)
+		under    string // a folder below {{library}} in the template ("": none)
 		workflow bool   // the folder is a workflow's, not an override
 		where    string
 	}{
-		{"override inside", "Films", false, "the library's Output tab"},
-		{"workflow inside", "Films", true, "the workflow's Save the result step"},
-		{"override holds", filepath.Join("Films", "Sub"), false, "the library's Output tab"},
+		{"override inside", "Films", "", false, "the library's Output tab"},
+		{"workflow inside", "Films", "", true, "the workflow's Save the result step"},
+		{"override strictly inside", "Films", "Sub", false, "the library's Output tab"}, // review2-766: fills below the library, not to it
+		{"override holds", filepath.Join("Films", "Sub"), "", false, "the library's Output tab"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -33,7 +35,7 @@ func TestFilledFolderInsideALibraryIsRefused(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			filled := filepath.Join(tmp, "Films")
+			filled := filepath.Join(tmp, "Films", c.under)
 			other := filepath.Join(tmp, c.other)
 			if err := os.MkdirAll(other, 0o755); err != nil {
 				t.Fatal(err)
@@ -44,7 +46,7 @@ func TestFilledFolderInsideALibraryIsRefused(t *testing.T) {
 			}
 			s := newScenarioAt(t, src, "movie.mkv")
 			s.store.AddLibrary("Other", other, rules.SliderTemplate(3), true)
-			j := runFilled(t, s, filepath.Join(tmp, "{{library}}"), c.workflow)
+			j := runFilled(t, s, filepath.Join(tmp, "{{library}}", c.under), c.workflow)
 			want := fmt.Sprintf("%q", filled)
 			if j.Status != jobs.Failed || !strings.Contains(j.Error, want) || !strings.Contains(j.Error, "inside the library at") ||
 				!strings.Contains(j.Error, "Your original was not touched") || !strings.Contains(j.Error, c.where) {
