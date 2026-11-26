@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"io/fs"
 	"log"
 	"os"
@@ -210,8 +211,8 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 			// person emptied: it records no count and sets no gone marks, until a walk finds videos again. A folder
 			// that still holds other files (a deleted video, say) is recorded as it is.
 			// A missing folder (a disk not mounted) is not a walk whole either: nothing is recorded or marked gone for it.
-			if !isDir(lib) {
-				log.Printf("scan: %s: the folder is missing (disk not mounted?): not recorded, the next scan tries again", lib)
+			if !readableFolder(lib) {
+				log.Printf("scan: %s: the folder is missing or cannot be read (disk not mounted? permissions?): not recorded, the next scan tries again", lib)
 			} else if prev, err := s.Store.GetLibrary(t.LibraryID); err == nil && videos == 0 && prev.LastScanVideos > 0 && folderEmpty(t.Path) {
 				log.Printf("scan: %s: the folder is empty, though the last scan found %d videos: not recorded, the next scan tries again", lib, prev.LastScanVideos)
 			} else {
@@ -669,10 +670,21 @@ func folderEmpty(dir string) bool {
 	return err == nil && len(es) == 0
 }
 
-// isDir reports whether path is a folder now: a missing library folder is not one.
-func isDir(path string) bool {
+// readableFolder reports whether path is a folder now that we can read: a missing library folder is not one, and
+// neither is one we cannot read (a permissions slip), whose walk finds nothing that is not an error. Reading one
+// entry is enough; the walk of a big library is not repeated here.
+func readableFolder(path string) bool {
 	st, err := os.Stat(path)
-	return err == nil && st.IsDir()
+	if err != nil || !st.IsDir() {
+		return false
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	_, err = f.Readdirnames(1)
+	return err == nil || errors.Is(err, io.EOF)
 }
 
 func (s *Scanner) markOriginalsGone(walked []int64, sizes map[string]int64) {
