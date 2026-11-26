@@ -107,3 +107,33 @@ table.tbl.wkr td.wk-sub{display:none}
   table.tbl.wkr td.wk-sub{display:block;order:3;flex:1 0 100%;margin-top:2px}
   table.tbl.wkr td.wk-slots,table.tbl.wkr td.wk-gpu,table.tbl.wkr td.wk-now,table.tbl.wkr td.wk-done,table.tbl.wkr .wk-addr{display:none}
 }
+
+/* Settings (page 11): a section list beside the section; on a phone the list is the first screen. */
+.set{display:grid;grid-template-columns:200px minmax(0,1fr);gap:28px;align-items:start}
+.set-nav{display:flex;flex-direction:column;gap:2px;position:sticky;top:12px}
+.set-nav a{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--text2);text-decoration:none;padding:7px 10px;border-radius:4px}
+.set-nav a[aria-current=page]{color:var(--text);background:var(--raised)}
+.set-nav .set-log{margin-top:12px;border-top:1px solid var(--border);padding-top:12px}
+.set-main{min-width:0;display:flex;flex-direction:column}
+.set-title{font-size:18px;margin:0 0 12px}
+.set-sub{font-size:14px;margin:24px 0 4px}
+.set-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,320px);gap:16px;align-items:start;padding:12px 0;border-bottom:1px solid var(--border)}
+.set-lab label{font-weight:600}
+.set-ctl{min-width:0;display:flex;flex-direction:column;gap:6px;align-items:flex-start}
+.set-ctl .inp,.set-ctl .sel{width:100%}
+.set-msg{margin:4px 0 0;font-size:13px}
+.set-saved{margin:8px 0}
+.set-group{border:1px solid var(--border);border-radius:var(--radius);padding:4px 14px 12px;margin:14px 0;background:var(--surface)}
+.set-grouphead{display:flex;align-items:center;gap:8px;padding:10px 0 4px}
+.set-main .row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 0}
+.set-back{display:none;color:var(--accent);font-size:14px;margin-bottom:8px}
+.savebar{position:sticky;bottom:0;display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--raised);border:1px solid var(--border);border-radius:var(--radius);padding:10px 14px;margin-top:16px;z-index:4}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--bad);margin-left:6px;vertical-align:middle}
+@media (max-width:900px){
+  .set{grid-template-columns:1fr}
+  .set-nav{position:static}
+  .set.open .set-nav{display:none}
+  .set:not(.open) .set-main{display:none}
+  .set-back{display:inline-block}
+  .set-row{grid-template-columns:1fr}
+}

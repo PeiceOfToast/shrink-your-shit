@@ -136,6 +136,8 @@ export function Shell({ children }: { children: ReactNode }) {
     jobs: failed > 0 ? { n: failed, bad: true } : undefined,
     workers: offline > 0 ? { n: offline, bad: false } : undefined,
   };
+  // A failed health check shows a red dot on Settings, in the top bar and the bottom bar.
+  const dots: Record<string, boolean | undefined> = { settings: summary.data?.healthFailing };
 
   return (
     <div className="app">
@@ -152,6 +154,7 @@ export function Shell({ children }: { children: ReactNode }) {
               <Icon name={s.icon} />
               <span>{s.label}</span>
               {badges[s.key] && <span className={`badge ${badges[s.key]?.bad ? "bad" : ""}`}>{badges[s.key]?.n}</span>}
+              {dots[s.key] && <span className="dot" role="img" aria-label="Problem found" />}
             </Link>
           ))}
         </nav>
@@ -201,6 +204,7 @@ export function Shell({ children }: { children: ReactNode }) {
             <Link key={s.key} to={s.to} aria-current={active === s.key ? "page" : undefined}>
               <Icon name={s.icon} />
               {s.label}
+              {dots[s.key] && <span className="dot" role="img" aria-label="Problem found" />}
             </Link>
           ))}
         </nav>

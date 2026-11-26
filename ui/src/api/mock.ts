@@ -6,6 +6,7 @@ import { ApiError } from "./errors.ts";
 import { getForcedState, respond } from "./mockState.ts";
 import { currentLibraries } from "./mockLibraries.ts";
 import { setAllWorkers, workerName } from "./mockWorkers.ts";
+import { healthFailing } from "./mockSettings.ts";
 
 // Mock implementation of the API. Route-named functions; shapes come from the page specs.
 // The dev state switcher sets a forced state (mockState.ts); pages see it only through these calls.
@@ -14,6 +15,7 @@ export type { ForcedState } from "./mockState.ts";
 export * from "./mockLibraries.ts";
 export * from "./mockWorkflows.ts";
 export * from "./mockWorkers.ts";
+export * from "./mockSettings.ts";
 
 // The status line reads this even when a page's own call is forced to fail, so it keeps its counts.
 export function getSummary(): Promise<Summary> {
@@ -21,7 +23,7 @@ export function getSummary(): Promise<Summary> {
     () => {
       const s = getForcedState();
       // Error and running both show new errors, so the status line's "N new errors" link is reachable.
-      return { ...SUMMARY, newErrors: s === "error" || s === "running" ? 2 : 0 };
+      return { ...SUMMARY, newErrors: s === "error" || s === "running" ? 2 : 0, healthFailing: healthFailing() };
     },
     { failInError: false },
   );

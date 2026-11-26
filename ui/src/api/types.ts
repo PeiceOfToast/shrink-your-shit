@@ -377,3 +377,160 @@ export interface JoinRequest {
   name: string;
   address: string;
 }
+
+// ---- Settings (page 11). Shapes are the ones in pages/11-settings.md "Data and API".
+
+export type SettingsSection = "general" | "processing" | "connections" | "notifications" | "variables" | "backup" | "health" | "access";
+
+export interface GeneralSettings {
+  serverName: string;
+  language: "en";
+  timeFormat: "24h" | "12h";
+  dateFormat: "YYYY-MM-DD" | "DD.MM.YYYY" | "MM/DD/YYYY";
+  theme: "system" | "light" | "dark";
+  checkForUpdates: boolean;
+  updateAvailable: string | null;
+}
+
+export interface ProcessingSettings {
+  parallelJobs: number;
+  gpuJobsSeparate: boolean;
+  scanSchedule: string;
+  queueOrder: "newest" | "oldest" | "largest" | "smallest";
+  lowPriority: boolean;
+  keepOriginalsDays: number;
+  lowSpaceGB: number;
+  languages: string[];
+  workflowsMayRunCommands: boolean;
+  trashPath: string;
+}
+
+export interface LogSettings {
+  jobDays: number;
+  systemDays: number;
+  rawDays: number;
+}
+
+export interface SettingsData {
+  general: GeneralSettings;
+  processing: ProcessingSettings;
+  logs: LogSettings;
+  backupKeep: number;
+}
+
+// PATCH sends only the changed fields, nested by group.
+export type SettingsPatch = {
+  general?: Partial<Omit<GeneralSettings, "updateAvailable">>;
+  processing?: Partial<Omit<ProcessingSettings, "trashPath">>;
+  logs?: Partial<LogSettings>;
+  backupKeep?: number;
+};
+
+export type IntegrationKind = "sonarr" | "radarr" | "plex" | "jellyfin";
+
+export interface PathMapping {
+  theirPath: string;
+  ourPath: string;
+}
+
+export interface LastResult {
+  ok: boolean;
+  message: string;
+  at: string;
+}
+
+export interface Integration {
+  id: string;
+  kind: IntegrationKind;
+  name: string;
+  url: string;
+  hasKey: boolean;
+  pathMappings: PathMapping[];
+  enabled: boolean;
+  lastResult: LastResult | null;
+  failingSince: string | null;
+}
+
+export interface IntegrationInput {
+  kind: IntegrationKind;
+  name?: string;
+  url: string;
+  apiKey?: string;
+  pathMappings?: PathMapping[];
+  enabled?: boolean;
+}
+
+export interface IntegrationTest {
+  ok: boolean;
+  message: string;
+  version: string | null;
+  folders: { theirPath: string; ourPath: string | null; inLibrary: boolean }[];
+}
+
+export type NotifyMode = "off" | "drained" | "daily" | "weekly";
+
+export interface NotifyEvent {
+  code: string;
+  name: string;
+}
+
+export interface NotifyTarget {
+  id: string;
+  name: string;
+  kind: "webhook" | "discord";
+  urlShown: string;
+  enabled: boolean;
+  events: string[];
+  lastResult: LastResult | null;
+  failingSince: string | null;
+}
+
+export interface Notifications {
+  targets: NotifyTarget[];
+  summary: { mode: NotifyMode; at: string };
+  linkBase: string | null;
+}
+
+export type VariableType = "string" | "number" | "boolean" | "enum" | "path";
+
+export interface WorkflowVariable {
+  name: string;
+  type: VariableType;
+  value?: string | number | boolean;
+  options?: string[];
+  description?: string;
+  usedBy: { type: "workflow" | "library"; id: string; name: string }[];
+}
+
+export interface BackupItem {
+  id: string;
+  name: string;
+  createdAt: string;
+  reason: "manual" | "before_update" | "before_migration" | "before_import";
+  appVersion: string;
+  sizeBytes: number;
+}
+
+export interface BackupPreview {
+  previewId: string;
+  createdAt: string;
+  appVersion: string;
+  contents: { settings: boolean; workflows: number; libraries: number; shares: number; connections: number; jobs: number };
+  warnings: string[];
+}
+
+export type CheckStatus = "ok" | "warn" | "bad" | "absent";
+
+export interface HealthCheck {
+  id: string;
+  label: string;
+  status: CheckStatus;
+  detail: string;
+  hint: string | null;
+  fix: { label: string; method: "POST"; path: string } | null;
+}
+
+export interface Doctor {
+  ranAt: string;
+  checks: HealthCheck[];
+}
