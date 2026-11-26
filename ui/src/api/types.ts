@@ -162,9 +162,9 @@ export interface Attention {
 export interface Summary {
   converting: { running: number; workers: number };
   queue: number;
-  // RFC 3339 UTC times.
-  lastDoneAt: string;
-  nextScanAt: string;
+  // RFC 3339 UTC times. lastDoneAt is null until a job has finished; nextScanAt is null when no library is watched.
+  lastDoneAt: string | null;
+  nextScanAt: string | null;
   diskFreeBytes: number;
   failed24h: number;
   workersOffline: number;
