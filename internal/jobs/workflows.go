@@ -604,6 +604,15 @@ func (s *Store) TrashNow(days int) (Trash, error) {
 		}
 	}
 	if !first.IsZero() {
+		// A due date already past is an original the purge holds back (its share isn't connected, its folder
+		// isn't found, a job uses it) or that the next hourly purge takes: the soonest it goes is now, never
+		// a past date (manager 11-26: a past nextDeleteAt after the U-B originals were held).
+		if now := time.Now(); first.Before(now) {
+			first = now
+			if last.Before(now) {
+				last = now
+			}
+		}
 		f, l := first.UTC().Format(time.RFC3339), last.UTC().Format(time.RFC3339)
 		t.NextDeleteAt, t.LastDeleteAt = &f, &l
 	}
