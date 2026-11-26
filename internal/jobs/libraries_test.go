@@ -525,10 +525,15 @@ func TestOverlapIgnoresCase(t *testing.T) {
 	if n, skipped, _ := s.EnsureLibraries([]string{films}, legacy); n != 0 || len(skipped) != 0 {
 		t.Errorf("exact path: added %d, skipped %q, want none", n, skipped)
 	}
-	// another spelling of the library's folder, a real folder of its own: adds nothing, and says why
-	realDir(t, filepath.Join(root, "films"))
-	if n, skipped, _ := s.EnsureLibraries([]string{filepath.Join(root, "films")}, legacy); n != 0 || len(skipped) != 1 || !strings.Contains(skipped[0], "letter case") {
-		t.Errorf("films: added %d, skipped %q, want one line saying letter case", n, skipped)
+	// another spelling of the library's folder, a real folder of its own: adds nothing, and says why. Only on a
+	// case-sensitive filesystem is it a folder of its own; elsewhere the two spellings are the same folder.
+	if !caseSensitive(t, root) {
+		t.Log("the filesystem ignores letter case: the other-spelling folder is the library's own folder, so that check is skipped")
+	} else {
+		realDir(t, filepath.Join(root, "films"))
+		if n, skipped, _ := s.EnsureLibraries([]string{filepath.Join(root, "films")}, legacy); n != 0 || len(skipped) != 1 || !strings.Contains(skipped[0], "letter case") {
+			t.Errorf("films: added %d, skipped %q, want one line saying letter case", n, skipped)
+		}
 	}
 	// a folder inside it, by another case, is skipped as inside
 	realDir(t, filepath.Join(root, "FILMS", "sub"))
@@ -538,4 +543,17 @@ func TestOverlapIgnoresCase(t *testing.T) {
 	if libs, _ := s.Libraries(); len(libs) != 1 {
 		t.Errorf("libraries %d, want 1", len(libs))
 	}
+}
+
+// caseSensitive reports whether dir's filesystem tells "Probe" and "probe" apart: a probe file is made, and the
+// other spelling is looked up. On Windows and on macOS's default disk it is found, and the case-twin tests skip.
+func caseSensitive(t *testing.T, dir string) bool {
+	t.Helper()
+	name := filepath.Join(dir, "CaseProbe")
+	if err := os.WriteFile(name, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(name)
+	_, err := os.Stat(filepath.Join(dir, "caseprobe"))
+	return err != nil
 }

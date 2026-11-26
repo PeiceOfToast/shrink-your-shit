@@ -357,7 +357,7 @@ func (s *Store) EnsureLibraries(paths []string, legacy rules.Template) (added in
 			case lp == p || l.Path == given:
 				have = true
 			case strings.EqualFold(lp, p):
-				caseOnly = l // a real, separate folder by another spelling: visible, never dropped silently
+				caseOnly = l // on a case-sensitive filesystem, a separate folder by another spelling: visible, never dropped silently
 			case withinFold(p, lp) || withinFold(lp, p):
 				clash = l.Path
 			}

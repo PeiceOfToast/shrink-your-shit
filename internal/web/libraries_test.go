@@ -521,11 +521,14 @@ func TestLibraryOverlapIgnoresCase(t *testing.T) {
 
 // A library that already holds a case-twin of another library's folder (possible on Linux, which keeps both)
 // can still be saved with its own folder: the overlap is already stored, and a rename is not a move.
-func TestSaveKeepingItsOwnFolderIsNotRefusedByACaseTwin(t *testing.T) {
+func TestLibrarySaveKeepingItsOwnFolderIsNotRefusedByACaseTwin(t *testing.T) {
 	srv, st, _, _ := libServer(t, false)
 	root, err := filepath.EvalSymlinks(t.TempDir()) // macOS: the temp folder is under a link
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !caseSensitive(t, root) {
+		t.Skip("the filesystem ignores letter case, so two case-twin libraries cannot exist here")
 	}
 	for _, d := range []string{"Films", "films"} {
 		os.MkdirAll(filepath.Join(root, d), 0o755)
@@ -540,4 +543,16 @@ func TestSaveKeepingItsOwnFolderIsNotRefusedByACaseTwin(t *testing.T) {
 	if code, body := post(t, srv, "PATCH", fmt.Sprintf("/api/libraries/%d", twin.ID), fmt.Sprintf(`{"name":"Films again","path":%q}`, filepath.Join(root, "films"))); code != 200 {
 		t.Errorf("rename keeping its own folder: %d %s, want 200", code, body)
 	}
+}
+
+// caseSensitive reports whether dir's filesystem tells "Probe" and "probe" apart (see the jobs test's helper).
+func caseSensitive(t *testing.T, dir string) bool {
+	t.Helper()
+	name := filepath.Join(dir, "CaseProbe")
+	if err := os.WriteFile(name, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(name)
+	_, err := os.Stat(filepath.Join(dir, "caseprobe"))
+	return err != nil
 }
