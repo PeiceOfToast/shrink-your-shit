@@ -417,6 +417,11 @@ func libraryPath(w http.ResponseWriter, store *jobs.Store, raw string, except in
 		apiError(w, http.StatusBadRequest, "not_a_folder", "That folder cannot be opened: "+err.Error())
 		return "", false
 	}
+	if except != 0 { // a save that keeps the library's own folder is not a move: an overlap already stored is not refused again
+		if cur, err := store.GetLibrary(except); err == nil && cur.Path == p {
+			return p, true
+		}
+	}
 	l, same, clash, err := store.FolderClash(p, except)
 	switch {
 	case err != nil:

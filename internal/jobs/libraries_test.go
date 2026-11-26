@@ -498,3 +498,62 @@ func TestDuplicateFlowKeepsDescriptionAndTags(t *testing.T) {
 		t.Errorf("copy meta = %+v, want description %q, tags [films 4k], no favourite", m, desc)
 	}
 }
+
+// Overlap is judged ignoring letter case (#767 review finding 2): on a case-insensitive disk "films" is the
+// library "Films", and "FILMS/sub" is inside it. "Films2" only starts the same way and is not a clash.
+func TestOverlapIgnoresCase(t *testing.T) {
+	s := open(t)
+	root, err := filepath.EvalSymlinks(t.TempDir()) // macOS: the temp folder is under a link
+	if err != nil {
+		t.Fatal(err)
+	}
+	films := realDir(t, filepath.Join(root, "Films"))
+	if _, err := s.AddLibrary("Films", films, rules.SliderTemplate(3), false); err != nil {
+		t.Fatal(err)
+	}
+	if l, same, ok, err := s.FolderClash(filepath.Join(root, "films"), 0); err != nil || !ok || !same || l.Name != "Films" {
+		t.Errorf("films: library %q same %v ok %v err %v, want Films, the same folder", l.Name, same, ok, err)
+	}
+	if _, same, ok, _ := s.FolderClash(filepath.Join(root, "FILMS", "sub"), 0); !ok || same {
+		t.Errorf("FILMS/sub: same %v ok %v, want inside Films", same, ok)
+	}
+	if _, _, ok, _ := s.FolderClash(filepath.Join(root, "Films2"), 0); ok {
+		t.Error("Films2 clashed with Films")
+	}
+	legacy := rules.LegacyTemplate(rules.Default(), "replace")
+	// the library's own folder, by its exact path: adds nothing and says nothing
+	if n, skipped, _ := s.EnsureLibraries([]string{films}, legacy); n != 0 || len(skipped) != 0 {
+		t.Errorf("exact path: added %d, skipped %q, want none", n, skipped)
+	}
+	// another spelling of the library's folder, a real folder of its own: adds nothing, and says why. Only on a
+	// case-sensitive filesystem is it a folder of its own; elsewhere the two spellings are the same folder.
+	if !caseSensitive(t, root) {
+		t.Log("the filesystem ignores letter case: the other-spelling folder is the library's own folder, so that check is skipped")
+	} else {
+		realDir(t, filepath.Join(root, "films"))
+		if n, skipped, _ := s.EnsureLibraries([]string{filepath.Join(root, "films")}, legacy); n != 0 || len(skipped) != 1 || !strings.Contains(skipped[0], "letter case") {
+			t.Errorf("films: added %d, skipped %q, want one line saying letter case", n, skipped)
+		}
+	}
+	// a folder inside it, by another case, is skipped as inside
+	realDir(t, filepath.Join(root, "FILMS", "sub"))
+	if n, skipped, _ := s.EnsureLibraries([]string{filepath.Join(root, "FILMS", "sub")}, legacy); n != 0 || len(skipped) != 1 || !strings.Contains(skipped[0], "inside") {
+		t.Errorf("FILMS/sub: added %d, skipped %q", n, skipped)
+	}
+	if libs, _ := s.Libraries(); len(libs) != 1 {
+		t.Errorf("libraries %d, want 1", len(libs))
+	}
+}
+
+// caseSensitive reports whether dir's filesystem tells "Probe" and "probe" apart: a probe file is made, and the
+// other spelling is looked up. On Windows and on macOS's default disk it is found, and the case-twin tests skip.
+func caseSensitive(t *testing.T, dir string) bool {
+	t.Helper()
+	name := filepath.Join(dir, "CaseProbe")
+	if err := os.WriteFile(name, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(name)
+	_, err := os.Stat(filepath.Join(dir, "caseprobe"))
+	return err != nil
+}
