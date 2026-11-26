@@ -296,7 +296,7 @@ func (t Template) SelectorsView() (Selectors, bool) {
 }
 
 // Ignored reports whether rel (a file's path inside its library, any separator) is left out by the
-// flow's Ignore list: equal to an entry, inside a folder an entry names, or matching an entry as a
+// workflow's ignore list: equal to an entry, inside a folder an entry names, or matching an entry as a
 // pattern (on the whole path, or on the file name for a pattern without a slash).
 func (t Template) Ignored(rel string) bool {
 	if t.Kind != KindSelectors || t.Selectors == nil {

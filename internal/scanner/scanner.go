@@ -41,13 +41,13 @@ func IsVideo(path string) bool {
 }
 
 // SkipDir reports whether a folder should not be scanned: hidden folders
-// (.Trash, .AppleDouble, ...), Synology's @eaDir, Windows' recycle bin and a lost+found folder at any depth (never media).
+// (.Trash, .AppleDouble, ...), Synology's @eaDir, #recycle and #snapshot, QNAP's @recycle, Windows' recycle bin and a lost+found folder at any depth (never media).
 func SkipDir(name string) bool {
 	if strings.HasPrefix(name, ".") {
 		return true
 	}
 	switch strings.ToLower(name) {
-	case "@eadir", "$recycle.bin", "system volume information", "lost+found":
+	case "@eadir", "$recycle.bin", "system volume information", "lost+found", "#recycle", "#snapshot", "@recycle":
 		return true
 	}
 	return false
@@ -156,7 +156,7 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 		noteUnread := func(folder string) {
 			if !unread[folder] { // once per folder, however many of its files fail
 				unread[folder] = true
-				log.Printf("scan: %s: cannot read the folder %s: its files are not seen, the library is not recorded this scan; the next scan tries again (if it is not media, add it to the flow's Ignore list)", lib, folder)
+				log.Printf("scan: %s: cannot read the folder %s: its files are not seen, the library is not recorded this scan; the next scan tries again (if it is not media, add it to the workflow's ignore list (Library files step))", lib, folder)
 			}
 		}
 		s.setScanning(t.LibraryID, 0, false)
@@ -170,7 +170,7 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 			}
 			if rel, err := filepath.Rel(lib, path); err == nil && rel != "." && t.Template.Ignored(rel) {
 				if d.IsDir() {
-					return fs.SkipDir // the flow's Ignore list: not looked at
+					return fs.SkipDir // the workflow's ignore list: not looked at
 				}
 				return nil
 			}

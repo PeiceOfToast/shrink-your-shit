@@ -138,7 +138,7 @@ func (p *Previewer) Library(libID int64, root string, t rules.Template, wait tim
 	if err != nil {
 		return Result{Status: "failed", Skipped: map[string]int{}}
 	}
-	kept := files[:0:0] // what the flow's Ignore list leaves out is not counted, as the scanner does not look at it
+	kept := files[:0:0] // what the workflow's ignore list leaves out is not counted, as the scanner does not look at it
 	for _, f := range files {
 		if rel, err := filepath.Rel(root, f.path); err != nil || !t.Ignored(rel) {
 			kept = append(kept, f)
