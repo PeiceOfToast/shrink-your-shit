@@ -1,3 +1,5 @@
+import { jobWhen } from "../format/time.ts";
+import { jobResultText, jobResultTone, jobStepText } from "../format/job.ts";
 import { navigate, Link, useLocation } from "../router.tsx";
 import { api, formatCount, type Job, type JobCounts, type JobState } from "../api/index.ts";
 import { useApi } from "../api/useApi.ts";
@@ -34,12 +36,12 @@ function JobRow({ j, filter }: { j: Job; filter: string }) {
         <span className="muted sm">{[j.library, j.workflow, j.worker].filter(Boolean).join(" · ")}</span>
       </td>
       <td data-l="Step">
-        <span className="nowrap">{j.step}</span>
+        <span className="nowrap">{jobStepText(j)}</span>
       </td>
-      <td className="num tnum" data-l="Progress">{j.progress != null ? `${j.progress} %` : "—"}</td>
-      <td className="num tnum" data-l="When">{j.when}</td>
+      <td className="num tnum" data-l="Progress">{j.progress ? `${j.progress.pct} %` : "—"}</td>
+      <td className="num tnum" data-l="When">{jobWhen(j)}</td>
       <td className="num tnum" data-l="Result">
-        <span className={j.resultTone}>{j.result}</span>
+        <span className={jobResultTone(j)}>{jobResultText(j)}</span>
       </td>
     </tr>
   );
