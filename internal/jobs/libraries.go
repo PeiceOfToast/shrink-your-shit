@@ -349,17 +349,23 @@ func (s *Store) EnsureLibraries(paths []string, legacy rules.Template) (added in
 		if err != nil {
 			return added, skipped, err
 		}
-		have, clash := false, ""
+		have, clash, caseOnly := false, "", Library{}
 		for _, l := range libs {
 			lp := canonical(l.Path)
 			switch {
-			case strings.EqualFold(lp, p) || l.Path == given:
+			case lp == p || l.Path == given:
 				have = true
+			case strings.EqualFold(lp, p):
+				caseOnly = l // a real, separate folder by another spelling: visible, never dropped silently
 			case withinFold(p, lp) || withinFold(lp, p):
 				clash = l.Path
 			}
 		}
 		if have {
+			continue
+		}
+		if caseOnly.ID != 0 {
+			skipped = append(skipped, fmt.Sprintf("%s: differs only in letter case from library %s (%s)", given, caseOnly.Name, caseOnly.Path))
 			continue
 		}
 		if clash != "" {

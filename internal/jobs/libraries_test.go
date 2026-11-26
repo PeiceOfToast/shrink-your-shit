@@ -503,7 +503,10 @@ func TestDuplicateFlowKeepsDescriptionAndTags(t *testing.T) {
 // library "Films", and "FILMS/sub" is inside it. "Films2" only starts the same way and is not a clash.
 func TestOverlapIgnoresCase(t *testing.T) {
 	s := open(t)
-	root := t.TempDir()
+	root, err := filepath.EvalSymlinks(t.TempDir()) // macOS: the temp folder is under a link
+	if err != nil {
+		t.Fatal(err)
+	}
 	films := realDir(t, filepath.Join(root, "Films"))
 	if _, err := s.AddLibrary("Films", films, rules.SliderTemplate(3), false); err != nil {
 		t.Fatal(err)
@@ -517,11 +520,15 @@ func TestOverlapIgnoresCase(t *testing.T) {
 	if _, _, ok, _ := s.FolderClash(filepath.Join(root, "Films2"), 0); ok {
 		t.Error("Films2 clashed with Films")
 	}
-	// adding a folder by another case of the library's own folder adds nothing
-	realDir(t, filepath.Join(root, "films"))
 	legacy := rules.LegacyTemplate(rules.Default(), "replace")
-	if n, _, _ := s.EnsureLibraries([]string{filepath.Join(root, "films")}, legacy); n != 0 {
-		t.Errorf("films: added %d", n)
+	// the library's own folder, by its exact path: adds nothing and says nothing
+	if n, skipped, _ := s.EnsureLibraries([]string{films}, legacy); n != 0 || len(skipped) != 0 {
+		t.Errorf("exact path: added %d, skipped %q, want none", n, skipped)
+	}
+	// another spelling of the library's folder, a real folder of its own: adds nothing, and says why
+	realDir(t, filepath.Join(root, "films"))
+	if n, skipped, _ := s.EnsureLibraries([]string{filepath.Join(root, "films")}, legacy); n != 0 || len(skipped) != 1 || !strings.Contains(skipped[0], "letter case") {
+		t.Errorf("films: added %d, skipped %q, want one line saying letter case", n, skipped)
 	}
 	// a folder inside it, by another case, is skipped as inside
 	realDir(t, filepath.Join(root, "FILMS", "sub"))

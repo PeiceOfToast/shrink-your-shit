@@ -494,7 +494,10 @@ func TestFreeSpaceTimeLimit(t *testing.T) {
 // the library Films, and "FILMS/sub" is inside it.
 func TestLibraryOverlapIgnoresCase(t *testing.T) {
 	srv, st, _, _ := libServer(t, false)
-	root := t.TempDir()
+	root, err := filepath.EvalSymlinks(t.TempDir()) // macOS: the temp folder is under a link
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, d := range []string{"Films", "films", filepath.Join("FILMS", "sub")} {
 		os.MkdirAll(filepath.Join(root, d), 0o755)
 	}
