@@ -45,12 +45,12 @@ func (p *Previewer) Track(ctx context.Context, root, path string, st fs.FileInfo
 	}
 	low, high := Saving(t, plan, info, size)
 	tr := Track{ExpectedBytesLow: size - high, ExpectedBytesHigh: size - low}
-	tr.Lines = append(tr.Lines, Line{Kind: "video", Text: videoLine(plan, info)})
+	tr.Lines = append(tr.Lines, Line{Kind: "video", Text: trackVideo(plan, info)})
 	if hdr := hdrLine(plan, info); hdr != "" {
 		tr.Lines = append(tr.Lines, Line{Kind: "hdr", Text: hdr})
 	}
-	tr.Lines = append(tr.Lines, Line{Kind: "audio", Text: audioLine(plan, len(info.Audio()))})
-	if line, _ := subtitleLine(t, plan, info); line != "" {
+	tr.Lines = append(tr.Lines, Line{Kind: "audio", Text: trackAudio(plan, info)})
+	if line := trackSubtitles(plan, info); line != "" {
 		tr.Lines = append(tr.Lines, Line{Kind: "subtitles", Text: line})
 	}
 	if plan.Output == "beside" {
@@ -63,7 +63,9 @@ func (p *Previewer) Track(ctx context.Context, root, path string, st fs.FileInfo
 	if info.DurationSec <= fullDecodeMaxSec {
 		tr.Checks = append(tr.Checks, "Plays to the end")
 	}
-	tr.Checks = append(tr.Checks, "Picture matches the original")
+	if !plan.Video.Copy { // a repackaged stream is the same bytes: there is no picture to compare (worker/verify.go)
+		tr.Checks = append(tr.Checks, "Picture matches the original")
+	}
 	if plan.KeepIfBigger {
 		tr.Checks = append(tr.Checks, "Smaller than the original, or the original is kept")
 	}

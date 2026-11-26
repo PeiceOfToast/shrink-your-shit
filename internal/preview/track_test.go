@@ -35,7 +35,7 @@ func TestTrackSaysWhatEachKindWillDo(t *testing.T) {
 	if got := kinds(a); got != "video,audio,original" {
 		t.Errorf("kinds %s", got)
 	}
-	if a.Lines[0].Text != "Video: converted to the smaller format, same picture size and length" || a.Lines[2].Text != "Original: kept in a .syp-trash folder beside it" {
+	if a.Lines[0].Text != "Video: H.264 1080p → HEVC, same picture size and length" || a.Lines[2].Text != "Original: kept in a .syp-trash folder beside it" {
 		t.Errorf("%+v", a.Lines)
 	}
 	if a.Skipped || a.EstimatedSeconds != nil || len(a.Checks) < 3 || a.Checks[0] != "Same length as the original" {
