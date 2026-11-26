@@ -13,7 +13,7 @@ export interface Progress { stage: string; percent: number | null; workflowPerce
 // GET /api/v2/jobs?tab=&q=&libraryId=&sort=queue&limit=&offset= -> {items, total, counts}
 export interface JobItem {
   id: ID;                 // the job id, or "skip-N" for a file left out by a scan (no detail behind it)
-  jobId?: ID;
+  jobId?: ID | null;     // null for a settling scan row (no job)
   origin: "job" | "scan";
   state: JobState;
   subState: string | null;
@@ -24,6 +24,7 @@ export interface JobItem {
   priority?: number | null; // #143: the job's place among the unpinned (null for a scan skip)
   pin?: Pin | null;          // #143: a single file put first or last (Jobs' Change priority); wins over library priority
   position?: number | null; // #134, Waiting tab: place in the queue (1: taken next); null when it isn't taken now
+  tags?: string[]; warning?: string | null; failure?: Failure | null; logState?: string; // the server row's fields on every job (a settling row: [], null, null, "none")
   reason?: Reason | null; skippedId?: ID; // #130: {code, message} on every row (code for icon/colour; show the message)
   newFileRefused?: boolean; // a check refused the new file, so the original was kept: a failed job that reads "Original kept" (dev 6ca34b87)
   // running

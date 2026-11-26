@@ -11,7 +11,7 @@ export interface List<T> { items: T[]; total: number; counts?: Record<string, nu
 export type JobState = "queued" | "preparing" | "running" | "validating" | "committing"
   | "completed" | "skipped" | "failed" | "cancelled" | "retry_wait";
 export type JobSubState =
-  | "waiting" | "processing_paused" | "library_disabled" | "no_capable_worker"
+  | "waiting" | "processing_paused" | "library_disabled" | "no_capable_worker" | "settling"
   | "retrying"
   | "probing" | "converting" | "checking" | "saving"
   | null;

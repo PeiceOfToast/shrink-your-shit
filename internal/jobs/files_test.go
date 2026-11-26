@@ -67,7 +67,7 @@ func TestFileList(t *testing.T) {
 	if fmt.Sprint(names) != "[retry.mkv wait0.mkv wait1.mkv wait2.mkv]" || total != 4 {
 		t.Errorf("unprocessed %v %d (retrying first)", names, total)
 	}
-	if fmt.Sprint(counts) != "map[failed:2 keptOriginals:0 processed:1 processing:1 skipped:2 unprocessed:4]" {
+	if fmt.Sprint(counts) != "map[failed:2 keptOriginals:0 processed:1 processing:1 settling:0 skipped:2 unprocessed:4]" {
 		t.Errorf("counts %v", counts)
 	}
 	if names, total, _ := list(FileFilter{Show: CardUnprocessed, Limit: 2, Offset: 2}); fmt.Sprint(names) != "[wait1.mkv wait2.mkv]" || total != 4 {
