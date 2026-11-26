@@ -35,3 +35,27 @@ func TestLibrarySkippedIsWhatTheSkippedListShows(t *testing.T) {
 		t.Errorf("library skipped: overview %d, Jobs list %d; want 2 and 2", totals.Skipped, cards[CardSkipped])
 	}
 }
+
+// A file still changing waits to settle (manager 11-26): the all-library skipped counts leave it out, as the
+// Skipped list does (review 743: /api/activity/summary said 2 while the list had 1).
+func TestSettlingFileIsNotCountedSkipped(t *testing.T) {
+	s := open(t)
+	l, _ := s.AddLibrary("Movies", t.TempDir(), rules.SliderTemplate(3), true)
+	s.PutFile(File{Path: filepath.Join(l.Path, "broken.mkv"), Decision: "unreadable", Reason: rules.SkipUnreadable})
+	s.PutFile(File{Path: filepath.Join(l.Path, "copying.mkv"), Decision: "skip: " + rules.SkipWords[rules.SkipStillChanging], Reason: rules.SkipStillChanging})
+	a, err := s.ActivitySummary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	totals, err := s.TotalsOf()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, cards, err := s.FileList(FileFilter{Show: CardSkipped})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Skipped != 1 || totals.Summary.Skipped != 1 || cards[CardSkipped] != 1 {
+		t.Errorf("skipped: activity %d, overview %d, Jobs list %d; want 1 each", a.Skipped, totals.Summary.Skipped, cards[CardSkipped])
+	}
+}
