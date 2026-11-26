@@ -170,6 +170,8 @@ export function Dashboard() {
     if (o) setKnown(o.workersOn);
   }, [o?.workersOn]);
   const workersOn = workersOverride ?? known ?? false;
+  const down = !!overview.error;
+  const UNREACHABLE = "Can't change this while the server can't be reached";
   const [encoder, setEncoder] = useState<EncoderTest>({ s: "idle" });
   const testEncoders = () => {
     setEncoder({ s: "testing" });
@@ -190,14 +192,27 @@ export function Dashboard() {
       <div className="pagehead">
         <h1>Dashboard</h1>
         <span className="sp"></span>
-        {/* Shows the last known state, disabled while the server can't be reached. Hidden only if no state was ever known. */}
+        {/* Shows the last known state. While the server can't be reached it is disabled, in muted tones, and says so. Hidden only if no state was ever known. */}
         {known !== null && (
-          <button type="button" className="sw" aria-pressed={workersOn} disabled={!!overview.error} onClick={toggleWorkers}>
+          <button
+            type="button"
+            className={`sw${down ? " dis" : ""}`}
+            aria-pressed={workersOn}
+            disabled={down}
+            title={down ? UNREACHABLE : undefined}
+            onClick={toggleWorkers}
+          >
             <span className={`k ${workersOn ? "on" : ""}`}></span>
-            <b>Workers {workersOn ? "on" : "off"}</b>
+            <b>{down ? `Workers ${workersOn ? "on" : "off"} · last known` : `Workers ${workersOn ? "on" : "off"}`}</b>
           </button>
         )}
-        <button type="button" className="btn ghost sm" onClick={() => void api.scanAllLibraries()}>
+        <button
+          type="button"
+          className={`btn ghost sm${down ? " dis" : ""}`}
+          disabled={down}
+          title={down ? UNREACHABLE : undefined}
+          onClick={() => void api.scanAllLibraries()}
+        >
           <Icon name="refresh" />
           Scan all
         </button>

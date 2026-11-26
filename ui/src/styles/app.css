@@ -34,3 +34,8 @@ button.search{background:none;border:1px solid var(--border);color:var(--text2);
   .statusbar{cursor:pointer}
   .dev-states{left:12px;right:12px;flex-wrap:wrap}
 }
+
+/* Dashboard error state: the Workers switch and Scan all are disabled. Muted tones, no opacity. */
+.sw.dis,.btn.dis{cursor:not-allowed;color:var(--text2)}
+.sw.dis .k,.sw.dis .k.on{background:var(--strong)}
+.sw.dis .k::after{background:var(--text2)}
