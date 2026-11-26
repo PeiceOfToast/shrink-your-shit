@@ -112,7 +112,9 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 		if tab == "waiting" { // each waiting job's place in the queue (1: taken next), over all of it; null when not taken now
 			ids := []int64{}
 			for _, row := range rows {
-				ids = append(ids, row.JobID)
+				if !row.Settling {
+					ids = append(ids, row.JobID)
+				}
 			}
 			if positions, err = store.QueuePositions(ids); err != nil {
 				serverError(w, err)
@@ -368,6 +370,14 @@ func v2Jobs(api *http.ServeMux, store *jobs.Store) {
 
 // v2JobItem is a Files item in the contract's Job terms: its state (spec 7), sub-state and progress.
 func v2JobItem(store *jobs.Store, it map[string]any, row jobs.FileRow, card string) map[string]any {
+	if row.Settling { // a file still changing (ui-shop 11-26): a scan row waiting to join the queue, no job to open or move
+		it["origin"], it["warning"], it["tags"], it["jobId"] = "scan", nil, []string{}, nil
+		it["state"], it["subState"], it["priority"], it["pin"], it["position"] = "queued", "settling", nil, nil, nil
+		it["reason"] = map[string]string{"code": row.Reason, "message": settlingWords}
+		it["failure"], it["logState"] = nil, "none" // as a skipped scan row's: no job, no log
+		delete(it, "status")                        // the UI keys pills on state and subState (ui-shop 11-26)
+		return it
+	}
 	it["origin"], it["warning"] = "job", nil
 	it["tags"] = row.Tags // FB2c: what a workflow's "Tag the file" step set; [] for most jobs
 	if row.Tags == nil {

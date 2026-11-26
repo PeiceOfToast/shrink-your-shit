@@ -121,7 +121,9 @@ func TestSettleIgnoresAnEarlierFailure(t *testing.T) {
 // A result that cannot be saved is logged with what was lost, and the error is returned.
 func TestWatchLogsAResultThatCannotBeSaved(t *testing.T) {
 	f := newWatchFixture(t, func(int) bool { return true }, nil, errors.New("access denied"))
-	f.w.DataDir = filepath.Join(t.TempDir(), "missing")
+	if err := os.Mkdir(filepath.Join(f.w.DataDir, resultFile), 0o755); err != nil { // a directory where the result goes: the save fails
+		t.Fatal(err)
+	}
 	var logs []string
 	f.w.Logf = func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) }
 	if err := f.w.Watch(); err == nil {

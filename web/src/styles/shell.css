@@ -450,6 +450,8 @@ label.chk{cursor:pointer}
 .list .tbl.jobs tr{position:relative}
 /* a long reason line is capped, or its nowrap text sets the name column wider than the screen at larger text sizes */
 .list .tbl.jobs .lpath{max-width:30em}
+/* a file still changing: its sentence is read in full (no drawer to open), so it wraps instead of cutting off */
+.lpath.settling{white-space:normal;overflow:visible;text-overflow:clip}
 .list .tbl td.sizec{width:1%;text-align:right;color:var(--text-2)}
 .uline{position:absolute;left:0;right:0;bottom:0;height:3px}
 .uline i{display:block;height:100%;background:var(--accent)}
@@ -1027,6 +1029,8 @@ nav.tabs[aria-label="Settings sections"]>a{display:flex;align-items:center;justi
 .lcard.sel .pill,.lcard.sel .mchip{box-shadow:inset 0 0 0 1px var(--border-strong)}
 .lcard .lcheck{flex:none}
 .lcard .lmain{flex:1 1 auto;min-width:0;display:grid;gap:6px}
+/* a long unbroken path in a sentence (the health check note) breaks inside the card instead of being cut at its edge */
+.brk{overflow-wrap:anywhere}
 /* item 10 (fix 2b): the name is a flex row at every width, so the title (a flex item) can take an ellipsis before the pill */
 .lcard .lname{display:flex;align-items:baseline;gap:8px;min-width:0}
 .lcard .lname .ttl{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

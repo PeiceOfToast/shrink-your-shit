@@ -206,10 +206,24 @@ FROM jobs GROUP BY library_id, d`, Running, Queued, Failed, Kept)
 	if err := rows.Err(); err != nil {
 		return t, err
 	}
+	settling, err := s.settlingByLibrary()
+	if err != nil {
+		return t, err
+	}
+	for id, n := range settling {
+		c := t.Counts[id]
+		c.Waiting += n
+		t.Counts[id] = c
+	}
+	n, err := s.settlingAll()
+	if err != nil {
+		return t, err
+	}
+	t.Summary.WaitingFiles += n
 	if err := s.savedByDay(&t); err != nil {
 		return t, err
 	}
-	err = s.reader().QueryRow(`SELECT COUNT(*) FROM files WHERE reason<>'' AND NOT ` + convertedSQL).Scan(&t.Summary.Skipped)
+	err = s.reader().QueryRow(`SELECT COUNT(*) FROM files WHERE reason<>'' AND reason<>'still_changing' AND NOT ` + convertedSQL).Scan(&t.Summary.Skipped)
 	return t, err
 }
 

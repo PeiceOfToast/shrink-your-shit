@@ -652,6 +652,10 @@ func (c *Checker) Folder(ctx context.Context, path string) (r FolderReport) {
 	return r
 }
 
+// missingDataAdvice is what both doctors say when the data folder is gone. A restart recreates the folder only
+// when its drive or share is connected; otherwise the folder is new and empty.
+const missingDataAdvice = "If it is on a drive or share, reconnect it, then restart. Otherwise restarting makes a new, empty data folder: settings and history start over."
+
 // writeProbe creates and removes a file in dir, as the user this program runs as.
 func writeProbe(dir string) error {
 	f, err := os.CreateTemp(dir, ".syp-write-check-*")

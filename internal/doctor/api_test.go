@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/media"
 	"github.com/shrink-your-shit/shrink-your-shit/internal/worker"
 )
@@ -179,8 +180,21 @@ func TestDoctorUnreadableLibraryIsBadAccess(t *testing.T) {
 	if access.Status != "bad" || !strings.HasPrefix(access.Detail, "Gone ("+gone+"): ") || access.Hint == nil {
 		t.Errorf("%+v", access)
 	}
-	if access.Hint != nil && *access.Hint != "Check that "+gone+" exists, and give the app's user read and write access to it." {
-		t.Errorf("unreadable hint should say read access and name the folder: %q", *access.Hint)
+	if access.Hint == nil || *access.Hint != "Check that "+gone+" exists, and give the app's user read access to it." {
+		t.Errorf("unreadable hint should say read access and name the folder: %v", access.Hint)
+	}
+}
+
+// A system folder is the wrong folder, not a permission to grant: the hint says to pick another.
+func TestDoctorSystemFolderHintSaysPickAnother(t *testing.T) {
+	if runtime.GOOS != "linux" || !jobs.SystemFolder("/etc") {
+		t.Skip("needs a system folder this test knows (Linux /etc)")
+	}
+	c := apiChecker(fakeFFmpeg(true, true, nil, nil), 1<<40)
+	d := c.API(context.Background(), APIInput{DataDir: t.TempDir(), Libs: []Library{{ID: 10, Name: "Sys", Path: "/etc"}}}, false)
+	access := checkByID(t, d.Checks, "library:10:access")
+	if access.Status != "bad" || access.Hint == nil || *access.Hint != "Change the folder on the Libraries page, then press Check again." {
+		t.Errorf("%+v", access)
 	}
 }
 
