@@ -9,7 +9,7 @@ import { useKeys } from "../ui/useKeys.ts";
 // Workflows list (page 04). Only the Video group is shown (decisions.md:57); the other groups come back later.
 const GROUPS: { kind: WorkflowKind; title: string }[] = [{ kind: "video", title: "Video" }];
 
-type Dialog = { kind: "refused"; names: string[] } | { kind: "confirm"; row: WorkflowRow };
+type Dialog = { kind: "refused"; name: string; names: string[] } | { kind: "confirm"; row: WorkflowRow };
 
 function download(name: string, data: unknown) {
   const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
@@ -65,7 +65,7 @@ export function Workflows() {
   const askDelete = (w: WorkflowRow) => {
     setMenuFor(null);
     setActErr(null);
-    if (w.usedBy.length > 0) setDialog({ kind: "refused", names: w.usedBy.map((u) => u.name) });
+    if (w.usedBy.length > 0) setDialog({ kind: "refused", name: w.name, names: w.usedBy.map((u) => u.name) });
     else setDialog({ kind: "confirm", row: w });
   };
 
@@ -76,7 +76,7 @@ export function Workflows() {
         setDialog(null);
         list.reload();
       } else {
-        setDialog({ kind: "refused", names: r.usedBy.map((u) => u.name) });
+        setDialog({ kind: "refused", name: w.name, names: r.usedBy.map((u) => u.name) });
       }
     } catch (e) {
       setDialog(null);
@@ -99,7 +99,7 @@ export function Workflows() {
 
   return (
     <>
-      <div className="pagehead">
+      <div className="pagehead wft-head">
         <h1>Workflows</h1>
         <span className="muted sm">How the videos in a library are converted.</span>
         <span className="sp"></span>
@@ -155,7 +155,7 @@ export function Workflows() {
               const items = rows.filter((w) => w.kind === g.kind);
               return (
                 <div key={g.kind}>
-                  <h2 className="sm muted pad" style={{ margin: 0 }}>{g.title}</h2>
+                  <h2 className="sm muted pad" style={{ margin: 0 }}>{g.title} {items.length}</h2>
                   {items.length === 0 ? (
                     <p className="muted pad">No workflows match.</p>
                   ) : (
@@ -172,15 +172,15 @@ export function Workflows() {
                       <tbody>
                         {items.map((w) => (
                           <tr key={w.id} className="row-link" tabIndex={0} onClick={() => navigate(`/workflows/${w.id}`)} onKeyDown={(e) => e.key === "Enter" && navigate(`/workflows/${w.id}`)}>
-                            <td className="full">
+                            <td className="full wft-name">
                               <b>{w.name}</b>
                               <br />
                               <span className="muted sm">{w.description}</span>
                             </td>
-                            <td data-l="Used by">{w.usedBy.length > 0 ? w.usedBy.map((u) => u.name).join(", ") : <span className="muted">not used</span>}</td>
-                            <td data-l="Last changed">{ago(w.updatedAt)}</td>
-                            <td data-l="State"><StatePill w={w} /></td>
-                            <td onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+                            <td className="wft-used">{w.usedBy.length > 0 ? w.usedBy.map((u) => u.name).join(", ") : <span className="muted">not used</span>}</td>
+                            <td className="wft-changed">{ago(w.updatedAt)}</td>
+                            <td className="wft-state"><StatePill w={w} /></td>
+                            <td className="wft-act" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
                               <span style={{ position: "relative" }}>
                                 <button
                                   type="button"
@@ -221,7 +221,7 @@ export function Workflows() {
           <section className="card" role="dialog" aria-modal="true" aria-labelledby="wf-dlg" style={{ width: "min(440px, 100%)", height: "fit-content" }} onClick={(e) => e.stopPropagation()}>
             {dialog.kind === "refused" ? (
               <>
-                <h2 id="wf-dlg">Delete this workflow?</h2>
+                <h2 id="wf-dlg">Can't delete {dialog.name}</h2>
                 <p>{refusedText(dialog.names)}</p>
                 <div className="row" style={{ justifyContent: "flex-end" }}>
                   <button type="button" className="btn sm" onClick={() => setDialog(null)}>OK</button>

@@ -39,3 +39,16 @@ button.search{background:none;border:1px solid var(--border);color:var(--text2);
 .sw.dis,.btn.dis{cursor:not-allowed;color:var(--text2)}
 .sw.dis .k,.sw.dis .k.on{background:var(--strong)}
 .sw.dis .k::after{background:var(--text2)}
+
+/* Workflows list at phone width (page 04): name, state and menu on line 1; used by and last changed on line 2. */
+@media (max-width: 600px) {
+  table.tbl.wft tr { grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "name state act" "used used changed"; align-items: center }
+  table.tbl.wft td.wft-name { grid-area: name }
+  table.tbl.wft td.wft-state { grid-area: state }
+  table.tbl.wft td.wft-act { grid-area: act }
+  table.tbl.wft td.wft-used { grid-area: used }
+  table.tbl.wft td.wft-changed { grid-area: changed }
+  table.tbl.wft td.wft-changed::before { content: "· "; color: var(--text2) }
+  .pagehead.wft-head .sp { display: none }
+  .pagehead.wft-head .btn { flex: 1 1 0 }
+}
