@@ -44,20 +44,18 @@ function TargetCard({
       <div className="set-grouphead">
         <b>{t.name}</b> <span className="muted sm">{t.kind === "discord" ? "Discord" : "Webhook"} · {t.urlShown}</span>
         {t.failingSince && <span className="bad sm"> · failing</span>}
+        <span className="sp" />
+        <Switch label={`On: ${t.name}`} on={t.enabled} onChange={(enabled) => onChange({ ...t, enabled })} />
       </div>
-      <div className="set-row">
-        <div className="set-lab"><span>Send these</span><div className="hint">Which events go to this target.</div></div>
-        <div className="set-ctl">
+      <div className="set-row full">
+        <div className="set-lab"><label>Send these</label><div className="hint">Which events go to this target.</div></div>
+        <div className="ticks">
           {events.map((e) => (
             <label key={e.code} className="row">
               <input type="checkbox" checked={t.events.includes(e.code)} onChange={() => toggleEvent(e.code)} /> {e.name}
             </label>
           ))}
         </div>
-      </div>
-      <div className="set-row">
-        <div className="set-lab"><span>On</span></div>
-        <div className="set-ctl"><Switch label={`On: ${t.name}`} on={t.enabled} onChange={(enabled) => onChange({ ...t, enabled })} /></div>
       </div>
       <div className="row">
         <button type="button" className="btn sm" onClick={runTest} disabled={busy}>Send a test</button>
@@ -152,15 +150,17 @@ export function Notifications() {
   return (
     <>
       <h2 className="set-title">Notifications</h2>
-      <Row label="Send a summary" hint="How often a summary of finished work is sent." problem={problem}>
-        <Seg label="Summary" value={draft.summary.mode} options={MODES} onChange={(mode) => edit({ ...draft, summary: { ...draft.summary, mode } })} />
+      <Row id="n-sum" label="Send a summary" hint="How often a summary of finished work is sent." problem={problem}>
+        <select id="n-sum" className="sel" value={draft.summary.mode} onChange={(e) => edit({ ...draft, summary: { ...draft.summary, mode: e.target.value as NotifyMode } })}>
+          {MODES.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+        </select>
       </Row>
       {draft.summary.mode !== "off" && draft.summary.mode !== "drained" && (
         <Row id="n-at" label="Summary time" hint="Local time the summary is sent." problem={problem} field="summary.at">
           <input id="n-at" className="inp" placeholder="08:00" value={draft.summary.at} onChange={(e) => edit({ ...draft, summary: { ...draft.summary, at: e.target.value } })} />
         </Row>
       )}
-      <Row id="n-link" label="Link base" hint="Used to make links in messages. Leave empty to send names only." problem={problem} field="linkBase">
+      <Row id="n-link" label="Address of this app" hint="Used to make links in messages. Leave empty to send names only." problem={problem} field="linkBase">
         <input id="n-link" className="inp" placeholder="http://192.168.1.20:8484" value={draft.linkBase ?? ""} onChange={(e) => edit({ ...draft, linkBase: e.target.value || null })} />
       </Row>
 

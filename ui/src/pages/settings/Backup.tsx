@@ -108,6 +108,7 @@ export function Backup() {
       {restored && <p className="muted sm" role="status">Restored. Settings and workflows are back to that backup.</p>}
 
       {preview && (
+        <div className="scrim">
         <div className="dlg" role="dialog" aria-modal="true" aria-labelledby="restore-q">
           <h2 id="restore-q">Replace all settings and workflows with this backup from {dayMonth(preview.createdAt)}?</h2>
           <p className="muted sm">
@@ -118,6 +119,7 @@ export function Backup() {
             <button type="button" className="btn ghost sm" onClick={() => setPreview(null)} disabled={busy}>Cancel</button>
             <button type="button" className="btn primary sm" onClick={apply} disabled={busy}>Restore</button>
           </div>
+        </div>
         </div>
       )}
     </>

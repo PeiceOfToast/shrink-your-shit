@@ -139,3 +139,11 @@ table.tbl.wkr td.wk-sub{display:none}
   .set-back{display:inline-block}
   .set-row{grid-template-columns:1fr}
 }
+/* Settings #777 fixes */
+.set-sub{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text2);margin:28px 0 0;padding-top:14px;border-top:1px solid var(--border)}
+.set-row.full{grid-template-columns:minmax(0,1fr)}
+.ticks{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px 16px;padding-top:4px}
+@media (max-width:900px){.ticks{grid-template-columns:repeat(2,minmax(0,1fr))}.pagehead-desk{display:none}}
+.seg button{white-space:nowrap}
+.hc .set-row{border-bottom:0}
+table.vars td.num{text-align:right;white-space:nowrap}

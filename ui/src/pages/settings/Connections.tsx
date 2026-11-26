@@ -54,7 +54,8 @@ function ConnRow({ c, onChanged }: { c: Integration; onChanged: () => void }) {
   return (
     <section className="set-group">
       <div className="set-grouphead">
-        <b>{name || c.name}</b> <span className="muted sm">{KINDS.find((k) => k.value === c.kind)?.label}</span>
+        <b>{name || c.name}</b>
+        {KINDS.find((k) => k.value === c.kind)?.label !== (name || c.name) && <span className="muted sm"> {KINDS.find((k) => k.value === c.kind)?.label}</span>}
         {c.failingSince && <span className="bad sm"> · failing</span>}
       </div>
       <div className="set-row">
@@ -70,28 +71,23 @@ function ConnRow({ c, onChanged }: { c: Integration; onChanged: () => void }) {
         <div className="set-ctl"><input id={`c-key-${c.id}`} className="inp" type="password" autoComplete="off" value={apiKey} onChange={(e) => setApiKey(e.target.value)} /></div>
       </div>
       <div className="set-row">
-        <div className="set-lab"><span>Path mappings</span><div className="hint">Their path on the left, ours on the right.</div></div>
+        <div className="set-lab"><label>Path mappings</label><div className="hint">Their path on the left, ours on the right.</div></div>
         <div className="set-ctl">
           {maps.map((m, i) => (
             <div className="row" key={i}>
-              <input aria-label={`Their path ${i + 1}`} className="inp" value={m.theirPath} onChange={(e) => setMaps(maps.map((x, j) => (j === i ? { ...x, theirPath: e.target.value } : x)))} />
-              <input aria-label={`Our path ${i + 1}`} className="inp" value={m.ourPath} onChange={(e) => setMaps(maps.map((x, j) => (j === i ? { ...x, ourPath: e.target.value } : x)))} />
+              <input aria-label={`Their path ${i + 1}`} placeholder="Their path" className="inp" value={m.theirPath} onChange={(e) => setMaps(maps.map((x, j) => (j === i ? { ...x, theirPath: e.target.value } : x)))} />
+              <input aria-label={`Our path ${i + 1}`} placeholder="Our path" className="inp" value={m.ourPath} onChange={(e) => setMaps(maps.map((x, j) => (j === i ? { ...x, ourPath: e.target.value } : x)))} />
               <button type="button" className="btn ghost sm" onClick={() => setMaps(maps.filter((_, j) => j !== i))}>Remove</button>
             </div>
           ))}
           <button type="button" className="btn ghost sm" onClick={() => setMaps([...maps, { theirPath: "", ourPath: "" }])}>Add mapping</button>
         </div>
       </div>
-      <div className="set-row">
-        <div className="set-lab"><span>Test</span><div className="hint">Checks the address and key.</div></div>
-        <div className="set-ctl row">
-          <button type="button" className="btn sm" onClick={runTest} disabled={busy}>Test connection</button>
-          <TestNote text={test?.text ?? null} ok={test?.ok ?? true} />
-        </div>
-      </div>
       {err && <p className="bad" role="alert">{err}</p>}
       <div className="row">
         <button type="button" className="btn primary sm" onClick={save} disabled={busy || !dirty}>Save connection</button>
+        <button type="button" className="btn sm" onClick={runTest} disabled={busy}>Test connection</button>
+        <TestNote text={test?.text ?? null} ok={test?.ok ?? true} />
         <span className="sp" />
         <button type="button" className="btn ghost sm" onClick={remove} disabled={busy}>Delete</button>
       </div>

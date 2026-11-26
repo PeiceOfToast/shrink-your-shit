@@ -57,7 +57,7 @@ export function SettingsPage({ section }: { section: SettingsSection | null }) {
   const current = SECTIONS.find((s) => s.key === section);
   return (
     <>
-      <div className="pagehead">
+      <div className={`pagehead${section ? " pagehead-desk" : ""}`}>
         <h1>Settings</h1>
       </div>
       <div className={`set${section ? " open" : ""}`}>
@@ -73,7 +73,7 @@ export function SettingsPage({ section }: { section: SettingsSection | null }) {
         <div className="set-main">
           {section && current ? (
             <>
-              <Link to="/settings" className="set-back">Back to settings</Link>
+              <Link to="/settings" className="set-back">← Settings</Link>
               <Body section={section} />
             </>
           ) : (

@@ -21,7 +21,7 @@ function Check({ c, onDoc }: { c: HealthCheck; onDoc: (d: Doctor) => void }) {
     <section className="set-group hc">
       <div className="set-row">
         <div className="set-lab">
-          <b>{c.label}</b> <span className={c.status === "bad" ? "bad sm" : "muted sm"}>{WORD[c.status]}</span>
+          <b>{c.label}</b> <span className={c.status === "bad" ? "bad sm" : c.status === "ok" ? "ok sm" : "muted sm"}>{WORD[c.status]}</span>
           <div className="hint">{c.detail}</div>
         </div>
         <div className="set-ctl">
