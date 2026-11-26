@@ -371,8 +371,12 @@ func Apply(d Doc, a Answers) Doc {
 		if a.AfterCards != nil && !w.afterSkip {
 			d = applyAfterCards(d, w, a.AfterCards)
 		}
-		d = applyFails(d, w.by[TypeConvert], a.ConvertFails)
-		d = applyFails(d, w.by[TypeVerify], a.CheckFails)
+		if !w.convertFailSkip { // an error link the questions can't show is kept as it is, even when sent
+			d = applyFails(d, w.by[TypeConvert], a.ConvertFails)
+		}
+		if !w.checkFailSkip {
+			d = applyFails(d, w.by[TypeVerify], a.CheckFails)
+		}
 		if a.Variables != nil {
 			d.Variables = clone(a.Variables)
 		}
@@ -585,17 +589,19 @@ type walked struct {
 	afterCards  []Card            // the cards after the save (Advanced)
 	convertFail *Fails
 	checkFail   *Fails
-	advancedWhy string   // set when the Advanced flow can't show some stretch of the workflow
-	hard        bool     // set when neither flow can read the main path: nothing is changed
-	afterSkip   bool     // the stretch after the save can't be read: Apply keeps it as it is
-	unread      []string // the steps whose stretches the questions can't show, in order
-	check       string   // the guide's own "Check the file", or "" (Basic)
-	checkEnd    string   // its "Leave the file alone"
-	after       []Node   // the guide's cards after the save, in order (Basic)
-	afterTail   string   // what follows them (a step Basic doesn't show), or ""
-	extra       []string
-	nodes       []Node // the main path, in order
-	why         string // set when Basic can't read the workflow
+	// the error link of the conversion or the check can't be read: Apply keeps it as it is
+	convertFailSkip, checkFailSkip bool
+	advancedWhy                    string   // set when the Advanced flow can't show some stretch of the workflow
+	hard                           bool     // set when neither flow can read the main path: nothing is changed
+	afterSkip                      bool     // the stretch after the save can't be read: Apply keeps it as it is
+	unread                         []string // the steps whose stretches the questions can't show, in order
+	check                          string   // the guide's own "Check the file", or "" (Basic)
+	checkEnd                       string   // its "Leave the file alone"
+	after                          []Node   // the guide's cards after the save, in order (Basic)
+	afterTail                      string   // what follows them (a step Basic doesn't show), or ""
+	extra                          []string
+	nodes                          []Node // the main path, in order
+	why                            string // set when Basic can't read the workflow
 }
 
 // walk reads the workflow once: the stretch in front, the Shrink videos steps, the stretch after the
@@ -686,6 +692,11 @@ func walk(d Doc) (walked, bool) {
 		f, why := readFails(l, l.byID[w.by[typ]])
 		if why != "" {
 			w.skip(nodeName(l.byID[w.by[typ]]), why)
+			if typ == TypeConvert {
+				w.convertFailSkip = true
+			} else {
+				w.checkFailSkip = true
+			}
 		} else if typ == TypeConvert {
 			w.convertFail = f
 		} else {

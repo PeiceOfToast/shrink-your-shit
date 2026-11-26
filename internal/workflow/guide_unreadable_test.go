@@ -131,3 +131,53 @@ func inOf(d Doc, id string) []Edge {
 	}
 	return in
 }
+
+// The owned card of the after-save stretch is followed by a hand-made check whose two sides join a hand-made step.
+// A Basic save the web sends (no before, no after cards) with notify off keeps the card the questions name as
+// unreadable.
+func TestGuideBasicSaveKeepsAnOwnedCardBeforeAJoin(t *testing.T) {
+	a := DefaultAnswers(GoalSmaller)
+	a.After = After{Notify: true}
+	d := Build(a)
+	n := nodeOf(d, TypeNotify)
+	chk := node(TypeCheckName, "", map[string]any{"pattern": "x"})
+	join := node(TypeNotify, "Join", map[string]any{"kind": "good", "text": "joined"})
+	d.Nodes = append(d.Nodes, chk, join)
+	d.Edges = append(d.Edges, link(n.ID, "success", chk.ID), link(chk.ID, "match", join.ID), link(chk.ID, "else", join.ID))
+	if g := GuideOf(d); !slices.Equal(g.Unreadable, []string{nodeName(n)}) {
+		t.Fatalf("unreadable %v", g.Unreadable)
+	}
+	basic := DefaultAnswers(GoalSmaller)
+	basic.Flow = FlowBasic
+	got := Apply(d, basic)
+	if nodeByIDOf(got, n.ID).ID == "" {
+		t.Fatalf("the notification the questions can't show was deleted by a Basic save")
+	}
+	if mustJSON(nodeByIDOf(got, n.ID)) != mustJSON(nodeByIDOf(d, n.ID)) {
+		t.Errorf("the notification changed on a Basic save")
+	}
+}
+
+// A sent error link (the Advanced flow's convertFails) does not replace a convert error link the questions can't
+// show: the link and its end step are the same bytes after the save.
+func TestGuideSentFailsKeepAnErrorLinkItCantShow(t *testing.T) {
+	d := Build(DefaultAnswers(GoalSmaller))
+	conv := nodeOf(d, TypeConvert)
+	second := node(TypeConvert, "Second try", map[string]any{"quality": 1, "format": "hevc", "resolution": "keep", "maxBitrate": "none", "speed": "normal"})
+	d.Nodes = append(d.Nodes, second)
+	d.Edges = append(d.Edges, link(conv.ID, "error", second.ID))
+	g := GuideOf(d)
+	if g.Answers == nil || !slices.Equal(g.Unreadable, []string{nodeName(conv)}) {
+		t.Fatalf("%+v", g)
+	}
+	a := *g.Answers
+	a.Flow = FlowAdvanced
+	a.ConvertFails = &Fails{End: "stop", Reason: "Stopped."}
+	got := Apply(d, a)
+	if mustJSON(outOf(got, conv.ID)) != mustJSON(outOf(d, conv.ID)) {
+		t.Errorf("the unreadable error link changed: %s", mustJSON(outOf(got, conv.ID)))
+	}
+	if nodeByIDOf(got, second.ID).ID == "" {
+		t.Errorf("the error link's step was deleted")
+	}
+}
