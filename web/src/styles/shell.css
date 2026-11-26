@@ -1027,6 +1027,8 @@ nav.tabs[aria-label="Settings sections"]>a{display:flex;align-items:center;justi
 .lcard.sel .pill,.lcard.sel .mchip{box-shadow:inset 0 0 0 1px var(--border-strong)}
 .lcard .lcheck{flex:none}
 .lcard .lmain{flex:1 1 auto;min-width:0;display:grid;gap:6px}
+/* a long unbroken path in a sentence (the health check note) breaks inside the card instead of being cut at its edge */
+.brk{overflow-wrap:anywhere}
 /* item 10 (fix 2b): the name is a flex row at every width, so the title (a flex item) can take an ellipsis before the pill */
 .lcard .lname{display:flex;align-items:baseline;gap:8px;min-width:0}
 .lcard .lname .ttl{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
