@@ -90,10 +90,10 @@ function StatusLine({ summary, ok }: { summary?: Summary; ok: boolean }) {
         queue <b>{s ? formatCount(s.queue) : "—"}</b>
       </Link>
       <span className="lg-only">
-        last done <b>{s?.lastDoneAt ? ago(s.lastDoneAt) : "—"}</b>
+        last done <b>{s ? (s.lastDoneAt ? ago(s.lastDoneAt) : "none yet") : "—"}</b>
       </span>
       <Link className="lg-only" to="/libraries">
-        next scan <b>{s ? (s.nextScanAt ? dayClock(s.nextScanAt) : "none scheduled") : "—"}</b>
+        next scan <b>{s ? (s.nextScanAt ? dayClock(s.nextScanAt) : "off") : "—"}</b>
       </Link>
       <Link className="lg-only" to="/settings/processing">
         disk free <b>{s ? formatBytes(s.diskFreeBytes) : "—"}</b>
