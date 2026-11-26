@@ -954,3 +954,18 @@ func modTime(t *testing.T, p string) int64 {
 	}
 	return st.ModTime().UnixNano()
 }
+
+// NAS system folders are skipped by exact name, in any case: Synology's #recycle and #snapshot and QNAP's
+// @recycle. A name that only contains one of them is media's folder, and is scanned.
+func TestSkipDirNASSystemFolders(t *testing.T) {
+	for _, name := range []string{"#Recycle", "@Recycle", "#SNAPSHOT", "#recycle", "@recycle", "#snapshot"} {
+		if !SkipDir(name) {
+			t.Errorf("%q must be skipped", name)
+		}
+	}
+	for _, name := range []string{"#recycled", "recycle", "snapshot", "my #recycle bin"} {
+		if SkipDir(name) {
+			t.Errorf("%q must be scanned", name)
+		}
+	}
+}
