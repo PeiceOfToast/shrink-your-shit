@@ -399,7 +399,8 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
             </div></div>}
           </div>
         </details>
-        {said && <p className="hint" role="status">{said}</p>}
+        {/* always mounted, so the live region exists before its first message; visually hidden while empty */}
+        <p className={said ? "hint" : "sr"} role="status">{said}</p>
         <p className="hint">Every video not already in this format is converted, even if the new file isn't smaller, so your library ends up in one format. Jobs shows the size before and after.</p>
       </div>);
   }
