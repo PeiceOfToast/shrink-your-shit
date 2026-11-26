@@ -431,12 +431,16 @@ func TestDeleteLibraryLeavesNothingHalfDone(t *testing.T) {
 	a.FailDelay = 0
 	var mu sync.Mutex
 	inSwap := map[int64]bool{} // its worker cannot be stopped any more
+	held, heldOnce := make(chan struct{}), sync.Once{}
 	srv := httptest.NewServer(Handler(st, a, Engine{RequeueJob: func(id int64) {
 		mu.Lock()
 		defer mu.Unlock()
-		if !inSwap[id] {
-			st.Release(id) // as the worker does: back in the queue, original untouched
+		if inSwap[id] {
+			// the delete is running and has reached the job it must wait for
+			heldOnce.Do(func() { close(held) })
+			return
 		}
+		st.Release(id) // as the worker does: back in the queue, original untouched
 	}}))
 	defer srv.Close()
 	defer func(d time.Duration) { libraryStopWait = d }(libraryStopWait)
@@ -465,7 +469,11 @@ func TestDeleteLibraryLeavesNothingHalfDone(t *testing.T) {
 	mu.Unlock()
 	done := make(chan time.Time, 1)
 	go func() {
-		time.Sleep(300 * time.Millisecond)
+		select {
+		case <-held:
+		case <-time.After(30 * time.Second):
+			t.Error("the delete never reached the job it must wait for")
+		}
 		// meanwhile a scan or Start cannot reopen it, and nothing of it is claimed
 		if err := st.StartLibrary(l.ID); err != jobs.ErrLibraryBusy {
 			t.Errorf("started during delete: %v", err)
