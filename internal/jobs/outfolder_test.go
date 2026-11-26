@@ -53,16 +53,16 @@ func TestOutputFolderOverride(t *testing.T) {
 	s := open(t)
 	lib, _ := s.AddLibrary("Movies", filepath.Join(t.TempDir(), "movies"), rules.SliderTemplate(3), true)
 	os.MkdirAll(lib.Path, 0o755)
-	if dir, p, err := s.OutputFolder(lib.ID, lib.Path); err != nil || p != nil || dir != lib.Path+" (shrunk)" {
-		t.Fatalf("default %q %+v %v", dir, p, err)
+	if dir, fromOverride, p, err := s.OutputFolder(lib.ID, lib.Path); err != nil || p != nil || fromOverride || dir != lib.Path+" (shrunk)" {
+		t.Fatalf("default %q override %v %+v %v", dir, fromOverride, p, err)
 	}
 	own := t.TempDir()
 	s.SetOverrideFolder(lib.ID, own)
-	if dir, _, _ := s.OutputFolder(lib.ID, lib.Path); dir != own {
-		t.Errorf("override %q", dir)
+	if dir, fromOverride, _, _ := s.OutputFolder(lib.ID, lib.Path); dir != own || !fromOverride {
+		t.Errorf("override %q from override %v", dir, fromOverride)
 	}
 	s.SetOverrideFolder(lib.ID, "")
-	if dir, _, _ := s.OutputFolder(lib.ID, lib.Path); dir != lib.Path+" (shrunk)" {
+	if dir, _, _, _ := s.OutputFolder(lib.ID, lib.Path); dir != lib.Path+" (shrunk)" {
 		t.Errorf("back to the default %q", dir)
 	}
 	if err := s.SetOverrideFolder(999, own); err != ErrNotFound {

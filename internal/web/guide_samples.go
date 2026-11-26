@@ -70,8 +70,8 @@ func guideSamples(store *jobs.Store, prev *preview.Previewer, lib jobs.Library, 
 	dest := preview.Destination{Library: lib.Name}
 	if folder, problem := libraryFolder(t, lib); problem != nil {
 		dest.Problem = problem.Message
-	} else if strings.Contains(folder, "{{") {
-		dest.Pattern = folder // filled per file, as the worker fills it
+	} else if strings.Contains(folder, "{{") && (lib.OverrideFolder != "" || t.Selectors.FolderMode != rules.NextToLibrary) {
+		dest.Pattern = folder // filled per file, as the worker fills it (the default folder beside a library is literal)
 	} else {
 		dest.Folder = folder
 	}
