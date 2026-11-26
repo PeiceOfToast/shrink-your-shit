@@ -26,13 +26,13 @@ button.search{background:none;border:1px solid var(--border);color:var(--text2);
 .palette-list{list-style:none;margin:0;padding:6px;max-height:50vh;overflow:auto}
 .palette-list button{width:100%;display:flex;justify-content:space-between;background:none;border:0;color:var(--text);padding:8px 10px;border-radius:4px;font:inherit;font-size:13.5px;cursor:pointer;text-align:left}
 .palette-list button:hover,.palette-list button:focus-visible{background:var(--raised)}
-.dev-states{position:fixed;right:12px;bottom:12px;z-index:20;display:flex;gap:4px;align-items:center;background:var(--raised);border:1px solid var(--border);border-radius:4px;padding:6px}
+.dev-chip{position:fixed;left:12px;bottom:12px;z-index:20;background:var(--raised);border:1px solid var(--border);border-radius:4px;padding:4px 8px}
+.dev-states{position:fixed;left:12px;bottom:12px;max-width:calc(100vw - 24px);flex-wrap:wrap;z-index:20;display:flex;gap:4px;align-items:center;background:var(--raised);border:1px solid var(--border);border-radius:4px;padding:6px}
 @media (max-width:900px){
   .topbar .menu{display:none}
   .statusbar .lg-only{display:none}
   .statusbar.open .lg-only{display:inline}
   .statusbar{cursor:pointer}
-  .dev-states{left:12px;right:12px;flex-wrap:wrap}
 }
 
 /* Dashboard error state: the Workers switch and Scan all are disabled. Muted tones, no opacity. */
