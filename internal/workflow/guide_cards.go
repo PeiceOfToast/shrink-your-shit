@@ -263,6 +263,9 @@ func readAfter(l links, id string, onPath map[string]bool) ([]Card, string) {
 // readFails reads what a converting step does when it doesn't work: its error link to an end, or its
 // own choice. why: it falls back to another conversion, which the questions can't show.
 func readFails(l links, n Node) (*Fails, string) {
+	if l.fan[[2]string{n.ID, "error"}] > 1 { // a second error link is hand-made: the questions read only the first, so the rest would be lost
+		return nil, "when '" + nodeName(n) + "' doesn't work the file goes to other steps that convert"
+	}
 	if t, ok := l.next(n.ID, "error"); ok {
 		switch t.Type {
 		case TypeEnd:
