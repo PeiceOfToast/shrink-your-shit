@@ -39,7 +39,7 @@ var pidAlive = func(pid int) bool {
 	}
 	p, err := os.FindProcess(pid)
 	if err != nil {
-		return errors.Is(err, fs.ErrPermission)
+		return existsDespite(err)
 	}
 	defer p.Release()
 	if runtime.GOOS == "windows" {
@@ -48,6 +48,10 @@ var pidAlive = func(pid int) bool {
 	err = p.Signal(syscall.Signal(0))
 	return err == nil || errors.Is(err, syscall.EPERM)
 }
+
+// existsDespite reports whether a FindProcess error still means the process exists: access denied (Windows
+// ERROR_ACCESS_DENIED maps to fs.ErrPermission). Any other error, such as no such process, means it is gone.
+func existsDespite(err error) bool { return errors.Is(err, fs.ErrPermission) }
 
 func pendingPath(dataDir string) string { return filepath.Join(dataDir, updateDir, pendingFile) }
 
@@ -93,7 +97,7 @@ func RecoverPending(dataDir, running string, now time.Time) error {
 		return nil
 	}
 	if pidAlive(p.Watcher) && now.Sub(p.At) < watchMaxLife {
-		log.Printf("update to %s is still running under its watcher (pid %d); leaving it to finish", p.To, p.Watcher)
+		log.Printf("update to %s may still be running: its watcher's process (pid %d) is alive and the record is recent; leaving it to finish", p.To, p.Watcher)
 		return nil
 	}
 	m := ReadMarker(dataDir)
