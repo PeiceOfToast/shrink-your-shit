@@ -196,9 +196,9 @@ export function Jobs() {
       <PageHead icon="i-jobs" title="Jobs" sub="Every file the workers look at: waiting, converting, done, skipped and failed.">
         {!firstRun && selectOnTab(tab) && <button className="btn sm ghost" type="button" aria-pressed={selecting} onClick={() => (selecting && setSel([]), setSelecting(!selecting))}>{selecting ? "Done" : "Select"}</button>}
       </PageHead>
-      {off && <p className="st warn" role="status"><Icon id="i-alert" /><span>{off === "offline"
+      <p className={off ? "st warn" : "sr"} role="status">{off && <><Icon id="i-alert" /><span>{off === "offline"
         ? <>No worker is connected. <Link to="/workers">See Workers.</Link></>
-        : <>No worker is running. <Link to="/workers">Turn workers on.</Link></>}</span></p>}
+        : <>No worker is running. <Link to="/workers">Turn workers on.</Link></>}</span></>}</p>
       {/* one library filter: the pressed button in the filter row says which library; the chip is only for an id the list lacks (so it can still be cleared) */}
       {library && libs.data && !libs.data.some((l) => l.id === library) && <div className="row" style={{ gap: 6 }}><span className="mchip">Library: {library}
         <button className="btn sm icon ghost" type="button" aria-label="Clear the library filter" onClick={() => navigate(query(tab, ""))}><Icon id="i-x" /></button></span></div>}

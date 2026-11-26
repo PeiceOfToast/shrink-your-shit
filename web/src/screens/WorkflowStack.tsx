@@ -314,7 +314,7 @@ export function Options({ n, set, issues }: { n: Node; set: (k: string, v: unkno
             {(q || vbr) && sel && <div className="stack">
               <fieldset disabled={vbr} aria-describedby={vbr ? n.id + "-vbrq" : undefined} style={{ border: 0, padding: 0, margin: 0, minWidth: 0, color: vbr ? "var(--text-2)" : undefined }}>{field("quality")}</fieldset>
               {vbr && <p className="hint" id={n.id + "-vbrq"}>VBR sizes the file by bitrate, so Quality isn't used.</p>}</div>}
-            {av1 && sel && <p className="hint" role="status">AV1 can only use Quality only. Pick HEVC or H.264 to set a bitrate.</p>}
+            <p className={av1 && sel ? "hint" : "sr"} role="status">{av1 && sel && "AV1 can only use Quality only. Pick HEVC or H.264 to set a bitrate."}</p>
             <fieldset className="field choice stack"><legend className="lab">Bitrate</legend>
               <label className="radio" style={{ alignItems: "flex-start" }}><input type="radio" name={n.id + "-rc"} checked={rc === "level"} disabled={av1} onChange={() => put("rateControl", "level")} />
                 <span><strong>Bitrate level</strong><span className="hint" style={{ display: "block" }}>Aims for the level's bitrate for each file's resolution.</span></span></label>

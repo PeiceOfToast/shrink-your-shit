@@ -310,11 +310,11 @@ export function SafetySettings() {
                 {t.files ? `Empty trash now: ${plural(t.files, "file", "files")}, ${bytes(t.bytes)}` : "Empty trash now"}</button>}
             </SettingRow>
             {purgeSaid && <p className="st bad" role="alert" style={{ margin: "0 16px 12px" }}><Icon id="i-alert" /><span>{purgeSaid}</span></p>}
-            {gone && <div aria-live="polite" className="stack" style={{ gap: 6, padding: "0 16px 12px" }}>
-              <p ref={freed} tabIndex={-1} className={gone.deletedFiles ? "st ok" : "st warn"} style={{ margin: 0 }}><Icon id={gone.deletedFiles ? "i-check-c" : "i-alert"} /><span>{gone.deletedFiles ? `Freed ${bytes(gone.freedBytes)} (${plural(gone.deletedFiles, "file", "files")}).` : "Nothing was deleted."}</span></p>
-              {gone.skipped.map((s, i) => <p key={i} className="st warn" style={{ margin: 0 }}><Icon id="i-alert" /><span>{`${s.library} was skipped. ${s.reason}`}</span></p>)}
-              {forgotSaid && <p role="status" className="st" style={{ margin: 0 }}><span>{forgotSaid}</span></p>}
-              {unreach && <div className="stack" style={{ gap: 8 }}>
+            <div aria-live="polite" className="stack" style={gone ? { gap: 6, padding: "0 16px 12px" } : undefined}>{/* always mounted, so the message is announced; takes no space while idle */}
+              {gone && <p ref={freed} tabIndex={-1} className={gone.deletedFiles ? "st ok" : "st warn"} style={{ margin: 0 }}><Icon id={gone.deletedFiles ? "i-check-c" : "i-alert"} /><span>{gone.deletedFiles ? `Freed ${bytes(gone.freedBytes)} (${plural(gone.deletedFiles, "file", "files")}).` : "Nothing was deleted."}</span></p>}
+              {gone && gone.skipped.map((s, i) => <p key={i} className="st warn" style={{ margin: 0 }}><Icon id="i-alert" /><span>{`${s.library} was skipped. ${s.reason}`}</span></p>)}
+              <p role="status" className={gone && forgotSaid ? "st" : "sr"} style={{ margin: 0 }}>{gone && forgotSaid && <span>{forgotSaid}</span>}</p>
+              {gone && unreach && <div className="stack" style={{ gap: 8 }}>
                 <p ref={unreachLine} tabIndex={-1} className="st warn" style={{ margin: 0 }}><Icon id="i-alert" /><span>{unreach.length ? unreachableLine(unreach.length) : "Every original that couldn't be deleted has been forgotten."}</span></p>
                 {unreach.length > 0 && <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 8 }}>
                   {unreach.map((u, i) => <li key={u.id} style={{ display: "flex", flexWrap: "wrap", gap: "8px 11px", alignItems: "center", justifyContent: "space-between", borderTop: "1px solid var(--line, #ddd)", paddingTop: 8 }}>
@@ -327,7 +327,7 @@ export function SafetySettings() {
                   </li>)}
                 </ul>}
               </div>}
-            </div>}
+            </div>
           </div>
         </section>
         <Commands settings={st} />
@@ -413,7 +413,7 @@ async function copyText(t: string): Promise<boolean> {
 function Copy({ t }: { t: string }) {
   const [said, setSaid] = useState("");
   return (<><div className="codebox"><code>{t}</code><button className="btn sm" type="button" onClick={async () => setSaid((await copyText(t)) ? "Copied." : "Select the command and copy it.")}><Icon id="i-copy" />Copy</button></div>
-    {said && <span className="hint" role="status">{said}</span>}</>);
+    <span className={said ? "hint" : "sr"} role="status">{said}</span></>);
 }
 function Install({ d, reload, check }: { d: UpdateNotice; reload: () => void; check: () => void }) {
   const jobs = useData(getConverting, []), [busy, setBusy] = useState(false), [said, setSaid] = useState(""), [gone, setGone] = useState(false), [late, setLate] = useState(false), [noNew, setNoNew] = useState(false), [rbFail, setRbFail] = useState("");
@@ -481,7 +481,7 @@ function Install({ d, reload, check }: { d: UpdateNotice; reload: () => void; ch
       : d.installType === "source" ? <p style={{ margin: 0 }}>Built from source: pull and build again.</p> : null)}
     {rbFail && <p className="st warn" role="alert" style={{ margin: 0, alignItems: "flex-start" }}><Icon id="i-alert" /><span>Couldn't roll back: <span style={{ fontWeight: 400, color: "var(--text)" }}>{rbFail}</span></span></p>}
     {said && <p className="st warn" role="alert" style={{ margin: 0 }}><Icon id="i-alert" /><span>{said}{noNew && <> <button className="linkbtn" type="button" onClick={() => (setSaid(""), setNoNew(false), check())}>Check now</button></>}</span></p>}
-    {cancelled && <p className="st ok" role="status" style={{ margin: 0 }}><Icon id="i-check-c" /><span>Update cancelled.</span></p>}
+    <p className={cancelled ? "st ok" : "sr"} role="status" style={{ margin: 0 }}>{cancelled && <><Icon id="i-check-c" /><span>Update cancelled.</span></>}</p>
     {cancelAsk && <Confirm title={`Cancel the update to ${to}?`} yes="Cancel update" no="Keep waiting" busy={busy} onYes={cancel}
       onNo={() => (setCancelAsk(false), cancelBtn.current?.focus())} body="Nothing is installed, and workers start again if the update paused them." />}
     {d.method === "helper" && st === "idle" && d.rollback.available && !gone && !rolling &&
