@@ -115,6 +115,9 @@ type Guide struct {
 	Why         string   `json:"why,omitempty"` // coverage none: what Basic can't show, so the workflow opens in Advanced
 	Advanced    string   `json:"advanced"`      // the Advanced flow's coverage: full or none
 	AdvancedWhy string   `json:"advancedWhy,omitempty"`
+	// Unreadable names the steps whose stretches the questions can't show (Advanced): those stretches are
+	// kept as they are, and the rest of the workflow is answered.
+	Unreadable []string `json:"unreadable"`
 }
 
 // DefaultAnswers are the answers a goal chooses. Every default keeps the original and asks for nothing
@@ -294,7 +297,9 @@ func Apply(d Doc, a Answers) Doc {
 	a = Fill(a)
 	w, ok := walk(d)
 	lists := a.Flow == FlowAdvanced || (a.Flow == "" && (a.Before != nil || a.AfterCards != nil))
-	if (!ok && w.advancedWhy != "") || (lists && w.advancedWhy != "") { // no flow can read it: nothing changes
+	// the main path can't be read, or the Basic flow can't and the Advanced lists weren't asked for: nothing
+	// changes. Stretches the Advanced flow can't show are kept as they are (w.unread), the rest is written.
+	if w.hard || (!ok && !lists && w.advancedWhy != "") {
 		return d
 	}
 	orig := d
@@ -363,7 +368,7 @@ func Apply(d Doc, a Answers) Doc {
 		if a.Before != nil {
 			d = applyBefore(d, w, a.Before)
 		}
-		if a.AfterCards != nil {
+		if a.AfterCards != nil && !w.afterSkip {
 			d = applyAfterCards(d, w, a.AfterCards)
 		}
 		d = applyFails(d, w.by[TypeConvert], a.ConvertFails)
@@ -578,11 +583,14 @@ type walked struct {
 	afterCards  []Card            // the cards after the save (Advanced)
 	convertFail *Fails
 	checkFail   *Fails
-	advancedWhy string // set when the Advanced flow can't show the workflow either
-	check       string // the guide's own "Check the file", or "" (Basic)
-	checkEnd    string // its "Leave the file alone"
-	after       []Node // the guide's cards after the save, in order (Basic)
-	afterTail   string // what follows them (a step Basic doesn't show), or ""
+	advancedWhy string   // set when the Advanced flow can't show some stretch of the workflow
+	hard        bool     // set when neither flow can read the main path: nothing is changed
+	afterSkip   bool     // the stretch after the save can't be read: Apply keeps it as it is
+	unread      []string // the steps whose stretches the questions can't show, in order
+	check       string   // the guide's own "Check the file", or "" (Basic)
+	checkEnd    string   // its "Leave the file alone"
+	after       []Node   // the guide's cards after the save, in order (Basic)
+	afterTail   string   // what follows them (a step Basic doesn't show), or ""
 	extra       []string
 	nodes       []Node // the main path, in order
 	why         string // set when Basic can't read the workflow
@@ -675,7 +683,7 @@ func walk(d Doc) (walked, bool) {
 	for _, typ := range []string{TypeConvert, TypeVerify} {
 		f, why := readFails(l, l.byID[w.by[typ]])
 		if why != "" {
-			w.advancedWhy = why
+			w.skip(nodeName(l.byID[w.by[typ]]), why)
 		} else if typ == TypeConvert {
 			w.convertFail = f
 		} else {
@@ -685,10 +693,16 @@ func walk(d Doc) (walked, bool) {
 	// after the save: every card (Advanced); Basic owns one of each of its kinds, without links off other
 	// ports (review-715 P2-2), then anything else
 	afterCards, why := readAfter(l, cur, map[string]bool{})
-	if why != "" && w.advancedWhy == "" {
-		w.advancedWhy = why
+	if why != "" { // the whole stretch from the save on is kept as it is
+		w.afterSkip = true
+		name := ""
+		if n, ok := l.byID[cur]; ok {
+			name = nodeName(n)
+		}
+		w.skip(name, why)
+	} else {
+		w.afterCards = afterCards
 	}
-	w.afterCards = afterCards
 	ownedKinds := map[string]bool{}
 	for id := cur; id != ""; {
 		n, ok := l.byID[id]
@@ -725,8 +739,19 @@ func linkedElsewhere(d Doc, id string) bool {
 
 // fail is a verdict both flows share: neither can read the workflow.
 func (w walked) fail(why string) (walked, bool) {
-	w.why, w.advancedWhy = why, why
+	w.why, w.advancedWhy, w.hard = why, why, true
 	return w, false
+}
+
+// skip records a stretch the questions can't show: the workflow still opens and the rest is answered; the
+// stretch is kept as it is. name is the step it starts at, or "" when there is none.
+func (w *walked) skip(name, why string) {
+	if w.advancedWhy == "" {
+		w.advancedWhy = why
+	}
+	if name != "" {
+		w.unread = append(w.unread, name)
+	}
 }
 
 // ownedCheck says n has only the guide's conditions set, as numbers: a {{variable}} there is the steps'
@@ -780,9 +805,9 @@ func ownedCheck(n Node) bool {
 // when neither can show the workflow.
 func GuideOf(d Doc) Guide {
 	w, ok := walk(d)
-	if !ok && w.advancedWhy != "" {
-		return Guide{Coverage: CoverageNone, Extra: []string{}, Why: "Basic can't show this workflow: " + w.why + ".",
-			Advanced: CoverageNone, AdvancedWhy: "The questions can't show this workflow: " + w.advancedWhy + "."}
+	if w.hard {
+		return Guide{Coverage: CoverageNone, Extra: []string{}, Unreadable: []string{}, Why: "Basic can't show this workflow: " + w.why + ".",
+			Advanced: CoverageNone, AdvancedWhy: "The questions can't show this workflow: " + w.why + "."}
 	}
 	byID := map[string]Node{}
 	for _, n := range d.Nodes {
@@ -835,13 +860,16 @@ func GuideOf(d Doc) Guide {
 			a.More[typ] = more
 		}
 	}
-	g := Guide{Coverage: CoverageFull, Extra: orEmpty(w.extra), Advanced: CoverageFull}
-	if w.advancedWhy == "" { // the Advanced lists
-		a.Before, a.AfterCards = orEmptyCards(w.before), orEmptyCards(w.afterCards)
-		a.ConvertFails, a.CheckFails = w.convertFail, w.checkFail
-		a.Variables = orEmptyVars(d.Variables)
-	} else {
-		g.Advanced, g.AdvancedWhy = CoverageNone, "The questions can't show this workflow: "+w.advancedWhy+"."
+	// the Advanced lists hold the readable parts; a stretch they can't show is left out (nil) and kept by Apply
+	g := Guide{Coverage: CoverageFull, Extra: orEmpty(w.extra), Advanced: CoverageFull, Unreadable: orEmpty(w.unread)}
+	a.Before = orEmptyCards(w.before)
+	if !w.afterSkip {
+		a.AfterCards = orEmptyCards(w.afterCards)
+	}
+	a.ConvertFails, a.CheckFails = w.convertFail, w.checkFail
+	a.Variables = orEmptyVars(d.Variables)
+	if w.advancedWhy != "" {
+		g.Advanced, g.AdvancedWhy = CoverageNone, "The questions can't show part of this workflow: "+w.advancedWhy+"."
 	}
 	g.Answers = ptr(a)
 	switch {
@@ -884,8 +912,8 @@ func guideCodes(v any) []string {
 
 // Steps are the main path's step names, in order, for the preview.
 func Steps(d Doc) []string {
-	w, ok := walk(d)
-	if !ok && w.advancedWhy != "" {
+	w, _ := walk(d)
+	if w.hard {
 		return []string{}
 	}
 	out := make([]string, 0, len(w.nodes))

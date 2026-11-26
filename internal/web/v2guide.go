@@ -105,7 +105,7 @@ func v2Guide(api *http.ServeMux, store *jobs.Store, svc *integrations.Service, n
 		// rewrite what it doesn't see; Advanced refuses only what no questions can show
 		g := workflow.GuideOf(cur.Doc)
 		switch {
-		case g.Advanced == workflow.CoverageNone:
+		case g.Answers == nil: // no readable main path; a stretch the questions can't show is kept as it is
 			writeErrorWith(w, http.StatusConflict, "not_guided", g.AdvancedWhy+" Nothing was changed.", map[string]any{"why": g.AdvancedWhy, "flow": workflow.FlowAdvanced})
 			return
 		case in.Answers.Flow != workflow.FlowAdvanced && g.Coverage == workflow.CoverageNone:

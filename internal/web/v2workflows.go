@@ -737,7 +737,7 @@ func guideTag(d workflow.Doc) (flow, tag string) {
 	switch {
 	case g.Coverage == workflow.CoverageFull && g.Answers != nil:
 		return "basic", "Basic · " + map[string]string{workflow.GoalSmaller: "Smaller files", workflow.GoalEveryDevice: "Plays everywhere", workflow.GoalBoth: "Small, plays on most"}[g.Answers.Goal]
-	case g.Advanced == workflow.CoverageFull:
+	case g.Answers != nil: // full, or partial: the readable parts open here; Unreadable names the rest
 		return "advanced", "Advanced"
 	}
 	return "custom", "Custom"
