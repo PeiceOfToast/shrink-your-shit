@@ -83,6 +83,8 @@ export function JobDetail({ id, initialTab }: { id: string; initialTab: "summary
   const [menu, setMenu] = useState(false);
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
+  // Phone width only: the actions after Retry collapse into a ⋯ menu.
+  const [more, setMore] = useState(false);
   const titleRef = useRef<HTMLHeadingElement>(null);
   const d = detail.data;
 
@@ -165,6 +167,7 @@ export function JobDetail({ id, initialTab }: { id: string; initialTab: "summary
             {state === "failed" && (
               <button type="button" className="btn sm" disabled={busy} onClick={() => act(() => api.runJobsAction("retry", [id]), "Queued to try again.")}>Retry</button>
             )}
+            <div className={`jd-more${more ? " open" : ""}`}>
             {(state === "done" || state === "skipped") && (
               <button type="button" className="btn sm" disabled={busy} onClick={() => setConfirm("again")}>Run again</button>
             )}
@@ -203,6 +206,10 @@ export function JobDetail({ id, initialTab }: { id: string; initialTab: "summary
             </span>
             <button type="button" className="btn ghost sm" disabled={!d} onClick={copyAll}>Copy all</button>
             <Link to="/workflows" className="btn ghost sm">Open in workflow</Link>
+            </div>
+            <button type="button" className="btn ghost sm jd-more-btn" aria-label="More actions" aria-expanded={more} onClick={() => setMore((m) => !m)}>
+              ⋯
+            </button>
           </div>
           <button type="button" className="btn ghost sm jd-close" aria-label="Close" onClick={close}>
             <Icon name="x" />

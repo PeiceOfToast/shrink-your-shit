@@ -399,6 +399,13 @@
 .jd-close {
   flex: none;
 }
+/* Desktop: the ⋯ menu is not used; its actions sit in the head row as before. */
+.jd-more {
+  display: contents;
+}
+.jd-more-btn {
+  display: none;
+}
 .jd-menu-wrap {
   position: relative;
 }
@@ -597,6 +604,85 @@
   .jd-search {
     flex: 1 1 100%;
     max-width: none;
+  }
+}
+
+/* Phone: head is two rows (name, state and X; then ‹ › Retry and ⋯), tabs scroll sideways on one row. */
+@media (max-width: 900px) {
+  .jd .ovh {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 6px 8px;
+  }
+  .jd-title {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .jd-state {
+    grid-column: 2;
+    grid-row: 1;
+    flex-wrap: nowrap;
+  }
+  .jd-state .sm {
+    display: none;
+  }
+  .jd-close {
+    grid-column: 3;
+    grid-row: 1;
+  }
+  .jd-acts {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    position: relative;
+    flex-wrap: nowrap;
+  }
+  .jd-more-btn {
+    display: inline-flex;
+    margin-left: auto;
+  }
+  .jd-more {
+    display: none;
+  }
+  .jd-more.open {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    z-index: 6;
+    min-width: 200px;
+    padding: 4px;
+    background: var(--raised);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+  }
+  .jd-more.open .btn {
+    justify-content: flex-start;
+  }
+  .jd-more .jd-menu-wrap {
+    display: flex;
+    flex-direction: column;
+  }
+  .jd-more .jd-menu {
+    position: static;
+    border: 0;
+    padding: 0;
+    background: none;
+  }
+  .jd .tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+  .jd .tabs button {
+    flex: none;
+    white-space: nowrap;
+  }
+  /* The dev state chip never sits over an open panel. */
+  body:has(.ov.panel) .dev-chip,
+  body:has(.ov.panel) .dev-states {
+    display: none;
   }
 }
 
