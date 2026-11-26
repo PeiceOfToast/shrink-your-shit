@@ -163,6 +163,38 @@ func (f FileFilter) settleFilters() (string, []any) {
 	return where, args
 }
 
+// inLibrarySQL is true for a files row (files.path) inside the folder of the libraries row l, whatever the
+// separator (Windows: review 43e6f66). The caller binds l.
+const inLibrarySQL = `substr(replace(files.path,'\','/'),1,length(rtrim(replace(l.path,'\','/'),'/'))+1)=rtrim(replace(l.path,'\','/'),'/')||'/'`
+
+// settlingAll is how many files are still changing: waiting to settle, not skipped (settleFilters' condition).
+func (s *Store) settlingAll() (int, error) {
+	var n int
+	err := s.reader().QueryRow(`SELECT COUNT(*) FROM files WHERE files.reason=? AND NOT `+convertedSQL, rules.SkipStillChanging).Scan(&n)
+	return n, err
+}
+
+// settlingByLibrary is how many files are still changing in each library, by the same folder rule as the
+// library filter (inLibrarySQL), so a library's waiting count adds its settling files like its jobs.
+func (s *Store) settlingByLibrary() (map[int64]int, error) {
+	rows, err := s.reader().Query(`SELECT l.id, COUNT(*) FROM libraries l JOIN files ON `+inLibrarySQL+`
+WHERE files.reason=? AND NOT `+convertedSQL+` GROUP BY l.id`, rules.SkipStillChanging)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64]int{}
+	for rows.Next() {
+		var id int64
+		var n int
+		if err := rows.Scan(&id, &n); err != nil {
+			return nil, err
+		}
+		out[id] = n
+	}
+	return out, rows.Err()
+}
+
 // fileFilters is base with f's reasons, time, library and name conditions on the files table.
 func (f FileFilter) fileFilters(base string) (string, []any) {
 	where, args := base, []any{}
@@ -176,9 +208,8 @@ func (f FileFilter) fileFilters(base string) (string, []any) {
 		where += ` AND files.decided_at>=?`
 		args = append(args, f.Since)
 	}
-	if f.LibraryID > 0 { // inside the library's folder, whatever the separator (Windows: review 43e6f66)
-		where += ` AND EXISTS (SELECT 1 FROM libraries l WHERE l.id=? AND
-  substr(replace(files.path,'\','/'),1,length(rtrim(replace(l.path,'\','/'),'/'))+1)=rtrim(replace(l.path,'\','/'),'/')||'/')`
+	if f.LibraryID > 0 {
+		where += ` AND EXISTS (SELECT 1 FROM libraries l WHERE l.id=? AND ` + inLibrarySQL + `)`
 		args = append(args, f.LibraryID)
 	}
 	if q := strings.TrimSpace(f.Q); q != "" {
