@@ -14,6 +14,7 @@ import { Icon } from "../ui/Icon.tsx";
 import { useKeys } from "../ui/useKeys.ts";
 import { Link, navigate, useLocation } from "../router.tsx";
 import { PILL } from "./Jobs.tsx";
+import { LEVEL_LABEL, copyText, saveText } from "./logParts.ts";
 
 // The job panel over the Jobs list (page 03). Opens at /jobs/:id; /jobs/:id/log opens the Log tab.
 type Tab = "summary" | "log" | "steps" | "before" | "history";
@@ -43,22 +44,12 @@ const LEVELS = [
 ] as const;
 type Level = (typeof LEVELS)[number]["key"];
 
-const LEVEL_LABEL: Record<LogLine["level"], string> = { info: "INFO", warn: "WARN", error: "ERROR", detail: "DETAIL" };
 const GROUPS: MediaRow["group"][] = ["General", "Video", "Audio", "Subtitles"];
 
 function fmtMs(ms: number | null): string {
   if (ms == null) return "—";
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`;
   return `${Math.floor(ms / 60_000)} min ${Math.round((ms % 60_000) / 1000)} s`;
-}
-
-async function copyText(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 // The text of the whole panel, for Copy all and the .txt download.
@@ -154,12 +145,7 @@ export function JobDetail({ id, initialTab }: { id: string; initialTab: "summary
 
   const downloadLog = () => {
     if (!d) return;
-    const url = URL.createObjectURL(new Blob([logText(d)], { type: "text/plain" }));
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `job-${d.job.id}-log.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
+    saveText(`job-${d.job.id}-log.txt`, logText(d));
   };
 
   const copyAll = async () => {

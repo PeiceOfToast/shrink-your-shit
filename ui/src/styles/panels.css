@@ -723,3 +723,104 @@
     overflow-wrap: anywhere;
   }
 }
+
+/* System log (page 12). Lines use the Job log's .log rows, with a source column. */
+.syslog-page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.syslog-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.syslog-check {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 13px;
+  color: var(--text2);
+}
+.syslog-link {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.syslog-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 16px 0;
+  color: var(--text2);
+}
+.syslog-list {
+  max-height: 70vh;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px 12px;
+}
+.syslog .ln {
+  grid-template-columns: 110px 58px 120px minmax(0, 1fr);
+  align-items: baseline;
+}
+.syslog .src {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text2);
+}
+.syslog .msg {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.syslog .rep,
+.syslog .rep-span {
+  color: var(--text2);
+}
+.syslog .copy {
+  opacity: 0;
+  margin-left: 8px;
+  vertical-align: baseline;
+}
+.syslog .ln:hover .copy,
+.syslog .copy:focus-visible {
+  opacity: 1;
+}
+.syslog-filters-toggle {
+  display: none;
+}
+
+@media (max-width: 600px) {
+  .syslog-filters-toggle {
+    display: inline-flex;
+  }
+  .syslog-filters:not(.open) {
+    display: none;
+  }
+  .syslog .ln {
+    display: flex;
+    flex-wrap: wrap;
+    column-gap: 10px;
+  }
+  .syslog .ln > .src {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .syslog .ln > :last-child {
+    flex-basis: 100%;
+  }
+  .syslog .copy {
+    opacity: 1;
+  }
+  .syslog-list {
+    max-height: 60vh;
+  }
+}

@@ -1,6 +1,6 @@
 import { ago, dayClock } from "../format/time.ts";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { api, formatBytes, formatCount, type Summary } from "../api/index.ts";
+import { api, formatBytes, formatCount, onSummaryChanged, type Summary } from "../api/index.ts";
 import { useApi } from "../api/useApi.ts";
 import { useConnectionOk } from "../api/connection.ts";
 import { Icon } from "../ui/Icon.tsx";
@@ -99,7 +99,7 @@ function StatusLine({ summary, ok }: { summary?: Summary; ok: boolean }) {
         disk free <b>{s ? formatBytes(s.diskFreeBytes) : "—"}</b>
       </Link>
       {s && s.newErrors > 0 && (
-        <Link className="lg-only" to="/settings/log">
+        <Link className="lg-only" to="/settings/log?level=error">
           {s.newErrors} new errors
         </Link>
       )}
@@ -120,10 +120,15 @@ export function Shell({ children }: { children: ReactNode }) {
   }, [theme]);
 
   // Settings' health check refreshes this summary after a fix or re-run, so the red dot clears at once.
+  // The System log reports when it has been opened, so the new-errors count clears at once.
   const reloadSummary = summary.reload;
   useEffect(() => {
     window.addEventListener("summary:refresh", reloadSummary);
-    return () => window.removeEventListener("summary:refresh", reloadSummary);
+    const offLog = onSummaryChanged(reloadSummary);
+    return () => {
+      window.removeEventListener("summary:refresh", reloadSummary);
+      offLog();
+    };
   }, [reloadSummary]);
 
   useEffect(() => {
