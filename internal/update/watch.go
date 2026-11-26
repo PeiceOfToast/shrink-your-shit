@@ -46,6 +46,8 @@ type Watcher struct {
 	RunSetup     func(setup string) error
 	Healthy      func(url string) bool
 	Logf         func(format string, args ...any)
+
+	resultUnsaved bool // set by fail when its result could not be written: the record must stay
 }
 
 // unsavedNote is what the watcher logs when it cannot save its result; the next start looks for it in watch.log.
@@ -53,9 +55,26 @@ const unsavedNote = "could not be saved"
 
 // Watch runs the update. It returns nil when a program is serving and will settle the marker itself (the new
 // one, or the previous one after a roll back). It returns an error only after writing a failed result.
+// The pending record is written before the app is stopped and cleared once a program is serving or the
+// failed result is saved. If that result cannot be saved, the record and the installers stay for the next start.
 func (w *Watcher) Watch() error {
-	defer os.Remove(w.NewSetup)
-	defer os.Remove(w.OldSetup)
+	if err := writePending(w.DataDir, pendingUpdate{From: w.From, To: w.To, NewSetup: w.NewSetup, OldSetup: w.OldSetup, At: time.Now().UTC()}); err != nil {
+		return w.fail(fmt.Sprintf("Update to %s not started: its record could not be saved (%v)", w.To, err))
+	}
+	err := w.run()
+	if w.resultUnsaved {
+		return err
+	}
+	if cerr := clearPending(w.DataDir); cerr != nil {
+		w.logf("the update record could not be cleared, so the installers are kept: %v", cerr)
+		return err
+	}
+	os.Remove(w.NewSetup)
+	os.Remove(w.OldSetup)
+	return err
+}
+
+func (w *Watcher) run() error {
 	started, startErr := w.AppStarted(w.PID)
 	if err := w.StopApp(w.PID); err != nil {
 		return w.fail(fmt.Sprintf("Update to %s not started: the running program could not be stopped (%v)", w.To, err))
@@ -111,6 +130,7 @@ func (w *Watcher) poll() time.Duration {
 func (w *Watcher) fail(msg string) error {
 	w.logf("%s", msg)
 	if err := WriteResult(w.DataDir, Result{OK: false, Kind: "update", From: w.From, To: w.To, Message: msg, At: time.Now().UTC()}); err != nil {
+		w.resultUnsaved = true
 		w.logf("the result above "+unsavedNote+", so the app shows a generic message at its next start: %v", err)
 		return err
 	}
