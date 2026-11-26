@@ -192,6 +192,9 @@ var bitmapSubCodecs = map[string]bool{
 	"dvb_teletext": true,
 }
 
+// IsBitmapSub is true for a picture subtitle (PGS, VobSub and the like), which is kept as pictures, not text.
+func (s Stream) IsBitmapSub() bool { return bitmapSubCodecs[s.Codec] }
+
 // MainVideoIndex is the position in Streams of the main picture: the first video stream that is not
 // cover art, or -1 when there is none. Video, MainVideoOrdinal, the headline ParseProbe reads and the
 // worker's picture count all take "the film" from here, so they cannot drift apart.

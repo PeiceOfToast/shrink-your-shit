@@ -317,11 +317,11 @@ func TestSampleInPlainWords(t *testing.T) {
 
 func TestFiles(t *testing.T) {
 	dir := library(t)
-	all, err := Files(dir, "")
+	all, err := Files(dir, "", false)
 	if err != nil || len(all) != 6 || all[0].Name != "a.mkv" || all[len(all)-1].Name != "sub/b.mp4" {
 		t.Fatalf("%v %+v", err, all)
 	}
-	if some, _ := Files(dir, "SUB"); len(some) != 1 || some[0].Path != filepath.Join(dir, "sub", "b.mp4") || some[0].Bytes != 2_000_000 {
+	if some, _ := Files(dir, "SUB", false); len(some) != 1 || some[0].Path != filepath.Join(dir, "sub", "b.mp4") || some[0].Bytes != 2_000_000 {
 		t.Errorf("%+v", some)
 	}
 }
@@ -429,5 +429,36 @@ func TestSampleSaysWhichSubtitlesStayInside(t *testing.T) {
 	}
 	if s := sample("subs.mkv", "keep_all"); strings.Contains(s, stay) {
 		t.Errorf("keep_all: %q", s)
+	}
+}
+
+// sort=newest lists the newest modified first (ties by path); the default is A to Z by path.
+func TestFilesNewestFirst(t *testing.T) {
+	dir := t.TempDir()
+	base := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
+	modified := map[string]time.Time{"a.mkv": base, "c.mkv": base.Add(time.Hour), "b.mkv": base.Add(2 * time.Hour)}
+	for _, n := range []string{"a.mkv", "c.mkv", "b.mkv"} {
+		write(t, filepath.Join(dir, n), 1000)
+		when := modified[n]
+		if err := os.Chtimes(filepath.Join(dir, n), when, when); err != nil {
+			t.Fatal(err)
+		}
+	}
+	names := func(newest bool) string {
+		got, err := Files(dir, "", newest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var s []string
+		for _, c := range got {
+			s = append(s, c.Name)
+		}
+		return strings.Join(s, ",")
+	}
+	if got := names(false); got != "a.mkv,b.mkv,c.mkv" {
+		t.Errorf("A to Z: %s", got)
+	}
+	if got := names(true); got != "b.mkv,c.mkv,a.mkv" {
+		t.Errorf("newest first: %s", got)
 	}
 }
