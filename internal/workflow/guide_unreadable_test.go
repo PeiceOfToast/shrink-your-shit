@@ -166,6 +166,122 @@ func TestGuideSentFailsKeepAnErrorLinkItCantShow(t *testing.T) {
 	second := node(TypeConvert, "Second try", map[string]any{"quality": 1, "format": "hevc", "resolution": "keep", "maxBitrate": "none", "speed": "normal"})
 	d.Nodes = append(d.Nodes, second)
 	d.Edges = append(d.Edges, link(conv.ID, "error", second.ID))
+	vfy := nodeOf(d, TypeVerify)
+	end := node(TypeEnd, "Done", map[string]any{})
+	d.Nodes = append(d.Nodes, end)
+	d.Edges = append(d.Edges, link(vfy.ID, "error", end.ID))
+	g := GuideOf(d)
+	if g.Answers == nil || !slices.Equal(g.Unreadable, []string{nodeName(conv)}) {
+		t.Fatalf("%+v", g)
+	}
+	a := *g.Answers
+	a.Flow = FlowAdvanced
+	a.ConvertFails = &Fails{End: "stop", Reason: "Stopped."}
+	a.CheckFails = &Fails{End: "stop", Reason: "Check stopped."}
+	got := Apply(d, a)
+	if mustJSON(outOf(got, conv.ID)) != mustJSON(outOf(d, conv.ID)) {
+		t.Errorf("the unreadable error link changed: %s", mustJSON(outOf(got, conv.ID)))
+	}
+	if nodeByIDOf(got, second.ID).ID == "" {
+		t.Errorf("the error link's step was deleted")
+	}
+	// a readable error link elsewhere (the check's) is still written: the skip is for this link only
+	if !errLinkTo(got, vfy.ID, TypeFail) {
+		t.Errorf("the readable check error link was not written")
+	}
+}
+
+// errLinkTo says the step's error link leads to a step of the given type.
+func errLinkTo(d Doc, id, typ string) bool {
+	for _, e := range outOf(d, id) {
+		if e.FromPort == "error" && nodeByIDOf(d, e.To).Type == typ {
+			return true
+		}
+	}
+	return false
+}
+
+// On the owned-card shape, a Basic answer that turns notify off (the read-back has it on) is refused by
+// ChangesUnreadable; the same answer with notify on, as read back, is not.
+func TestGuideBasicAfterThatChangesAnUnreadableStretchIsRefused(t *testing.T) {
+	a := DefaultAnswers(GoalSmaller)
+	a.After = After{Notify: true}
+	d := Build(a)
+	n := nodeOf(d, TypeNotify)
+	chk := node(TypeCheckName, "", map[string]any{"pattern": "x"})
+	join := node(TypeNotify, "Join", map[string]any{"kind": "good", "text": "joined"})
+	d.Nodes = append(d.Nodes, chk, join)
+	d.Edges = append(d.Edges, link(n.ID, "success", chk.ID), link(chk.ID, "match", join.ID), link(chk.ID, "else", join.ID))
+	basic := DefaultAnswers(GoalSmaller)
+	basic.Flow = FlowBasic
+	if !ChangesUnreadable(d, basic) {
+		t.Errorf("notify off on the owned-card shape: not refused")
+	}
+	basic.After = After{Notify: true}
+	if ChangesUnreadable(d, basic) {
+		t.Errorf("notify on, as read back: refused")
+	}
+	adv := basic
+	adv.Flow = FlowAdvanced
+	if ChangesUnreadable(d, adv) {
+		t.Errorf("an Advanced answer is never refused here")
+	}
+}
+
+// The after-save stretch starts at a link to a step that isn't in the workflow: the questions can't name that step,
+// so the notice names the stretch "the steps after Save", and a Basic answer that turns notify on is refused.
+func TestGuideDanglingAfterSaveLinkIsNamedAndRefusesNotify(t *testing.T) {
+	d := Build(DefaultAnswers(GoalSmaller))
+	commit := nodeOf(d, TypeCommit)
+	d.Edges = append(d.Edges, link(commit.ID, "success", "gone-step"))
+	g := GuideOf(d)
+	if !slices.Equal(g.Unreadable, []string{"the steps after Save"}) || g.AdvancedWhy == "" {
+		t.Fatalf("unreadable %v, advancedWhy %q", g.Unreadable, g.AdvancedWhy)
+	}
+	basic := DefaultAnswers(GoalSmaller)
+	basic.Flow = FlowBasic
+	basic.After = After{Notify: true}
+	if !ChangesUnreadable(d, basic) {
+		t.Errorf("notify on over a dangling after-save link: not refused")
+	}
+	if got := Apply(d, basic); mustJSON(got) != mustJSON(d) {
+		t.Errorf("Apply changed a workflow it refused")
+	}
+}
+
+// A check's error link the questions can't show (it leads to a notification) is kept as it is when a sent
+// CheckFails is applied.
+func TestGuideSentCheckFailsKeepAnErrorLinkItCantShow(t *testing.T) {
+	d := Build(DefaultAnswers(GoalSmaller))
+	vfy := nodeOf(d, TypeVerify)
+	note := node(TypeNotify, "Tell someone", map[string]any{"kind": "bad", "text": "check failed"})
+	d.Nodes = append(d.Nodes, note)
+	d.Edges = append(d.Edges, link(vfy.ID, "error", note.ID))
+	g := GuideOf(d)
+	if g.Answers == nil || !slices.Contains(g.Unreadable, nodeName(vfy)) {
+		t.Fatalf("%+v", g)
+	}
+	a := *g.Answers
+	a.Flow = FlowAdvanced
+	a.CheckFails = &Fails{End: "stop", Reason: "Check stopped."}
+	got := Apply(d, a)
+	if mustJSON(outOf(got, vfy.ID)) != mustJSON(outOf(d, vfy.ID)) {
+		t.Errorf("the unreadable check error link changed: %s", mustJSON(outOf(got, vfy.ID)))
+	}
+	if nodeByIDOf(got, note.ID).ID == "" {
+		t.Errorf("the check's error step was deleted")
+	}
+}
+
+// Two error links off one convert step: the questions read the first, so an Advanced save with ConvertFails
+// would drop the second. The step is named as unreadable, and both error links stay as they are.
+func TestGuideTwoErrorLinksOnAConvertAreUnreadable(t *testing.T) {
+	d := Build(DefaultAnswers(GoalSmaller))
+	conv := nodeOf(d, TypeConvert)
+	end := node(TypeEnd, "Done", map[string]any{})
+	other := node(TypeNotify, "Tell me", map[string]any{"kind": "good", "text": "failed"})
+	d.Nodes = append(d.Nodes, end, other)
+	d.Edges = append(d.Edges, link(conv.ID, "error", end.ID), link(conv.ID, "error", other.ID))
 	g := GuideOf(d)
 	if g.Answers == nil || !slices.Equal(g.Unreadable, []string{nodeName(conv)}) {
 		t.Fatalf("%+v", g)
@@ -175,9 +291,6 @@ func TestGuideSentFailsKeepAnErrorLinkItCantShow(t *testing.T) {
 	a.ConvertFails = &Fails{End: "stop", Reason: "Stopped."}
 	got := Apply(d, a)
 	if mustJSON(outOf(got, conv.ID)) != mustJSON(outOf(d, conv.ID)) {
-		t.Errorf("the unreadable error link changed: %s", mustJSON(outOf(got, conv.ID)))
-	}
-	if nodeByIDOf(got, second.ID).ID == "" {
-		t.Errorf("the error link's step was deleted")
+		t.Errorf("the error links changed: %s", mustJSON(outOf(got, conv.ID)))
 	}
 }

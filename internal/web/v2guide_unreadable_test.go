@@ -131,3 +131,69 @@ func mustJSON(v any) string {
 	b, _ := json.Marshal(v)
 	return string(b)
 }
+
+// A Basic save that would change the after-save stretch the questions can't show is refused with 409 not_guided
+// (flow basic) and nothing is saved; the same save with the stretch's own notify setting goes through.
+func TestGuidedBuilderRefusesABasicChangeToAnUnreadableStretch(t *testing.T) {
+	rules.SetAvailableFormats(map[string]bool{"libx265": true, "libx264": true, "aac": true})
+	defer rules.SetAvailableFormats(nil)
+	srv, st, _, _ := libServer(t, false)
+	send := func(method, path, body, ifMatch string) (int, string) {
+		t.Helper()
+		req, _ := http.NewRequest(method, srv.URL+path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		if ifMatch != "" {
+			req.Header.Set("If-Match", ifMatch)
+		}
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		b, _ := io.ReadAll(res.Body)
+		return res.StatusCode, string(b)
+	}
+	a := workflow.DefaultAnswers(workflow.GoalSmaller)
+	a.After = workflow.After{Notify: true}
+	d := workflow.Build(a)
+	n := findNode(t, d, workflow.TypeNotify)
+	chk := workflow.Node{ID: "chk-hand", Type: workflow.TypeCheckName, Enabled: true, Config: map[string]any{"pattern": "x"}}
+	join := workflow.Node{ID: "join-hand", Type: workflow.TypeNotify, Enabled: true, Config: map[string]any{"kind": "good", "text": "joined"}}
+	d.Nodes = append(d.Nodes, chk, join)
+	d.Edges = append(d.Edges, workflow.Edge{From: n.ID, FromPort: "success", To: chk.ID},
+		workflow.Edge{From: chk.ID, FromPort: "match", To: join.ID}, workflow.Edge{From: chk.ID, FromPort: "else", To: join.ID})
+	f, err := st.AddWorkflow("Notify then a hand-made check", d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := strconv.FormatInt(f.ID, 10)
+	_, body := send("GET", "/api/v2/workflows/"+id+"/draft", "", "")
+	var rev struct {
+		Etag string
+	}
+	if err := json.Unmarshal([]byte(body), &rev); err != nil {
+		t.Fatal(err)
+	}
+	before, _, err := st.Draft(f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	code, b := send("PUT", "/api/v2/workflows/"+id+"/answers",
+		`{"answers":{"flow":"basic","goal":"smaller","after":{"notify":false}}}`, rev.Etag)
+	if code != 409 || errCode(b) != "not_guided" || !strings.Contains(b, `"flow":"basic"`) {
+		t.Fatalf("notify off: %d %s", code, b)
+	}
+	after, _, err := st.Draft(f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mustJSON(after.Doc) != mustJSON(before.Doc) {
+		t.Errorf("the refused save changed the draft")
+	}
+
+	if code, b := send("PUT", "/api/v2/workflows/"+id+"/answers",
+		`{"answers":{"flow":"basic","goal":"smaller","after":{"notify":true}}}`, rev.Etag); code != 200 {
+		t.Errorf("notify on, as read back: %d %s", code, b)
+	}
+}

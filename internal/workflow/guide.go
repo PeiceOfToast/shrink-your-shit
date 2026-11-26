@@ -389,6 +389,20 @@ func Apply(d Doc, a Answers) Doc {
 	return inOrder(orig, d)
 }
 
+// ChangesUnreadable says a Basic answer would change the stretch after Save that the questions can't show: its
+// After is not the one the workflow reads back, so Apply would add or drop a card there. Such a save is refused
+// (nothing is saved) rather than written without the change. Advanced answers and anything Apply can keep are not.
+func ChangesUnreadable(d Doc, a Answers) bool {
+	a = Fill(a)
+	w, ok := walk(d)
+	lists := a.Flow == FlowAdvanced || (a.Flow == "" && (a.Before != nil || a.AfterCards != nil))
+	if !ok || w.hard || lists || !w.afterSkip {
+		return false
+	}
+	g := GuideOf(d)
+	return g.Answers != nil && g.Answers.After != a.After
+}
+
 // inOrder keeps the steps and links that were there in their old places, new ones after them, so
 // re-applying unchanged answers changes no bytes (QA-716).
 func inOrder(orig, d Doc) Doc {
