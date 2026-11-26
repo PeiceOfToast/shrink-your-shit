@@ -48,9 +48,9 @@ func waitDone(t *testing.T, done chan struct{}) {
 	waitDoneWithin(t, done, 10*time.Second)
 }
 
-// waitDoneWithin is waitDone with its own bound: a stall stop measures about 2 s here and about 4 s for a stuck
-// case, so a slow runner needs more than the shared 10 s. The bound only ends a run that would hang; it decides
-// nothing the test checks.
+// waitDoneWithin is waitDone with its own bound: a stall stop takes a few seconds of wall time here, so a slow
+// runner needs more than the shared 10 s. The bound only ends a run that would hang; it decides nothing the test
+// checks.
 func waitDoneWithin(t *testing.T, done chan struct{}, d time.Duration) {
 	t.Helper()
 	select {
@@ -422,8 +422,9 @@ type positionExec struct {
 	clock       *fakeClockAt
 }
 
-// maxStuckReports ends a stuck encode that is never stopped, so the test fails fast instead of running on: a stall
-// stop comes after about 20 reports (2 s at 100 ms each).
+// maxStuckReports is how many reports a stuck encode sends before it holds still and waits for the stall stop (at
+// most 5 s of wall time, then it fails). The reports come faster than the watchdog's wall-clock tick, so the stop
+// usually lands in that wait.
 const maxStuckReports = 1000
 
 func (x positionExec) Stream(ctx context.Context, onLine func(string), name string, args ...string) (string, error) {
@@ -434,8 +435,13 @@ func (x positionExec) Stream(ctx context.Context, onLine func(string), name stri
 		if err := ctx.Err(); err != nil {
 			return "", err
 		}
-		if x.step == 0 && i >= maxStuckReports {
-			return "", errors.New("a stuck encode was never stopped")
+		if x.step == 0 && i >= maxStuckReports { // the reports outrun the watchdog's 100 ms wall tick: hold still until it acts
+			select {
+			case <-ctx.Done():
+				return "", ctx.Err()
+			case <-time.After(5 * time.Second):
+				return "", errors.New("a stuck encode was never stopped")
+			}
 		}
 		x.clock.add(100 * time.Millisecond) // this report comes 100 ms of the watchdog's time after the last
 		frame := i
@@ -514,8 +520,12 @@ func TestStallStopWaitsForAMovingEncode(t *testing.T) {
 		done := make(chan struct{})
 		go func() { w.RunOne(context.Background()); close(done) }()
 		waitDoneWithin(t, done, 60*time.Second)
-		if j := s.job(); j.Status != c.want || j.DurationSec != 0 {
+		j := s.job()
+		if j.Status != c.want || j.DurationSec != 0 {
 			t.Errorf("no length, step %d: %s %q (duration %v)", c.step, j.Status, j.Error, j.DurationSec)
+		}
+		if c.want == jobs.Failed && !strings.Contains(j.Error, "no progress for 2s") { // the stall stop, not maxStuckReports
+			t.Errorf("no length, stuck: stopped for %q, want the stall stop", j.Error)
 		}
 	}
 }
