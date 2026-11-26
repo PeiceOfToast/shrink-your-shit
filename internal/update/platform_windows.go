@@ -5,7 +5,6 @@
 package update
 
 import (
-	"fmt"
 	"os/exec"
 	"syscall"
 	"time"
@@ -88,8 +87,6 @@ func stopProcess(pid int) error {
 	if err := windows.TerminateProcess(h, 1); err != nil {
 		return err
 	}
-	if _, err := windows.WaitForSingleObject(h, uint32((30 * time.Second).Milliseconds())); err != nil {
-		return fmt.Errorf("process %d did not exit: %w", pid, err)
-	}
-	return nil
+	event, err := windows.WaitForSingleObject(h, uint32(stopWait.Milliseconds()))
+	return exitWaitError(pid, event, err)
 }
