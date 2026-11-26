@@ -17,10 +17,10 @@ export function App() {
       page = <Jobs />;
       break;
     case "job":
-      page = <Placeholder title="Job details" note="Job details come in the next pull request (batch 1, PR 2)." />;
+      page = <Placeholder title="Job details" note="Job details come in the next pull request (batch 1, PR 2)." back={{ to: "/jobs", label: "Back to Jobs" }} />;
       break;
     case "jobLog":
-      page = <Placeholder title="Job log" note="The job log comes in the next pull request (batch 1, PR 2)." />;
+      page = <Placeholder title="Job log" note="The job log comes in the next pull request (batch 1, PR 2)." back={{ to: "/jobs", label: "Back to Jobs" }} />;
       break;
     case "placeholder":
       page = <Placeholder title={route.title} />;

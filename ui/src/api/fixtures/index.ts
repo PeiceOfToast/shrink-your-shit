@@ -36,7 +36,7 @@ export const ATTENTION: Attention[] = [
     id: "enc",
     tile: { icon: "alert", tone: "bad" },
     title: "This computer's graphics encoder failed 3 times today",
-    hint: { text: "It converts on the processor until 18:10, which is slower.", link: { label: "Test the encoders", href: "#" } },
+    hint: { text: "It converts on the processor until 18:10, which is slower.", link: { label: "Test the encoders", action: "test-encoders" } },
     side: { pill: { label: "Slower", tone: "warn" } },
   },
   {

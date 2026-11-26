@@ -86,3 +86,8 @@ export function runWorkersAction(action: "on" | "off"): Promise<{ ok: true; acti
 export function scanAllLibraries(): Promise<{ ok: true }> {
   return respond(() => ({ ok: true as const }));
 }
+
+// Test the encoders on one worker (POST /api/v2/workers/{id}/capabilities/test). The result is one line.
+export function testEncoders(workerId: string): Promise<{ line: string }> {
+  return respond(() => ({ line: `Test finished: the graphics encoder failed on ${workerId === "this-computer" ? "This computer" : workerId}.` }));
+}

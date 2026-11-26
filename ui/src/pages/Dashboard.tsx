@@ -1,4 +1,4 @@
-import { Fragment, useState, type MouseEvent } from "react";
+import { Fragment, useEffect, useState, type MouseEvent } from "react";
 import { api, formatCount, formatGB, type Attention, type Job, type LibrarySummary } from "../api/index.ts";
 import { useApi } from "../api/useApi.ts";
 import { Bars } from "../ui/Bars.tsx";
@@ -26,7 +26,28 @@ function Lines({ lines }: { lines: string[] }) {
   );
 }
 
-function AttentionRow({ a }: { a: Attention }) {
+type EncoderTest = { s: "idle" } | { s: "testing" } | { s: "done"; line: string } | { s: "failed" };
+
+// "Test the encoders" runs in place: Testing…, then one line and a link to the worker on Workers (page 08).
+function EncoderTestLink({ state, onRun }: { state: EncoderTest; onRun: () => void }) {
+  if (state.s === "testing") return <>Testing…</>;
+  if (state.s === "done")
+    return (
+      <>
+        {state.line} <Link to="/workers">See on Workers</Link>
+      </>
+    );
+  return (
+    <>
+      {state.s === "failed" && "Couldn't run the test. "}
+      <button type="button" className="linklike" onClick={onRun}>
+        {state.s === "failed" ? "Try again" : "Test the encoders"}
+      </button>
+    </>
+  );
+}
+
+function AttentionRow({ a, encoder, onTestEncoders }: { a: Attention; encoder: EncoderTest; onTestEncoders: () => void }) {
   const tile = a.tile;
   return (
     <li>
@@ -54,7 +75,13 @@ function AttentionRow({ a }: { a: Attention }) {
         {a.hint && (
           <span className="hint">
             {a.hint.text}
-            {a.hint.link && (
+            {a.hint.link?.action === "test-encoders" && (
+              <>
+                {" "}
+                <EncoderTestLink state={encoder} onRun={onTestEncoders} />
+              </>
+            )}
+            {a.hint.link && !a.hint.link.action && (
               <>
                 {" "}
                 <a href={a.hint.link.href}>{a.hint.link.label}</a>
@@ -137,7 +164,20 @@ export function Dashboard() {
   const running = useApi(() => api.getJobs({ state: "running" }), []);
   const [workersOverride, setWorkersOverride] = useState<boolean | null>(null);
   const o = overview.data;
-  const workersOn = workersOverride ?? o?.workersOn ?? false;
+  // The last state the server reported. It stays when a later call fails, so the switch can show it disabled.
+  const [known, setKnown] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (o) setKnown(o.workersOn);
+  }, [o?.workersOn]);
+  const workersOn = workersOverride ?? known ?? false;
+  const [encoder, setEncoder] = useState<EncoderTest>({ s: "idle" });
+  const testEncoders = () => {
+    setEncoder({ s: "testing" });
+    api.testEncoders("this-computer").then(
+      (r) => setEncoder({ s: "done", line: r.line }),
+      () => setEncoder({ s: "failed" }),
+    );
+  };
 
   const toggleWorkers = () => {
     const next = !workersOn;
@@ -150,10 +190,13 @@ export function Dashboard() {
       <div className="pagehead">
         <h1>Dashboard</h1>
         <span className="sp"></span>
-        <button type="button" className="sw" aria-pressed={workersOn} onClick={toggleWorkers}>
-          <span className={`k ${workersOn ? "on" : ""}`}></span>
-          <b>Workers {workersOn ? "on" : "off"}</b>
-        </button>
+        {/* Shows the last known state, disabled while the server can't be reached. Hidden only if no state was ever known. */}
+        {known !== null && (
+          <button type="button" className="sw" aria-pressed={workersOn} disabled={!!overview.error} onClick={toggleWorkers}>
+            <span className={`k ${workersOn ? "on" : ""}`}></span>
+            <b>Workers {workersOn ? "on" : "off"}</b>
+          </button>
+        )}
         <button type="button" className="btn ghost sm" onClick={() => void api.scanAllLibraries()}>
           <Icon name="refresh" />
           Scan all
@@ -210,7 +253,7 @@ export function Dashboard() {
               {attention.data && attention.data.length > 0 && (
                 <ul className="rows">
                   {attention.data.map((a) => (
-                    <AttentionRow key={a.id} a={a} />
+                    <AttentionRow key={a.id} a={a} encoder={encoder} onTestEncoders={testEncoders} />
                   ))}
                 </ul>
               )}
@@ -227,7 +270,7 @@ export function Dashboard() {
               </div>
               <div className="sub tnum">
                 <span>
-                  {o.savedMoreOn16Nov} GB more on 16 Nov, when originals leave the trash · <a href="#">{o.trashGB} GB in the trash</a>
+                  {o.savedMoreOn16Nov} GB more on 16 Nov, when originals leave the trash · <Link to="/settings/processing">{o.trashGB} GB in the trash</Link>
                 </span>
                 <span>
                   New files are <b>{o.avgShrinkPct}% smaller</b> on average

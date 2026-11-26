@@ -47,7 +47,7 @@ export interface Attention {
   title: string;
   titleHref?: string;
   chips?: { icon?: IconName; label: string }[];
-  hint?: { text: string; link?: { label: string; href: string } };
+  hint?: { text: string; link?: { label: string; href?: string; action?: "test-encoders" } };
   side: { text?: { label: string; tone: "bad" | "" }; pill: { label: string; tone: "bad" | "warn" | "ok" | ""; icon?: IconName } };
 }
 

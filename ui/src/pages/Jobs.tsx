@@ -33,7 +33,9 @@ function JobRow({ j }: { j: Job }) {
         <br />
         <span className="muted sm">{[j.library, j.workflow, j.worker].filter(Boolean).join(" · ")}</span>
       </td>
-      <td data-l="Step">{j.step}</td>
+      <td data-l="Step">
+        <span className="nowrap">{j.step}</span>
+      </td>
       <td className="num tnum" data-l="Progress">{j.progress != null ? `${j.progress} %` : "—"}</td>
       <td className="num tnum" data-l="When">{j.when}</td>
       <td className="num tnum" data-l="Result">
@@ -70,15 +72,43 @@ export function Jobs() {
       </div>
 
       <section className="card" style={{ padding: 0 }}>
-        {page.loading && !page.data && <p className="muted pad">Loading…</p>}
         {page.error && !page.data && (
           <p className="bad pad">
             Can't load jobs. <button type="button" className="btn ghost sm" onClick={page.reload}>Try now</button>
           </p>
         )}
+        {page.loading && !page.data && (
+          <table className="tbl" aria-busy="true">
+            <thead>
+              <tr>
+                <th>Status</th>
+                <th>File</th>
+                <th>Step</th>
+                <th className="num">Progress</th>
+                <th className="num">When</th>
+                <th className="num">Result</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[0, 1, 2, 3, 4].map((i) => (
+                <tr key={i}>
+                  <td colSpan={6}>
+                    <span className="skel" />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
         {page.data && page.data.items.length === 0 && (
           <p className="muted pad">
-            {counts?.all === 0 ? "Nothing has been converted yet. Jobs appear here once a library is scanned." : "Nothing in this tab."}
+            {counts?.all === 0 ? (
+              <>
+                Nothing has been converted yet. Jobs appear here once a library is scanned. <Link to="/libraries">Go to Libraries</Link>
+              </>
+            ) : (
+              "Nothing in this tab."
+            )}
           </p>
         )}
         {page.data && page.data.items.length > 0 && (
