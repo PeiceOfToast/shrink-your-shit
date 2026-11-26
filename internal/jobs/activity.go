@@ -8,6 +8,8 @@ import (
 	"os"
 	"strings"
 	"sync"
+
+	"github.com/shrink-your-shit/shrink-your-shit/internal/rules"
 )
 
 // Activity's figures and lists (slice 21b, UI-API-CONTRACT.md "Activity"). They only read.
@@ -219,9 +221,10 @@ type Skipped struct {
 // there are in all, so a page of several reasons (design's "Already in this format": already_hevc and
 // already_in_format) pages as one list.
 func (s *Store) SkippedFiles(reasons []string, limit, offset int) ([]Skipped, int, error) {
-	where, args := `reason<>'' AND NOT `+convertedSQL, []any{}
+	// a file still changing is waiting to settle, not skipped (FileRow.Settling)
+	where, args := `reason<>'' AND reason<>'`+rules.SkipStillChanging+`' AND NOT `+convertedSQL, []any{}
 	if len(reasons) > 0 {
-		where = `reason IN (?` + strings.Repeat(",?", len(reasons)-1) + `) AND NOT ` + convertedSQL
+		where = `reason IN (?` + strings.Repeat(",?", len(reasons)-1) + `) AND reason<>'` + rules.SkipStillChanging + `' AND NOT ` + convertedSQL
 		for _, r := range reasons {
 			args = append(args, r)
 		}
