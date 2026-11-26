@@ -55,10 +55,21 @@ func TestWorkerTransport(t *testing.T) {
 		{"a trusted proxy that terminated https", trusted, req("10.0.0.5:5000", false, "https", "203.0.113.9"), true},
 		{"a trusted proxy, plain http from outside", trusted, req("10.0.0.5:5000", false, "http", "203.0.113.9"), false},
 		{"a trusted proxy, plain http from this network", trusted, req("10.0.0.5:5000", false, "http", "192.168.1.2"), true},
-		{"a private peer that isn't the proxy is judged directly", trusted, req("10.0.0.6:5000", false, "http", "203.0.113.9"), true},
+		{"a private peer that isn't the proxy and forwards a request is refused", trusted, req("10.0.0.6:5000", false, "http", "203.0.113.9"), false},
+		{"an unlisted LAN proxy forwarding over plain HTTP is refused", none, req("192.168.1.20:5000", false, "", "203.0.113.9"), false},
+		{"an unlisted LAN proxy claiming https is refused", none, req("192.168.1.20:5000", false, "https", "203.0.113.9"), false},
+		{"a private peer that isn't the proxy, with no forwarding headers, is judged directly", trusted, req("10.0.0.6:5000", false, "", ""), true},
+		{"TLS here through an unlisted LAN proxy", none, req("192.168.1.20:5000", true, "", "203.0.113.9"), true},
 	} {
 		if got := c.t.Allowed(c.r); got != c.want {
 			t.Errorf("%s: %v, want %v", c.name, got, c.want)
+		}
+	}
+	for _, h := range []string{"X-Real-IP", "Forwarded"} {
+		r := req("192.168.1.20:5000", false, "", "")
+		r.Header.Set(h, "203.0.113.9")
+		if none.Allowed(r) {
+			t.Errorf("an unlisted LAN proxy that sends %s was allowed over plain HTTP", h)
 		}
 	}
 	if p, err := ParseTrustedProxies(" 10.0.0.5, 172.16.0.0/12 "); err != nil || len(p) != 2 || !p[1].Contains(netip.MustParseAddr("172.20.1.1")) {

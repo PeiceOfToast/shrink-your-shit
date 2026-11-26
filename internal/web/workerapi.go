@@ -123,7 +123,9 @@ func (t Transport) Allowed(r *http.Request) bool {
 		}
 	}
 	if !trusted {
-		return r.TLS != nil || private(peer)
+		// a private peer that forwards someone else's request (a reverse proxy on this LAN that is not listed)
+		// is not a private client: the worker behind it may be on the internet, over plain HTTP
+		return r.TLS != nil || (private(peer) && !forwardedByProxy(r))
 	}
 	// a trusted proxy: its word on the client's connection and address
 	if strings.EqualFold(strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-Proto"), ",")[0]), "https") {
