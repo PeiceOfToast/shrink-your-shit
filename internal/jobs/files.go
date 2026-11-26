@@ -71,6 +71,9 @@ type FileRow struct {
 	OutputPath            string
 	Beside                bool     // kept beside (the output is another file next to it)
 	Tags                  []string // the job's tags (migration 57; FB2c); empty for a skipped row
+	// Settling: a file the scanner saw still changing (rules.SkipStillChanging), listed on the waiting card
+	// before the jobs: not skipped, it joins the queue once it stays the same for a scan (manager 11-26)
+	Settling bool
 }
 
 // nameOf is SQL for the lower-case file name of a path column (no basename function in SQLite: the
@@ -144,8 +147,25 @@ func (f FileFilter) jobFilters() (string, []any) {
 	return where, args
 }
 
+// skipFilters is the skipped card's condition: a file still changing is waiting, not skipped (settleFilters).
 func (f FileFilter) skipFilters() (string, []any) {
-	where, args := `files.reason<>'' AND NOT `+convertedSQL, []any{}
+	return f.fileFilters(`files.reason<>'' AND files.reason<>'` + rules.SkipStillChanging + `' AND NOT ` + convertedSQL)
+}
+
+// settleFilters is the condition for the files still changing that the waiting card lists (FileRow.Settling),
+// under the same library, name and path filters as its jobs.
+func (f FileFilter) settleFilters() (string, []any) {
+	where, args := FileFilter{LibraryID: f.LibraryID, Q: f.Q}.fileFilters(`files.reason='` + rules.SkipStillChanging + `' AND NOT ` + convertedSQL)
+	if f.Path != "" {
+		where += " AND files.path=?"
+		args = append(args, f.Path)
+	}
+	return where, args
+}
+
+// fileFilters is base with f's reasons, time, library and name conditions on the files table.
+func (f FileFilter) fileFilters(base string) (string, []any) {
+	where, args := base, []any{}
 	if len(f.Reasons) > 0 {
 		where += ` AND files.reason IN (?` + strings.Repeat(",?", len(f.Reasons)-1) + `)`
 		for _, r := range f.Reasons {
@@ -192,8 +212,42 @@ func (s *Store) FileList(f FileFilter) (rows []FileRow, total int, counts map[st
 		return nil, 0, nil, err
 	}
 	counts[CardSkipped] = skipped
+	settling := 0
+	if f.Reason == "" { // a failure code's list has no file still changing
+		tw, ta := f.settleFilters()
+		if err := s.db.QueryRow(`SELECT COUNT(*) FROM files WHERE `+tw, ta...).Scan(&settling); err != nil {
+			return nil, 0, nil, err
+		}
+	}
+	counts["settling"] = settling
+	counts[CardUnprocessed] += settling
 
 	rows = []FileRow{}
+	limit, offset := f.Limit, f.Offset
+	if f.Show == CardUnprocessed && offset < settling && limit > 0 { // the files still changing come first, then the jobs
+		tw, ta := f.settleFilters()
+		r, err := s.db.Query(`SELECT files.rowid, files.path, files.size, files.reason FROM files WHERE `+tw+` ORDER BY files.path LIMIT ? OFFSET ?`,
+			append(ta, min(limit, settling-offset), offset)...)
+		if err != nil {
+			return nil, 0, nil, err
+		}
+		for r.Next() {
+			row := FileRow{Settling: true, Tags: []string{}}
+			if err := r.Scan(&row.SkipID, &row.Path, &row.SizeBefore, &row.Reason); err != nil {
+				r.Close()
+				return nil, 0, nil, err
+			}
+			rows = append(rows, row)
+		}
+		r.Close()
+		if err := r.Err(); err != nil {
+			return nil, 0, nil, err
+		}
+		limit -= len(rows)
+	}
+	if f.Show == CardUnprocessed {
+		offset = max(0, offset-settling)
+	}
 	switch {
 	case f.Show == CardSkipped:
 		total = skipped
@@ -234,7 +288,7 @@ func (s *Store) FileList(f FileFilter) (rows []FileRow, total int, counts map[st
   COALESCE(j.error,''), COALESCE(j.error_code,''), j.priority, j.attempts, COALESCE(j.retry_at,''), j.size_before, COALESCE(j.size_after,0), j.duration, j.updated,
   COALESCE(fl.id,0), COALESCE(fl.name,''), COALESCE(o.id,0), COALESCE(o.state,''), COALESCE(o.delete_on,''), COALESCE(o.kept_at,''), j.output_path,
   j.output_path<>'' AND j.output_path<>j.path AND o.id IS NULL, COALESCE(j.tags,'[]') `+jobFrom+` WHERE `+cond+` ORDER BY `+order+` LIMIT ? OFFSET ?`,
-			append(append(args, orderArgs...), f.Limit, f.Offset)...)
+			append(append(args, orderArgs...), limit, offset)...)
 		if err != nil {
 			return nil, 0, nil, err
 		}
