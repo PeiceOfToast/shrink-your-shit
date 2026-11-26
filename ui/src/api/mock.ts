@@ -4,7 +4,7 @@ import { JOBS } from "./fixtures/jobs.ts";
 import { jobDetail } from "./fixtures/jobDetail.ts";
 import { ApiError } from "./errors.ts";
 import { getForcedState, respond } from "./mockState.ts";
-import { currentLibraries } from "./mockLibraries.ts";
+import { currentLibraries, reconnectShare } from "./mockLibraries.ts";
 import { setAllWorkers, workerName } from "./mockWorkers.ts";
 
 // Mock implementation of the API. Route-named functions; shapes come from the page specs.
@@ -92,6 +92,17 @@ export function scanAllLibraries(): Promise<{ ok: true }> {
 // Test the encoders on one worker (POST /api/v2/workers/{id}/capabilities/test). The result is one line.
 export function testEncoders(workerId: string): Promise<{ line: string }> {
   return respond(() => ({ line: `Test finished: the graphics encoder failed on ${workerName(workerId) ?? workerId}.` }));
+}
+
+// The generic action behind a Needs attention row: it calls the method and path the server named.
+// Only the routes this mock knows answer; anything else fails with a sentence the row shows as it is.
+export function runAction(method: string, path: string): Promise<void> {
+  const enc = /^\/api\/v2\/workers\/([^/]+)\/capabilities\/test$/.exec(path);
+  if (method === "POST" && enc) return testEncoders(enc[1]).then(() => undefined);
+  const share = /^\/api\/v2\/shares\/([^/]+)\/reconnect$/.exec(path);
+  if (method === "POST" && share) return reconnectShare(share[1]).then(() => undefined);
+  if (method === "POST" && path === "/api/v2/jobs/actions") return respond(() => undefined);
+  return Promise.reject(new ApiError("unknown_action", "That action isn't available here."));
 }
 
 // GET /api/v2/jobs/{id}: the head, Summary, Steps, log, media and history of one job.
