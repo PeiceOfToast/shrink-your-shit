@@ -1,10 +1,18 @@
 import { useSyncExternalStore, type AnchorHTMLAttributes, type MouseEvent, type ReactNode } from "react";
+import type { SettingsSection } from "./api/types.ts";
+import { holdForLeave } from "./settings/leaveGuard.ts";
 
 // A small router on the history API. Routes come from pages/00-screen-map.md; anything not built yet is a placeholder.
 
-export function navigate(to: string): void {
+function go(to: string): void {
   if (to !== location.pathname + location.search) history.pushState(null, "", to);
   window.dispatchEvent(new PopStateEvent("popstate"));
+}
+
+// A section with unsaved changes holds the move until the person answers "Leave without saving?".
+export function navigate(to: string): void {
+  if (holdForLeave(() => go(to))) return;
+  go(to);
 }
 
 function subscribe(cb: () => void): () => void {
@@ -28,7 +36,11 @@ export type Route =
   | { name: "workflows" }
   | { name: "workflowEditor"; id: string }
   | { name: "libraries" }
+  | { name: "workers" }
+  | { name: "worker"; id: string }
   | { name: "library"; id: string }
+  | { name: "systemLog" }
+  | { name: "settings"; section: SettingsSection | null }
   | { name: "placeholder"; title: string };
 
 const TITLES: Record<string, string> = {
@@ -37,7 +49,10 @@ const TITLES: Record<string, string> = {
   start: "Start",
   signin: "Sign in",
   process: "Process one file",
+  "system-log": "System log",
 };
+
+const SECTION_KEYS: SettingsSection[] = ["general", "processing", "connections", "notifications", "variables", "backup", "health", "access"];
 
 export function resolve(pathname: string): Route {
   const parts = pathname.split("/").filter(Boolean).map(decodeURIComponent);
@@ -51,9 +66,18 @@ export function resolve(pathname: string): Route {
     if (parts.length === 1) return { name: "workflows" };
     if (parts.length === 2) return { name: "workflowEditor", id: parts[1] };
   }
+  if (parts[0] === "workers") {
+    if (parts.length === 1) return { name: "workers" };
+    if (parts.length === 2) return { name: "worker", id: parts[1] };
+  }
   if (parts[0] === "libraries") {
     if (parts.length === 1) return { name: "libraries" };
     if (parts.length === 2) return { name: "library", id: parts[1] };
+  }
+  if (parts[0] === "settings" && parts[1] === "log") return { name: "systemLog" };
+  if (parts[0] === "settings") {
+    if (parts.length === 1) return { name: "settings", section: null };
+    if (parts.length === 2 && SECTION_KEYS.includes(parts[1] as SettingsSection)) return { name: "settings", section: parts[1] as SettingsSection };
   }
   return { name: "placeholder", title: TITLES[parts[0]] ?? "Not found" };
 }

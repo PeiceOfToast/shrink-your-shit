@@ -234,6 +234,7 @@ export interface JobsPage {
 
 export interface JobsParams {
   state?: JobState | "all";
+  worker?: string; // a worker id; the jobs it ran or is running
   limit?: number;
   cursor?: string;
 }
@@ -317,4 +318,219 @@ export interface JobDetail {
   logs: LogStep[] | null;
   media: MediaRow[];
   history: HistoryLine[];
+}
+
+// Workers (page 10 "Data and API"). GET /api/v2/workers returns Worker items; GET /api/v2/workers/{id} returns WorkerDetail.
+export type WorkerState = "converting" | "idle" | "paused" | "offline";
+
+export interface Worker {
+  id: string;
+  name: string;
+  address: string; // "" for this computer
+  local: boolean;
+  state: WorkerState;
+  since: string | null; // RFC 3339; when the state began (offline and paused show it)
+  slots: number; // files at once
+  gpuSlots: number;
+  gpu: { name: string } | null;
+  now: { jobId: string; file: string; step: JobStepRef } | null;
+  doneToday: number;
+}
+
+export interface WorkerLibrary {
+  libraryId: string;
+  name: string;
+  serverPath: string;
+  workerPath: string;
+  mode: "read" | "read_write";
+  test: { state: "untested" | "pending" | "ok" | "failed"; at?: string; message?: string };
+}
+
+// One encoder the worker has. Only the ones whose test passed are offered as a choice.
+export interface WorkerEncoder {
+  name: string; // e.g. "hevc_qsv"
+  label: string;
+  testOk: boolean;
+}
+
+export interface WorkerDetail extends Worker {
+  hours: { from: string; to: string } | null; // "HH:MM" in the server's local time; null = any time. from > to runs overnight.
+  primaryEncoder: string | null; // null = automatic; "cpu" or an encoder name
+  encoders: WorkerEncoder[];
+  // Remote workers only: the libraries it takes. This computer takes every library and sends none.
+  libraries: WorkerLibrary[];
+  // Libraries added since this worker's list was last saved and not on it. The next PATCH {libraries} clears it.
+  newLibraries: { libraryId: string; name: string }[];
+}
+
+export interface Pairing {
+  id: string;
+  code: string;
+  expiresAt: string; // RFC 3339
+  command: string; // the line to run on the other machine
+  plainHTTP: boolean; // the server is reached without TLS
+}
+
+// A worker asking to join after its command ran. Allow or Deny answers it.
+export interface JoinRequest {
+  id: string;
+  name: string;
+  address: string;
+}
+
+// ---- Settings (page 11). Shapes are the ones in pages/11-settings.md "Data and API".
+
+export type SettingsSection = "general" | "processing" | "connections" | "notifications" | "variables" | "backup" | "health" | "access";
+
+export interface GeneralSettings {
+  serverName: string;
+  language: "en";
+  timeFormat: "24h" | "12h";
+  dateFormat: "YYYY-MM-DD" | "DD.MM.YYYY" | "MM/DD/YYYY";
+  theme: "system" | "light" | "dark";
+  checkForUpdates: boolean;
+  updateAvailable: string | null;
+}
+
+export interface ProcessingSettings {
+  parallelJobs: number;
+  gpuJobsSeparate: boolean;
+  scanSchedule: string;
+  queueOrder: "newest" | "oldest" | "largest" | "smallest";
+  lowPriority: boolean;
+  keepOriginalsDays: number;
+  lowSpaceGB: number;
+  languages: string[];
+  workflowsMayRunCommands: boolean;
+  trashPath: string;
+}
+
+export interface LogSettings {
+  jobDays: number;
+  systemDays: number;
+  rawDays: number;
+}
+
+export interface SettingsData {
+  general: GeneralSettings;
+  processing: ProcessingSettings;
+  logs: LogSettings;
+  backupKeep: number;
+}
+
+// PATCH sends only the changed fields, nested by group.
+export type SettingsPatch = {
+  general?: Partial<Omit<GeneralSettings, "updateAvailable">>;
+  processing?: Partial<Omit<ProcessingSettings, "trashPath">>;
+  logs?: Partial<LogSettings>;
+  backupKeep?: number;
+};
+
+export type IntegrationKind = "sonarr" | "radarr" | "plex" | "jellyfin";
+
+export interface PathMapping {
+  theirPath: string;
+  ourPath: string;
+}
+
+export interface LastResult {
+  ok: boolean;
+  message: string;
+  at: string;
+}
+
+export interface Integration {
+  id: string;
+  kind: IntegrationKind;
+  name: string;
+  url: string;
+  hasKey: boolean;
+  pathMappings: PathMapping[];
+  enabled: boolean;
+  lastResult: LastResult | null;
+  failingSince: string | null;
+}
+
+export interface IntegrationInput {
+  kind: IntegrationKind;
+  name?: string;
+  url: string;
+  apiKey?: string;
+  pathMappings?: PathMapping[];
+  enabled?: boolean;
+}
+
+export interface IntegrationTest {
+  ok: boolean;
+  message: string;
+  version: string | null;
+  folders: { theirPath: string; ourPath: string | null; inLibrary: boolean }[];
+}
+
+export type NotifyMode = "off" | "drained" | "daily" | "weekly";
+
+export interface NotifyEvent {
+  code: string;
+  name: string;
+}
+
+export interface NotifyTarget {
+  id: string;
+  name: string;
+  kind: "webhook" | "discord";
+  urlShown: string;
+  enabled: boolean;
+  events: string[];
+  lastResult: LastResult | null;
+  failingSince: string | null;
+}
+
+export interface Notifications {
+  targets: NotifyTarget[];
+  summary: { mode: NotifyMode; at: string };
+  linkBase: string | null;
+}
+
+export type VariableType = "string" | "number" | "boolean" | "enum" | "path";
+
+export interface WorkflowVariable {
+  name: string;
+  type: VariableType;
+  value?: string | number | boolean;
+  options?: string[];
+  description?: string;
+  usedBy: { type: "workflow" | "library"; id: string; name: string }[];
+}
+
+export interface BackupItem {
+  id: string;
+  name: string;
+  createdAt: string;
+  reason: "manual" | "before_update" | "before_migration" | "before_import";
+  appVersion: string;
+  sizeBytes: number;
+}
+
+export interface BackupPreview {
+  previewId: string;
+  createdAt: string;
+  appVersion: string;
+  contents: { settings: boolean; workflows: number; libraries: number; shares: number; connections: number; jobs: number };
+  warnings: string[];
+}
+
+export type CheckStatus = "ok" | "warn" | "bad" | "absent";
+
+export interface HealthCheck {
+  id: string;
+  label: string;
+  status: CheckStatus;
+  detail: string;
+  hint: string | null;
+  fix: { label: string; method: "POST"; path: string } | null;
+}
+
+export interface Doctor {
+  ranAt: string;
+  checks: HealthCheck[];
 }
