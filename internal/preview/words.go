@@ -40,9 +40,17 @@ func trackVideo(plan rules.Plan, info media.Info) string {
 		text = fmt.Sprintf("Video: %s → %s, %s", from, to, same)
 	}
 	if plan.Video.MaxRateKbps > 0 && !plan.Video.IsVP9Target() {
-		text += fmt.Sprintf(", at most %d Mbps", plan.Video.MaxRateKbps/1000)
+		text += ", at most " + mbpsWords(plan.Video.MaxRateKbps)
 	}
 	return text
+}
+
+// mbpsWords is a bitrate in megabits a second as people read it: "8 Mbps", "2.5 Mbps".
+func mbpsWords(kbps int) string {
+	if kbps%1000 == 0 {
+		return fmt.Sprintf("%d Mbps", kbps/1000)
+	}
+	return fmt.Sprintf("%.1f Mbps", float64(kbps)/1000)
 }
 
 // targetWords is the format an encoder makes, as people know it ("libx265" is HEVC).

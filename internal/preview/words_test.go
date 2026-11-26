@@ -58,6 +58,14 @@ func TestTrackLinesSayTheChange(t *testing.T) {
 	}
 }
 
+func TestBitrateCapReadsAsMegabits(t *testing.T) {
+	for kbps, want := range map[int]string{8000: "8 Mbps", 2500: "2.5 Mbps", 1000: "1 Mbps"} {
+		if got := mbpsWords(kbps); got != want {
+			t.Errorf("mbpsWords(%d) = %q, want %q", kbps, got, want)
+		}
+	}
+}
+
 func TestJoinAndNamesTheLastTwo(t *testing.T) {
 	for _, c := range []struct {
 		in   []string

@@ -21,7 +21,7 @@ func TestTrackSaysWhatEachKindWillDo(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return p.Track(context.Background(), dir, filepath.Join(dir, name), st, rules.SliderTemplate(3), speed)
+		return p.Track(context.Background(), dir, filepath.Join(dir, name), st, rules.SliderTemplate(3), Destination{}, speed)
 	}
 	kinds := func(tr Track) string {
 		var k []string
@@ -59,7 +59,7 @@ func TestTrackSaysWhatEachKindWillDo(t *testing.T) {
 	if !bad.Skipped || len(bad.Lines) != 1 || bad.Lines[0].Kind != "original" || bad.Lines[0].Text != "Left as it is: it can't be read." {
 		t.Errorf("%+v", bad)
 	}
-	if bad.Checks != nil || bad.EstimatedSeconds != nil || bad.ExpectedBytesLow != 100_000 || bad.ExpectedBytesHigh != 100_000 {
+	if bad.Checks == nil || len(bad.Checks) != 0 || bad.EstimatedSeconds != nil || bad.ExpectedBytesLow != 100_000 || bad.ExpectedBytesHigh != 100_000 {
 		t.Errorf("skipped file: %+v", bad)
 	}
 }
@@ -71,7 +71,7 @@ func TestTrackEstimatesFromTheSpeedItIsGiven(t *testing.T) {
 	path := filepath.Join(dir, "a.mkv")
 	var asked []string
 	at := func(x float64) *int64 {
-		tr := p.Track(context.Background(), dir, path, st, rules.SliderTemplate(3), func(enc string) float64 {
+		tr := p.Track(context.Background(), dir, path, st, rules.SliderTemplate(3), Destination{}, func(enc string) float64 {
 			asked = append(asked, enc)
 			return x
 		})
@@ -91,7 +91,38 @@ func TestTrackEstimatesFromTheSpeedItIsGiven(t *testing.T) {
 	if at(0) != nil {
 		t.Error("no speed for the encoder: the estimate must be left out")
 	}
-	if tr := p.Track(context.Background(), dir, path, st, rules.SliderTemplate(3), nil); tr.EstimatedSeconds != nil {
+	if tr := p.Track(context.Background(), dir, path, st, rules.SliderTemplate(3), Destination{}, nil); tr.EstimatedSeconds != nil {
 		t.Error("nil speed lookup: no estimate")
+	}
+}
+
+// the original line says where the new file goes: a folder, why there is none yet, beside, or replaced
+func TestTrackSaysWhereTheNewFileGoes(t *testing.T) {
+	dir := library(t)
+	p := &Previewer{Store: store(t), Exec: &probes{}, FFprobe: "ffprobe"}
+	path := filepath.Join(dir, "a.mkv")
+	st, _ := os.Stat(path)
+	last := func(after string, dest Destination) string {
+		s := rules.DefaultSelectors(3)
+		s.AfterConverting = after
+		if after == "folder" {
+			s.FolderMode = rules.NextToLibrary // one folder per library, so the folder comes from dest
+		}
+		tr := p.Track(context.Background(), dir, path, st, s.Template(), dest, nil)
+		return tr.Lines[len(tr.Lines)-1].Text
+	}
+	for _, c := range []struct {
+		name, after, want string
+		dest              Destination
+	}{
+		{"folder", "folder", "Original: stays as it is; the new file goes to /media/movies (shrunk)", Destination{Folder: "/media/movies (shrunk)"}},
+		{"folder with a problem", "folder", "Original: stays as it is; the new file goes to a folder that can't be used yet: No folder for new files for Movies yet: /media is on a different disk. Pick a folder.",
+			Destination{Problem: "No folder for new files for Movies yet: /media is on a different disk. Pick a folder."}},
+		{"beside", "beside", "Original: stays as it is, next to the new file", Destination{}},
+		{"replace", "replace", "Original: kept in a .syp-trash folder beside it", Destination{}},
+	} {
+		if got := last(c.after, c.dest); got != c.want {
+			t.Errorf("%s:\n got %q\nwant %q", c.name, got, c.want)
+		}
 	}
 }

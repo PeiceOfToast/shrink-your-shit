@@ -67,6 +67,12 @@ func guideSamples(store *jobs.Store, prev *preview.Previewer, lib jobs.Library, 
 	if err != nil {
 		root = lib.Path // the walk then says the folder cannot be opened, as the library Preview does
 	}
+	var dest preview.Destination
+	if folder, problem := libraryFolder(t, lib); problem != nil {
+		dest.Problem = problem.Message
+	} else {
+		dest.Folder = folder
+	}
 	out := make([]guideSample, 0, len(files))
 	for _, f := range files {
 		path, st, prob := resolveSample(root, f)
@@ -74,7 +80,7 @@ func guideSamples(store *jobs.Store, prev *preview.Previewer, lib jobs.Library, 
 			out = append(out, guideSample{File: f, Error: &sampleError{prob.code, prob.message}})
 			continue
 		}
-		tr := prev.Track(r.Context(), root, path, st, t, speed)
+		tr := prev.Track(r.Context(), root, path, st, t, dest, speed)
 		out = append(out, guideSample{File: f, Track: &tr})
 	}
 	return out, nil

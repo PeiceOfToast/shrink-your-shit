@@ -34,14 +34,22 @@ type Track struct {
 	Skipped          bool   `json:"skipped"`
 }
 
-// Track says what the answers compiled to (t) would do with one file. speed gives the realtime multiple
-// this computer last measured for an encoder (ffmpeg's name), or 0 when it has none; nil means no estimate.
-func (p *Previewer) Track(ctx context.Context, root, path string, st fs.FileInfo, t rules.Template, speed func(encoder string) float64) Track {
+// Destination is where a folder workflow's new files go: Folder when there is one, or Problem (in plain
+// words) when there is none yet. Both are empty when the answers do not keep new files in a folder.
+type Destination struct {
+	Folder  string
+	Problem string
+}
+
+// Track says what the answers compiled to (t) would do with one file. dest is where the new file goes
+// when it is kept in a folder. speed gives the realtime multiple this computer last measured for an encoder
+// (ffmpeg's name), or 0 when it has none; nil means no estimate.
+func (p *Previewer) Track(ctx context.Context, root, path string, st fs.FileInfo, t rules.Template, dest Destination, speed func(encoder string) float64) Track {
 	size := st.Size()
 	info, plan := p.plan(ctx, root, path, st, t)
 	if plan.Skip != "" {
 		return Track{Lines: []Line{{Kind: "original", Text: "Left as it is: " + skipWhy(plan) + "."}},
-			ExpectedBytesLow: size, ExpectedBytesHigh: size, Skipped: true}
+			Checks: []string{}, ExpectedBytesLow: size, ExpectedBytesHigh: size, Skipped: true}
 	}
 	low, high := Saving(t, plan, info, size)
 	tr := Track{ExpectedBytesLow: size - high, ExpectedBytesHigh: size - low}
@@ -53,9 +61,12 @@ func (p *Previewer) Track(ctx context.Context, root, path string, st fs.FileInfo
 	if line := trackSubtitles(plan, info); line != "" {
 		tr.Lines = append(tr.Lines, Line{Kind: "subtitles", Text: line})
 	}
-	if plan.Output == "beside" {
+	switch plan.Output {
+	case "beside":
 		tr.Lines = append(tr.Lines, Line{Kind: "original", Text: "Original: stays as it is, next to the new file"})
-	} else {
+	case "folder":
+		tr.Lines = append(tr.Lines, Line{Kind: "original", Text: folderOriginal(dest)})
+	default:
 		tr.Lines = append(tr.Lines, Line{Kind: "original", Text: "Original: kept in a .syp-trash folder beside it"})
 	}
 
@@ -77,6 +88,17 @@ func (p *Previewer) Track(ctx context.Context, root, path string, st fs.FileInfo
 		}
 	}
 	return tr
+}
+
+// folderOriginal says where a folder workflow's new file goes: the folder, or why there is none yet.
+func folderOriginal(d Destination) string {
+	switch {
+	case d.Problem != "":
+		return "Original: stays as it is; the new file goes to a folder that can't be used yet: " + d.Problem
+	case d.Folder != "":
+		return "Original: stays as it is; the new file goes to " + d.Folder
+	}
+	return "Original: stays as it is; the new file goes to a folder"
 }
 
 // encoderName is the software encoder ffmpeg runs for the plan's video ("libx265" and so on), or "".
