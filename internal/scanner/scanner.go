@@ -216,7 +216,9 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 					log.Printf("scan: %s: %v", lib, err)
 				}
 				walked = append(walked, t.LibraryID)
-				walkedPaths = append(walkedPaths, lib)
+				if isDir(lib) { // a missing folder (a disk not mounted) is not walked whole: its settling rows stay
+					walkedPaths = append(walkedPaths, lib)
+				}
 			}
 		}
 	}
@@ -664,6 +666,12 @@ func (s *Scanner) markOutputsGone(walked []int64, sizes map[string]int64) {
 func folderEmpty(dir string) bool {
 	es, err := os.ReadDir(dir)
 	return err == nil && len(es) == 0
+}
+
+// isDir reports whether path is a folder now: a missing library folder is not one.
+func isDir(path string) bool {
+	st, err := os.Stat(path)
+	return err == nil && st.IsDir()
 }
 
 func (s *Scanner) markOriginalsGone(walked []int64, sizes map[string]int64) {
