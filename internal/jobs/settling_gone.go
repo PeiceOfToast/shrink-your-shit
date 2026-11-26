@@ -3,6 +3,9 @@
 package jobs
 
 import (
+	"errors"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -25,7 +28,10 @@ func (s *Store) ForgetSettlingGone(libPath string, seen map[string]bool) error {
 			return err
 		}
 		if strings.HasPrefix(filepath.Clean(p), prefix) && !seen[p] {
-			gone = append(gone, p)
+			// only a file really gone: one under a folder the walk could not read is not seen, and is not gone
+			if _, err := os.Lstat(p); errors.Is(err, fs.ErrNotExist) {
+				gone = append(gone, p)
+			}
 		}
 	}
 	if err := rows.Err(); err != nil {

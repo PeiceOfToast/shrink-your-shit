@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -95,5 +96,30 @@ func TestFutureMtimeFileIsQueued(t *testing.T) {
 	look(1) // unchanged for MinAge: queued
 	if r, _ := st.GetFile(a); r == nil || r.Reason != "" || !strings.HasPrefix(r.Decision, "queued: ") {
 		t.Errorf("future-time file's record %+v, want queued", r)
+	}
+}
+
+// A settling file under a folder the walk cannot read is not seen, but it is not gone: its row stays.
+func TestSettlingRowUnderUnreadableFolderIsKept(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("needs a folder without read permission, and not as root")
+	}
+	s, st, lib, _ := setup(t, h264Big)
+	clock := time.Now()
+	s.Now, s.MinAge = func() time.Time { return clock }, time.Minute
+	sub := filepath.Join(lib, "sub")
+	os.Mkdir(sub, 0o755)
+	b := filepath.Join(sub, "b.mkv")
+	os.WriteFile(b, []byte("young"), 0o644)
+	os.Chtimes(b, clock, clock)
+	t.Cleanup(func() { os.Chmod(sub, 0o755) })
+	s.ScanOnce(context.Background()) // young: settling
+	if r, _ := st.GetFile(b); r == nil {
+		t.Fatal("no settling row for a young file in a subfolder")
+	}
+	os.Chmod(sub, 0)
+	s.ScanOnce(context.Background()) // a complete walk: the unreadable folder is skipped, not counted as gone
+	if r, _ := st.GetFile(b); r == nil {
+		t.Error("settling row of a file under an unreadable folder was forgotten")
 	}
 }
