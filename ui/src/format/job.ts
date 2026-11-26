@@ -49,13 +49,19 @@ export function jobHint(job: Job): string {
 // The Summary's "Original" line, from the server's {action, until}.
 export function originalText(o: JobOriginal): string {
   switch (o.action) {
-    case "trashed":
-      return o.until ? `In the trash until ${dayOf(o.until)}` : "In the trash";
-    case "kept":
-      return "Kept as it was";
     case "not_yet":
       return "Not yet";
-    default:
+    case "not_touched":
       return "Not touched";
+    case "trashed":
+      return o.until ? `In the trash until ${dayOf(o.until)}` : "In the trash";
+    case "deleted":
+      return "Deleted";
+    case "restored":
+      return "Restored";
+    default: {
+      const unknown: never = o.action;
+      throw new Error(`Unknown original action: ${unknown}`);
+    }
   }
 }

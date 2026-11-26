@@ -28,7 +28,14 @@ export function getSummary(): Promise<Summary> {
 export function getOverview(): Promise<Overview> {
   return respond(() => {
     if (getForcedState() === "empty") {
-      return { ...OVERVIEW, converted: 0, convertedPerDay: 0, waiting: 0, running: 0, failed24h: 0, libraries: [] };
+      return {
+        ...OVERVIEW,
+        converted: { ...OVERVIEW.converted, total: 0, perDay: 0 },
+        waiting: { ...OVERVIEW.waiting, count: 0 },
+        running: [],
+        failed24h: { ...OVERVIEW.failed24h, count: 0 },
+        libraries: [],
+      };
     }
     return { ...OVERVIEW, libraries: currentLibraries() };
   });

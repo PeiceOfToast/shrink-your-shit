@@ -1,32 +1,44 @@
-import type { Attention, Overview, Summary } from "../types.ts";
+import type { Attention, DaySeries, Overview, Summary } from "../types.ts";
 import seriesRaw from "./series.json" with { type: "json" };
 import { minsAgo, plus, trashUntil } from "./clock.ts";
 import { nextScanFor } from "../schedule.ts";
 import { clock } from "../../format/time.ts";
 
 // Numbers from draft-b/dashboard.html and draft-b/jobs.html (the status line, KPIs, cards and table).
-export const SERIES = seriesRaw as { saved: Overview["savedSeries"]; converted: Overview["filesSeries"] };
+// series.json holds the chart heights: saved[0] freed and saved[1] in the trash (GB), converted[0..2] done, skipped, failed.
+const raw = seriesRaw as { saved: { v: (number | null)[] }[]; converted: { v: (number | null)[] }[] };
+const toBytes = (gb: number | null) => (gb == null ? null : Math.round(gb * 1e9));
+const dayString = (offset: number) => {
+  const d = new Date();
+  d.setDate(d.getDate() + offset);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+const DAYS: DaySeries[] = raw.saved[0].v.map((_, i) => ({
+  day: dayString(i - (raw.saved[0].v.length - 1)),
+  freed: toBytes(raw.saved[0].v[i]),
+  trash: toBytes(raw.saved[1].v[i]),
+  done: raw.converted[0].v[i],
+  skipped: raw.converted[1].v[i],
+  failed: raw.converted[2].v[i],
+}));
 
 export const OVERVIEW: Overview = {
-  freedGB: 36.4,
-  freedTodayGB: 1.9,
-  converted: 4812,
-  convertedPerDay: 11,
-  waiting: 1284,
-  nextScan: nextScanFor("daily"),
-  failed24h: 3,
-  failedRatePct: 0.6,
-  avgShrinkPct: 38,
-  convertSecPerGB: 130,
-  running: 2,
+  freed: {
+    total: 36_400_000_000,
+    today: 1_900_000_000,
+    // The newest done job (finished 12 min after it started, see jobs.ts j5) plus 30 days in the trash.
+    nextReleaseBytes: 3_200_000_000,
+    nextReleaseAt: trashUntil(plus(minsAgo(200), 708_000)),
+    inTrash: 61_000_000_000,
+  },
+  converted: { total: 4812, perDay: 11 },
+  waiting: { count: 1284, nextScanAt: nextScanFor("daily") },
+  failed24h: { count: 3, rate: 0.6 },
+  avgShrink: { pct: 38, secPerGB: 130 },
+  series: { days: DAYS },
+  running: ["j1", "j2"],
   workersOn: true,
-  trashGB: 61,
-  // The newest done job (finished 12 min after it started, see jobs.ts j5) plus 30 days in the trash.
-  nextReleaseBytes: 3_200_000_000,
-  nextReleaseAt: trashUntil(plus(minsAgo(200), 708_000)),
-  savedSeries: SERIES.saved,
-  filesSeries: SERIES.converted,
-  filesLast24h: { done: 14, skipped: 2, failed: 3 },
+  last24h: { done: 14, skipped: 2, failed: 3 },
   libraries: [],
 };
 

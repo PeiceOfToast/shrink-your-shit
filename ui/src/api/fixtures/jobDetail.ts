@@ -133,7 +133,7 @@ export function jobDetail(job: Job): JobDetail {
     timeLeftMs: job.state === "running" ? 180_000 : null,
     original: done && finishedAt
       ? { action: "trashed", until: trashUntil(finishedAt) }
-      : { action: job.state === "running" ? "not_yet" : failed ? "kept" : "not_touched", until: null },
+      : { action: job.state === "running" ? "not_yet" : "not_touched", until: null },
     failure: failed
       ? { step: job.step?.name ?? "A step", reason: job.result.reason ?? "The step didn't work", nextAction: "Check that the file plays in another player, then retry.", actionLabel: "Retry" }
       : null,

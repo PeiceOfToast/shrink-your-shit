@@ -114,29 +114,40 @@ export interface LibraryPatch {
   paused?: boolean;
 }
 
+// GET /api/v2/overview, in pages/08 "Data and API" nesting. Sizes are whole bytes; times are RFC 3339 UTC.
 export interface Overview {
-  freedGB: number;
-  freedTodayGB: number;
-  converted: number;
-  convertedPerDay: number;
-  waiting: number;
-  // RFC 3339 UTC time of the next scan.
-  nextScan: string;
-  failed24h: number;
-  failedRatePct: number;
-  avgShrinkPct: number;
-  convertSecPerGB: number;
-  running: number;
+  freed: {
+    total: number;
+    today: number;
+    // Space that frees up when originals leave the trash, and the day it happens. Both null when the trash is empty.
+    nextReleaseBytes: number | null;
+    nextReleaseAt: string | null;
+    // NOT on pages/08 yet (the Dashboard shows it): the bytes in the trash now.
+    inTrash: number;
+  };
+  // NOT on pages/08 yet: `total` is the all-time count the Dashboard shows.
+  converted: { total: number; perDay: number };
+  waiting: { count: number; nextScanAt: string };
+  // rate is a percent, as the Dashboard shows it.
+  failed24h: { count: number; rate: number };
+  avgShrink: { pct: number; secPerGB: number };
+  series: { days: DaySeries[] };
+  // Ids of the jobs converting now.
+  running: string[];
   workersOn: boolean;
-  trashGB: number;
-  // Space that frees up when originals leave the trash: whole bytes, and the day it happens (RFC 3339).
-  // Both null when the trash is empty; the Dashboard hides the sentence then.
-  nextReleaseBytes: number | null;
-  nextReleaseAt: string | null;
-  savedSeries: Series[];
-  filesSeries: Series[];
-  filesLast24h: { done: number; skipped: number; failed: number };
+  // NOT on pages/08 yet: the last 24 h counts the Dashboard shows.
+  last24h: { done: number; skipped: number; failed: number };
   libraries: Library[];
+}
+
+// One day of the charts. Freed and in-trash are bytes; the rest are job counts. null = no data that day.
+export interface DaySeries {
+  day: string; // local calendar day, YYYY-MM-DD
+  freed: number | null;
+  trash: number | null;
+  done: number | null;
+  skipped: number | null;
+  failed: number | null;
 }
 
 export interface Attention {
@@ -276,9 +287,9 @@ export interface HistoryLine {
   text: string;
 }
 
-// The Summary's "Original" line. action is what happened to the original file; until is RFC 3339, null when it doesn't apply.
+// The Summary's "Original" line (pages/03). until is RFC 3339, set only for "trashed", otherwise null.
 export interface JobOriginal {
-  action: "trashed" | "kept" | "not_touched" | "not_yet";
+  action: "not_yet" | "not_touched" | "trashed" | "deleted" | "restored";
   until: string | null;
 }
 
