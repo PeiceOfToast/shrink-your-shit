@@ -23,6 +23,6 @@ export function libraryRight(l: { saved: number; waitingToFree: number; bytesNow
     const total = l.saved + l.bytesNow;
     return { gain: bytes(l.saved), rest: " saved · " + shareText((100 * l.saved) / total) + " of " + bytes(total) };
   }
-  if (l.waitingToFree > 0) return { gain: "", rest: bytes(l.waitingToFree) + " smaller" + (nextFreeDay ? " · frees on " + nextFreeDay : "") };
+  if (l.waitingToFree > 0) return { gain: "", rest: bytes(l.waitingToFree) + " smaller" + (nextFreeDay ? " · frees from " + nextFreeDay : "") };
   return { gain: "", rest: "Nothing saved yet" };
 }
