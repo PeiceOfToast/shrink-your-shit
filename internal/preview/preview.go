@@ -289,9 +289,10 @@ func Saving(t rules.Template, plan rules.Plan, info media.Info, size int64) (low
 	return low, high
 }
 
-// Files lists the library's videos whose path (inside the library) contains q, case-insensitively,
-// sorted by that path: the choices for a sample file.
-func Files(root, q string) ([]Candidate, error) {
+// Files lists the library's videos whose path (inside the library) contains q, case-insensitively: sorted
+// by that path (A to Z), or with newest set, the newest modified first (ties by path). The choices for a
+// sample file.
+func Files(root, q string, newest bool) ([]Candidate, error) {
 	files, _, err := list(root)
 	if err != nil {
 		return nil, err
@@ -301,16 +302,22 @@ func Files(root, q string) ([]Candidate, error) {
 	for _, f := range files {
 		rel, _ := filepath.Rel(root, f.path)
 		if q == "" || strings.Contains(strings.ToLower(rel), q) {
-			out = append(out, Candidate{Path: f.path, Name: filepath.ToSlash(rel), Bytes: f.st.Size()})
+			out = append(out, Candidate{Path: f.path, Name: filepath.ToSlash(rel), Bytes: f.st.Size(), Modified: f.st.ModTime()})
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	sort.Slice(out, func(i, j int) bool {
+		if newest && !out[i].Modified.Equal(out[j].Modified) {
+			return out[i].Modified.After(out[j].Modified)
+		}
+		return out[i].Name < out[j].Name
+	})
 	return out, nil
 }
 
 // Candidate is a file that can be chosen as the sample.
 type Candidate struct {
-	Path  string `json:"path"`
-	Name  string `json:"name"` // its path inside the library
-	Bytes int64  `json:"bytes"`
+	Path     string    `json:"path"`
+	Name     string    `json:"name"` // its path inside the library
+	Bytes    int64     `json:"bytes"`
+	Modified time.Time `json:"-"` // for sort=newest; not sent
 }
