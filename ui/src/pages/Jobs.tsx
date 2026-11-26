@@ -2,7 +2,7 @@ import { navigate, Link, useLocation } from "../router.tsx";
 import { api, formatCount, type Job, type JobCounts, type JobState } from "../api/index.ts";
 import { useApi } from "../api/useApi.ts";
 
-// Built exactly as draft-b/jobs.html. The only addition is the row click (opens /jobs/:id).
+// Built exactly as draft-b/jobs.html. The only addition is the row click (opens /jobs/:id, with the list's filter kept).
 
 const TABS: { key: JobState | "all"; label: string; count: keyof JobCounts }[] = [
   { key: "all", label: "All", count: "all" },
@@ -13,7 +13,7 @@ const TABS: { key: JobState | "all"; label: string; count: keyof JobCounts }[] =
   { key: "skipped", label: "Skipped", count: "skipped" },
 ];
 
-const PILL: Record<JobState, { cls: string; label: string }> = {
+export const PILL: Record<JobState, { cls: string; label: string }> = {
   waiting: { cls: "", label: "Waiting" },
   running: { cls: "run", label: "Running" },
   done: { cls: "ok", label: "Done" },
@@ -21,8 +21,8 @@ const PILL: Record<JobState, { cls: string; label: string }> = {
   skipped: { cls: "skip", label: "Skipped" },
 };
 
-function JobRow({ j }: { j: Job }) {
-  const open = () => navigate(`/jobs/${j.id}`);
+function JobRow({ j, filter }: { j: Job; filter: string }) {
+  const open = () => navigate(`/jobs/${j.id}${filter}`);
   return (
     <tr className="row-link" tabIndex={0} onClick={open} onKeyDown={(e) => e.key === "Enter" && open()}>
       <td className="full">
@@ -51,6 +51,8 @@ export function Jobs() {
   const state = (TABS.find((t) => t.key === raw)?.key ?? "all") as JobState | "all";
   const page = useApi(() => api.getJobs({ state }), [state]);
   const counts = page.data?.counts;
+  // The panel's ‹ › walk and Close keep this list's filter.
+  const filter = state === "all" ? "" : `?state=${state}`;
 
   return (
     <>
@@ -125,7 +127,7 @@ export function Jobs() {
             </thead>
             <tbody>
               {page.data.items.map((j) => (
-                <JobRow key={j.id} j={j} />
+                <JobRow key={j.id} j={j} filter={filter} />
               ))}
             </tbody>
           </table>

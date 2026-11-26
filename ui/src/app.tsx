@@ -2,6 +2,8 @@ import { Shell } from "./shell/Shell.tsx";
 import { DevStates, showDevStates } from "./devStates.tsx";
 import { Dashboard } from "./pages/Dashboard.tsx";
 import { Jobs } from "./pages/Jobs.tsx";
+import { JobDetail } from "./pages/JobDetail.tsx";
+import { Libraries } from "./pages/Libraries.tsx";
 import { Placeholder } from "./pages/Placeholder.tsx";
 import { resolve, useLocation } from "./router.tsx";
 
@@ -16,11 +18,28 @@ export function App() {
     case "jobs":
       page = <Jobs />;
       break;
+    // The job panel sits over the list, which stays behind it (dimmed).
     case "job":
-      page = <Placeholder title="Job details" note="Job details come in the next pull request (batch 1, PR 2)." back={{ to: "/jobs", label: "Back to Jobs" }} />;
+      page = (
+        <>
+          <Jobs />
+          <JobDetail id={route.id} initialTab="summary" />
+        </>
+      );
       break;
     case "jobLog":
-      page = <Placeholder title="Job log" note="The job log comes in the next pull request (batch 1, PR 2)." back={{ to: "/jobs", label: "Back to Jobs" }} />;
+      page = (
+        <>
+          <Jobs />
+          <JobDetail id={route.id} initialTab="log" />
+        </>
+      );
+      break;
+    case "libraries":
+      page = <Libraries />;
+      break;
+    case "library":
+      page = <Libraries selected={route.id} />;
       break;
     case "placeholder":
       page = <Placeholder title={route.title} />;

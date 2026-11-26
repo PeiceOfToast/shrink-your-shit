@@ -1,57 +1,40 @@
-import type { Attention, Job, JobsPage, JobsParams, Overview, Summary } from "./types.ts";
-import { ATTENTION, LIBRARIES, OVERVIEW, SUMMARY } from "./fixtures/index.ts";
+import type { Attention, Job, JobDetail, JobsPage, JobsParams, Overview, Summary } from "./types.ts";
+import { ATTENTION, OVERVIEW, SUMMARY } from "./fixtures/index.ts";
 import { JOBS } from "./fixtures/jobs.ts";
+import { jobDetail } from "./fixtures/jobDetail.ts";
+import { ApiError } from "./errors.ts";
+import { getForcedState, respond } from "./mockState.ts";
+import { currentLibraries } from "./mockLibraries.ts";
 
 // Mock implementation of the API. Route-named functions; shapes come from the page specs.
-// The dev state switcher sets a forced state here; pages see it only through these calls.
+// The dev state switcher sets a forced state (mockState.ts); pages see it only through these calls.
+export { setForcedState, getForcedState, onForcedStateChange } from "./mockState.ts";
+export type { ForcedState } from "./mockState.ts";
+export * from "./mockLibraries.ts";
 
-export type ForcedState = "none" | "empty" | "loading" | "error" | "running";
-
-let forced: ForcedState = "none";
-const listeners = new Set<() => void>();
-
-export function setForcedState(state: ForcedState): void {
-  forced = state;
-  listeners.forEach((cb) => cb());
-}
-
-export function getForcedState(): ForcedState {
-  return forced;
-}
-
-export function onForcedStateChange(cb: () => void): () => void {
-  listeners.add(cb);
-  return () => listeners.delete(cb);
-}
-
-const DELAY_MS = 300;
-
-async function respond<T>(value: () => T): Promise<T> {
-  if (forced === "loading") return new Promise<T>(() => {});
-  await new Promise((r) => setTimeout(r, DELAY_MS));
-  if (forced === "error") throw new Error("Can't reach the server · trying again");
-  return value();
-}
-
+// The status line reads this even when a page's own call is forced to fail, so it keeps its counts.
 export function getSummary(): Promise<Summary> {
-  return respond(() => ({ ...SUMMARY }));
+  return respond(
+    () => {
+      const s = getForcedState();
+      // Error and running both show new errors, so the status line's "N new errors" link is reachable.
+      return { ...SUMMARY, newErrors: s === "error" || s === "running" ? 2 : 0 };
+    },
+    { failInError: false },
+  );
 }
 
 export function getOverview(): Promise<Overview> {
   return respond(() => {
-    if (forced === "empty") {
+    if (getForcedState() === "empty") {
       return { ...OVERVIEW, converted: 0, convertedPerDay: 0, waiting: 0, running: 0, failed24h: 0, libraries: [] };
     }
-    return { ...OVERVIEW, libraries: LIBRARIES };
+    return { ...OVERVIEW, libraries: currentLibraries() };
   });
 }
 
 export function getAttention(): Promise<Attention[]> {
-  return respond(() => (forced === "empty" ? [] : ATTENTION));
-}
-
-export function getLibraries(): Promise<typeof LIBRARIES> {
-  return respond(() => (forced === "empty" ? [] : LIBRARIES));
+  return respond(() => (getForcedState() === "empty" ? [] : ATTENTION));
 }
 
 export function getJobs(params: JobsParams = {}): Promise<JobsPage> {
@@ -64,6 +47,7 @@ export function getJobs(params: JobsParams = {}): Promise<JobsPage> {
       done: 142,
       skipped: 9,
     };
+    const forced = getForcedState();
     if (forced === "empty") {
       return { counts: { ...counts, all: 0, waiting: 0, running: 0, failed: 0, done: 0, skipped: 0 }, items: [], next: null };
     }
@@ -90,4 +74,27 @@ export function scanAllLibraries(): Promise<{ ok: true }> {
 // Test the encoders on one worker (POST /api/v2/workers/{id}/capabilities/test). The result is one line.
 export function testEncoders(workerId: string): Promise<{ line: string }> {
   return respond(() => ({ line: `Test finished: the graphics encoder failed on ${workerId === "this-computer" ? "This computer" : workerId}.` }));
+}
+
+// GET /api/v2/jobs/{id}: the head, Summary, Steps, log, media and history of one job.
+export function getJob(id: string): Promise<JobDetail> {
+  return respond(() => {
+    const job = JOBS.find((j) => j.id === id);
+    if (!job) throw new ApiError("job_not_found", "That job doesn't exist.");
+    return jobDetail(job);
+  });
+}
+
+// GET /api/v2/jobs/{id}/neighbours?state=: the ids before and after this one in the list behind the panel.
+export function getJobNeighbours(id: string, state?: string): Promise<{ prev: string | null; next: string | null }> {
+  return respond(() => {
+    const list = state && state !== "all" ? JOBS.filter((j) => j.state === state) : JOBS;
+    const i = list.findIndex((j) => j.id === id);
+    return { prev: i > 0 ? list[i - 1].id : null, next: i >= 0 && i < list.length - 1 ? list[i + 1].id : null };
+  });
+}
+
+// POST /api/v2/jobs/{id}/convert-again: queues the file again; the panel stays open on the new attempt.
+export function convertAgain(id: string): Promise<{ ok: true; jobId: string }> {
+  return respond(() => ({ ok: true as const, jobId: id }));
 }

@@ -5,4 +5,5 @@ import * as mock from "./mock.ts";
 export const api = mock;
 export { setForcedState, getForcedState, onForcedStateChange } from "./mock.ts";
 export type * from "./types.ts";
+export { ApiError } from "./errors.ts";
 export { formatCount, formatGB, formatBytes, formatPct } from "./format.ts";

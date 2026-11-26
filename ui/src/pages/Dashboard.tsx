@@ -1,8 +1,9 @@
 import { Fragment, useEffect, useState, type MouseEvent } from "react";
-import { api, formatCount, formatGB, type Attention, type Job, type LibrarySummary } from "../api/index.ts";
+import { api, formatCount, formatGB, type Attention, type Job, type Library } from "../api/index.ts";
 import { useApi } from "../api/useApi.ts";
 import { Bars } from "../ui/Bars.tsx";
 import { Icon } from "../ui/Icon.tsx";
+import { libraryStatus } from "../ui/libraryStatus.ts";
 import { Link, navigate } from "../router.tsx";
 
 // Built exactly as draft-b/dashboard.html (see that file for the markup this mirrors). Batch 1, 11-26.
@@ -141,18 +142,19 @@ function ConvertingRow({ j }: { j: Job }) {
   );
 }
 
-function LibraryRow({ l }: { l: LibrarySummary }) {
+function LibraryRow({ l }: { l: Library }) {
+  const status = libraryStatus(l);
   return (
     <tr>
       <td className="full">
         <b>{l.name}</b> <span className="muted sm">{l.path}</span>
       </td>
-      <td data-l="Workflow">{l.workflow}</td>
+      <td data-l="Workflow">{l.workflow?.name ?? "—"}</td>
       <td className="num tnum" data-l="Files">{formatCount(l.files)}</td>
       <td className="num tnum" data-l="Waiting">{formatCount(l.waiting)}</td>
-      <td className="num tnum" data-l="Saved">{l.saved}</td>
+      <td className="num tnum" data-l="Saved">{l.savedBytes ? `${formatGB(l.savedBytes / 1e9)} · ${l.savedPct}%` : "—"}</td>
       <td>
-        <span className={`pill ${l.status.kind}`}>{l.status.label}</span>
+        <span className={`pill ${status.kind}`}>{status.label}</span>
       </td>
     </tr>
   );
