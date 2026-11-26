@@ -39,7 +39,7 @@ test("library right side: saved gives the green figure and the share of the tota
 });
 
 test("library right side: nothing saved, waiting to free shows the smaller bytes and the day", () => {
-  assert.deepEqual(libraryRight({ saved: 0, waitingToFree: 410, bytesNow: 900 }, "Nov 28", bytes), { gain: "", rest: "410 B smaller · frees on Nov 28" });
+  assert.deepEqual(libraryRight({ saved: 0, waitingToFree: 410, bytesNow: 900 }, "Nov 28", bytes), { gain: "", rest: "410 B smaller · frees from Nov 28" });
   assert.deepEqual(libraryRight({ saved: 0, waitingToFree: 410, bytesNow: 900 }, null, bytes), { gain: "", rest: "410 B smaller" });
 });
 
