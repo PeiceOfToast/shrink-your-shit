@@ -42,7 +42,7 @@ test("timeLeft rounds up to minutes", () => {
 });
 
 test("jobWhen follows the job state", () => {
-  const base = { id: "x", file: "f", library: "L", workflow: "w", worker: "", step: "", progress: null, result: "", resultTone: "" as const };
+  const base = { id: "x", file: "f", library: "L", workflow: "w", worker: "", step: null, progress: null, result: { sizeBefore: 1, sizeAfter: null, outcome: null, failedStep: null, reason: null, warnings: 0 } };
   assert.equal(jobWhen({ ...base, state: "running", startedAt: local(2026, 10, 26, 14, 2), queuedAt: null, finishedAt: null, tookMs: null }), "from 14:02");
   assert.equal(jobWhen({ ...base, state: "waiting", startedAt: null, queuedAt: local(2026, 10, 26, 13, 20), finishedAt: null, tookMs: null }), "queued 13:20");
   assert.equal(jobWhen({ ...base, state: "done", startedAt: null, queuedAt: null, finishedAt: null, tookMs: 380_000 }), "took 6:20");

@@ -148,18 +148,42 @@ export interface Job {
   library: string;
   workflow: string;
   worker: string;
-  step: string;
-  progress: number | null;
+  // The latest step the job reached (page 02 "step"); null while waiting or when skipped.
+  step: JobStepRef | null;
+  // The latest progress event; null unless running.
+  progress: JobProgress | null;
   // RFC 3339 UTC times; null until the step happens. Durations are whole milliseconds.
   queuedAt: string | null;
   startedAt: string | null;
   finishedAt: string | null;
   tookMs: number | null;
-  result: string;
-  resultTone: "ok" | "bad" | "";
+  result: JobResult;
   // Converting-now card (dashboard) only.
   tileLines?: string[];
-  hint?: string;
+}
+
+export interface JobStepRef {
+  index: number;
+  count: number;
+  name: string;
+}
+
+export interface JobProgress {
+  pct: number;
+  // Page 02 says "speed" with no unit; the mock uses bytes per second.
+  speed: number | null;
+  // Milliseconds left; null while unknown.
+  etaMs: number | null;
+}
+
+export interface JobResult {
+  // Bytes. While a job runs, sizeAfter is the estimate the saving text is built from.
+  sizeBefore: number;
+  sizeAfter: number | null;
+  outcome: "smaller" | "bigger_kept" | "failed" | null;
+  failedStep: string | null;
+  reason: string | null;
+  warnings: number;
 }
 
 export interface JobCounts {

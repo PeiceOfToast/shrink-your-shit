@@ -15,7 +15,6 @@ const DECISIONS = [
   "Told the media server to refresh this library",
 ];
 const DURATIONS = [1100, 3200, 252000, 4000, 900, 1400];
-const BEFORE_BYTES = 38.4e9;
 
 // The settings and measurements each step used (page 03 "values used").
 const VALUES: LogValue[][] = [
@@ -35,7 +34,8 @@ function outcomesFor(job: Job): StepOutcome[] {
     case "done":
       return STEP_NAMES.map(() => "done");
     case "failed": {
-      const at = job.step.startsWith("Check") ? 3 : 2;
+      // The failed step's index (1-based) is the 0-based slot to mark.
+      const at = job.step ? job.step.index - 1 : 2;
       return STEP_NAMES.map((_, i) => (i < at ? "done" : i === at ? "failed" : "skipped"));
     }
     case "running":
@@ -86,12 +86,9 @@ export function jobDetail(job: Job): JobDetail {
         }));
   const done = job.state === "done";
   const failed = job.state === "failed";
-  // The result text carries the saving: "41% smaller" or "12% bigger".
-  const pct = /(\d+)% (smaller|bigger)/.exec(job.result);
-  const afterBytes =
-    done && pct
-      ? Math.round(BEFORE_BYTES * (pct[2] === "smaller" ? 1 - Number(pct[1]) / 100 : 1 + Number(pct[1]) / 100))
-      : null;
+  // Sizes come from the job's own result, in bytes.
+  const beforeBytes = job.result.sizeBefore;
+  const afterBytes = done ? job.result.sizeAfter : null;
   const path = `/media/${job.library.toLowerCase().replace(/\s+/g, "-")}/${job.file}`;
 
   // Finish = start + took, so Took always matches Started → Finished.
@@ -101,7 +98,7 @@ export function jobDetail(job: Job): JobDetail {
   // Before and after, in the order the page groups them. Changed rows say what happened ("removed", "new").
   const media: MediaRow[] = [
     { group: "General", field: "Duration", kind: "duration", before: 7_092_000, after: done ? 7_092_000 : null, changed: false },
-    { group: "General", field: "Size", kind: "bytes", before: BEFORE_BYTES, after: afterBytes, changed: true },
+    { group: "General", field: "Size", kind: "bytes", before: beforeBytes, after: afterBytes, changed: true },
     { group: "Video", field: "Codec", before: "H.264", after: done ? "HEVC" : null, changed: true },
     { group: "Video", field: "Resolution", before: "1920×1080", after: done ? "1920×1080" : null, changed: false },
     { group: "Audio", field: "Track 1 · English · AC-3 5.1", before: "AC-3 5.1", after: done ? "AC-3 5.1" : null, changed: false },
@@ -114,7 +111,7 @@ export function jobDetail(job: Job): JobDetail {
     { time: plus(base, -2 * 60_000), level: "info", text: `Queued by the ${job.library} scan` },
     { time: plus(base, -60_000), level: "info", text: `Picked up by ${job.worker || "a worker"}` },
     ...(failed
-      ? [{ time: finishedAt ?? base, level: "error" as const, text: `Failed: ${job.step}` }]
+      ? [{ time: finishedAt ?? base, level: "error" as const, text: `Failed: ${job.step?.name ?? "a step"}` }]
       : done
         ? [{ time: finishedAt ?? base, level: "info" as const, text: "Finished · original moved to the trash" }]
         : []),
@@ -129,16 +126,16 @@ export function jobDetail(job: Job): JobDetail {
     startedAt,
     tookMs: job.tookMs,
     finishedAt,
-    sizeBeforeBytes: BEFORE_BYTES,
+    sizeBeforeBytes: beforeBytes,
     sizeAfterBytes: afterBytes,
     writtenAt: done ? finishedAt : null,
     outputPath: done ? path : null,
     timeLeftMs: job.state === "running" ? 180_000 : null,
     original: done ? "In the trash until 16 Nov" : job.state === "running" ? "Not yet" : failed ? "Kept as it was" : "Not touched",
     failure: failed
-      ? { step: job.step.split(" · ")[0], reason: job.step.split(" · ")[1] ?? "The step didn't work", nextAction: "Check that the file plays in another player, then retry.", actionLabel: "Retry" }
+      ? { step: job.step?.name ?? "A step", reason: job.result.reason ?? "The step didn't work", nextAction: "Check that the file plays in another player, then retry.", actionLabel: "Retry" }
       : null,
-    skipReason: job.state === "skipped" ? job.step : null,
+    skipReason: job.state === "skipped" ? job.result.reason : null,
     steps,
     logs,
     media,

@@ -1,3 +1,4 @@
+import { jobResultText, jobResultTone } from "../format/job.ts";
 import { clock, clockPrecise, duration, timeLeft } from "../format/time.ts";
 import { formatGB } from "../api/index.ts";
 
@@ -62,7 +63,7 @@ async function copyText(text: string): Promise<boolean> {
 
 // The text of the whole panel, for Copy all and the .txt download.
 function logText(d: Detail): string {
-  const head = `${d.job.file}\n${d.path}\n${d.job.result}\n`;
+  const head = `${d.job.file}\n${d.path}\n${jobResultText(d.job)}\n`;
   const history = d.history.map((h) => `${clock(h.time)} ${h.text}`).join("\n");
   if (!d.logs) return `${head}\nThe detailed log is no longer kept.\n\nHistory\n${history}\n`;
   const steps = d.logs.map((s) =>
@@ -184,9 +185,9 @@ export function JobDetail({ id, initialTab }: { id: string; initialTab: "summary
           {job && (
             <span className="jd-state">
               <span className={`pill ${PILL[job.state].cls}`}>{PILL[job.state].label}</span>
-              <span className={`sm ${job.resultTone}`}>{job.result}</span>
+              <span className={`sm ${jobResultTone(job)}`}>{jobResultText(job)}</span>
               {job.state === "running" && d && (
-                <span className="muted sm tnum">{job.progress ?? 0}% · {timeLeft(d.timeLeftMs) ?? "—"}</span>
+                <span className="muted sm tnum">{job.progress?.pct ?? 0}% · {timeLeft(d.timeLeftMs) ?? "—"}</span>
               )}
             </span>
           )}

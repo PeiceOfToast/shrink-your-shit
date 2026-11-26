@@ -1,3 +1,4 @@
+import { jobHint } from "../format/job.ts";
 import { clock, dayClock } from "../format/time.ts";
 import { Fragment, useEffect, useState, type MouseEvent } from "react";
 import { api, formatCount, formatGB, type Attention, type Job, type Library } from "../api/index.ts";
@@ -128,16 +129,16 @@ function ConvertingRow({ j }: { j: Job }) {
           </span>
           <span>started {j.startedAt ? clock(j.startedAt) : "—"}</span>
         </div>
-        <span className="hint">{j.hint}</span>
+        <span className="hint">{jobHint(j)}</span>
       </div>
       <div className="side">
         <span className="pill run">
           <Icon name="play" />
-          Running · {j.progress}%
+          Running · {j.progress?.pct ?? 0}%
         </span>
       </div>
       <div className="lbar bar">
-        <i style={{ width: `${j.progress ?? 0}%` }}></i>
+        <i style={{ width: `${j.progress?.pct ?? 0}%` }}></i>
       </div>
     </li>
   );
