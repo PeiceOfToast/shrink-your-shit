@@ -3,6 +3,7 @@
 package worker
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"os"
@@ -292,6 +293,73 @@ func TestEmptyTrashFindsAMovedOriginalByShareMountPointOnly(t *testing.T) {
 	}
 	r, _ := s.store.OriginalByID(o.ID)
 	if r.State != jobs.OriginalPurged || !strings.HasPrefix(r.Path, newRoot) {
+		t.Errorf("row %s at %s, want purged under %s", r.State, r.Path, newRoot)
+	}
+}
+
+// Nested shape: the original's old folder ends in Shows/Arcane (so its trash path has that suffix), and the library
+// is the parent of the share's new mount point, which is that same folder name under the library. The library root
+// and the mount root both produce one candidate, Lib/Shows/Arcane/.syp-trash/x: the seen[] dedupe must keep it to one
+// match, or the original is reported ambiguous. This fails with the dedupe disabled (review of #730).
+func TestEmptyTrashFindsAMovedOriginalUnderItsOwnLibraryFolder(t *testing.T) {
+	oldRoot := filepath.Join(t.TempDir(), "old", "Shows", "Arcane")
+	if err := os.MkdirAll(oldRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s := newScenarioAt(t, oldRoot, "movie.mkv")
+	if _, err := s.keeping(7).RunOne(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	o, err := s.store.OriginalOfJob(s.id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	libs, err := s.store.Libraries()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range libs {
+		if err := s.store.DeleteLibrary(l.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	lib, err := jobs.RealPath(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.store.AddLibraryWithoutFlow("Shows", lib, false); err != nil {
+		t.Fatal(err)
+	}
+	newRoot := filepath.Join(lib, "Shows", "Arcane")
+	if err := os.MkdirAll(filepath.Dir(newRoot), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(oldRoot, newRoot); err != nil {
+		t.Fatal(err)
+	}
+	newRoot, err = jobs.RealPath(newRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sh, err := s.store.SaveShare(jobs.Share{Type: "smb", Address: "//h/x", Name: "ssd", Guest: true}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.SetShareMountPoint(sh.ID, newRoot); err != nil {
+		t.Fatal(err)
+	}
+	movedTrash := filepath.Join(newRoot, TrashDir, filepath.Base(o.Trash))
+	rep := Purge(s.store, 0, later(t, o), nil, 0)
+	if rep.Deleted != 1 {
+		t.Fatalf("deleted %d, want 1; said %q; unreachable %+v", rep.Deleted, rep.Said, rep.Unreachable)
+	}
+	if len(rep.Unreachable) != 0 {
+		t.Errorf("unreachable %+v, want none: one place is ours, not ambiguous", rep.Unreachable)
+	}
+	if _, err := os.Stat(movedTrash); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the moved original is still there: %v", err)
+	}
+	if r, _ := s.store.OriginalByID(o.ID); r.State != jobs.OriginalPurged || !strings.HasPrefix(r.Path, newRoot) {
 		t.Errorf("row %s at %s, want purged under %s", r.State, r.Path, newRoot)
 	}
 }
