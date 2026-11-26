@@ -15,6 +15,7 @@ import { VariablesSettings } from "./Variables";
 import { Link, navigate, useSearch } from "../router";
 import type { Workflow } from "../types/v2";
 import { closeMenuToSummary, menuEscape } from "../menuFocus";
+import { tablistKey } from "../tablistKeys";
 
 // design review rule 4: "same resolution", and that originals stay. Also first run's step 2.
 export const START_SIMPLE = "A list of steps with plain choices. HEVC, same resolution, stereo audio in your languages, MKV. Saves new files in a separate folder. Your originals stay where they are; no space is freed until you remove them.";
@@ -163,10 +164,10 @@ export function Workflows() {
           <button className="btn sm primary" type="button" onClick={() => navigate("/workflows/guided")}><Icon id="i-plus" />New workflow</button>
         </>}
       </PageHead>
-      <div className="tabs tabs3" role="tablist">
-        <button role="tab" type="button" aria-selected={tab === "workflows"} onClick={() => tab !== "workflows" && setTab("workflows")}>Workflows {wfs.data && <span className="n">{all.length}</span>}</button>
-        <button role="tab" type="button" aria-selected={tab === "templates"} onClick={() => tab !== "templates" && setTab("templates")}>Templates {tpl.data && <span className="n">{templates.length}</span>}</button>
-        <button role="tab" type="button" aria-selected={tab === "variables"} onClick={() => tab !== "variables" && setTab("variables")}>Variables {vars.data && <span className="n">{vars.data.total}</span>}</button>
+      <div className="tabs tabs3" role="tablist" onKeyDown={tablistKey}>
+        <button role="tab" type="button" tabIndex={tab === "workflows" ? 0 : -1} aria-selected={tab === "workflows"} onClick={() => tab !== "workflows" && setTab("workflows")}>Workflows {wfs.data && <span className="n">{all.length}</span>}</button>
+        <button role="tab" type="button" tabIndex={tab === "templates" ? 0 : -1} aria-selected={tab === "templates"} onClick={() => tab !== "templates" && setTab("templates")}>Templates {tpl.data && <span className="n">{templates.length}</span>}</button>
+        <button role="tab" type="button" tabIndex={tab === "variables" ? 0 : -1} aria-selected={tab === "variables"} onClick={() => tab !== "variables" && setTab("variables")}>Variables {vars.data && <span className="n">{vars.data.total}</span>}</button>
       </div>
       <p className="muted" role="status">{said}</p>
       {impErr && <p className="st bad" role="alert"><Icon id="i-alert" /><span>{impErr}</span></p>}
