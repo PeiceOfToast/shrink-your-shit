@@ -41,13 +41,13 @@ func IsVideo(path string) bool {
 }
 
 // SkipDir reports whether a folder should not be scanned: hidden folders
-// (.Trash, .AppleDouble, ...), Synology's @eaDir and Windows' recycle bin.
+// (.Trash, .AppleDouble, ...), Synology's @eaDir, Windows' recycle bin and a disk's lost+found (root-only, never media).
 func SkipDir(name string) bool {
 	if strings.HasPrefix(name, ".") {
 		return true
 	}
 	switch strings.ToLower(name) {
-	case "@eadir", "$recycle.bin", "system volume information":
+	case "@eadir", "$recycle.bin", "system volume information", "lost+found":
 		return true
 	}
 	return false
@@ -152,15 +152,20 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 	for _, t := range targets {
 		lib := t.Path
 		videos := 0
-		var unread []string // folders under the library the walk could not read: its files were not seen
+		unread := map[string]bool{} // folders under the library the walk could not read: their files were not seen
+		noteUnread := func(folder string) {
+			if !unread[folder] { // once per folder, however many of its files fail
+				unread[folder] = true
+				log.Printf("scan: %s: cannot read the folder %s: its files are not seen, the library is not recorded this scan; the next scan tries again (if it is not media, add it to the flow's Ignore list)", lib, folder)
+			}
+		}
 		s.setScanning(t.LibraryID, 0, false)
 		filepath.WalkDir(lib, func(path string, d fs.DirEntry, err error) error {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
 			if err != nil {
-				unread = append(unread, path)
-				log.Printf("scan: %s: cannot read the folder %s: its files are not seen, the library is not recorded this scan; the next scan tries again (if it is not media, add it to the flow's Ignore list)", lib, path)
+				noteUnread(path)
 				return nil
 			}
 			if rel, err := filepath.Rel(lib, path); err == nil && rel != "." && t.Template.Ignored(rel) {
@@ -170,9 +175,7 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 				return nil
 			}
 			if d.IsDir() {
-				// lost+found is skipped at any depth below the library (it is a disk root's folder, never media): here,
-				// not in SkipDir, which the doctor's unreadable-folder note also uses
-				if path != lib && (SkipDir(d.Name()) || d.Name() == "lost+found") {
+				if path != lib && SkipDir(d.Name()) {
 					return fs.SkipDir
 				}
 				return nil
@@ -185,8 +188,7 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 			info, err := os.Lstat(path)
 			if err != nil {
 				if !errors.Is(err, fs.ErrNotExist) { // listed but not searchable (mode 0644): its files are not seen
-					unread = append(unread, filepath.Dir(path))
-					log.Printf("scan: %s: cannot read the folder %s: its files are not seen, the library is not recorded this scan; the next scan tries again (if it is not media, add it to the flow's Ignore list)", lib, filepath.Dir(path))
+					noteUnread(filepath.Dir(path))
 				}
 				return nil
 			}

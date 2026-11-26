@@ -3,9 +3,12 @@
 package scanner
 
 import (
+	"bytes"
+	"log"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/shrink-your-shit/shrink-your-shit/internal/jobs"
@@ -54,7 +57,14 @@ func TestUnreadableSubfolderKeepsItsFilesState(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { os.Chmod(sub, 0o755) }) // so TempDir can be removed
+			var logs bytes.Buffer
+			prevLog := log.Writer()
+			log.SetOutput(&logs)
 			scanLibrary(s, l)
+			log.SetOutput(prevLog)
+			if n := strings.Count(logs.String(), "cannot read the folder"); n != 1 { // once per folder, not per file
+				t.Errorf("the unreadable folder was logged %d times in one scan; want once", n)
+			}
 			after, _ := st.GetLibrary(l.ID)
 			if after.LastScanVideos != before.LastScanVideos || after.LastScan != before.LastScan {
 				t.Errorf("last scan %d at %q after an unreadable subfolder; want %d at %q kept",
