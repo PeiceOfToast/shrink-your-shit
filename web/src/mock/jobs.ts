@@ -13,7 +13,15 @@ const base = (id: string, name: string, folder: string, lib: readonly [string, s
 });
 const prog = (pct: number, fps: number, el: number, eta: number) => ({ stage: "Converting video", percent: pct, workflowPercent: Math.round(5 + pct * 0.8), elapsedS: el, speed: 0.9, etaS: eta, fps, bitrateKbps: 8300 });
 
+// a file still changing: the server's scan row (state queued, subState settling, no job), listed first on Waiting
+const settle = (id: string, name: string, bytes: number): JobItem => ({
+  id, origin: "scan", state: "queued", subState: "settling", name, folder: ".", path: "/media/movies/" + name, library: MOV[0], libraryId: MOV[1],
+  bytes, codec: null, resolution: null, durationSec: null, attempts: 0, retryAt: null, priority: null, pin: null, position: null,
+  reason: { code: "still_changing", message: "It may still be copying. It joins the queue once it stops changing for a scan." },
+  detail: "It may still be copying. It joins the queue once it stops changing for a scan.",
+});
 let items: JobItem[] = [
+  settle("settle-12", "copying.mkv", 7340032), settle("settle-13", "Partly.Written.2026.mkv", 2.1 * GB),
   base("j-48213", "Dune.Part.Two.2024.2160p.REMUX.mkv", "Dune Part Two (2024)", MOV, "running", { subState: "converting", worker: "builtin", progress: prog(62, 41, 728, 450), convertingTo: "HEVC · 10-bit · MKV", bytes: 58 * GB, resolution: "2160p" }),
   base("j-48214", "The.Bear.S03E04.1080p.WEB-DL.mkv", "Season 3", TV, "validating", { subState: "checking", worker: "nas", progress: { ...prog(100, 9, 222, 0), stage: "Checking the result", percent: null, workflowPercent: 90 }, bytes: 2.1 * GB }),
   base("48220", "Oppenheimer.2023.1080p.BluRay.mkv", "Oppenheimer (2023)", MOV, "queued", { subState: "waiting", attempts: 0, retryAt: null, status: "waiting", detail: null, bytes: 14.9 * GB }),
@@ -57,8 +65,10 @@ export function mockJobs(tab: Tab, q: string, path?: string, limit = 200, librar
   let rows = mine.filter((j) => tabOf(j.state) === tab && (!q || j.name.toLowerCase().includes(q.toLowerCase())) && (!path || j.path === path) && (!kept || (tab === "completed" && j.originalState === "kept")) && (!left || (tab === "completed" && (j.originalState === "left_in_place" || j.originalState === "kept_beside"))));
   if (tab === "waiting") { // as the server with sort=queue (#134): taken-now files by priority, then age; a retry waiting for its time has no place
     const rank = (j: JobItem) => (j.pin === "first" ? 2 : j.pin === "last" ? 0 : 1); // #143: pinned first, then by priority, pinned last at the end
-    const now = rows.filter((j) => j.state === "queued").sort((a, b) => rank(b) - rank(a) || (b.priority ?? 0) - (a.priority ?? 0));
-    rows = [...now.map((j, i) => ({ ...j, position: i + 1 })), ...rows.filter((j) => j.state !== "queued").map((j) => ({ ...j, position: null }))];
+    // a file still changing is listed first with no place (the server's settling rows, v2jobs.go), then the queue, then the rest
+    const still = rows.filter((j) => j.subState === "settling").map((j) => ({ ...j, position: null }));
+    const now = rows.filter((j) => j.state === "queued" && j.subState !== "settling").sort((a, b) => rank(b) - rank(a) || (b.priority ?? 0) - (a.priority ?? 0));
+    rows = [...still, ...now.map((j, i) => ({ ...j, position: i + 1 })), ...rows.filter((j) => j.state !== "queued").map((j) => ({ ...j, position: null }))];
   }
   return { items: rows.slice(0, limit), total: rows.length, counts };
 }
