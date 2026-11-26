@@ -77,6 +77,13 @@ export function moveNode(d: WorkflowDoc, id: ID, dir: -1 | 1): WorkflowDoc {
   return relink(d, ids);
 }
 
+// Did a drop change the running order? Compare the order, not the document: a nudge down and back builds a new document
+// with the same order, and that is not a move (no history entry, no "moved" announcement).
+export function dropResult(before: WorkflowDoc, dropped: WorkflowDoc): { moved: boolean } {
+  const ids = (d: WorkflowDoc) => order(d).map((n) => n.id).join();
+  return { moved: ids(before) !== ids(dropped) };
+}
+
 // Delete a step and join the steps either side of it. Its own links go with it, and so does an end that only it led to
 // (a question's No).
 export function deleteNode(d: WorkflowDoc, id: ID): WorkflowDoc {
