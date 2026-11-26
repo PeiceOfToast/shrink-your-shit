@@ -18,6 +18,7 @@ import { filesFoot, shrinkLine, spaceFoot, spaceHeadline } from "../cardLines";
 import { getStartedSteps, nextStep, showGetStarted } from "../getStarted";
 import { runFields, startedAt } from "../jobCards";
 import { filesFact, freshFact, lastDoneFact, nextScanFact, nothingFact, stateWord, workersFact, type Fact } from "../statusStrip";
+import { convertingEmpty, libraryRight, shareText } from "../dashRowText";
 import { attentionRows, LIBRARY_WORD } from "../attention";
 const HEALTH_HIDDEN = "syp-health-dismissed"; // the failed checks the Dismiss was for
 import { onLive } from "../live";
@@ -344,16 +345,15 @@ export function Overview() {
 
       {!starting && <>
       <section className="sec" aria-labelledby="ov-j"><h2 id="ov-j">Converting now {rows.length > 0 && <span className="muted sm">{slotUsed} of {slotTotal} slots</span>} <Link className="more" to="/jobs?tab=running">All jobs</Link></h2>
-        {!v.active.length ? <p className="muted">{on > 0 ? "Nothing is converting." : "Nothing is converting. Turn workers on to start."}</p> : (
+        {!v.active.length ? <p className="muted">{convertingEmpty(on > 0, h.filesWaiting, v.nextScanAt, clock)}</p> : (
           // design busy-1: the Jobs running card (the M4 mini card's grammar): tile, name, the Step / Speed / Time left fields, a status pill, a bar along the bottom
-          <ul className="lcards" aria-label="Converting now">{v.active.map((a0) => { const a = { ...a0, ...live[a0.jobId] }, p = pct(a.percent), w = workerOf(a.jobId), rj = runOf.get(a.jobId), lib = a.library ? libOf.get(a.library.id) : undefined,
+          <ul className="lcards" aria-label="Converting now">{v.active.map((a0) => { const a = { ...a0, ...live[a0.jobId] }, p = pct(a.percent), w = workerOf(a.jobId), rj = runOf.get(a.jobId), st = startedAt(rj?.progress?.elapsedS, new Date()), lib = a.library ? libOf.get(a.library.id) : undefined,
                 f = runFields({ stage: a.stage ?? "", percent: a.percent, workflowPercent: 0, elapsedS: 0, speed: a.speed ?? null, etaS: a.etaS, fps: a.fps ?? null, bitrateKbps: a.bitrateKbps ?? null });
               return <li key={a.jobId} className="lcard">
                 <span className="ltile codec" aria-hidden="true">{rj?.codec ? <>{rj.codec}{rj.resolution && <><br />{rj.resolution}</>}</> : <Icon id="i-file" />}</span>
                 <div className="lmain">
                   <div className="lname"><Link className="ttl" to={"/jobs?tab=running&job=" + encodeURIComponent(a.jobId)}>{a.name}</Link><span className="lchev" aria-hidden="true">›</span></div>
-                  <div className="chips">{a.library && <span className="mchip"><Icon id="i-folder" />{a.library.name}</span>}{lib?.workflowName && <span className="mchip"><Icon id="i-workflow" />{lib.workflowName}</span>}<span className="mchip"><Icon id="i-worker" />{w ?? "This computer"}</span></div>
-                  {startedAt(rj?.progress?.elapsedS, new Date()) && <span className="muted sm">started {clock(startedAt(rj?.progress?.elapsedS, new Date())!)}</span>}
+                  <div className="chips">{a.library && <span className="mchip"><Icon id="i-folder" />{a.library.name}</span>}{lib?.workflowName && <span className="mchip"><Icon id="i-workflow" />{lib.workflowName}</span>}<span className="mchip"><Icon id="i-worker" />{w ?? "This computer"}</span>{st && <span className="mchip">started {clock(st)}</span>}</div>
                   <div className="rfields">
                     <div className="rf"><span className="muted sm">Step</span><span className="rfv">{f.step}</span></div>
                     <div className="rf"><span className="muted sm">Speed</span><span className="rfv">{f.speed}</span></div>
@@ -375,9 +375,10 @@ export function Overview() {
           {/* design busy-2: a library is a card (the Libraries page's card grammar): tile, name, fact chips; saved and the share of the total on the right; a bar along the bottom */}
           <ul className="lcards" aria-label="Libraries">{v.libraries.map((l) => { const total = l.saved + l.bytesNow, share = total > 0 ? (100 * l.saved) / total : null, sp = share == null ? null : Math.round(share);
               const frees = h.nextFreeAt ? ", frees from " + dayName(h.nextFreeAt.slice(0, 10)) : "";
+              const nextFreeDay = h.nextFreeAt ? dayName(h.nextFreeAt.slice(0, 10)) : null;
               const lib = libOf.get(String(l.id)); // the Libraries page's workflow and scan figures
-              const facts = [l.saved === 0 && l.waitingToFree > 0 ? bytes(l.waitingToFree) + " smaller" + frees : null, l.saved > 0 && l.waitingToFree > 0 ? bytes(l.waitingToFree) + " more" + frees : null, (l.grew ?? 0) > 0 ? bytes(l.grew!) + " added by bigger files" : null].filter(Boolean);
-              const files = l.counts.done + l.counts.waiting + l.counts.skipped + l.counts.failed;
+              const facts = [l.saved > 0 && l.waitingToFree > 0 ? bytes(l.waitingToFree) + " more" + frees : null, (l.grew ?? 0) > 0 ? bytes(l.grew!) + " added by bigger files" : null].filter(Boolean);
+              const files = l.counts.done + l.counts.waiting + l.counts.skipped + l.counts.failed, right = libraryRight(l, nextFreeDay, bytes);
               return <li key={l.id} className="lcard">
                 <span className="ltile" aria-hidden="true"><Icon id="i-library" /></span>
                 <div className="lmain">
@@ -385,18 +386,15 @@ export function Overview() {
                   <div className="chips"><span className="mchip">{count(l.counts.waiting)} waiting</span><span className="mchip">{plural(files, "file", "files")}</span>{lib?.workflowName && <span className="mchip"><Icon id="i-workflow" />{lib.workflowName}</span>}{lib && <span className="mchip">{lib.scan.lastScanAt ? "scanned " + lastScan(lib.scan.lastScanAt) : "not scanned yet"}</span>}{facts.map((f) => <span key={f} className="mchip">{f}</span>)}</div>
                 </div>
                 <div className="lside">
-                  {l.saved > 0 ? <span className="saved nowrap"><b className="gain">{bytes(l.saved)}</b> saved</span> : <span className="sm nowrap">{l.waitingToFree > 0 ? bytes(l.waitingToFree) + " smaller" : "Nothing saved yet"}</span>}
+                  <span className={l.saved > 0 ? "saved nowrap" : "sm nowrap"}>{right.gain && <b className="gain">{right.gain}</b>}{right.rest}</span>
                   <span className="lnote">
-                    {sp != null && <span>{sp}% of {bytes(total)}</span>}
                     {l.counts.failed > 0 && <Link className="over" to={"/jobs?tab=failed&libraryId=" + encodeURIComponent(String(l.id))}>{count(l.counts.failed)} failed</Link>}
                     {l.couldFree > 0 && l.saved === 0 && <Link to={"/jobs?tab=completed&left=1&libraryId=" + encodeURIComponent(String(l.id))}>{"could free " + bytes(l.couldFree)}</Link>}
                     {l.state === "no_workflow" ? <span className="pill warn">No workflow</span> : l.state === "paused" ? <span className="pill warn">Paused</span> : l.state === "paused_share" ? <span className="pill warn">Share not connected yet</span> : null}
                   </span>
                 </div>
-                {sp != null && <div className="lbar" role="progressbar" aria-label={l.name + ": " + sp + "% saved"} aria-valuemin={0} aria-valuemax={100} aria-valuenow={sp}><i style={{ width: (share ?? 0) + "%" }} /></div>}
-              </li>; })}</ul>
-          <details className="libhelp"><summary>What Saved and Size now mean</summary>
-            <p className="muted sm">Saved is space already freed. A replaced original waits in the trash until its date: it no longer counts in Size now, but it isn't freed yet, which is the 'frees from' figure. Sizes are updated when a library is scanned.</p></details></>}
+                {sp != null && <div className="lbar" role="progressbar" aria-label={l.name + ": " + shareText(share ?? 0) + " saved"} aria-valuemin={0} aria-valuemax={100} aria-valuenow={sp}><i style={{ width: (share ?? 0) + "%" }} /></div>}
+              </li>; })}</ul></>}
       </section>
 
 

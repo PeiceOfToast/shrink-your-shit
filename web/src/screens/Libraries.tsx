@@ -149,6 +149,8 @@ export function Libraries() {
         <ul className={"lcards" + (selecting ? " selecting" : "")} aria-label="Library list">
           {items.map((l) => <LibCard key={l.id} l={l} tag={tag(l)} selecting={selecting} checked={sel.includes(l.id)} onToggle={(on) => setSel(on ? [...sel, l.id] : sel.filter((x) => x !== l.id))} />)}
         </ul>)}
+      {all.length > 0 && <details className="libhelp"><summary>What Saved and Size now mean</summary>
+        <p className="muted sm">Saved is space already freed. A replaced original waits in the trash until its date: it no longer counts in Size now, but it isn't freed yet, which is the 'frees from' figure. Sizes are updated when a library is scanned.</p></details>}
     </div>
   );
 }
