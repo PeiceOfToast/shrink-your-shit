@@ -487,6 +487,9 @@ func codecWords(c string) string {
 	return strings.ToUpper(c)
 }
 
+// CodecWords is a video codec as people know it ("H.264", "HEVC"), for the preview's lines.
+func CodecWords(c string) string { return codecWords(c) }
+
 // lowerFirst is s with its first letter in lower case (skip words follow "skip: ").
 // skipWords are a "Leave the file alone" reason as skip words, which follow "skip: ": without the
 // reason's own full stop, as every place that shows them adds one (V6 review: "left alone..").
