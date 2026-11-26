@@ -85,7 +85,7 @@ const FILTERS: [LibFilter, string][] = [["all", "All"], ["watching", "Watching"]
 export function Libraries() {
   const libs = useData(listLibrariesV2, [], 3000);
   // the trash's next deletion day: the same day the Dashboard's "frees from" names
-  const trash = useData(getTrash, [], 3000), trashDay = trash.data?.nextDeleteAt ? dayName(trash.data.nextDeleteAt.slice(0, 10)) : null;
+  const trash = useData(getTrash, [], 30000), trashDay = trash.data?.nextDeleteAt ? dayName(trash.data.nextDeleteAt.slice(0, 10)) : null;
   // user item 3 (design 7.1): each row shows its workflow's summary in full ("Standard · Balanced · ..."), from the workflows list
   const docs = useData(listWorkflowDocs, [], 10000), tag = (l: Library) => { const t = docs.data?.find((w) => w.id === l.workflowId)?.summaryTag ?? ""; return t.trim() === l.workflowName.trim() ? "" : t; }; // review 628ebc3 P2: a workflow named by its summary (the default) shows it once
   useEffect(() => onLive((t) => { if (t === "library.changed") libs.reload(); }), []); // eslint-disable-line react-hooks/exhaustive-deps -- #150: at once
