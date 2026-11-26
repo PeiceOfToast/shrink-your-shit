@@ -74,3 +74,26 @@ func TestSettlingRowOfRemovedFileIsForgotten(t *testing.T) {
 		t.Errorf("settling row of a removed file kept: %+v", r)
 	}
 }
+
+// A file whose time is in the future (clock skew, a NAS ahead) is not young forever: its age is negative, so it is
+// decided like any other file, after two looks MinAge apart.
+func TestFutureMtimeFileIsQueued(t *testing.T) {
+	s, st, lib, _ := setup(t, h264Big)
+	clock := time.Now()
+	s.Now, s.MinAge = func() time.Time { return clock }, time.Minute
+	a := filepath.Join(lib, "a.mkv")
+	future := clock.Add(time.Hour)
+	os.Chtimes(a, future, future)
+	look := func(want int) {
+		t.Helper()
+		if n := s.ScanOnce(context.Background()); n != want {
+			t.Errorf("queued %d, want %d", n, want)
+		}
+	}
+	look(0) // first look: waiting
+	clock = clock.Add(2 * time.Minute)
+	look(1) // unchanged for MinAge: queued
+	if r, _ := st.GetFile(a); r == nil || r.Reason != "" || !strings.HasPrefix(r.Decision, "queued: ") {
+		t.Errorf("future-time file's record %+v, want queued", r)
+	}
+}

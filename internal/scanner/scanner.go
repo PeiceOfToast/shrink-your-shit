@@ -195,7 +195,7 @@ func (s *Scanner) ScanOnce(ctx context.Context) int {
 				}
 				return nil
 			}
-			if now().Sub(info.ModTime()) < s.MinAge {
+			if age := now().Sub(info.ModTime()); age >= 0 && age < s.MinAge {
 				s.settleYoung(path, info)
 				return nil
 			}
