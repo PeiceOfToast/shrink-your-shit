@@ -116,6 +116,12 @@ func v2Guide(api *http.ServeMux, store *jobs.Store, svc *integrations.Service, n
 		if !answersOK(w, a) {
 			return
 		}
+		// a Basic answer that would change the stretch after Save (which the questions can't show) is refused, not dropped
+		if workflow.ChangesUnreadable(cur.Doc, a) {
+			why := g.AdvancedWhy + " The steps after Save stay as they are; change them in the steps."
+			writeErrorWith(w, http.StatusConflict, "not_guided", why+" Nothing was changed.", map[string]any{"why": why, "flow": workflow.FlowBasic})
+			return
+		}
 		// a secret is never sent to the page, so a variable saved back without a value keeps the stored one
 		doc := workflow.KeepSecretValues(workflow.Apply(cur.Doc, a), cur.Doc)
 		if vs := workflow.CheckVariables(doc); len(vs) > 0 {
