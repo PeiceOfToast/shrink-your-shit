@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/PeiceOfToast/shrink-your-shit/internal/store"
 )
 
 // ErrClosed is returned by Emit after Close.
@@ -33,6 +35,10 @@ type Options struct {
 	// LogKeep is how many rotated files to keep (system.log.1 … .N). Default 5.
 	LogKeep int
 
+	// DB is the open store. When set, events are also written to the events table, which Query reads.
+	// Nil means no table: Query then fails and job seq starts at 1 each run.
+	DB *store.DB
+
 	// sinks are extra sinks, for tests in this package.
 	sinks []sink
 }
@@ -41,13 +47,16 @@ type Options struct {
 // Emit never waits on a sink or a subscriber.
 type Bus struct {
 	mu         sync.Mutex
+	cond       *sync.Cond // on mu; signalled when the db sink commits a batch
 	opts       Options
 	clock      func() time.Time
+	db         *store.DB
 	sinks      []*sinkRun
 	subs       map[int]*subscriber
 	nextSub    int
 	nextGlobal int64
-	jobSeq     map[int64]int64
+	jobSeq     map[int64]int64 // a job's last seq; absent until its first event this run (seeded from the table)
+	pending    map[int64]int   // job events accepted by the db sink and not yet committed; guarded by mu
 	closed     bool
 }
 
@@ -103,13 +112,23 @@ func New(opts Options) (*Bus, error) {
 	}
 
 	b := &Bus{
-		opts:   opts,
-		clock:  opts.Clock,
-		subs:   map[int]*subscriber{},
-		jobSeq: map[int64]int64{},
+		opts:    opts,
+		clock:   opts.Clock,
+		db:      opts.DB,
+		subs:    map[int]*subscriber{},
+		jobSeq:  map[int64]int64{},
+		pending: map[int64]int{},
+	}
+	b.cond = sync.NewCond(&b.mu)
+	if opts.DB != nil {
+		sinks = append(sinks, newDBSink(opts.DB, b))
 	}
 	for _, s := range sinks {
-		r := &sinkRun{s: s, ch: make(chan Event, opts.Buffer), done: make(chan struct{})}
+		size := opts.Buffer
+		if _, ok := s.(*dbSink); ok {
+			size = dbBuffer
+		}
+		r := &sinkRun{s: s, ch: make(chan Event, size), done: make(chan struct{})}
 		b.sinks = append(b.sinks, r)
 		go r.run()
 	}
@@ -156,8 +175,21 @@ func (b *Bus) Emit(e Event) error {
 		return ErrClosed
 	}
 	if e.JobID != 0 {
+		// Seeding may wait for the db sink to commit this job's earlier events, and Close may run meanwhile.
+		if err := b.seedLocked(e.JobID); err != nil {
+			b.mu.Unlock()
+			return err
+		}
+		if b.closed {
+			b.mu.Unlock()
+			return ErrClosed
+		}
 		b.jobSeq[e.JobID]++
 		e.Seq = b.jobSeq[e.JobID]
+		if e.Kind == KindRunEnd {
+			// The job is finished; a later event for it seeds again from the table.
+			delete(b.jobSeq, e.JobID)
+		}
 	} else {
 		b.nextGlobal++
 		e.Seq = b.nextGlobal
@@ -169,6 +201,9 @@ func (b *Bus) Emit(e Event) error {
 		}
 		select {
 		case r.ch <- e:
+			if _, ok := r.s.(*dbSink); ok && e.JobID != 0 {
+				b.pending[e.JobID]++
+			}
 			if r.drops > 0 {
 				reports = append(reports, report{r.s.name(), r.drops})
 				r.drops = 0

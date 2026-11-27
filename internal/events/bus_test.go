@@ -92,9 +92,11 @@ func TestBlockedSinkNeverBlocksEmit(t *testing.T) {
 
 	// Free the sink, then emit until a later accepted event reports the drops. The recorder shares the same
 	// buffer size, so it may also drop during the burst and report its own drops; only the blocked sink's count is checked.
+	// The released sink drains on its own goroutine, so poll for the report against a deadline, not a fixed count.
 	close(release)
-	for i := 0; i < 1000 && len(blockedReports(rec.events())) == 0; i++ {
+	for deadline := time.Now().Add(5 * time.Second); len(blockedReports(rec.events())) == 0 && time.Now().Before(deadline); {
 		_ = b.Emit(note("after"))
+		time.Sleep(time.Millisecond)
 	}
 	if err := b.Close(context.Background()); err != nil {
 		t.Fatal(err)
