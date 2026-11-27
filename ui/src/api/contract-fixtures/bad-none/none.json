@@ -1,0 +1,7 @@
+{
+  "type": "none",
+  "method": "POST",
+  "path": "/api/v2/signout",
+  "status": 204,
+  "body": {"unexpected": true}
+}

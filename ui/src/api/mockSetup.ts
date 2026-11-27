@@ -1,11 +1,11 @@
 // First run and sign in (page 13). Shapes come from page 13 and page 05 (starters). The guide's chips (page 06) are not mocked yet,
 // so a starter's answers are empty here (a gap in the handback).
 import { ApiError } from "./errors.ts";
+import type { Health, Setup, SetupDone } from "./types.ts";
 import { DELAY_MS, getForcedState, onForcedStateChange, respond, setFreshInstall } from "./mockState.ts";
 import { currentToken } from "./mockSettings.ts";
 import { clearLibraries, insertLibrary } from "./mockLibraries.ts";
 
-export type Setup = { needsAccount: boolean; starting: boolean };
 
 export type Starter = { id: string; kind: string; name: string; line: string; icon: string; guided: boolean };
 
@@ -57,7 +57,7 @@ function checkPassword(password: string): void {
 }
 
 // Page 13: one call, all or nothing. A refused folder is 409 with field library.path and saves nothing.
-export function postSetup(input: SetupInput): Promise<{ ok: true; scanStarted: boolean }> {
+export function postSetup(input: SetupInput): Promise<SetupDone> {
   return respond(() => {
     checkPassword(input.account.password);
     if (input.library && "path" in input.library && input.library.path.endsWith("/refused")) {
@@ -72,7 +72,7 @@ export function postSetup(input: SetupInput): Promise<{ ok: true; scanStarted: b
       );
     }
     setupDone = true;
-    return { ok: true as const, scanStarted: input.library !== null };
+    return { scanStarted: input.library !== null };
   });
 }
 
@@ -101,7 +101,7 @@ function slowFailure<T>(p: Promise<T>): Promise<T> {
 }
 
 // POST /api/v2/signin {password}. A wrong password says so in one line and gives no hint which part was wrong.
-export function signIn(password: string): Promise<{ ok: true }> {
+export function signIn(password: string): Promise<void> {
   return slowFailure(respond(() => {
     const now = Date.now();
     checkLock(now);
@@ -110,12 +110,12 @@ export function signIn(password: string): Promise<{ ok: true }> {
       throw new ApiError("bad_password", "That password isn't right.");
     }
     failures = [];
-    return { ok: true as const };
+    return;
   }));
 }
 
 // POST /api/v2/signin {token}: the sign-in link. The bad_token text is a placeholder (a gap in the handback).
-export function signInWithToken(token: string): Promise<{ ok: true }> {
+export function signInWithToken(token: string): Promise<void> {
   return slowFailure(respond(() => {
     const now = Date.now();
     checkLock(now);
@@ -124,11 +124,17 @@ export function signInWithToken(token: string): Promise<{ ok: true }> {
       throw new ApiError("bad_token", "That sign-in link doesn't work any more. Sign in with your password, or get a new link from the server.");
     }
     failures = [];
-    return { ok: true as const };
+    return;
   }));
 }
 
 // POST /api/v2/signout.
-export function signOut(): Promise<{ ok: true }> {
-  return respond(() => ({ ok: true as const }));
+// The server answers 204 with no body.
+export function signOut(): Promise<void> {
+  return respond(() => undefined);
+}
+
+// GET /api/v2/health without a session: {ok, starting}; version only with a session (the mock is signed in).
+export function getHealth(): Promise<Health> {
+  return respond(() => ({ ok: true, starting: false, version: "0.9.4" }));
 }
