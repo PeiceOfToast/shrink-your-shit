@@ -225,7 +225,7 @@ func TestVideoDolbyVisionIsGreyedNotFaked(t *testing.T) {
 	}
 }
 
-// TestVideoTenBitH264IsGreyed: 10-bit H.264 is not offered on this encoder.
+// TestVideoTenBitH264IsGreyed: 10-bit H.264 is not offered (few devices play it).
 func TestVideoTenBitH264IsGreyed(t *testing.T) {
 	set := videoSettings("h264", 3)
 	set.BitDepth = ptr(10)

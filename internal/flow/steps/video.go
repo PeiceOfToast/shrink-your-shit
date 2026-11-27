@@ -71,7 +71,7 @@ func (VideoStep) Def() flow.Definition {
 				Keep: events.KeepLog},
 			{Code: "video.no_bitrate", Level: events.LevelError, Text: "The bitrate is missing",
 				Keep: events.KeepLog},
-			{Code: "video.hdr_h264", Level: events.LevelError, Text: "H.264 can't keep HDR",
+			{Code: "video.hdr_h264", Level: events.LevelError, Text: "H.264 isn't used for HDR",
 				Keep: events.KeepLog},
 			{Code: "video.hdr_skipped", Level: events.LevelInfo, Text: "Left alone: {hdr} is not converted",
 				Fields: []string{"hdr"}, Keep: events.KeepLog},
@@ -120,9 +120,9 @@ func (VideoStep) Plan(s flow.Settings, in flow.PlanInput, p *encode.Plan) (flow.
 		p.Video.HDR = encode.HDRTonemap
 	}
 	if want == encode.CodecH264 && p.Video.HDR == encode.HDRKeep && main.HDRKind() != "SDR" {
-		// H.264 cannot carry HDR on this encoder (#855): say so before the run, not as a failed job.
+		// H.264 is not used for HDR, by choice (#855): say so before the run, not as a failed job.
 		return flow.Decision{}, &flow.PlanError{Code: "video.hdr_h264",
-			Message: "H.264 can't keep HDR. Pick HEVC, or choose Convert to SDR."}
+			Message: "H.264 isn't used for HDR, because few devices play it. Pick HEVC, or choose Convert to SDR."}
 	}
 	detail := flow.F{
 		"format": string(want), "from": main.Codec,
@@ -297,7 +297,7 @@ func (VideoStep) Validate(s flow.Settings, vc flow.ValidateContext) flow.Check {
 	if set.BitDepth != nil && *set.BitDepth == 10 && set.Format == "h264" {
 		// Greyed and a problem: a plan asking for ten-bit H.264 is refused rather than written as eight (#855).
 		c.Problems = append(c.Problems, flow.Problem{Field: "bitDepth", Code: "video.bitdepth_h264",
-			Message: "10-bit H.264 isn't offered. Pick 8-bit, or HEVC."})
+			Message: "10-bit H.264 plays on few devices, so it isn't offered. Pick HEVC or AV1 for 10-bit."})
 	}
 	if !set.UseGpu {
 		c.Disabled = append(c.Disabled, flow.Disabled{Field: "ifGpuFails", Why: "The graphics card is not used."})
@@ -362,7 +362,7 @@ func tagDisabled(set VideoSettings) []flow.Disabled {
 	}
 	if set.BitDepth != nil && *set.BitDepth == 10 && set.Format == "h264" {
 		out = append(out, flow.Disabled{Field: "bitDepth", Value: "10",
-			Why: "10-bit H.264 isn't offered. H.264 stays 8-bit."})
+			Why: "10-bit H.264 plays on few devices, so it isn't offered. Pick HEVC or AV1 for 10-bit."})
 	}
 	return out
 }

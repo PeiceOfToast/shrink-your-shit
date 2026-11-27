@@ -259,17 +259,17 @@ func videoOptions(plan Plan, main media.VideoTrack, encoder string, res *Result)
 		depth = 8
 	}
 	if plan.Video.Codec == CodecH264 {
-		// H.264 is 8-bit on this encoder: no ten-bit H.264 is offered, and HDR cannot be kept in it. A plan that asks
+		// H.264 is 8-bit by choice (10-bit and HDR H.264 play on few devices): no ten-bit H.264 is offered, and HDR cannot be kept in it. A plan that asks
 		// for either is refused; a ten-bit SDR source is written as 8-bit, and the log says so (#855).
 		if keepHDR {
-			return nil, fmt.Errorf("%w: H.264 can't keep HDR", ErrInvalidPlan)
+			return nil, fmt.Errorf("%w: H.264 is not used for HDR", ErrInvalidPlan)
 		}
 		if plan.Video.BitDepth == Depth10 {
-			return nil, fmt.Errorf("%w: 10-bit H.264 isn't offered", ErrInvalidPlan)
+			return nil, fmt.Errorf("%w: 10-bit H.264 is not offered", ErrInvalidPlan)
 		}
 		if depth == 10 {
 			depth = 8
-			res.Notes = append(res.Notes, "10-bit H.264 isn't offered; written as 8-bit")
+			res.Notes = append(res.Notes, "H.264 is written as 8-bit: 10-bit H.264 plays on few devices")
 		}
 	}
 

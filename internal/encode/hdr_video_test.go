@@ -119,7 +119,7 @@ func TestBuildTenBitHDRIsHDR10(t *testing.T) {
 	}
 }
 
-// TestBuildH264IsEightBit: H.264 is 8-bit on this encoder (#855). A ten-bit SDR source is written as 8-bit with
+// TestBuildH264IsEightBit: H.264 is 8-bit by choice (#855). A ten-bit SDR source is written as 8-bit with
 // the reason in the log; asking for ten-bit H.264, or keeping HDR in it, is refused.
 func TestBuildH264IsEightBit(t *testing.T) {
 	tenBitSDR := baseInfo()
