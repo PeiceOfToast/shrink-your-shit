@@ -185,6 +185,7 @@ func TestVideoNotYet(t *testing.T) {
 	set.HDR = ptr("tonemap")
 	set.KeepDolbyVision = true
 	set.RateControl = ptr("vbr")
+	set.BitrateLevel = "high"
 	set.AvgMbps = ptr(3.6)
 	check := VideoStep{}.Validate(set, flow.ValidateContext{})
 	got := map[string]bool{}
@@ -194,7 +195,7 @@ func TestVideoNotYet(t *testing.T) {
 		}
 		got[p.Field] = true
 	}
-	for _, field := range []string{"size", "preset", "fps", "bitDepth", "hdr", "keepDolbyVision", "rateControl"} {
+	for _, field := range []string{"size", "preset", "fps", "bitDepth", "hdr", "keepDolbyVision", "rateControl", "bitrateLevel"} {
 		if !got[field] {
 			t.Errorf("problems = %v, want one on %s", got, field)
 		}

@@ -187,6 +187,9 @@ func videoNotYet(set VideoSettings) []flow.Problem {
 			}
 		}
 	}
+	if set.BitrateLevel != "" && set.BitrateLevel != "medium" {
+		add("bitrateLevel", "Picking a bitrate level is not built yet; the Quality slider decides for now.") // item 6
+	}
 	if set.Preset != nil && *set.Preset != "" && *set.Preset != "normal" {
 		add("preset", "Choosing the encoder speed is not built yet; the processor picks its own speed.") // item 8
 	}
