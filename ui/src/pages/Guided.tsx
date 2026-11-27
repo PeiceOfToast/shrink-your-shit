@@ -3,7 +3,8 @@ import { navigate } from "../router.tsx";
 import { api, type Answers, type FlowDisabled, type GuideChoice, type GuideDoc, type GuideField, type GuidePart, type GuidePreview, type TryLine } from "../api/index.ts";
 import { languageName } from "../format/language.ts";
 import { useApi } from "../api/useApi.ts";
-import { ChoiceField, QUALITY_NAMES, Row, qualityMeaning, toErr, useBitrateLadder, type Err } from "./flowParts.tsx";
+import { ChoiceField, QUALITY_NAMES, Row, toErr, useBitrateLadder, useCardFamilies, type Err } from "./flowParts.tsx";
+import { qualityMeaning } from "../format/quality.ts";
 
 // Guided builder (06): a short set of questions that build the flow. Nothing reaches the library until
 // "Save and use it". The three panels are the parts index, the part cards and "What this does".
@@ -355,6 +356,7 @@ function greyFileTypes(choices: GuideChoice[], disabled: FlowDisabled[]): GuideC
 
 function FieldRow({ field, value, answers, languages, disabled, onChange }: { field: GuideField; value: unknown; answers: Answers; languages: string[]; disabled: FlowDisabled[]; onChange: (v: unknown) => void }) {
   const ladder = useBitrateLadder();
+  const families = useCardFamilies(answers.useGpu !== false);
   if (field.type === "choice" && field.choices) {
     return (
       <>
@@ -369,7 +371,7 @@ function FieldRow({ field, value, answers, languages, disabled, onChange }: { fi
     return (
       <Row
         label={isQuality ? `Quality · ${n} · ${QUALITY_NAMES[n - 1]}` : field.label}
-        hint={isQuality && ladder ? qualityMeaning(ladder, n, String(answers.format ?? "hevc"), answers.useGpu !== false, null) : undefined}
+        hint={isQuality && ladder ? qualityMeaning(ladder, n, String(answers.format ?? "hevc"), families, null) : undefined}
       >
         <div className="wf-quality">
           <input type="range" min={1} max={5} step={1} value={n} aria-label={field.label} aria-valuetext={isQuality ? `${n} · ${QUALITY_NAMES[n - 1]}` : `${n}`} onChange={(e) => onChange(Number(e.target.value))} />

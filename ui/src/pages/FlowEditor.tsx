@@ -2,7 +2,8 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { navigate, useLocation } from "../router.tsx";
 import { api, type Flow, type FlowCheck, type FlowStep, type StepId, type TryLine } from "../api/index.ts";
 import { useApi } from "../api/useApi.ts";
-import { ChoiceField, QUALITY_NAMES, Row, Seg, qualityMeaning, toErr, useBitrateLadder, type Err } from "./flowParts.tsx";
+import { ChoiceField, QUALITY_NAMES, Row, Seg, toErr, useBitrateLadder, useCardFamilies, type Err } from "./flowParts.tsx";
+import { qualityMeaning } from "../format/quality.ts";
 import { LanguageChips } from "./LanguageChips.tsx";
 
 // Flow editor (07): the fixed walk Video → Audio → Save the result. Nothing is added or reordered.
@@ -461,9 +462,10 @@ function Editor({ id, initial }: { id: string; initial: Loaded }) {
 // Quality: the 1–5 slider with its name, and the number it resolves to for the picture size.
 function QualityRow({ value, format, card, size, off, onChange }: { value: number; format: string; card: boolean; size: string | null; off?: string; onChange: (q: number) => void }) {
   const ladder = useBitrateLadder();
+  const families = useCardFamilies(card);
   return (
     <div className={off ? "wf-dim" : undefined}>
-      <Row label={`Quality · ${value} · ${QUALITY_NAMES[value - 1]}`} hint={off ?? (ladder ? qualityMeaning(ladder, value, format, card, size) : undefined)}>
+      <Row label={`Quality · ${value} · ${QUALITY_NAMES[value - 1]}`} hint={off ?? (ladder ? qualityMeaning(ladder, value, format, families, size) : undefined)}>
         <div className="wf-quality">
           <input type="range" min={1} max={5} step={1} value={value} disabled={Boolean(off)} aria-label="Quality" aria-valuetext={`${value} · ${QUALITY_NAMES[value - 1]}`} onChange={(e) => onChange(Number(e.target.value))} />
         </div>
