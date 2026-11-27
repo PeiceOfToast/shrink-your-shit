@@ -76,7 +76,10 @@ export function getOverview(): Promise<Overview> {
         workersOn: !workersSwitch().paused,
       };
     }
-    return { ...OVERVIEW, libraries: currentLibraries(), workersOn: !workersSwitch().paused };
+    // While the switch is off, only the files still finishing are converting; once they are done nothing is.
+    const sw = workersSwitch();
+    const running = sw.paused ? OVERVIEW.running.slice(0, sw.finishing) : OVERVIEW.running;
+    return { ...OVERVIEW, running, libraries: currentLibraries(), workersOn: !sw.paused };
   });
 }
 
