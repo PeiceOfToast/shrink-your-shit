@@ -92,7 +92,7 @@ func TestVerifyTooShortStopsBeforeStreams(t *testing.T) {
 	st, _ := stagedWith(t, "x")
 	src := goodInfo(100 * time.Second)
 	p := &stubProber{info: goodInfo(90 * time.Second)}
-	v, err := Verify(context.Background(), p, st, src, wantAll, time.Minute)
+	v, err := Verify(context.Background(), p, Recorder{}, st, src, wantAll, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestVerifyTooShortStopsBeforeStreams(t *testing.T) {
 
 func TestVerifyTooLong(t *testing.T) {
 	st, _ := stagedWith(t, "x")
-	v, err := Verify(context.Background(), &stubProber{info: goodInfo(105 * time.Second)}, st, goodInfo(100*time.Second), wantAll, time.Minute)
+	v, err := Verify(context.Background(), &stubProber{info: goodInfo(105 * time.Second)}, Recorder{}, st, goodInfo(100*time.Second), wantAll, time.Minute)
 	if err != nil || v.Code != CodeTooLong {
 		t.Fatalf("verdict = %+v, %v; want too_long", v, err)
 	}
@@ -115,11 +115,11 @@ func TestVerifyTooLong(t *testing.T) {
 func TestVerifyDurationToleranceIsTheLargerOfOneSecondAndHalfAPercent(t *testing.T) {
 	st, _ := stagedWith(t, "x")
 	// 0.5 % of 4000 s is 20 s, so a 15 s gap passes on a long film, while 1.5 s fails on a 100 s one.
-	v, _ := Verify(context.Background(), &stubProber{info: goodInfo(4015 * time.Second)}, st, goodInfo(4000*time.Second), wantAll, time.Minute)
+	v, _ := Verify(context.Background(), &stubProber{info: goodInfo(4015 * time.Second)}, Recorder{}, st, goodInfo(4000*time.Second), wantAll, time.Minute)
 	if !v.OK {
 		t.Fatalf("15 s off a 4000 s film: %+v; want OK", v)
 	}
-	v, _ = Verify(context.Background(), &stubProber{info: goodInfo(101500 * time.Millisecond)}, st, goodInfo(100*time.Second), wantAll, time.Minute)
+	v, _ = Verify(context.Background(), &stubProber{info: goodInfo(101500 * time.Millisecond)}, Recorder{}, st, goodInfo(100*time.Second), wantAll, time.Minute)
 	if v.Code != CodeTooLong {
 		t.Fatalf("1.5 s off a 100 s film: %+v; want too_long (floor is 1 s, 0.5 %% is 0.5 s)", v)
 	}
@@ -140,7 +140,7 @@ func TestVerifyStreamChecks(t *testing.T) {
 			st, _ := stagedWith(t, "x")
 			info := goodInfo(100 * time.Second)
 			c.mut(&info)
-			v, err := Verify(context.Background(), &stubProber{info: info}, st, goodInfo(100*time.Second), wantAll, time.Minute)
+			v, err := Verify(context.Background(), &stubProber{info: info}, Recorder{}, st, goodInfo(100*time.Second), wantAll, time.Minute)
 			if err != nil || v.Code != c.code || v.OK {
 				t.Fatalf("verdict = %+v, %v; want %s", v, err, c.code)
 			}
@@ -150,15 +150,15 @@ func TestVerifyStreamChecks(t *testing.T) {
 
 func TestVerifyUnreadableFileIsANoAndAHangIsAnError(t *testing.T) {
 	st, _ := stagedWith(t, "x")
-	v, err := Verify(context.Background(), &stubProber{err: media.ErrNotMedia}, st, goodInfo(time.Second), wantAll, time.Minute)
+	v, err := Verify(context.Background(), &stubProber{err: media.ErrNotMedia}, Recorder{}, st, goodInfo(time.Second), wantAll, time.Minute)
 	if err != nil || v.Code != CodeIncomplete {
 		t.Fatalf("not-media file: %+v, %v; want a check.incomplete no", v, err)
 	}
-	_, err = Verify(context.Background(), &stubProber{hang: true}, st, goodInfo(time.Second), wantAll, 20*time.Millisecond)
+	_, err = Verify(context.Background(), &stubProber{hang: true}, Recorder{}, st, goodInfo(time.Second), wantAll, 20*time.Millisecond)
 	if err == nil {
 		t.Fatal("a probe that hangs past the timeout must be an error, not a verdict")
 	}
-	_, err = Verify(context.Background(), &stubProber{err: media.ErrFFprobeMissing}, st, goodInfo(time.Second), wantAll, time.Minute)
+	_, err = Verify(context.Background(), &stubProber{err: media.ErrFFprobeMissing}, Recorder{}, st, goodInfo(time.Second), wantAll, time.Minute)
 	if err == nil {
 		t.Fatal("ffprobe missing is a check that could not run: an error")
 	}

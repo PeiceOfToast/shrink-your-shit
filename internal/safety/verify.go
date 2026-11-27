@@ -10,6 +10,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/PeiceOfToast/shrink-your-shit/internal/events"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/media"
 )
 
@@ -45,6 +46,32 @@ const (
 // DefaultVerifyTimeout bounds the probe of checks 1-3 (L-SAFE-1: a check that hangs times out).
 const DefaultVerifyTimeout = 2 * time.Minute
 
+// Recorder writes each check's result to the job log as a decision line (Source "safety"). A nil Bus writes nothing,
+// so a zero Recorder is valid. A line the bus refuses must not change the verdict, so the Emit error is dropped.
+type Recorder struct {
+	Bus   *events.Bus
+	JobID int64
+}
+
+// log records one check and returns its verdict unchanged.
+func (r Recorder) log(check string, v Verdict) Verdict {
+	if r.Bus == nil {
+		return v
+	}
+	e := events.Event{JobID: r.JobID, Kind: events.KindDecision, Source: "safety", Level: events.LevelInfo}
+	if v.OK {
+		e.Code = "check.pass"
+		e.Message = check + ": pass"
+	} else {
+		e.Level = events.LevelWarn
+		e.Code = v.Code
+		e.Message = check + ": " + v.Message
+		e.NextAction = v.NextAction
+	}
+	_ = r.Bus.Emit(e)
+	return v
+}
+
 // Want is what the plan asked for. Flow fills it in; safety never imports encode.
 type Want struct {
 	// AudioLanguages has one entry per audio track the output must keep, by language ("" for unknown).
@@ -58,7 +85,7 @@ type Want struct {
 //
 // The error is for a check that could not run: a timeout, a cancelled context, or ffprobe missing or crashing. The
 // worker treats that as may-pass. A file ffprobe cannot read is a "no", not an error.
-func Verify(ctx context.Context, p media.Prober, st Staged, src media.Info, want Want, timeout time.Duration) (Verdict, error) {
+func Verify(ctx context.Context, p media.Prober, rec Recorder, st Staged, src media.Info, want Want, timeout time.Duration) (Verdict, error) {
 	if timeout <= 0 {
 		timeout = DefaultVerifyTimeout
 	}
@@ -68,25 +95,28 @@ func Verify(ctx context.Context, p media.Prober, st Staged, src media.Info, want
 		if err != nil {
 			return Verdict{}, err
 		}
-		return *v, nil
+		return rec.log("complete", *v), nil
 	}
 	out, err := probe(ctx, p, st.Path, timeout)
 	if err != nil {
 		return Verdict{}, err
 	}
 	if out == nil {
-		return noVerdict(CodeIncomplete, "the file could not be read as media"), nil
+		return rec.log("complete", noVerdict(CodeIncomplete, "the file could not be read as media")), nil
 	}
+	rec.log("complete", Verdict{OK: true})
 
 	// 2. Duration.
 	if v := checkDuration(src, *out); v != nil {
-		return *v, nil
+		return rec.log("duration", *v), nil
 	}
+	rec.log("duration", Verdict{OK: true})
 
 	// 3. Streams.
 	if v := checkStreams(*out, want); v != nil {
-		return *v, nil
+		return rec.log("streams", *v), nil
 	}
+	rec.log("streams", Verdict{OK: true})
 
 	return Verdict{OK: true}, nil
 }
