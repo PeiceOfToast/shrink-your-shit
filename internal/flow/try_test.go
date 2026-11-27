@@ -5,6 +5,7 @@ package flow_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,8 +18,8 @@ import (
 	"github.com/PeiceOfToast/shrink-your-shit/internal/safety"
 )
 
-// trySafety is the file boundary for a try: its staging is a real hidden folder beside the
-// destination (so a leftover is visible), and its output is a file of a size the test picks.
+// trySafety is the file boundary for a try: its staging is a real hidden folder in the folder the
+// try gave it (so a leftover would show there), and its output is a file of a size the test picks.
 type trySafety struct {
 	verify safety.Verdict
 	// verifyErr makes the check unable to run.
@@ -28,15 +29,21 @@ type trySafety struct {
 	// staged closes when the staging folder exists, so a test can stop the run mid-encode.
 	staged chan struct{}
 
+	folder   string
 	placedTo string
 	gotSrc   media.Info
 }
 
-func (f *trySafety) Stage(dst string) (safety.Staged, error) {
-	folder, err := os.MkdirTemp(filepath.Dir(dst), ".out.*.syp-tmp")
+func (f *trySafety) Stage(base, dst string) (safety.Staged, error) {
+	dir := base
+	if dir == "" {
+		dir = filepath.Dir(dst)
+	}
+	folder, err := os.MkdirTemp(dir, ".out.*.syp-tmp")
 	if err != nil {
 		return safety.Staged{}, err
 	}
+	f.folder = folder
 	path := filepath.Join(folder, "out"+filepath.Ext(dst))
 	if err := os.WriteFile(path, make([]byte, f.size), 0o600); err != nil {
 		os.RemoveAll(folder)
@@ -146,12 +153,18 @@ func TestATryNeverWritesBesideTheOriginal(t *testing.T) {
 
 	m := &fake.Media{Probes: map[string]media.Info{src: info}, Runs: []fake.RunScript{{}}}
 	sf := &trySafety{verify: safety.Verdict{OK: true}, size: 7}
-	res, err := flow.Try(context.Background(), starterFlow(t), src, tryEnv(m, sf), t.TempDir())
+	scratch := t.TempDir()
+	res, err := flow.Try(context.Background(), starterFlow(t), src, tryEnv(m, sf), scratch)
 	if err != nil {
 		t.Fatalf("try: %v", err)
 	}
 	if sf.placedTo != "" {
 		t.Errorf("the try placed a file at %s", sf.placedTo)
+	}
+	// The staging is the app's temporary folder, never the original's: a killed process leaves
+	// nothing for the person to find beside their video.
+	if sf.folder == "" || !strings.HasPrefix(sf.folder, scratch+string(filepath.Separator)) {
+		t.Errorf("the try staged in %q, want a folder under the app's %s", sf.folder, scratch)
 	}
 	if got := entries(t, root); strings.Join(got, ",") != strings.Join(before, ",") {
 		t.Errorf("the folder changed: %v -> %v", before, got)
@@ -227,6 +240,36 @@ func TestATryEncodesOneMinuteFromAThirdIn(t *testing.T) {
 	}
 	if got := entries(t, root); strings.Join(got, ",") != strings.Join(before, ",") {
 		t.Errorf("the folder changed: %v -> %v", before, got)
+	}
+}
+
+// TestASampleIsAlwaysAnMkv: the sample does not inherit the source's container, which may refuse
+// the streams a stream copy carries (subtitles into AVI or TS, for one). The engine re-encodes
+// from the sample, so an MKV loses nothing.
+func TestASampleIsAlwaysAnMkv(t *testing.T) {
+	root, src, info := trySource(t, 2*time.Hour)
+	ts := filepath.Join(root, "clip.ts")
+	if err := os.Rename(src, ts); err != nil {
+		t.Fatal(err)
+	}
+	info.Path = ts
+	mf := &fake.Media{Probes: map[string]media.Info{ts: info}, Runs: []fake.RunScript{{}, {}}}
+	m := &tryMedia{Media: mf, src: ts, whole: info, sample: 60 * time.Second}
+	sf := &trySafety{verify: safety.Verdict{OK: true}}
+	if _, err := flow.Try(context.Background(), starterFlow(t), ts, tryEnv(m, sf), t.TempDir()); err != nil {
+		t.Fatalf("try: %v", err)
+	}
+	argvs := mf.Argvs()
+	if len(argvs) != 2 {
+		t.Fatalf("runs = %d, want the cut and then the engine's encode", len(argvs))
+	}
+	cut := argvs[0]
+	sample := cut[len(cut)-1]
+	if filepath.Base(sample) != "sample.mkv" {
+		t.Errorf("cut writes %q, want sample.mkv whatever the source's container", sample)
+	}
+	if enc := strings.Join(argvs[1], " "); !strings.Contains(enc, " -i "+sample+" ") {
+		t.Errorf("encode = %q, want the MKV sample %s as its input", enc, sample)
 	}
 }
 
@@ -345,13 +388,25 @@ func TestAStoppedTryLeavesNothingBehind(t *testing.T) {
 func TestATryRefusesWhatItCannotRead(t *testing.T) {
 	root, src, info := trySource(t, 60*time.Second)
 	cases := []struct {
-		name string
-		file string
-		m    media.Media
-		code string
+		name    string
+		file    string
+		m       media.Media
+		code    string
+		message string
 	}{
-		{"not a file", filepath.Join(root, "missing.mkv"), &fake.Media{}, "invalid_file"},
-		{"not media", src, &fake.Media{ProbeErrors: map[string]error{src: media.ErrNotMedia}}, "invalid_file"},
+		{
+			// The page has the file in hand and it is gone by the time the try reads it: the
+			// probe's own stat error speaks, and the page answers "choose it again", not 500.
+			name: "gone since the page listed it", file: filepath.Join(root, "missing.mkv"),
+			m:    &fake.Media{ProbeErrors: map[string]error{filepath.Join(root, "missing.mkv"): fmt.Errorf("probe: %w", os.ErrNotExist)}},
+			code: "invalid_file", message: "The file is missing or cannot be read.",
+		},
+		{
+			name: "unreadable", file: filepath.Join(root, "missing.mkv"),
+			m:    &fake.Media{ProbeErrors: map[string]error{filepath.Join(root, "missing.mkv"): fmt.Errorf("probe: %w", os.ErrPermission)}},
+			code: "invalid_file", message: "The file is missing or cannot be read.",
+		},
+		{"not media", src, &fake.Media{ProbeErrors: map[string]error{src: media.ErrNotMedia}}, "invalid_file", ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -359,6 +414,9 @@ func TestATryRefusesWhatItCannotRead(t *testing.T) {
 			var refuse *flow.TryError
 			if !errors.As(err, &refuse) || refuse.Code != c.code {
 				t.Fatalf("error = %v, want %s", err, c.code)
+			}
+			if c.message != "" && !strings.Contains(refuse.Message, c.message) {
+				t.Errorf("message = %q, want %q", refuse.Message, c.message)
 			}
 		})
 	}

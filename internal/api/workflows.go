@@ -474,7 +474,7 @@ func (s *Server) tryWorkflow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !inside {
-		writeError(w, http.StatusBadRequest, "not_in_library", "Pick a file inside one of your libraries.", "file", 0)
+		writeError(w, http.StatusBadRequest, "not_in_library", "That file isn't in one of your libraries. Try a file from a library.", "file", 0)
 		return
 	}
 	if rs.Try == nil {

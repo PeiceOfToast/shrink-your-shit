@@ -76,6 +76,10 @@ type RunInput struct {
 	// run.
 	Try  bool
 	Flow *Flow
+	// StageBase is where the private staging folder is made; empty means beside the destination,
+	// which is what a job wants. A try sets it to the app's temp folder, so a killed process
+	// leaves nothing in the original's folder.
+	StageBase string
 }
 
 // Want is the codec the runner must be able to encode.
@@ -172,12 +176,13 @@ func (e *engine) run(ctx context.Context) (res Result) {
 	}
 	argv := append([]string{"ffmpeg"}, built.Argv...)
 
-	// 5. Stage the output beside its destination. The encoder writes the staged file, not the
-	// destination, so nothing appears there until Place has checked the result.
+	// 5. Stage the output beside its destination (a try stages in the app's temp folder instead).
+	// The encoder writes the staged file, not the destination, so nothing appears there until
+	// Place has checked the result.
 	if res = ctxStop(ctx); res.Outcome != "" {
 		return res
 	}
-	staged, err := e.env.Safety.Stage(plan.Output)
+	staged, err := e.env.Safety.Stage(e.in.StageBase, plan.Output)
 	if err != nil {
 		return fatal("save.stage_failed", err.Error(), "save", "Check the destination folder's permissions.")
 	}

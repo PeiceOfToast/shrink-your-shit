@@ -238,7 +238,7 @@ func TestTryReadsOnlyFilesInsideALibrary(t *testing.T) {
 		if rec.Code != http.StatusBadRequest || code != "not_in_library" || env["field"] != "file" {
 			t.Fatalf("%s = %d %q field %v; want 400 not_in_library on file", file, rec.Code, code, env["field"])
 		}
-		if msg != "Pick a file inside one of your libraries." {
+		if msg != "That file isn't in one of your libraries. Try a file from a library." {
 			t.Errorf("message = %q, want ui-shop's sentence", msg)
 		}
 		if call.flow != nil {

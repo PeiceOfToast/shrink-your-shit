@@ -60,11 +60,15 @@ type fakeSafety struct {
 	placedTo    string
 }
 
-func (f *fakeSafety) Stage(dst string) (safety.Staged, error) {
+func (f *fakeSafety) Stage(base, dst string) (safety.Staged, error) {
 	if f.stageE != nil {
 		return safety.Staged{}, f.stageE
 	}
-	folder, err := os.MkdirTemp(filepath.Dir(dst), ".out.*.syp-tmp")
+	dir := base
+	if dir == "" {
+		dir = filepath.Dir(dst)
+	}
+	folder, err := os.MkdirTemp(dir, ".out.*.syp-tmp")
 	if err != nil {
 		return safety.Staged{}, err
 	}

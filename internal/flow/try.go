@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"math"
 	"os"
 	"path/filepath"
@@ -59,8 +60,9 @@ const (
 
 // Try runs f on one file and answers the lines the pages show. It never asks for a saved revision
 // and never writes beside the file: the engine stops after the result check, and its staging goes
-// with the run, whether it passed, failed or was stopped. A sample is cut in scratch, a folder the
-// app made for this (never the system temp, which can be a small memory-backed folder).
+// with the run, whether it passed, failed or was stopped. Everything a try makes — the sample and
+// the engine's staging — lives in scratch, a folder the app made for this (never the system temp,
+// which can be a small memory-backed folder), so even a killed process leaves the library alone.
 func Try(ctx context.Context, f Flow, file string, env Env, scratch string) (TryResult, error) {
 	if err := CheckShape(f); err != nil {
 		return TryResult{}, &TryError{Code: "invalid_flow", Message: err.Error()}
@@ -68,13 +70,21 @@ func Try(ctx context.Context, f Flow, file string, env Env, scratch string) (Try
 	if env.Media == nil || env.Safety == nil {
 		return TryResult{}, errors.New("flow: a try needs media and safety")
 	}
+	if scratch == "" {
+		return TryResult{}, errors.New("flow: a try needs a folder to work in")
+	}
 	info, err := env.Media.Probe(ctx, file)
 	if err != nil {
 		if ctx.Err() != nil {
 			return TryResult{}, ctx.Err()
 		}
-		if errors.Is(err, media.ErrNotMedia) {
+		switch {
+		case errors.Is(err, media.ErrNotMedia):
 			return TryResult{}, &TryError{Code: "invalid_file", Message: "The file could not be read as media."}
+		case errors.Is(err, fs.ErrNotExist), errors.Is(err, fs.ErrPermission):
+			// The file was there when the page listed it and is gone or unreadable now: the page can
+			// say so and ask for another, which is not the app going wrong.
+			return TryResult{}, &TryError{Code: "invalid_file", Message: "The file is missing or cannot be read. Choose it again."}
 		}
 		return TryResult{}, fmt.Errorf("try %s: probe: %w", file, err)
 	}
@@ -126,6 +136,9 @@ func Try(ctx context.Context, f Flow, file string, env Env, scratch string) (Try
 		Try: true, Flow: &f,
 		LibraryRoot: filepath.Dir(source), Source: source,
 		Size: st.Size(), MTime: st.ModTime(),
+		// A try never places, so its staging is ours alone: keep it out of the library, where a
+		// killed process would leave it behind.
+		StageBase: scratch,
 	}, env)
 	if ctx.Err() != nil {
 		return TryResult{}, ctx.Err()
@@ -156,19 +169,16 @@ func Try(ctx context.Context, f Flow, file string, env Env, scratch string) (Try
 // aligned; seeking while re-encoding is the one arrangement that does not (Mkv kept the video
 // about eight seconds late, and the result check said so). The pre-roll a keyframe adds is part
 // of the sample and of its measured length, so the estimate is not skewed by it.
+//
+// The sample is always an MKV: it holds any streams the source's container might not (subtitles
+// in AVI or TS, for one), and the engine re-encodes from it anyway, so matching the source's
+// container buys nothing and can make the copy fail.
 func cutSample(ctx context.Context, file string, whole time.Duration, env Env, scratch string) (dir, path string, err error) {
-	if scratch == "" {
-		return "", "", errors.New("flow: a try needs a folder to cut its sample in")
-	}
 	dir, err = os.MkdirTemp(scratch, "try-*")
 	if err != nil {
 		return "", "", fmt.Errorf("try: make a sample folder: %w", err)
 	}
-	ext := filepath.Ext(file)
-	if ext == "" {
-		ext = ".mkv"
-	}
-	path = filepath.Join(dir, "sample"+ext)
+	path = filepath.Join(dir, "sample.mkv")
 	argv := []string{
 		"ffmpeg", "-y", "-nostdin", "-loglevel", "error",
 		"-ss", ffmpegSeconds(whole / 3), "-t", ffmpegSeconds(TrySample), "-i", file,
