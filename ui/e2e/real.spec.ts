@@ -39,8 +39,8 @@ convert("a clip converts, and its Job log shows each step", async ({ page }) => 
   let row = page.locator("tr.row-link").first();
   while (Date.now() < deadline) {
     await page.goto(`${BASE_URL}/jobs?state=done&api=real`);
-    if (await row.count()) break;
-    await page.waitForTimeout(15_000);
+    // Wait up to 15 s for the list to render: count() reads at once, before the page has loaded, so it never breaks.
+    if (await row.waitFor({ state: "visible", timeout: 15_000 }).then(() => true, () => false)) break;
   }
   await expect(row, "a job reached Done within 10 minutes").toHaveCount(1);
   await row.click();
