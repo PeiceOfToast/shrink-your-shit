@@ -15,7 +15,7 @@ import (
 // file system surprise; RealSafety is the real thing.
 type Safety interface {
 	Stage(dst string) (safety.Staged, error)
-	Verify(ctx context.Context, p media.Prober, st safety.Staged, src media.Info, want safety.Want, timeout time.Duration) (safety.Verdict, error)
+	Verify(ctx context.Context, p media.Prober, rec safety.Recorder, st safety.Staged, src media.Info, want safety.Want, timeout time.Duration) (safety.Verdict, error)
 	Place(ctx context.Context, st safety.Staged, final string) (string, error)
 }
 
@@ -24,8 +24,8 @@ type RealSafety struct{}
 
 func (RealSafety) Stage(dst string) (safety.Staged, error) { return safety.Stage(dst) }
 
-func (RealSafety) Verify(ctx context.Context, p media.Prober, st safety.Staged, src media.Info, want safety.Want, timeout time.Duration) (safety.Verdict, error) {
-	return safety.Verify(ctx, p, st, src, want, timeout)
+func (RealSafety) Verify(ctx context.Context, p media.Prober, rec safety.Recorder, st safety.Staged, src media.Info, want safety.Want, timeout time.Duration) (safety.Verdict, error) {
+	return safety.Verify(ctx, p, rec, st, src, want, timeout)
 }
 
 func (RealSafety) Place(ctx context.Context, st safety.Staged, final string) (string, error) {
