@@ -1,5 +1,5 @@
 import { LOG_CHOICES, type LogSettings, type ProcessingSettings } from "../../api/index.ts";
-import { ListInput, LoadState, Row, SaveBar, Switch } from "./parts.tsx";
+import { LoadState, Row, SaveBar, Switch } from "./parts.tsx";
 import { useSettingsForm } from "./useSettingsForm.ts";
 
 const dayLabel = (n: number) => (n === 0 ? "Forever" : `${n} days`);
@@ -52,9 +52,6 @@ export function Processing() {
       </Row>
       <Row id="p-space" label="Low disk space limit (GB)" hint="A library disk below this gets no new jobs." field="processing.lowSpaceGB" problem={f.problem}>
         <input id="p-space" type="number" className="inp" min={1} max={1000} value={p.lowSpaceGB} onChange={(e) => setP({ lowSpaceGB: e.target.valueAsNumber })} />
-      </Row>
-      <Row id="p-lang" label="Languages" hint="Three-letter codes, for example eng, ger." field="processing.languages" problem={f.problem}>
-        <ListInput id="p-lang" label="Languages" value={p.languages} onChange={(languages) => setP({ languages })} />
       </Row>
       <Row label="Workflows may run commands" hint="Lets workflows run commands on this server. Off unless you need it.">
         <Switch label="Workflows may run commands" on={p.workflowsMayRunCommands} onChange={(workflowsMayRunCommands) => setP({ workflowsMayRunCommands })} />

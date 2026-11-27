@@ -46,7 +46,6 @@ let settings: SettingsData = {
     lowPriority: true,
     keepOriginalsDays: 7,
     lowSpaceGB: 10,
-    languages: ["eng", "ger"],
     workflowsMayRunCommands: false,
     trashPath: "/media/.syp-trash",
   },
@@ -56,7 +55,7 @@ let settings: SettingsData = {
 
 const KNOWN: Record<string, string[]> = {
   general: ["serverName", "language", "timeFormat", "dateFormat", "theme", "checkForUpdates", "languages"],
-  processing: ["parallelJobs", "gpuJobsSeparate", "scanSchedule", "queueOrder", "lowPriority", "keepOriginalsDays", "lowSpaceGB", "languages", "workflowsMayRunCommands"],
+  processing: ["parallelJobs", "gpuJobsSeparate", "scanSchedule", "queueOrder", "lowPriority", "keepOriginalsDays", "lowSpaceGB", "workflowsMayRunCommands"],
   logs: ["jobDays", "systemDays", "rawDays"],
 };
 
@@ -73,7 +72,6 @@ function validate(next: SettingsData) {
   if (p.scanSchedule !== "" && !/^([01]\d|2[0-3]):[0-5]\d$/.test(p.scanSchedule)) throw bad("processing.scanSchedule", "Use a time like 02:00, or leave it empty for no daily scan.");
   if (!inRange(p.keepOriginalsDays, 0, 365)) throw bad("processing.keepOriginalsDays", "Keep originals from 0 to 365 days.");
   if (!inRange(p.lowSpaceGB, 1, 1000)) throw bad("processing.lowSpaceGB", "Pick a limit from 1 to 1000 GB.");
-  if (!p.languages.every((l) => /^[a-z]{3}$/.test(l))) throw bad("processing.languages", "Use three-letter codes like eng, ger, fra.");
   const l = next.logs;
   if (!(LOG_CHOICES.jobDays as readonly number[]).includes(l.jobDays)) throw bad("logs.jobDays", "Pick 7, 30, 90 days or forever.");
   if (!(LOG_CHOICES.systemDays as readonly number[]).includes(l.systemDays)) throw bad("logs.systemDays", "Pick a number of days from the list.");

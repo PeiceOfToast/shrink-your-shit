@@ -409,7 +409,6 @@ export interface ProcessingSettings {
   lowPriority: boolean;
   keepOriginalsDays: number;
   lowSpaceGB: number;
-  languages: string[];
   workflowsMayRunCommands: boolean;
   trashPath: string;
 }
