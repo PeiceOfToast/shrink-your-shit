@@ -106,3 +106,23 @@ export interface BitrateLadder {
   resolutionRow: Record<string, string>;
   cardOffsets: Partial<Record<"qsv" | "nvenc" | "vaapi" | "amf", Record<string, number>>>;
 }
+
+export type StepValue = string | number | boolean | null;
+export interface StepChoice { value: string | number | null; label: string; available: boolean; why?: string }
+export interface StepUi {
+  widget: "segmented" | "select" | "slider" | "checkbox" | "text" | "number" | "languages";
+  group: string; order: number; unit?: string; sliderLabels?: string[]; choices?: StepChoice[];
+  showIf?: { field: string; equals?: StepValue; notEquals?: StepValue }; // exactly one of equals / notEquals
+}
+type JsonType = "string" | "integer" | "number" | "boolean" | "array" | "null";
+export interface StepProperty {
+  type: JsonType | JsonType[]; title: string; description?: string;
+  enum?: (string | number | null)[]; default?: StepValue | string[]; minimum?: number; maximum?: number;
+  items?: { type: "string" }; "x-ui": StepUi;
+}
+export interface StepForm {
+  groups: { id: string; label: string; help?: string }[];
+  schema: { type: "object"; additionalProperties: false; properties: Record<string, StepProperty> };
+}
+export interface StepEvent { code: string; level: "debug" | "info" | "warn" | "error"; text: string; fields?: string[]; keep: "log" | "job" }
+export interface StepDefinition { type: FlowStep["type"]; version: number; name: string; help: string; events: StepEvent[]; form: StepForm }
