@@ -361,3 +361,67 @@ func TestWrongBearerIsDelayed(t *testing.T) {
 		t.Fatalf("wrong bearer delays %v, want [500ms]", got)
 	}
 }
+
+// Parallel wrong guesses from one address: at most five are checked, the rest are refused at once,
+// even while every checked try is still waiting out its delay (review of #805).
+func TestParallelGuessesStopAtTheLimit(t *testing.T) {
+	for _, kind := range []string{"password", "token"} {
+		t.Run(kind, func(t *testing.T) {
+			a, _, _, _ := newAccess(t)
+			ctx := context.Background()
+			if err := a.SetPassword(ctx, testPassword); err != nil {
+				t.Fatal(err)
+			}
+			gate := make(chan struct{})
+			a.sleep = func(time.Duration) { <-gate }
+
+			const n = 10
+			results := make(chan error, n)
+			for i := 0; i < n; i++ {
+				go func() {
+					var err error
+					if kind == "password" {
+						_, err = a.SignInPassword(ctx, "10.0.0.9", "wrong password!", "ua")
+					} else {
+						_, err = a.SignInToken(ctx, "10.0.0.9", "not-the-token", "ua")
+					}
+					results <- err
+				}()
+			}
+			// The refused tries return without sleeping; the checked ones wait on the gate.
+			var errs []error
+			timeout := time.After(10 * time.Second)
+		collect:
+			for len(errs) < n-lockFailures {
+				select {
+				case err := <-results:
+					errs = append(errs, err)
+				case <-timeout:
+					break collect
+				}
+			}
+			close(gate)
+			for len(errs) < n {
+				errs = append(errs, <-results)
+			}
+			bad, locked := 0, 0
+			for _, err := range errs {
+				var le *LockedError
+				switch {
+				case errors.As(err, &le):
+					locked++
+				case errors.Is(err, ErrBadPassword), errors.Is(err, ErrBadToken):
+					bad++
+				default:
+					t.Fatalf("unexpected error %v", err)
+				}
+			}
+			if bad > lockFailures || bad+locked != n {
+				t.Fatalf("got %d checked and %d refused; want at most %d checked", bad, locked, lockFailures)
+			}
+			if _, err := a.SignInPassword(ctx, "10.0.0.9", testPassword, "ua"); !errors.As(err, new(*LockedError)) {
+				t.Fatalf("after five failures the address should be locked, got %v", err)
+			}
+		})
+	}
+}

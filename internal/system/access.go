@@ -38,6 +38,7 @@ type Access struct {
 	key         []byte     // the AES key from secret.key; nil until the file exists
 	failures    map[string][]time.Time
 	lockedUntil map[string]time.Time
+	inFlight    map[string]int // sign-in tries from each address still being checked
 }
 
 // Options configure Access. Zero values take the defaults: the real clock and time.Sleep.
@@ -117,6 +118,7 @@ func Open(db *store.DB, dataDir string, o Options) (*Access, error) {
 		sleep:       o.Sleep,
 		failures:    map[string][]time.Time{},
 		lockedUntil: map[string]time.Time{},
+		inFlight:    map[string]int{},
 	}
 	if a.now == nil {
 		a.now = time.Now
@@ -337,9 +339,10 @@ func (a *Access) EndSession(ctx context.Context, cookie string) error {
 // SignInPassword checks the password from addr. A failure waits about a second; five in a minute from
 // one address lock sign-in for a minute (page 13). It returns the new session's cookie value.
 func (a *Access) SignInPassword(ctx context.Context, addr, password, userAgent string) (string, error) {
-	if err := a.locked(addr); err != nil {
+	if err := a.enter(addr); err != nil {
 		return "", err
 	}
+	defer a.leave(addr)
 	if err := a.CheckPassword(ctx, password); err != nil {
 		if errors.Is(err, ErrBadPassword) {
 			a.sleep(failDelay)
@@ -353,9 +356,10 @@ func (a *Access) SignInPassword(ctx context.Context, addr, password, userAgent s
 
 // SignInToken is SignInPassword for the access token (the ?token= link and the token sign-in).
 func (a *Access) SignInToken(ctx context.Context, addr, token, userAgent string) (string, error) {
-	if err := a.locked(addr); err != nil {
+	if err := a.enter(addr); err != nil {
 		return "", err
 	}
+	defer a.leave(addr)
 	if err := a.CheckToken(ctx, token); err != nil {
 		if errors.Is(err, ErrBadToken) {
 			a.sleep(failDelay)
@@ -367,19 +371,40 @@ func (a *Access) SignInToken(ctx context.Context, addr, token, userAgent string)
 	return a.CreateSession(ctx, userAgent, addr)
 }
 
-// locked returns a LockedError while addr is locked out, and nil otherwise.
-func (a *Access) locked(addr string) error {
+// enter starts one sign-in try from addr, or returns a LockedError. Tries still being checked count
+// toward the limit with the failures in the window, so parallel guesses cannot all get past the check
+// while each waits out its delay. A caller that gets nil must call leave.
+func (a *Access) enter(addr string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	until, ok := a.lockedUntil[addr]
-	if !ok {
-		return nil
+	now := a.now()
+	if until, ok := a.lockedUntil[addr]; ok {
+		if now.Before(until) {
+			return &LockedError{RetryAfter: int(lockFor / time.Second)}
+		}
+		delete(a.lockedUntil, addr)
 	}
-	if a.now().Before(until) {
-		return &LockedError{RetryAfter: int(lockFor / time.Second)}
+	recent := 0
+	for _, t := range a.failures[addr] {
+		if now.Sub(t) < lockWindow {
+			recent++
+		}
 	}
-	delete(a.lockedUntil, addr)
+	if recent+a.inFlight[addr] >= lockFailures {
+		// The tries in flight may yet lock the address; ask the client to come back shortly.
+		return &LockedError{RetryAfter: int(failDelay/time.Second) + 1}
+	}
+	a.inFlight[addr]++
 	return nil
+}
+
+// leave ends a try that enter started.
+func (a *Access) leave(addr string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.inFlight[addr]--; a.inFlight[addr] <= 0 {
+		delete(a.inFlight, addr)
+	}
 }
 
 // fail records one failed sign-in from addr. The fifth in a window starts the lock.
