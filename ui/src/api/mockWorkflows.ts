@@ -4,8 +4,13 @@ import { ApiError } from "./errors.ts";
 import { getForcedState, respond } from "./mockState.ts";
 import { WORKFLOW_ROWS } from "./fixtures/workflowRows.ts";
 import { currentLibraries } from "./mockLibraries.ts";
+import { assertThreeSteps, createDraft, getFlow } from "./mockFlow.ts";
+import type { Flow } from "./flowTypes.ts";
 
-const FORMAT = "shrink-your-shit.workflow";
+// The export file: the workflow's own flow, in the format the workshop's API uses. appVersion is the mock's app version (the one its backups report).
+const FORMAT = "syp-workflow";
+const FORMAT_VERSION = 1;
+const APP_VERSION = "0.9.4";
 let rows: Omit<WorkflowRow, "usedBy">[] = WORKFLOW_ROWS.map((r) => ({ ...r }));
 let seq = 0;
 
@@ -67,41 +72,34 @@ export function deleteWorkflow(id: string): Promise<{ ok: true } | { ok: false; 
   });
 }
 
-// The file Export downloads. Only the fields a user would keep; the page saves it as JSON.
-export function exportWorkflow(id: string): Promise<Record<string, unknown>> {
-  return respond(() => {
-    const r = find(id);
-    return { format: FORMAT, version: 1, name: r.name, description: r.description, kind: r.kind, madeWith: r.madeWith };
-  });
+// The file Export downloads: {format, formatVersion, appVersion, flow}. The flow carries its own name and description.
+export async function exportWorkflow(id: string): Promise<Record<string, unknown>> {
+  const { flow } = await getFlow(id);
+  return { format: FORMAT, formatVersion: FORMAT_VERSION, appVersion: APP_VERSION, flow };
 }
 
-// Import checks the file is a workflow export, adds it as a draft, and returns its id for the editor placeholder.
-export function importWorkflow(text: string): Promise<{ id: string }> {
-  return respond(() => {
-    let data: { format?: unknown; name?: unknown; description?: unknown; kind?: unknown };
+// Import accepts only a syp-workflow file (formatVersion 1) with a valid three-step flow, and adds it as a draft
+// the editor can open. Anything else, including the old app's format, is not_a_workflow.
+export async function importWorkflow(text: string): Promise<{ id: string }> {
+  const flow = await respond((): Flow => {
+    const notWorkflow = () => new ApiError("not_a_workflow", "That file isn't a workflow export.");
+    let data: { format?: unknown; formatVersion?: unknown; flow?: unknown };
     try {
       data = JSON.parse(text);
     } catch {
-      throw new ApiError("not_a_workflow", "That file isn't a workflow export.");
+      throw notWorkflow();
     }
-    if (!data || data.format !== FORMAT || typeof data.name !== "string" || !data.name.trim()) {
-      throw new ApiError("not_a_workflow", "That file isn't a workflow export.");
+    if (!data || data.format !== FORMAT || data.formatVersion !== FORMAT_VERSION || !data.flow || typeof data.flow !== "object") {
+      throw notWorkflow();
     }
-    const id = `imported-${++seq}`;
-    rows = [
-      ...rows,
-      {
-        id,
-        name: data.name.trim(),
-        description: typeof data.description === "string" ? data.description : "",
-        kind: "video",
-        updatedAt: new Date().toISOString(),
-        state: "draft",
-        problemCount: 0,
-        madeWith: "editor",
-        fitsGuided: false,
-      },
-    ];
-    return { id };
+    const flow = data.flow as Flow;
+    if (typeof flow.name !== "string" || !flow.name.trim() || !Array.isArray(flow.steps)) throw notWorkflow();
+    try {
+      assertThreeSteps(flow);
+    } catch {
+      throw notWorkflow();
+    }
+    return flow;
   });
+  return createDraft({ name: flow.name, description: flow.description, flow });
 }
