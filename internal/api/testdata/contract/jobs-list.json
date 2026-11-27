@@ -28,7 +28,7 @@
         "state": "done",
         "step": null,
         "tookMs": 0,
-        "worker": "",
+        "worker": "local",
         "workflow": "Shrink"
       },
       {
@@ -50,7 +50,7 @@
         "state": "failed",
         "step": null,
         "tookMs": 0,
-        "worker": "",
+        "worker": "local",
         "workflow": "Shrink"
       },
       {
