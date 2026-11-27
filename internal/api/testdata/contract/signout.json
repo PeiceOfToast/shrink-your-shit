@@ -1,0 +1,7 @@
+{
+  "body": null,
+  "method": "POST",
+  "path": "/api/v2/signout",
+  "status": 204,
+  "type": "none"
+}

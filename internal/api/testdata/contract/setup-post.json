@@ -1,0 +1,9 @@
+{
+  "body": {
+    "scanStarted": false
+  },
+  "method": "POST",
+  "path": "/api/v2/setup",
+  "status": 200,
+  "type": "SetupDone"
+}
