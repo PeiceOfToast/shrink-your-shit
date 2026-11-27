@@ -14,6 +14,9 @@ import (
 	"github.com/PeiceOfToast/shrink-your-shit/internal/media"
 )
 
+// frameHDR reads the HDR side data of a video's first frame. A variable so a test can answer for a file it cannot make.
+var frameHDR = media.ProbeFrameHDR
+
 // ProbeBudget is the whole device probe for one card (L-HW-2). A variable so a test can shorten it.
 var ProbeBudget = 90 * time.Second
 
@@ -28,7 +31,10 @@ type DeviceRecord struct {
 	Scale    bool // the card scales to 240p
 	Encode10 bool // a 10-bit encode, recorded apart from the 8-bit ones
 	Decode10 bool // a 10-bit decode, recorded apart from the 8-bit one
-	Reasons  map[string]string
+	// HDRSurvives: the card's own 10-bit encode of an HDR10 source keeps both the mastering display and the content light
+	// side data (L-HW-2). A card that drops them does not carry HDR.
+	HDRSurvives bool
+	Reasons     map[string]string
 }
 
 // Probe runs the device probe for one card inside ProbeBudget. Steps that cannot run because an earlier step failed
@@ -96,7 +102,43 @@ func Probe(ctx context.Context, m media.Media, dir string, c Candidate) DeviceRe
 	} else {
 		rec.Reasons["decode10"] = "not tried: the 10-bit encode did not pass"
 	}
+
+	// HDR survival (L-HW-2): an HDR10 source, encoded by the card in 10 bits, must keep its side data.
+	if rec.Encode10 {
+		hdrSrc := filepath.Join(dir, "hdr-source.mkv")
+		defer os.Remove(hdrSrc)
+		hdrOut := filepath.Join(dir, c.Encoder+".hdr.mkv")
+		defer os.Remove(hdrOut)
+		if err := makeHDRClip(pctx, m, hdrSrc); err != nil {
+			rec.Reasons["hdr"] = "the HDR test source could not be made"
+		} else if _, err := m.Run(pctx, append([]string{"ffmpeg"}, hdrEncodeArgs(c, hdrSrc, hdrOut)...), nil); err != nil {
+			rec.Reasons["hdr"] = plainReason(err)
+		} else if h, err := frameHDR(pctx, hdrOut); err != nil {
+			rec.Reasons["hdr"] = "the HDR output could not be read"
+		} else if !h.MasteringDisplay || !h.ContentLight {
+			rec.Reasons["hdr"] = "the HDR metadata did not survive the card's encode"
+		} else {
+			rec.HDRSurvives = true
+		}
+	} else {
+		rec.Reasons["hdr"] = "not tried: the 10-bit encode did not pass"
+	}
 	return rec
+}
+
+// makeHDRClip writes a short HDR10 source with libx265 and the HDR10 signalling and mastering data (no real media).
+func makeHDRClip(ctx context.Context, m media.Media, out string) error {
+	argv := []string{"ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc2=size=1920x1080:rate=24", "-t", "1",
+		"-pix_fmt", "yuv420p10le", "-c:v", "libx265",
+		"-x265-params", "colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc:master-display=G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,1):max-cll=1000,400:hdr-opt=1:repeat-headers=1",
+		"-color_primaries", "bt2020", "-color_trc", "smpte2084", "-colorspace", "bt2020nc", out}
+	_, err := m.Run(ctx, argv, nil)
+	return err
+}
+
+// hdrEncodeArgs is the card's 10-bit encode of the HDR source.
+func hdrEncodeArgs(c Candidate, src, out string) []string {
+	return append(deviceSetup(c), "-i", src, "-vf", uploadFilter(c, "p010"), "-c:v", c.Encoder, "-profile:v", "main10", "-y", out)
 }
 
 // stepReason explains a failed step: its own timeout, the whole probe running out, or the tool's words.

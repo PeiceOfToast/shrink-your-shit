@@ -1,0 +1,57 @@
+// Copyright (C) shrink-your-shit contributors. Licensed under AGPL-3.0-or-later.
+
+package hw
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/PeiceOfToast/shrink-your-shit/internal/media"
+)
+
+// TestRealHardwareInventory runs on a real machine, not in CI: it proves every candidate with real test encodes, probes
+// each one that passes, and prints the inventory. It runs only with SYP_HW_INVENTORY=1, from a cross-built test binary:
+//
+//	GOOS=linux GOARCH=amd64 go test -c -o hwtest ./internal/hw/
+//	SYP_HW_INVENTORY=1 ./hwtest -test.run TestRealHardwareInventory -test.v
+func TestRealHardwareInventory(t *testing.T) {
+	if os.Getenv("SYP_HW_INVENTORY") != "1" {
+		t.Skip("set SYP_HW_INVENTORY=1 on a machine with a GPU to print the inventory")
+	}
+	m := media.MediaFuncs{ProbeFunc: media.Probe, RunFunc: media.Run}
+	dir := t.TempDir()
+	nodes := ReadRenderNodes("/sys/class/drm")
+	inv := Detect(context.Background(), m, dir, Candidates(nodes))
+	fmt.Println("render nodes:", nodeList(nodes))
+	for _, v := range inv.Verdicts {
+		if v.Available {
+			fmt.Printf("%-12s available  (device %s)\n", v.Encoder, v.Device)
+		} else {
+			fmt.Printf("%-12s NOT available: %s\n", v.Encoder, v.Reason)
+		}
+	}
+	fmt.Println("summary:", Summary(inv))
+	for _, v := range inv.Verdicts {
+		if !v.Available {
+			continue
+		}
+		rec := Probe(context.Background(), m, filepath.Join(dir, v.Encoder), v.Candidate)
+		fmt.Printf("probe %-12s decode=%v scale=%v encode10=%v decode10=%v hdr=%v reasons=%v\n",
+			v.Encoder, rec.Decode, rec.Scale, rec.Encode10, rec.Decode10, rec.HDRSurvives, rec.Reasons)
+	}
+}
+
+func nodeList(nodes []RenderNode) string {
+	var parts []string
+	for _, n := range nodes {
+		parts = append(parts, fmt.Sprintf("%s(%s)", n.Path, n.Vendor))
+	}
+	if len(parts) == 0 {
+		return "none"
+	}
+	return strings.Join(parts, " ")
+}
