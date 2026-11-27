@@ -233,6 +233,40 @@ func TestParseLoudness(t *testing.T) {
 	}
 }
 
+// TestAudioConvertedCodecTheContainerCannotHoldFallsBack is L-AUD-10 on the convert branch: the
+// step can ask for a codec the file type cannot hold (the step does not see the container), so
+// Build writes the fallback codec instead and the note says which and why.
+func TestAudioConvertedCodecTheContainerCannotHoldFallsBack(t *testing.T) {
+	info := audioInfo(media.AudioTrack{Index: 1, Codec: "eac3", Channels: 6})
+	plan := convertPlan(AudioPlan{Index: 1, Action: StreamConvert, Codec: "opus"})
+	plan.Container = ContainerMP4
+	plan.Output = "out.mp4"
+
+	streams, notes, err := AudioOutputs(plan, info)
+	if err != nil {
+		t.Fatalf("outputs: %v", err)
+	}
+	if len(streams) != 1 || streams[0].Codec != "eac3" || streams[0].Channels != 6 {
+		t.Fatalf("streams = %+v, want one 5.1 E-AC-3 track", streams)
+	}
+	want := "audio stream #1 (opus) is written as eac3: MP4 cannot hold Opus"
+	if len(notes) != 1 || notes[0] != want {
+		t.Fatalf("notes = %v, want %q", notes, want)
+	}
+
+	res := buildOK(t, plan, info, cpuRung(CodecHEVC))
+	if v, _ := flagValue(res.Argv, "-c:a:0"); v != "eac3" {
+		t.Errorf("codec = %q, want eac3", v)
+	}
+	if v, _ := flagValue(res.Argv, "-b:a:0"); v != "576k" {
+		t.Errorf("bitrate = %q, want 576k for 5.1 E-AC-3", v)
+	}
+	// The fallback keeps the source's channel count, so no -ac is written.
+	if hasFlag(res.Argv, "-ac:a:0") {
+		t.Errorf("argv = %v, want no -ac when the fallback keeps the channels", res.Argv)
+	}
+}
+
 // TestAudioCopyEntriesWriteNothing: a plan that names every stream as a copy writes exactly the
 // command the audio step wrote before conversion existed (the golden table's rows).
 func TestAudioCopyEntriesWriteNothing(t *testing.T) {
