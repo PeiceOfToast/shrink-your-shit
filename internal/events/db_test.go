@@ -2,6 +2,8 @@ package events
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/PeiceOfToast/shrink-your-shit/internal/store"
@@ -111,6 +113,58 @@ func TestDBSinkWritesQueriesAndSeeds(t *testing.T) {
 	}
 	if len(eight) != 3 || eight[2].Seq != 3 {
 		t.Fatalf("job 8 after restart: %d events, last seq %d; want 3 events, last seq 3", len(eight), eight[len(eight)-1].Seq)
+	}
+}
+
+// Ten goroutines emit into one job at once. Every event must be stored, once, with seq 1..1000 in order.
+func TestConcurrentEmitsStoreEveryEventInSeqOrder(t *testing.T) {
+	db := openTestDB(t)
+	b, err := New(Options{Clock: clockFn(), DB: db})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const writers, each = 10, 100
+	var wg sync.WaitGroup
+	errs := make(chan error, writers*each)
+	for w := 0; w < writers; w++ {
+		wg.Add(1)
+		go func(w int) {
+			defer wg.Done()
+			for i := 0; i < each; i++ {
+				if err := b.Emit(jobNote(9, fmt.Sprintf("w%d-%d", w, i))); err != nil {
+					errs <- err
+					return
+				}
+			}
+		}(w)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatal(err)
+	}
+	closeBus(t, b)
+
+	var all []Event
+	page := Page{Limit: 100}
+	for {
+		evs, next, err := b.Query(context.Background(), Filter{JobID: 9}, page)
+		if err != nil {
+			t.Fatal(err)
+		}
+		all = append(all, evs...)
+		if len(evs) < page.Limit {
+			break
+		}
+		page.Cursor = next.Cursor
+	}
+	if len(all) != writers*each {
+		t.Fatalf("stored %d events, want %d", len(all), writers*each)
+	}
+	for i, e := range all {
+		if e.Seq != int64(i+1) {
+			t.Fatalf("event %d has seq %d, want %d", i, e.Seq, i+1)
+		}
 	}
 }
 
