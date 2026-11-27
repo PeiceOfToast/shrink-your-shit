@@ -24,6 +24,13 @@ export function getTrash(): Promise<TrashItem[]> {
   return respond(() => [...items].sort((a, b) => b.trashedAt.localeCompare(a.trashedAt)).map((i) => ({ ...i })));
 }
 
+// After one of these, a Restore on the same row can't work again: the row goes at the next reload. name_taken can
+// be retried once the other file is renamed.
+const NO_RETRY = new Set(["original_gone", "converted_changed"]);
+export function restoreCanRetry(code: string): boolean {
+  return !NO_RETRY.has(code);
+}
+
 // POST /trash/{id}/restore: the original goes back and the converted file is removed; the row leaves the list.
 export function restoreTrash(id: string): Promise<{ ok: true }> {
   return respond(() => {

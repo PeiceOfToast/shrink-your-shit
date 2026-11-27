@@ -1,7 +1,7 @@
 // Settings > Trash: the list is newest first, restore removes the row, and each refusal answers with its code.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { getTrash, restoreTrash } from "./mockTrash.ts";
+import { getTrash, restoreCanRetry, restoreTrash } from "./mockTrash.ts";
 import { ApiError } from "./errors.ts";
 
 test("the trash lists the newest first", async () => {
@@ -27,4 +27,10 @@ test("the three refusals answer with their codes", async () => {
 
 test("an unknown id is not in the trash", async () => {
   await assert.rejects(restoreTrash("nope"), (e: unknown) => e instanceof ApiError && e.code === "trash_not_found");
+});
+
+test("only original_gone and converted_changed end the row's Restore; name_taken can be retried", () => {
+  assert.equal(restoreCanRetry("original_gone"), false);
+  assert.equal(restoreCanRetry("converted_changed"), false);
+  assert.equal(restoreCanRetry("name_taken"), true);
 });

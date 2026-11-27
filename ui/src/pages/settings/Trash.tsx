@@ -11,7 +11,7 @@ export function Trash() {
   const list = useApi(() => api.getTrash(), []);
   const [asking, setAsking] = useState<TrashItem | null>(null);
   const [busy, setBusy] = useState(false);
-  const [refused, setRefused] = useState<Record<string, string>>({});
+  const [refused, setRefused] = useState<Record<string, { code: string; message: string }>>({});
   const [done, setDone] = useState<string | null>(null);
   if (!list.data) return <LoadState s={list} />;
   const items = list.data;
@@ -31,7 +31,8 @@ export function Trash() {
       list.reload();
     } catch (e) {
       setAsking(null);
-      setRefused((r) => ({ ...r, [item.id]: errText(e) }));
+      const code = typeof (e as { code?: unknown })?.code === "string" ? (e as { code: string }).code : "";
+      setRefused((r) => ({ ...r, [item.id]: { code, message: errText(e) } }));
     } finally {
       setBusy(false);
     }
@@ -51,11 +52,13 @@ export function Trash() {
               <span className="muted sm">
                 {item.library} · {dayMonth(item.trashedAt)} · {item.daysLeft} {item.daysLeft === 1 ? "day" : "days"} left
               </span>
-              {refused[item.id] && <p className="bad sm" role="alert">{refused[item.id]}</p>}
+              {refused[item.id] && <p className="bad sm" role="alert">{refused[item.id].message}</p>}
             </div>
-            <button type="button" className="btn sm" disabled={busy} onClick={() => setAsking(item)}>
-              Restore
-            </button>
+            {!(refused[item.id] && !api.restoreCanRetry(refused[item.id].code)) && (
+              <button type="button" className="btn sm" disabled={busy} onClick={() => setAsking(item)}>
+                Restore
+              </button>
+            )}
           </li>
         ))}
       </ul>
