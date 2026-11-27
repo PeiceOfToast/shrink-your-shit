@@ -1,0 +1,18 @@
+{
+  "body": [
+    {
+      "level": "info",
+      "text": "queued",
+      "time": "2026-11-27T16:14:36.440Z"
+    },
+    {
+      "level": "info",
+      "text": "picked",
+      "time": "2026-11-27T16:14:36.441Z"
+    }
+  ],
+  "method": "GET",
+  "path": "/api/v2/jobs/3/history",
+  "status": 200,
+  "type": "HistoryLine[]"
+}

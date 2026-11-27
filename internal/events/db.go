@@ -345,6 +345,7 @@ func (b *Bus) Query(ctx context.Context, f Filter, p Page) ([]Event, Page, error
 		if err != nil {
 			return nil, Page{}, err
 		}
+		e.RowID = id
 		out = append(out, e)
 		if f.JobID != 0 {
 			cursor = e.Seq

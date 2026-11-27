@@ -128,6 +128,8 @@ type Event struct {
 	NextAction string         `json:"nextAction,omitempty"`
 	Data       map[string]any `json:"data,omitempty"`
 	Keep       Keep           `json:"keep"`
+	// RowID is the row's id in the events table. Query sets it; an event not yet stored has 0.
+	RowID int64 `json:"-"`
 }
 
 // validate refuses an unknown kind or level. Emit calls it before anything is stored or sent.

@@ -1,0 +1,63 @@
+{
+  "body": {
+    "attempt": 1,
+    "failure": null,
+    "finishedAt": "2026-11-27T16:14:36.441Z",
+    "history": [
+      {
+        "level": "info",
+        "text": "queued",
+        "time": "2026-11-27T16:14:36.440Z"
+      },
+      {
+        "level": "info",
+        "text": "picked",
+        "time": "2026-11-27T16:14:36.441Z"
+      }
+    ],
+    "job": {
+      "file": "three.mkv",
+      "finishedAt": "2026-11-27T16:14:36.441Z",
+      "id": "3",
+      "library": "Clips",
+      "progress": null,
+      "queuedAt": "2026-11-27T16:14:36.439Z",
+      "result": {
+        "failedStep": null,
+        "outcome": "smaller",
+        "reason": null,
+        "sizeAfter": 400,
+        "sizeBefore": 1000,
+        "warnings": 0
+      },
+      "startedAt": "2026-11-27T16:14:36.440Z",
+      "state": "done",
+      "step": null,
+      "tookMs": 1,
+      "worker": "",
+      "workflow": "Shrink"
+    },
+    "logs": [],
+    "media": [],
+    "original": {
+      "action": "not_touched",
+      "until": null
+    },
+    "outputPath": "/tmp/TestContractGoldensForJobs2493052127/002/three-shrunk.mkv",
+    "path": "/tmp/TestContractGoldensForJobs2493052127/002/three.mkv",
+    "sizeAfterBytes": 400,
+    "sizeBeforeBytes": 1000,
+    "skipReason": null,
+    "startedAt": "2026-11-27T16:14:36.440Z",
+    "steps": [],
+    "timeLeftMs": null,
+    "tookMs": 1,
+    "worker": "",
+    "workflow": "Shrink",
+    "writtenAt": "2026-11-27T16:14:36.441Z"
+  },
+  "method": "GET",
+  "path": "/api/v2/jobs/3",
+  "status": 200,
+  "type": "JobDetail"
+}

@@ -15,6 +15,9 @@ import (
 
 	"github.com/PeiceOfToast/shrink-your-shit/internal/api"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/events"
+	"github.com/PeiceOfToast/shrink-your-shit/internal/flow"
+	"github.com/PeiceOfToast/shrink-your-shit/internal/jobs"
+	"github.com/PeiceOfToast/shrink-your-shit/internal/library"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/store"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/system"
 )
@@ -76,6 +79,7 @@ func run(dataDir, listen string) error {
 		bus.Close(context.Background())
 		return err
 	}
+	srv.Jobs(jobs.New(jobs.Options{DB: db, Bus: bus}), library.NewCatalog(db), flow.Open(db), bus)
 	srv.Ready(access, bus)
 	fmt.Fprintln(os.Stderr, "syp serving on", ln.Addr())
 
@@ -87,6 +91,7 @@ func run(dataDir, listen string) error {
 			return err
 		}
 	}
+	srv.CloseStreams() // event streams never end on their own
 	shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	httpSrv.Shutdown(shutdown)
