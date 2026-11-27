@@ -524,6 +524,52 @@ export const STEP_DEFINITIONS: StepDefinition[] = [
         "keep": "log",
         "level": "info",
         "text": "Audio copied as is"
+      },
+      {
+        "code": "audio.convert",
+        "fields": [
+          "format",
+          "audioTracks",
+          "kept",
+          "converted",
+          "dropped",
+          "subtitleTracks"
+        ],
+        "keep": "log",
+        "level": "info",
+        "text": "Converting audio"
+      },
+      {
+        "code": "audio.keep_languages",
+        "fields": [
+          "format",
+          "audioTracks",
+          "kept",
+          "dropped"
+        ],
+        "keep": "log",
+        "level": "info",
+        "text": "Keeping some audio tracks"
+      },
+      {
+        "code": "audio.default_track",
+        "fields": [
+          "audioTracks",
+          "defaultTrack"
+        ],
+        "keep": "log",
+        "level": "info",
+        "text": "Setting the default audio track"
+      },
+      {
+        "code": "audio.no_audio",
+        "fields": [
+          "audioTracks",
+          "subtitleTracks"
+        ],
+        "keep": "log",
+        "level": "info",
+        "text": "The file has no audio"
       }
     ],
     "form": {
@@ -906,7 +952,7 @@ export const STEP_DEFINITIONS: StepDefinition[] = [
         "type": "object"
       }
     },
-    "help": "Keep the sound as it is, or choose another format once that is built.",
+    "help": "Keep every track as it is, or choose the format, the channels and the languages to keep.",
     "name": "Audio",
     "type": "audio.tracks",
     "version": 1

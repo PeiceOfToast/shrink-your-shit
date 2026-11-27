@@ -45,8 +45,8 @@ type GuideField struct {
 	Type    string        `json:"type"`
 	More    bool          `json:"more,omitempty"`
 	Choices []GuideChoice `json:"choices,omitempty"`
-	// Available false greys the whole field with Why until the app can act on it (item 7 greys the
-	// audio languages). Nil is the ordinary field and is not served.
+	// Available false greys the whole field with Why until the app can act on it. Nil is the
+	// ordinary field and is not served.
 	Available *bool  `json:"available,omitempty"`
 	Why       string `json:"why,omitempty"`
 }
@@ -61,10 +61,8 @@ type GuideChoice struct {
 
 // DefaultAnswers is what a new workflow starts from: the page's sensible defaults, ticked.
 func DefaultAnswers() Answers {
-	// The audio default is as_is keeping every track, with the languages left unset: converting the
-	// audio is item 7, so stereo AAC with the person's languages would make the default workflow
-	// unpublishable today. Back to stereo_aac and the default languages with item 7 (ui-shop ask,
-	// 11-27 20:14Z); the other audio choices are offered greyed until then.
+	// The audio default is page 06's stereo AAC with the person's languages (build-order item 7:
+	// it was as_is only until the audio conversion was built).
 	return Answers{
 		"quality":             3,
 		"slower":              false,
@@ -72,7 +70,7 @@ func DefaultAnswers() Answers {
 		"resolution":          "keep",
 		"useGpu":              true,
 		"ifGpuFails":          "cpu",
-		"audio":               "as_is",
+		"audio":               "stereo_aac",
 		"allLanguages":        true,
 		"languages":           []string{},
 		"languagesEverywhere": false,
@@ -85,19 +83,12 @@ func DefaultAnswers() Answers {
 	}
 }
 
-// unavailable is a field's Available for one the engine cannot act on yet: the JSON carries
-// available false, while an ordinary field leaves the property out.
-func unavailable() *bool {
-	no := false
-	return &no
-}
-
 // Guide is the guided page's table as the API serves it.
 func Guide() GuideDoc {
 	return GuideDoc{
 		Chips: []GuideChip{
 			{ID: "shrink_hevc", Label: "Shrink to HEVC", On: Answers{"format": "hevc"}, Off: Answers{"format": "h264"}, Available: true},
-			{ID: "keep_my_languages", Label: "Keep only my languages", On: Answers{"allLanguages": false}, Off: Answers{"allLanguages": true}, Available: false, Why: AudioWhy},
+			{ID: "keep_my_languages", Label: "Keep only my languages", On: Answers{"allLanguages": false}, Off: Answers{"allLanguages": true}, Available: true},
 			{ID: "use_gpu", Label: "Use the graphics card (QSV)", On: Answers{"useGpu": true}, Off: Answers{"useGpu": false}, Available: true},
 			{ID: "never_worse", Label: "Never make anything worse", Always: true, On: Answers{}, Off: Answers{}, Available: true},
 			{ID: "hdr_kept", Label: "HDR kept, Dolby Vision left alone", Always: true, On: Answers{}, Off: Answers{}, Available: true},
@@ -129,14 +120,14 @@ func Guide() GuideDoc {
 				ID: "audio", Label: "Audio",
 				Fields: []GuideField{
 					{Key: "audio", Label: "Audio", Type: "choice", Choices: []GuideChoice{
-						{Value: "stereo_aac", Label: "Stereo AAC", Available: false, Why: AudioWhy},
-						{Value: "stereo_aac_surround", Label: "AAC, same channels as the source", Available: false, Why: AudioWhy},
-						{Value: "eac3_surround", Label: "E-AC-3, surround kept", Available: false, Why: AudioWhy},
-						{Value: "ac3_surround", Label: "AC-3, surround kept", Available: false, Why: AudioWhy},
-						{Value: "stereo_opus", Label: "Stereo Opus", Available: false, Why: AudioWhy},
+						{Value: "stereo_aac", Label: "Stereo AAC", Available: true},
+						{Value: "stereo_aac_surround", Label: "AAC, same channels as the source", Available: true},
+						{Value: "eac3_surround", Label: "E-AC-3, surround kept", Available: true},
+						{Value: "ac3_surround", Label: "AC-3, surround kept", Available: true},
+						{Value: "stereo_opus", Label: "Stereo Opus", Available: true},
 						{Value: "as_is", Label: "Leave as it is", Available: true},
 					}},
-					{Key: "languages", Label: "Keep these languages", Type: "languages", Available: unavailable(), Why: AudioWhy},
+					{Key: "languages", Label: "Keep these languages", Type: "languages"},
 				},
 			},
 			{

@@ -28,11 +28,6 @@ const ReplaceWhy = "Replacing the original comes in a later update; for now the 
 // the same sentence. "New file" is design's wording (11-27 20:19Z).
 const FolderWhy = "Saving to a different folder comes in a later update; for now the new file is saved next to it."
 
-// AudioWhy is why page 06 offers "Leave as it is" alone until stage 2 item 7 builds audio
-// conversion, and why the Audio step's check greys the other formats. One sentence, so the guide
-// and the editor say the same thing. The defaults go back to stereo AAC with item 7.
-const AudioWhy = "Converting audio is not built yet; Copy is the only choice for now."
-
 // besideSuffix ends the folder a beside_library answer writes: a sibling of the library root named
 // "<library name> (smaller)". ToAnswers reads a folder ending in it as beside_library.
 const besideSuffix = " (smaller)"

@@ -32,6 +32,10 @@ func TestStageOneWorkflowsStillPlanTheSame(t *testing.T) {
 		Path:   "/library/clip.mkv",
 		Format: media.Format{Names: []string{"matroska"}},
 		Video:  []media.VideoTrack{{Index: 0, Codec: "h264", Width: 1920, Height: 1080}},
+		Audio:  []media.AudioTrack{{Index: 1, Codec: "eac3", Channels: 6, Language: "eng"}},
+		Subtitles: []media.SubtitleTrack{
+			{Index: 2, Codec: "subrip", Language: "eng"},
+		},
 	}
 
 	decisions, plan, err := flow.PlanFile(rev, info, flow.Env{})
@@ -41,8 +45,13 @@ func TestStageOneWorkflowsStillPlanTheSame(t *testing.T) {
 	if plan.Video.Codec != encode.CodecHEVC || plan.Video.CRF == nil || *plan.Video.CRF != 23 {
 		t.Errorf("video plan = %+v, want HEVC CRF 23", plan.Video)
 	}
-	if len(plan.Audio) != 0 || len(plan.Subtitles) != 0 {
-		t.Errorf("audio = %+v, subtitles = %+v, want the source copied as is", plan.Audio, plan.Subtitles)
+	for _, a := range plan.Audio {
+		if a.Action != encode.StreamCopy || a.Codec != "" || a.Default != nil {
+			t.Errorf("audio = %+v, want the source copied as is", a)
+		}
+	}
+	if len(plan.Subtitles) != 0 {
+		t.Errorf("subtitles = %+v, want every subtitle copied as is", plan.Subtitles)
 	}
 	if plan.Container != encode.ContainerMKV {
 		t.Errorf("container = %q, want mkv", plan.Container)

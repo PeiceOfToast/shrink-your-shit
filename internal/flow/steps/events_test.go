@@ -30,6 +30,8 @@ func codeCases() []codeCase {
 	noAverage := videoSettings("hevc", 3)
 	noAverage.RateControl = ptr("cbr")
 	noAverage.BitrateLevel = "custom"
+	loud := probeInfo("h264", 1920, 1080)
+	loud.Audio[0].BitRate = 640_000
 	return []codeCase{
 		{name: "video convert", step: VideoStep{}, set: videoSettings("hevc", 3), info: probeInfo("h264", 1920, 1080), want: "video.convert"},
 		{name: "video already target", step: VideoStep{}, set: videoSettings("hevc", 3), info: probeInfo("hevc", 1920, 1080), want: "video.already_target"},
@@ -38,6 +40,13 @@ func codeCases() []codeCase {
 		{name: "video bitrate missing", step: VideoStep{}, set: noAverage,
 			info: probeInfo("h264", 1920, 1080), want: "video.no_bitrate", isErr: true},
 		{name: "audio as is", step: AudioStep{}, set: AudioSettings{Format: "copy"}, info: probeInfo("h264", 1920, 1080), want: "audio.as_is"},
+		{name: "audio convert", step: AudioStep{}, set: AudioSettings{Format: "aac", Channels: "stereo"}, info: loud, want: "audio.convert"},
+		{name: "audio keep languages", step: AudioStep{}, set: AudioSettings{Format: "copy", Languages: []string{"eng"}},
+			info: probeInfo("h264", 1920, 1080), want: "audio.keep_languages"},
+		{name: "audio default track", step: AudioStep{}, set: AudioSettings{Format: "copy", DefaultTrack: ptr("ger")},
+			info: probeInfo("h264", 1920, 1080), want: "audio.default_track"},
+		{name: "audio no audio", step: AudioStep{}, set: AudioSettings{Format: "copy"},
+			info: media.Info{Path: "/library/a.mkv"}, want: "audio.no_audio"},
 		{name: "save next to", step: SaveStep{}, set: saveSettings("mkv", "next_to", "shrunk"), info: mp4Info(), plan: working, want: "save.next_to"},
 		{name: "save nothing", step: SaveStep{}, set: saveSettings("mkv", "next_to", "shrunk"), info: mp4Info(), want: "save.nothing"},
 		{name: "save lands on source", step: SaveStep{}, set: saveSettings("keep", "next_to", ""),

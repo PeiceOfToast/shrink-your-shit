@@ -21,8 +21,8 @@
         {
           "id": "audio",
           "settings": {
-            "channels": "source",
-            "format": "copy",
+            "channels": "stereo",
+            "format": "aac",
             "subtitles": "keep_all"
           },
           "type": "audio.tracks",

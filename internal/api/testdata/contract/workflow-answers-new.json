@@ -2,7 +2,7 @@
   "body": {
     "answers": {
       "allLanguages": true,
-      "audio": "as_is",
+      "audio": "stereo_aac",
       "fileType": "mkv",
       "folder": "",
       "format": "hevc",

@@ -38,12 +38,15 @@ func goodInfo(d time.Duration) media.Info {
 	return media.Info{
 		Format:    media.Format{Duration: d},
 		Video:     []media.VideoTrack{{Codec: "h264"}},
-		Audio:     []media.AudioTrack{{Language: "eng"}, {Language: "jpn"}},
+		Audio:     []media.AudioTrack{{Language: "eng", Channels: 6}, {Language: "jpn", Channels: 2}},
 		Subtitles: []media.SubtitleTrack{{Language: "eng"}},
 	}
 }
 
-var wantAll = Want{AudioLanguages: []string{"eng", "jpn"}, SubtitleLanguages: []string{"eng"}}
+var wantAll = Want{
+	Audio:             []WantedAudio{{Language: "eng", Channels: 6}, {Language: "jpn", Channels: 2}},
+	SubtitleLanguages: []string{"eng"},
+}
 
 // stagedWith stages a file in a temp dir and writes data into it.
 func stagedWith(t *testing.T, data string) (Staged, string) {
@@ -158,6 +161,7 @@ func TestVerifyStreamChecks(t *testing.T) {
 		"video missing":    {func(i *media.Info) { i.Video = nil }, CodeVideoMissing},
 		"audio missing":    {func(i *media.Info) { i.Audio = i.Audio[:1] }, CodeAudioMissing},
 		"wrong language":   {func(i *media.Info) { i.Audio[1].Language = "fra" }, CodeAudioLanguage},
+		"wrong channels":   {func(i *media.Info) { i.Audio[0].Channels = 2 }, CodeAudioChannels},
 		"subtitle missing": {func(i *media.Info) { i.Subtitles = nil }, CodeSubtitleMissing},
 	}
 	for name, c := range cases {

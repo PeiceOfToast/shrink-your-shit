@@ -79,7 +79,7 @@ const (
 	// does not name.
 	StreamCopy StreamAction = ""
 	StreamDrop StreamAction = "drop"
-	// StreamConvert is reserved for the audio step's convert (stage 2); Build refuses it.
+	// StreamConvert re-encodes a stream: the audio step's formats and channels.
 	StreamConvert StreamAction = "convert"
 )
 
@@ -120,8 +120,10 @@ type RateControl struct {
 // services, no clock, no file system.
 type Plan struct {
 	Video VideoPlan
-	// Audio and Subtitles say what happens to named input streams; unnamed streams are copied.
-	Audio     []StreamPlan
+	// Audio says what happens to each named audio stream, including the codec and channel choices
+	// when it converts; a stream it does not name is copied.
+	Audio []AudioPlan
+	// Subtitles says what happens to named input streams; unnamed streams are copied.
 	Subtitles []StreamPlan
 	// MetadataClear names per-stream video tags to remove from the output. The ffmpeg statistics
 	// tags are always cleared on a re-encoded video stream, because they describe the old encode.

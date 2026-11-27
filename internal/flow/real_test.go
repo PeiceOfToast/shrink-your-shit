@@ -5,6 +5,7 @@ package flow_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -139,5 +140,138 @@ func TestRealRunShrinksAClip(t *testing.T) {
 		if strings.Contains(e.Name(), ".syp-tmp") {
 			t.Errorf("staging folder %s left behind", e.Name())
 		}
+	}
+}
+
+// makeRealClip encodes one real source file with the given ffmpeg input and output arguments.
+func makeRealClip(t *testing.T, path string, args ...string) {
+	t.Helper()
+	argv := append([]string{"-nostdin", "-hide_banner", "-loglevel", "error", "-y"}, args...)
+	argv = append(argv, path)
+	if out, err := exec.Command("ffmpeg", argv...).CombinedOutput(); err != nil {
+		t.Fatalf("make %s: %v\n%s", filepath.Base(path), err, out)
+	}
+}
+
+// runRealFlow runs the starter on one real file with the audio step's settings changed.
+func runRealFlow(t *testing.T, src, audio string) flow.Result {
+	t.Helper()
+	root := filepath.Dir(src)
+	st, err := os.Stat(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := fsx.FileID(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rev := starterFlow(t)
+	rev.Steps[1].Settings = json.RawMessage(audio)
+	in := flow.RunInput{
+		JobID: 1, Attempt: 1, LibraryID: "Movies", WorkerID: "local",
+		WorkflowID: 1, Revision: 1,
+		LibraryRoot: root, Source: src,
+		Size: st.Size(), MTime: st.ModTime(), FileID: id,
+	}
+	env := flow.Env{
+		Media:        media.MediaFuncs{ProbeFunc: media.Probe, RunFunc: media.Run},
+		Safety:       flow.RealSafety{},
+		Pick:         flow.ProcessorPick,
+		LoadRevision: func(ctx context.Context, id int64, r int) (flow.Flow, error) { return rev, nil },
+		Now:          time.Now,
+		Sleep:        time.Sleep,
+		AppVersion:   "test",
+	}
+	return flow.Run(context.Background(), in, env)
+}
+
+// TestRealRunConvertsSurroundToStereoAAC is L-AUD-6's real path: the plan's "stereo AAC" on a 5.1
+// source writes exactly one AAC stream with two channels, read back with ffprobe.
+func TestRealRunConvertsSurroundToStereoAAC(t *testing.T) {
+	requireRealTools(t)
+	for _, encoder := range []string{"libx264", "libx265", "aac", "eac3"} {
+		if !hasEncoder(t, encoder) {
+			if os.Getenv("SYP_REQUIRE_FFMPEG") != "" {
+				t.Fatalf("this ffmpeg build has no %s and SYP_REQUIRE_FFMPEG is set", encoder)
+			}
+			t.Skipf("this ffmpeg build has no %s", encoder)
+		}
+	}
+
+	root := t.TempDir()
+	src := filepath.Join(root, "surround.mkv")
+	makeRealClip(t, src,
+		"-f", "lavfi", "-i", "testsrc2=size=320x240:rate=30:duration=4",
+		"-f", "lavfi", "-i", "sine=frequency=440:duration=4",
+		"-c:v", "libx264", "-preset", "ultrafast", "-b:v", "6M", "-pix_fmt", "yuv420p",
+		"-ac", "6", "-c:a", "eac3", "-shortest")
+	before, err := media.Probe(context.Background(), src)
+	if err != nil {
+		t.Fatalf("probe the source: %v", err)
+	}
+	if len(before.Audio) != 1 || before.Audio[0].Channels != 6 {
+		t.Fatalf("source audio = %+v, want one 5.1 track", before.Audio)
+	}
+
+	res := runRealFlow(t, src, `{"format":"aac","channels":"stereo"}`)
+	if res.Outcome != flow.OutcomeSmaller {
+		t.Fatalf("result = %+v, want smaller", res)
+	}
+	got, err := media.Probe(context.Background(), res.OutputPath)
+	if err != nil {
+		t.Fatalf("probe the output: %v", err)
+	}
+	if len(got.Audio) != 1 {
+		t.Fatalf("output audio = %+v, want one track", got.Audio)
+	}
+	if got.Audio[0].Codec != "aac" || got.Audio[0].Channels != 2 {
+		t.Errorf("output audio = %+v, want one stereo AAC track", got.Audio[0])
+	}
+}
+
+// TestRealRunKeepsTheChosenLanguage is the language filter's real path: "keep English" writes one
+// AAC stream, in English, and the German track is gone.
+func TestRealRunKeepsTheChosenLanguage(t *testing.T) {
+	requireRealTools(t)
+	for _, encoder := range []string{"libx264", "libx265", "aac"} {
+		if !hasEncoder(t, encoder) {
+			if os.Getenv("SYP_REQUIRE_FFMPEG") != "" {
+				t.Fatalf("this ffmpeg build has no %s and SYP_REQUIRE_FFMPEG is set", encoder)
+			}
+			t.Skipf("this ffmpeg build has no %s", encoder)
+		}
+	}
+
+	root := t.TempDir()
+	src := filepath.Join(root, "twolangs.mkv")
+	makeRealClip(t, src,
+		"-f", "lavfi", "-i", "testsrc2=size=320x240:rate=30:duration=4",
+		"-f", "lavfi", "-i", "sine=frequency=440:duration=4",
+		"-f", "lavfi", "-i", "sine=frequency=880:duration=4",
+		"-map", "0:v", "-map", "1:a", "-map", "2:a",
+		"-c:v", "libx264", "-preset", "ultrafast", "-b:v", "6M", "-pix_fmt", "yuv420p",
+		"-c:a", "aac",
+		"-metadata:s:a:0", "language=eng", "-metadata:s:a:1", "language=ger")
+	before, err := media.Probe(context.Background(), src)
+	if err != nil {
+		t.Fatalf("probe the source: %v", err)
+	}
+	if len(before.Audio) != 2 {
+		t.Fatalf("source audio = %+v, want two tracks", before.Audio)
+	}
+
+	res := runRealFlow(t, src, `{"format":"copy","languages":["eng"]}`)
+	if res.Outcome != flow.OutcomeSmaller {
+		t.Fatalf("result = %+v, want smaller", res)
+	}
+	got, err := media.Probe(context.Background(), res.OutputPath)
+	if err != nil {
+		t.Fatalf("probe the output: %v", err)
+	}
+	if len(got.Audio) != 1 {
+		t.Fatalf("output audio = %+v, want the English track only", got.Audio)
+	}
+	if got.Audio[0].Codec != "aac" || !strings.EqualFold(got.Audio[0].Language, "eng") {
+		t.Errorf("output audio = %+v, want the English AAC track", got.Audio[0])
 	}
 }
