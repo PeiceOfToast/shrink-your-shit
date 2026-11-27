@@ -1,5 +1,8 @@
 import type { ReactNode } from "react";
 import { api, ApiError, type GuideChoice } from "../api/index.ts";
+import type { BitrateLadder } from "../api/flowTypes.ts";
+import { useApi } from "../api/useApi.ts";
+import { qualityCrf } from "../format/quality.ts";
 
 // Pieces the guided page (06) and the flow editor (07) share: a setting row, a segmented control, a choice field.
 
@@ -8,15 +11,21 @@ export interface Err {
   message: string;
 }
 
-// The Quality slider's names, positions 1 to 5 (the mock's SLIDER table).
+// The Quality slider's names, positions 1 to 5 (the ladder's slider).
 export const QUALITY_NAMES = ["Smallest file", "Smaller", "Balanced", "Better quality", "Best quality"];
 
+// The server's bitrate ladder, which carries the Quality slider's numbers. null until it has loaded.
+export function useBitrateLadder(): BitrateLadder | null {
+  return useApi(() => api.getBitrateLadder(), []).data ?? null;
+}
+
 // The one-line meaning of a Quality setting: the card's number when the card is used, then the processor CRF.
-// `where` says which picture size the number is for.
-export function qualityMeaning(value: number, format: string, card: boolean, where: string): string {
-  const crf = api.crfFor(value, format, false);
+// `size` is the picture size the number is for (null = 1080p, the default).
+export function qualityMeaning(ladder: BitrateLadder, value: number, format: string, card: boolean, size: string | null): string {
+  const where = size == null ? "at 1080p (one lower at 720p and below, one higher at 2160p)" : size === "custom" ? "at the custom size" : `for ${size}p`;
+  const crf = qualityCrf(ladder, value, format, false, size);
   if (format === "hevc" && card) {
-    return `Uses the Intel card (QSV) ${api.crfFor(value, format, true)} when it can, otherwise the processor CRF ${crf} ${where}. Lower means a better picture and a bigger file.`;
+    return `Uses the Intel card (QSV) ${qualityCrf(ladder, value, format, true, size)} when it can, otherwise the processor CRF ${crf} ${where}. Lower means a better picture and a bigger file.`;
   }
   return `Uses the processor CRF ${crf} ${where}. Lower means a better picture and a bigger file.`;
 }

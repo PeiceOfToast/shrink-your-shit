@@ -101,4 +101,10 @@ export interface BitrateLadder {
   vbrFormats: string[];
   factors: { fps60: number; hdr: number };
   vbrMaxFactor: number;
+  // The Quality slider: the processor's CRF at 1080p by position, and what turns it into the number each format, row and card uses.
+  slider: { position: number; name: string; crf: number }[];
+  crfOffset: Record<string, number>;
+  rowCrfShift: Record<string, number>;
+  resolutionRow: Record<string, string>;
+  cardOffsets: Partial<Record<"qsv" | "nvenc" | "vaapi" | "amf", Record<string, number>>>;
 }

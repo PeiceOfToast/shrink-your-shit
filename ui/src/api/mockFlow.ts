@@ -31,22 +31,6 @@ const FORMAT_LABEL: Record<string, string> = { hevc: "HEVC", h264: "H.264", av1:
 const CODEC_LABEL: Record<string, string> ={ aac: "AAC", opus: "Opus", ac3: "AC-3", eac3: "E-AC-3", flac: "FLAC", copy: "Same as the source" };
 const CHANNEL_LABEL: Record<string, string> = { stereo: "stereo", source: "same channels as the source", mono: "mono", "5.1": "5.1" };
 
-// The Quality slider (page 07, rev 4): the processor's CRF at 1080p, by position. Offsets are the app's own.
-const SLIDER = [
-  { position: 1, name: "Smallest file", crf: 27 },
-  { position: 2, name: "Smaller", crf: 25 },
-  { position: 3, name: "Balanced", crf: 23 },
-  { position: 4, name: "Better quality", crf: 21 },
-  { position: 5, name: "Best quality", crf: 19 },
-];
-const FORMAT_CRF_OFFSET: Record<string, number> = { hevc: 0, h264: -5, av1: 9 };
-const QSV_OFFSET = [-2, -2, -1, -1, -1];
-
-// The number a slider position uses for a format at 1080p, and the Intel card's number for HEVC (page 07).
-export function crfFor(position: number, format: string, card: boolean): number {
-  const base = SLIDER[position - 1].crf + (FORMAT_CRF_OFFSET[format] ?? 0);
-  return card && format === "hevc" ? base + QSV_OFFSET[position - 1] : base;
-}
 
 const LADDER: BitrateLadder = {
   unit: "Mbps",
@@ -81,6 +65,18 @@ const LADDER: BitrateLadder = {
     },
   },
   vbrFormats: ["hevc", "h264"],
+  // The Quality slider (page 07, rev 4): the processor's CRF at 1080p, and the offsets from the app's own tables.
+  slider: [
+    { position: 1, name: "Smallest file", crf: 27 },
+    { position: 2, name: "Smaller", crf: 25 },
+    { position: 3, name: "Balanced", crf: 23 },
+    { position: 4, name: "Better quality", crf: 21 },
+    { position: 5, name: "Best quality", crf: 19 },
+  ],
+  crfOffset: { hevc: 0, h264: -5, av1: 9 },
+  rowCrfShift: { "2160": 1, "1440": 0, "1080": 0, "720": -1, sd: -1 },
+  resolutionRow: { "2160": "2160", "1080": "1080", "720": "720", "480": "sd" },
+  cardOffsets: { qsv: { "1": -2, "2": -2, "3": -1, "4": -1, "5": -1 } },
   factors: { fps60: 1.4, hdr: 1.25 },
   vbrMaxFactor: 1.5,
 };
@@ -310,7 +306,7 @@ export function checkFlow(flow: Flow): FlowCheck {
   const problems: FlowProblem[] = [];
   const disabled: FlowCheck["disabled"] = [];
 
-  if (v.rateControl === "vbr" && v.format === "av1") {
+  if (v.rateControl === "vbr" && !LADDER.vbrFormats.includes(String(v.format))) {
     problems.push({ stepId: "video", field: "rateControl", code: "vbr_av1", message: "Variable bitrate doesn't work with AV1 yet. Pick Constant bitrate or Quality, or another format." });
   }
   if (sv.where === "folder" && !sv.folder) {
@@ -506,7 +502,3 @@ export function getBitrateLadder(): Promise<BitrateLadder> {
   return respond(() => LADDER);
 }
 
-// The Quality slider's numbers and the offsets that turn them into the number a format and card use (page 07, rev 4).
-export function getSliderPositions(): Promise<{ slider: typeof SLIDER; crfOffset: Record<string, number>; qsvOffset: number[] }> {
-  return respond(() => ({ slider: SLIDER, crfOffset: FORMAT_CRF_OFFSET, qsvOffset: QSV_OFFSET }));
-}
