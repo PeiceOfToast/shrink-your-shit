@@ -1,0 +1,2 @@
+# Golden tables are compared byte for byte; keep LF on every OS (Windows checkout would add CR).
+*.tsv text eol=lf

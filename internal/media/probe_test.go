@@ -119,6 +119,49 @@ func TestParseProbeHDR10SideData(t *testing.T) {
 	}
 }
 
+// TestParseProbeCodecTagAndDolbyVisionProfile covers the two stream facts the encoder needs: the
+// container tag it should write, and which Dolby Vision profile a stream carries (5 has no HDR10
+// base and is not converted; 7 and 8 are).
+func TestParseProbeCodecTagAndDolbyVisionProfile(t *testing.T) {
+	const answer = `{
+	  "format": {"format_name": "matroska,webm"},
+	  "streams": [
+	    {"index": 0, "codec_type": "video", "codec_name": "hevc", "codec_tag_string": "hvc1",
+	     "pix_fmt": "yuv420p10le", "color_transfer": "smpte2084",
+	     "side_data_list": [{"side_data_type": "DOVI configuration record", "dv_profile": 5}]}
+	  ]
+	}`
+	info, err := ParseProbe([]byte(answer))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	v := info.Video[0]
+	if v.Tag != "hvc1" {
+		t.Errorf("tag = %q, want hvc1", v.Tag)
+	}
+	if !v.HDR.DolbyVision || v.HDR.DVProfile != 5 {
+		t.Errorf("HDR = %+v, want Dolby Vision profile 5", v.HDR)
+	}
+	if v.HDRKind() != "Dolby Vision" {
+		t.Errorf("HDR kind = %q, want Dolby Vision", v.HDRKind())
+	}
+}
+
+// TestParseProbeRotation covers the Display Matrix's rotation, the fact the encoder needs to fit
+// a scale box to the upright picture rather than the coded one (review 44dbabe).
+func TestParseProbeRotation(t *testing.T) {
+	v := loadProbe(t, "mp4-rotated90.json").Video[0]
+	if v.Width != 320 || v.Height != 240 {
+		t.Errorf("coded size = %dx%d, want 320x240", v.Width, v.Height)
+	}
+	if v.Rotation != 90 {
+		t.Errorf("rotation = %d, want 90", v.Rotation)
+	}
+	if got := loadProbe(t, "mp4-h264-aac.json").Video[0].Rotation; got != 0 {
+		t.Errorf("rotation without a matrix = %d, want 0", got)
+	}
+}
+
 func TestParseProbeLanguagesAndSubtitles(t *testing.T) {
 	info := loadProbe(t, "mkv-chapters.json")
 

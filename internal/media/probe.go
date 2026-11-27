@@ -66,19 +66,23 @@ func (r Rational) String() string {
 // VideoTrack is one video stream. AttachedPicture marks cover art, which is a video stream in some
 // containers but must never be mistaken for the main video.
 type VideoTrack struct {
-	Index           int
-	Codec           string
-	Profile         string
-	Width, Height   int
-	FrameRate       Rational
-	PixelFormat     string
-	BitDepth        int
-	BitRate         int64
-	ColorPrimaries  string
-	ColorTransfer   string
-	ColorSpace      string
-	ColorRange      string
-	HDR             HDR
+	Index          int
+	Codec          string
+	Tag            string // the container codec tag ("hvc1", "avc1", "hev1"); "" when unset
+	Profile        string
+	Width, Height  int
+	FrameRate      Rational
+	PixelFormat    string
+	BitDepth       int
+	BitRate        int64
+	ColorPrimaries string
+	ColorTransfer  string
+	ColorSpace     string
+	ColorRange     string
+	HDR            HDR
+	// Rotation is the Display Matrix's rotation in degrees (−90, 90, 180 or 270): how far the
+	// player must turn the coded picture to show it upright. 0 when there is no matrix.
+	Rotation        int
 	AttachedPicture bool
 	Language        string
 	Title           string
@@ -90,6 +94,7 @@ type HDR struct {
 	MasteringDisplay bool // "Mastering display metadata" side data (HDR10)
 	ContentLight     bool // "Content light level metadata" side data
 	DolbyVision      bool // "DOVI configuration record" side data
+	DVProfile        int  // the profile in that record (5, 7, 8); 0 when the record does not say
 }
 
 // HDRKind names what the stream carries, for the summary and later the pages: "SDR", "HDR10",
@@ -262,6 +267,7 @@ type probeFormat struct {
 type probeStream struct {
 	Index            int              `json:"index"`
 	CodecName        string           `json:"codec_name"`
+	CodecTag         string           `json:"codec_tag_string"`
 	CodecType        string           `json:"codec_type"`
 	Profile          string           `json:"profile"`
 	Width            flexInt          `json:"width"`
@@ -291,7 +297,9 @@ type probeDisposition struct {
 }
 
 type probeSideData struct {
-	Type string `json:"side_data_type"`
+	Type      string    `json:"side_data_type"`
+	DVProfile flexInt   `json:"dv_profile"`
+	Rotation  flexFloat `json:"rotation"`
 }
 
 type probeChapter struct {
@@ -394,6 +402,7 @@ func videoTrack(s *probeStream) VideoTrack {
 	v := VideoTrack{
 		Index:           s.Index,
 		Codec:           s.CodecName,
+		Tag:             s.CodecTag,
 		Profile:         s.Profile,
 		Width:           int(s.Width),
 		Height:          int(s.Height),
@@ -417,6 +426,9 @@ func videoTrack(s *probeStream) VideoTrack {
 			v.HDR.ContentLight = true
 		case "DOVI configuration record":
 			v.HDR.DolbyVision = true
+			v.HDR.DVProfile = int(sd.DVProfile)
+		case "Display Matrix":
+			v.Rotation = int(math.Round(float64(sd.Rotation)))
 		}
 	}
 	return v
