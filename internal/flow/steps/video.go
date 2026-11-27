@@ -147,6 +147,9 @@ func (VideoStep) Plan(s flow.Settings, in flow.PlanInput, p *encode.Plan) (flow.
 		row := ladderRow(main, p.Video.Scale)
 		crf := videoCRF(set.Format, set.Quality, row)
 		p.Video.CRF = &crf
+		// The slider position itself, for L-HW-12's measured card offsets: the CRF above is the
+		// processor's number, and a card's encoder moves its own number from it.
+		p.Video.Quality = set.Quality
 		detail["crf"] = crf
 		detail["quality"] = set.Quality
 		detail["row"] = row

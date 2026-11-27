@@ -56,20 +56,49 @@ func Build(plan Plan, info media.Info, rung Rung) (Result, error) {
 		default:
 			return res, fmt.Errorf("%w: codec %q is not hevc, h264, av1 or copy", ErrInvalidPlan, plan.Video.Codec)
 		}
-		if rung.Family != FamilyCPU {
-			return res, fmt.Errorf("%w: the %s family", ErrRungNotBuilt, rung.Family)
+		switch rung.Decode {
+		case "", DecodeSoftware, DecodeHardware:
+		default:
+			return res, fmt.Errorf("%w: decode %q is not software or hardware", ErrInvalidPlan, rung.Decode)
 		}
-		if rung.Decode == DecodeHardware {
-			return res, fmt.Errorf("%w: hardware decode", ErrRungNotBuilt)
+		switch rung.Family {
+		case FamilyCPU:
+			if rung.Decode == DecodeHardware {
+				return res, fmt.Errorf("%w: hardware decode on the processor", ErrRungNotBuilt)
+			}
+			want, _ := CPUEncoder(plan.Video.Codec)
+			if rung.Encoder != "" && rung.Encoder != want {
+				return res, fmt.Errorf("%w: encoder %q cannot encode %s", ErrInvalidPlan, rung.Encoder, plan.Video.Codec)
+			}
+			encoder = want
+		case FamilyQSV, FamilyVAAPI, FamilyNVENC:
+			want, ok := CardEncoder(rung.Family, plan.Video.Codec)
+			if !ok {
+				return res, fmt.Errorf("%w: %s on a %s card", ErrRungNotBuilt, plan.Video.Codec, rung.Family)
+			}
+			if rung.Encoder != "" && rung.Encoder != want {
+				return res, fmt.Errorf("%w: encoder %q cannot encode %s", ErrInvalidPlan, rung.Encoder, plan.Video.Codec)
+			}
+			if rung.Family == FamilyVAAPI && rung.Device == "" {
+				return res, fmt.Errorf("%w: a VA-API rung needs its render node", ErrInvalidPlan)
+			}
+			encoder = want
+			if rung.Decode == DecodeHardware {
+				// The full pipeline is a choice for some plans only (L-HW-11); a refusal here
+				// falls through to the next rung, so the file still converts on the processor.
+				if err := fullPipelineOK(plan, rung); err != nil {
+					return res, err
+				}
+			}
+		case FamilyAMF:
+			return res, fmt.Errorf("%w: the amf family", ErrRungNotBuilt)
+		default:
+			return res, fmt.Errorf("%w: the %q family", ErrInvalidPlan, rung.Family)
 		}
-		want, _ := CPUEncoder(plan.Video.Codec)
-		if rung.Encoder != "" && rung.Encoder != want {
-			return res, fmt.Errorf("%w: encoder %q cannot encode %s", ErrInvalidPlan, rung.Encoder, plan.Video.Codec)
-		}
-		encoder = want
 	} else {
-		if plan.Video.CRF != nil || plan.Video.Preset != "" || plan.Video.Scale != (Scale{}) ||
-			plan.Video.FPS != 0 || plan.Video.BitDepth != DepthSource || plan.RateControl != nil {
+		if plan.Video.CRF != nil || plan.Video.Preset != "" || plan.Video.Quality != 0 ||
+			plan.Video.Scale != (Scale{}) || plan.Video.FPS != 0 || plan.Video.BitDepth != DepthSource ||
+			plan.RateControl != nil {
 			return res, fmt.Errorf("%w: the video is copied, so its size, rate and depth cannot change", ErrInvalidPlan)
 		}
 	}
@@ -108,8 +137,15 @@ func Build(plan Plan, info media.Info, rung Rung) (Result, error) {
 
 	argv := []string{
 		"-y", "-nostdin", "-progress", "pipe:1", "-nostats", "-loglevel", "error",
-		"-i", info.Path,
 	}
+	if encoding {
+		// The card's device, and for the full pipeline its decoder, are input options: they come
+		// before the file they decode (L-HW-10).
+		setup, decode := rungSetup(rung)
+		argv = append(argv, setup...)
+		argv = append(argv, decode...)
+	}
+	argv = append(argv, "-i", info.Path)
 	// An extracted subtitle is an output of its own, written before the new file so a name it
 	// cannot take stops the job before anything is placed. The new file's own options follow the
 	// extracts, so ffmpeg still binds them to the new file.
@@ -125,7 +161,7 @@ func Build(plan Plan, info media.Info, rung Rung) (Result, error) {
 	}
 
 	if encoding {
-		options, err := videoOptions(plan, main, encoder, &res)
+		options, err := videoOptions(plan, main, rung, encoder, &res)
 		if err != nil {
 			return res, err
 		}
@@ -152,6 +188,41 @@ func Build(plan Plan, info media.Info, rung Rung) (Result, error) {
 
 	res.Argv = argv
 	return res, nil
+}
+
+// fullPipelineOK refuses the full GPU pipeline — the decoder and the encoder both on the card — for
+// a plan whose frames must pass through the processor. It is not a job error: the caller falls
+// through to the next rung, which decodes in software and still converts the file (L-HW-11).
+func fullPipelineOK(plan Plan, rung Rung) error {
+	if rung.Family == FamilyNVENC {
+		return fmt.Errorf("%w: NVENC is hybrid, it encodes frames the processor decoded (L-HW-17)", ErrRungNotBuilt)
+	}
+	if plan.Video.FPS > 0 {
+		return fmt.Errorf("%w: a frame rate change runs on the processor", ErrRungNotBuilt)
+	}
+	if plan.Video.HDR == HDRTonemap {
+		return fmt.Errorf("%w: tone mapping runs on the processor", ErrRungNotBuilt)
+	}
+	return nil
+}
+
+// rungSetup is the device arguments a card rung needs before its input: the device the card's
+// filters and encoder use, and for the full pipeline the card's decoder (L-HW-10). The names are
+// the ones the card probe proved (internal/hw).
+func rungSetup(rung Rung) (setup, decode []string) {
+	switch rung.Family {
+	case FamilyQSV:
+		setup = []string{"-init_hw_device", "qsv=qsv:hw", "-filter_hw_device", "qsv"}
+		if rung.Decode == DecodeHardware {
+			decode = []string{"-hwaccel", "qsv", "-hwaccel_output_format", "qsv"}
+		}
+	case FamilyVAAPI:
+		setup = []string{"-init_hw_device", "vaapi=va:" + rung.Device, "-filter_hw_device", "va"}
+		if rung.Decode == DecodeHardware {
+			decode = []string{"-hwaccel", "vaapi", "-hwaccel_device", "va", "-hwaccel_output_format", "vaapi"}
+		}
+	}
+	return setup, decode
 }
 
 // subtitleOut is one subtitle's place in the new file: the input stream, and the codec it is
@@ -327,9 +398,10 @@ func KeptStreams(plan Plan, info media.Info) (audio, subtitles []int, err error)
 	return audio, subtitles, nil
 }
 
-// videoOptions is the video encoder's part of the table. It also appends any HDR note and the
-// copy- untouched case is handled by Build.
-func videoOptions(plan Plan, main media.VideoTrack, encoder string, res *Result) ([]string, error) {
+// videoOptions is the video encoder's part of the table, per family (L-HW-10/11/13). It also
+// appends any note; the copy case is handled by Build.
+func videoOptions(plan Plan, main media.VideoTrack, rung Rung, encoder string, res *Result) ([]string, error) {
+	family := rung.Family
 	var crf int
 	if plan.RateControl != nil && plan.Video.CRF != nil {
 		return nil, fmt.Errorf("%w: a bitrate replaces the CRF", ErrInvalidPlan)
@@ -418,6 +490,17 @@ func videoOptions(plan Plan, main media.VideoTrack, encoder string, res *Result)
 		}
 	}
 
+	if rung.Decode == DecodeHardware {
+		srcDepth := 8
+		if main.BitDepth >= 10 {
+			srcDepth = 10
+		}
+		if depth != srcDepth {
+			// The decoder's frames are already the source's depth; changing it needs a processor
+			// filter, which the full pipeline does not run (L-HW-11).
+			return nil, fmt.Errorf("%w: the picture's depth cannot change on the card", ErrRungNotBuilt)
+		}
+	}
 	if plan.Video.FPS < 0 || math.IsNaN(plan.Video.FPS) || math.IsInf(plan.Video.FPS, 0) {
 		return nil, fmt.Errorf("%w: frame rate %v", ErrInvalidPlan, plan.Video.FPS)
 	}
@@ -430,18 +513,32 @@ func videoOptions(plan Plan, main media.VideoTrack, encoder string, res *Result)
 	if depth == 10 {
 		pixelFormat = "yuv420p10le"
 	}
-	argv := []string{
-		"-c:v:0", encoder,
-		"-preset:v:0", preset,
+	argv := []string{"-c:v:0", encoder}
+	if family == FamilyVAAPI {
+		// VA-API's encoders have no speed setting: the driver picks its own pace (L-HW-13). A
+		// choice the person made is said out loud rather than silently dropped.
+		if plan.Video.Preset != "" && plan.Video.Preset != "normal" {
+			res.Notes = append(res.Notes, "The card's VA-API encoder has no speed setting, so this file encodes at the driver's own pace")
+		}
+	} else {
+		argv = append(argv, "-preset:v:0", preset)
 	}
 	if plan.RateControl != nil {
+		if family != FamilyCPU {
+			// The card families' bitrate flags are not part of this stage; refusing keeps a number
+			// the person chose from being ignored (L-HW-10 is quality-only for now).
+			return nil, fmt.Errorf("%w: a bitrate on a %s card", ErrNotBuiltYet, family)
+		}
 		rate, err := rateArgs(plan.Video.Codec, *plan.RateControl)
 		if err != nil {
 			return nil, err
 		}
 		argv = append(argv, rate...)
 	} else {
-		argv = append(argv, "-crf:v:0", strconv.Itoa(crf))
+		if plan.Video.Quality < 0 || plan.Video.Quality > 5 {
+			return nil, fmt.Errorf("%w: quality %d is not a slider position 1..5", ErrInvalidPlan, plan.Video.Quality)
+		}
+		argv = append(argv, qualityArgs(family, plan.Video.Codec, crf, plan.Video.Quality)...)
 	}
 	// x265 takes its own options through one -x265-params flag, so HDR's color description and
 	// strict CBR share it rather than one silently replacing the other. libx265's minrate/maxrate
@@ -452,20 +549,71 @@ func videoOptions(plan Plan, main media.VideoTrack, encoder string, res *Result)
 	if plan.RateControl != nil && plan.RateControl.Mode == "cbr" && plan.Video.Codec == CodecHEVC {
 		x265 = append(x265, "hrd=1:strict-cbr=1")
 	}
-	argv = append(argv, "-pix_fmt:v:0", pixelFormat)
+	// The card families set their pixel format on the frames themselves: the upload filter's
+	// format for QSV and VA-API, the decoder's own for the full pipeline. NVENC takes the
+	// processor's frames and names p010le for ten bits (L-HW-13).
+	switch family {
+	case FamilyCPU:
+		argv = append(argv, "-pix_fmt:v:0", pixelFormat)
+	case FamilyNVENC:
+		argv = append(argv, "-pix_fmt:v:0", nvencFormat(depth))
+	}
 	if depth == 10 && plan.Video.Codec == CodecHEVC {
 		argv = append(argv, "-profile:v:0", "main10")
 	}
 	argv = append(argv, "-tag:v:0", tags[plan.Video.Codec])
-	if plan.Video.Codec == CodecAV1 {
+	if family == FamilyCPU && plan.Video.Codec == CodecAV1 {
+		// SVT-AV1's own tuning; a card's AV1 encoder has no such parameter (L-HW-13).
 		argv = append(argv, "-svtav1-params:v:0", "tune=0")
 	}
 	var filters []string
-	if scaleW > 0 && scaleH > 0 {
-		filters = append(filters, fmt.Sprintf("scale=%d:%d", scaleW, scaleH))
-	}
-	if tonemapping {
-		filters = append(filters, tonemapChain(transfer, primaries, colorspace, pixelFormat))
+	switch family {
+	case FamilyCPU, FamilyNVENC:
+		// These read the processor's ordinary frames.
+		if scaleW > 0 && scaleH > 0 {
+			filters = append(filters, fmt.Sprintf("scale=%d:%d", scaleW, scaleH))
+		}
+		if tonemapping {
+			filters = append(filters, tonemapChain(transfer, primaries, colorspace, pixelFormat))
+		}
+	case FamilyQSV:
+		if rung.Decode == DecodeHardware {
+			// The full pipeline: the decoder's frames stay on the card, so only a card filter may
+			// touch them and nothing is uploaded (L-HW-11).
+			if scaleW > 0 && scaleH > 0 {
+				filters = append(filters, qsvScale(scaleH))
+			}
+		} else {
+			format := uploadFormat(depth)
+			if tonemapping {
+				filters = append(filters, tonemapChain(transfer, primaries, colorspace, format))
+			} else {
+				filters = append(filters, "format="+format)
+			}
+			filters = append(filters, "hwupload=extra_hw_frames=64")
+			if scaleW > 0 && scaleH > 0 {
+				filters = append(filters, qsvScale(scaleH))
+			}
+		}
+	case FamilyVAAPI:
+		if rung.Decode == DecodeHardware {
+			if scaleW > 0 && scaleH > 0 {
+				filters = append(filters, vaapiScale(scaleH, uploadFormat(depth)))
+			}
+		} else {
+			if scaleW > 0 && scaleH > 0 {
+				filters = append(filters, fmt.Sprintf("scale=%d:%d", scaleW, scaleH))
+			}
+			format := uploadFormat(depth)
+			if tonemapping {
+				filters = append(filters, tonemapChain(transfer, primaries, colorspace, format))
+			} else {
+				filters = append(filters, "format="+format)
+			}
+			// The upload comes last, after every processor filter (L-HW-11). The plan has no crop
+			// and no pixel-shape change, so there is no earlier step to place.
+			filters = append(filters, "hwupload")
+		}
 	}
 	if len(filters) > 0 {
 		argv = append(argv, "-vf:v:0", strings.Join(filters, ","))
@@ -482,7 +630,7 @@ func videoOptions(plan Plan, main media.VideoTrack, encoder string, res *Result)
 			"-color_trc:v:0", transfer,
 			"-colorspace:v:0", colorspace,
 		)
-		if plan.Video.Codec == CodecHEVC && transfer == "smpte2084" {
+		if family == FamilyCPU && plan.Video.Codec == CodecHEVC && transfer == "smpte2084" {
 			// HDR10 static metadata; HDR10+ dynamic metadata is not carried and becomes HDR10.
 			x265 = append(x265,
 				"colorprim="+primaries+":transfer=smpte2084:colormatrix="+colorspace+":hdr10=1:hdr10-opt=1")
@@ -541,6 +689,52 @@ func rateArgs(codec Codec, rc RateControl) ([]string, error) {
 // kbpsArg writes a bitrate in the units ffmpeg takes: whole kbps, e.g. 3600k.
 func kbpsArg(mbps float64) string {
 	return strconv.FormatInt(int64(math.Round(mbps*1000)), 10) + "k"
+}
+
+// qualityArgs is the quality flag each encoder takes for the same CRF (L-HW-10), with L-HW-12's
+// measured QSV HEVC offset applied at the slider position the CRF came from.
+func qualityArgs(family Family, codec Codec, crf, quality int) []string {
+	n := crf + cardQualityOffset(family, codec, quality)
+	switch family {
+	case FamilyQSV:
+		return []string{"-global_quality:v:0", strconv.Itoa(n)}
+	case FamilyVAAPI:
+		return []string{"-rc_mode:v:0", "CQP", "-qp:v:0", strconv.Itoa(n)}
+	case FamilyNVENC:
+		return []string{"-rc:v:0", "vbr", "-cq:v:0", strconv.Itoa(n)}
+	}
+	return []string{"-crf:v:0", strconv.Itoa(n)}
+}
+
+// uploadFormat is the pixel format a card's upload filter names for the output's depth: p010 for
+// ten bits (NV12's ten-bit form), nv12 for eight (L-HW-10).
+func uploadFormat(depth int) string {
+	if depth == 10 {
+		return "p010"
+	}
+	return "nv12"
+}
+
+// nvencFormat is NVENC's software-frame pixel format: p010le for ten bits, yuv420p for eight
+// (L-HW-13).
+func nvencFormat(depth int) string {
+	if depth == 10 {
+		return "p010le"
+	}
+	return "yuv420p"
+}
+
+// qsvScale is the card's scaler, computing the width in the filter so it matches the planned even
+// width for the upright picture (L-HW-10, L-HW-11: divide late, round once). scale_qsv has no
+// "-2 keeps the shape" width, hence the expression.
+func qsvScale(height int) string {
+	return fmt.Sprintf("scale_qsv=w=trunc(%d*iw/ih/2+0.5)*2:h=%d", height, height)
+}
+
+// vaapiScale is the card's scaler for the full pipeline: the width follows the height (-2, even),
+// and the format is the output depth's own (L-HW-10).
+func vaapiScale(height int, format string) string {
+	return fmt.Sprintf("scale_vaapi=w=-2:h=%d:format=%s", height, format)
 }
 
 // OutputHeight is the upright height of the picture the plan writes: the source's own when the
