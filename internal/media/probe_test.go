@@ -238,22 +238,34 @@ func TestParseProbePlainValues(t *testing.T) {
 	}
 }
 
-// TestSubtitleKindsAreExplicit covers both lists and the third value: text codecs, known bitmap
-// codecs, and everything else, which must not be mistaken for convertible text.
+// TestSubtitleKindsAreExplicit covers both lists and the third value: the longer L-AUD-19 text
+// list, known bitmap codecs, and everything else, which must not be mistaken for convertible text.
 func TestSubtitleKindsAreExplicit(t *testing.T) {
 	cases := map[string]SubtitleKind{
 		"subrip":            SubtitleText,
+		"srt":               SubtitleText,
 		"ass":               SubtitleText,
 		"ssa":               SubtitleText,
 		"webvtt":            SubtitleText,
 		"mov_text":          SubtitleText,
 		"text":              SubtitleText,
+		"subviewer":         SubtitleText,
+		"subviewer1":        SubtitleText,
+		"jacosub":           SubtitleText,
+		"sami":              SubtitleText,
+		"realtext":          SubtitleText,
+		"stl":               SubtitleText,
+		"vplayer":           SubtitleText,
+		"mpl2":              SubtitleText,
+		"pjs":               SubtitleText,
+		"microdvd":          SubtitleText,
+		"eia_608":           SubtitleText,
 		"hdmv_pgs_subtitle": SubtitleBitmap,
 		"dvd_subtitle":      SubtitleBitmap,
 		"dvb_subtitle":      SubtitleBitmap,
+		"dvb_teletext":      SubtitleBitmap,
 		"xsub":              SubtitleBitmap,
-		"dvb_teletext":      SubtitleOther,
-		"eia_608":           SubtitleOther,
+		"ttml":              SubtitleOther, // TTML has no kind, so it is left alone
 		"":                  SubtitleOther,
 		"something_new":     SubtitleOther,
 	}
@@ -261,6 +273,35 @@ func TestSubtitleKindsAreExplicit(t *testing.T) {
 		if got := subtitleKind(codec); got != want {
 			t.Errorf("subtitleKind(%q) = %q, want %q", codec, got, want)
 		}
+	}
+}
+
+// TestParseProbeHearingImpaired reads the flag that decides whether a name says .sdh, including a
+// file that does not carry it at all.
+func TestParseProbeHearingImpaired(t *testing.T) {
+	const answer = `{
+	  "format": {"format_name": "matroska,webm"},
+	  "streams": [
+	    {"index": 1, "codec_type": "subtitle", "codec_name": "subrip",
+	     "tags": {"language": "eng"},
+	     "disposition": {"default": 0, "forced": 0, "hearing_impaired": 1}},
+	    {"index": 2, "codec_type": "subtitle", "codec_name": "subrip",
+	     "tags": {"language": "eng"},
+	     "disposition": {"default": 0, "forced": 0}}
+	  ]
+	}`
+	info, err := ParseProbe([]byte(answer))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(info.Subtitles) != 2 {
+		t.Fatalf("subtitles = %d, want 2", len(info.Subtitles))
+	}
+	if s := info.Subtitles[0]; !s.HearingImpaired {
+		t.Errorf("first subtitle = %+v, want hearing impaired", s)
+	}
+	if s := info.Subtitles[1]; s.HearingImpaired {
+		t.Errorf("second subtitle = %+v, want no hearing-impaired flag", s)
 	}
 }
 
