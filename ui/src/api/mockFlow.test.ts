@@ -1,7 +1,8 @@
 // The workflow mock no longer carries "if a step fails" or flow variables: not in the flow, not in the guide, not in the summary.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { answersToFlow, DEFAULT_ANSWERS, getGuide, guidePreview } from "./mockFlow.ts";
+import { answersToFlow, checkFlow, DEFAULT_ANSWERS, getGuide, guidePreview } from "./mockFlow.ts";
+import type { Answers } from "./flowTypes.ts";
 
 test("a flow from the guided answers has no failure rule or variables", () => {
   const flow = answersToFlow(DEFAULT_ANSWERS, { name: "Shrink videos", description: "" });
@@ -18,4 +19,70 @@ test("the summary never says what happens when a step fails", async () => {
   const preview = await guidePreview(DEFAULT_ANSWERS);
   const text = JSON.stringify(preview);
   assert.equal(/If a step fails/.test(text), false);
+});
+
+const META = { name: "Shrink videos", description: "" };
+const withAnswers = (a: Answers) => answersToFlow({ ...DEFAULT_ANSWERS, ...a }, META);
+const disabledFor = (a: Answers, value: string) =>
+  checkFlow(withAnswers(a)).disabled.find((d) => d.stepId === "save" && d.field === "container" && d.value === value);
+
+test("subtitles and the file type land in the audio and save steps", () => {
+  const flow = withAnswers({ subtitles: "my_languages", subtitleLanguages: ["eng"], fileType: "keep" });
+  assert.equal(flow.steps[1].settings.subtitles, "my_languages");
+  assert.deepEqual(flow.steps[1].settings.subtitleLanguages, ["eng"]);
+  assert.equal(flow.steps[2].settings.container, "keep");
+});
+
+test("the default answers keep MKV and MP4 open, grey WebM (HEVC video), and raise no problem", () => {
+  const check = checkFlow(withAnswers({}));
+  assert.equal(disabledFor({}, "mkv"), undefined);
+  assert.equal(disabledFor({}, "mp4"), undefined);
+  assert.ok(disabledFor({}, "webm"));
+  assert.equal(check.problems.length, 0);
+});
+
+test("MP4 is greyed for Opus audio, with its reason", () => {
+  assert.equal(disabledFor({ audio: "stereo_opus" }, "mp4")?.why, "MP4 can't hold Opus audio.");
+  assert.equal(disabledFor({ audio: "stereo_aac" }, "mp4"), undefined);
+});
+
+test("WebM needs AV1 video and Opus audio; with either missing it is greyed", () => {
+  const why = "WebM needs AV1 video and Opus audio.";
+  assert.equal(disabledFor({ format: "hevc", audio: "stereo_opus" }, "webm")?.why, why);
+  assert.equal(disabledFor({ format: "av1", audio: "stereo_aac" }, "webm")?.why, why);
+  assert.equal(disabledFor({ format: "av1", audio: "stereo_opus" }, "webm"), undefined);
+});
+
+test("a saved file type the rules rule out is a problem", () => {
+  const check = checkFlow(withAnswers({ fileType: "webm", format: "hevc" }));
+  const p = check.problems.find((x) => x.code === "container_unsupported");
+  assert.equal(p?.stepId, "save");
+  assert.equal(p?.field, "container");
+});
+
+test("the guided preview greys the file types the answers rule out, with the editor's reason", async () => {
+  const p = await guidePreview({ ...DEFAULT_ANSWERS, audio: "stereo_opus" } as Answers);
+  const mp4 = p.disabled.find((d) => d.field === "container" && d.value === "mp4");
+  assert.equal(mp4?.why, "MP4 can't hold Opus audio.");
+  assert.equal(p.disabled.find((d) => d.field === "container" && d.value === "mkv"), undefined);
+});
+
+test("the closed Audio card names the subtitles choice", () => {
+  assert.match(checkFlow(withAnswers({ subtitles: "keep_all" })).summaries.audio ?? "", / · subtitles: keep all$/);
+  assert.match(checkFlow(withAnswers({ subtitles: "my_languages", subtitleLanguages: ["eng", "ger"] })).summaries.audio ?? "", / · subtitles: English and German$/);
+  assert.match(checkFlow(withAnswers({ subtitles: "text_only" })).summaries.audio ?? "", / · text only$/);
+  assert.match(checkFlow(withAnswers({ subtitles: "srt" })).summaries.audio ?? "", / · SRT files$/);
+});
+
+test("the closed Save card names the file type and where the result goes", () => {
+  assert.equal(checkFlow(withAnswers({ fileType: "mkv", original: "replace" })).summaries.save, "MKV · replace the original · old file in the trash 7 days");
+  assert.equal(checkFlow(withAnswers({ fileType: "mkv", original: "next_to" })).summaries.save, "MKV · next to the original");
+  const folder = checkFlow(withAnswers({ fileType: "mp4", original: "one_folder", folder: "/media/out" })).summaries.save ?? "";
+  assert.match(folder, /^MP4 · a different folder/);
+  assert.equal(folder.includes("trash"), false);
+});
+
+test("with AAC audio, MP4 is not greyed; with Opus it is", () => {
+  assert.equal(disabledFor({ audio: "stereo_aac" }, "mp4"), undefined);
+  assert.ok(disabledFor({ audio: "stereo_opus" }, "mp4"));
 });

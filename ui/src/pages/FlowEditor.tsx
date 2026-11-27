@@ -2,7 +2,9 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { navigate, useLocation } from "../router.tsx";
 import { api, type Flow, type FlowCheck, type FlowStep, type StepId, type TryLine } from "../api/index.ts";
 import { useApi } from "../api/useApi.ts";
-import { ChoiceField, QUALITY_NAMES, Row, Seg, qualityMeaning, toErr, useBitrateLadder, type Err } from "./flowParts.tsx";
+import { ChoiceField, QUALITY_NAMES, Row, Seg, toErr, useBitrateLadder, useCardFamilies, type Err } from "./flowParts.tsx";
+import { qualityMeaning } from "../format/quality.ts";
+import { fileTypeHint } from "../format/fileType.ts";
 import { LanguageChips } from "./LanguageChips.tsx";
 
 // Flow editor (07): the fixed walk Video → Audio → Save the result. Nothing is added or reordered.
@@ -10,6 +12,26 @@ import { LanguageChips } from "./LanguageChips.tsx";
 
 const NEW = "new";
 const ORDER: StepId[] = ["video", "audio", "save"];
+// The file types, in the order the File type row shows them. Greyed ones come from the check's disabled list.
+const CONTAINERS = [
+  { value: "mkv", label: "MKV" },
+  { value: "mp4", label: "MP4" },
+  { value: "webm", label: "WebM" },
+  { value: "keep", label: "Keep the same" },
+];
+// What each Subtitles choice keeps, under the choice.
+const SUBTITLE_HINT: Record<string, string> = {
+  keep_all: "Every subtitle is kept.",
+  my_languages: "Only the subtitles in the languages picked below are kept.",
+  text_only: "Only text subtitles are kept; picture subtitles are dropped.",
+  srt: "Subtitles are made into SRT files.",
+};
+// The name example follows the file type: Keep the same keeps the source's own extension.
+function nameExample(container: string, suffix: string): string {
+  const after = suffix || "…";
+  if (container === "keep") return `Keeps the file's own extension: media.mov becomes media-${after}.mov. Empty keeps the name.`;
+  return `media.${container} becomes media-${after}.${container}. Empty keeps the name.`;
+}
 const STEP_NAME: Record<StepId, string> = { video: "Video", audio: "Audio", save: "Save the result" };
 const FORMAT_NAME: Record<string, string> = { hevc: "HEVC", h264: "H.264", av1: "AV1" };
 const ROW_FOR_SIZE: Record<string, string> = { "2160": "2160", "1440": "1440", "1080": "1080", "720": "720", "480": "sd" };
@@ -105,6 +127,9 @@ function Editor({ id, initial }: { id: string; initial: Loaded }) {
     setDirty(true);
   };
   const why = (stepId: StepId, field: string): string | undefined => check?.disabled.find((d) => d.stepId === stepId && d.field === field)?.why;
+  // A choice the check rules out for its value (the file types): the reason, or undefined.
+  const whyValue = (stepId: StepId, field: string, value: string): string | undefined =>
+    check?.disabled.find((d) => d.stepId === stepId && d.field === field && d.value === value)?.why;
   const problemsFor = (stepId: StepId) => (check?.problems ?? []).filter((p) => p.stepId === stepId);
   const problemCount = check?.problems.length ?? 0;
 
@@ -258,24 +283,48 @@ function Editor({ id, initial }: { id: string; initial: Loaded }) {
         <Advanced summary="Advanced" description="Codec, bitrate, downmix, loudness, commentary, original track">
           <AudioAdvanced s={audio} set={(patch) => set("audio", patch)} />
         </Advanced>
+        <Row label="Subtitles" full hint={SUBTITLE_HINT[String(audio.subtitles ?? "keep_all")]}>
+          <Seg
+            label="Subtitles"
+            value={String(audio.subtitles ?? "keep_all")}
+            options={[
+              { value: "keep_all", label: "Keep all" },
+              { value: "my_languages", label: "Keep my languages" },
+              { value: "text_only", label: "Text only" },
+              { value: "srt", label: "Make SRT files" },
+            ]}
+            onChange={(v) => set("audio", { subtitles: v })}
+          />
+        </Row>
+        {audio.subtitles === "my_languages" && (
+          <Row label="Subtitle languages" full hint="None picked keeps the same languages as the audio.">
+            <LanguageChips label="Subtitle languages" value={(audio.subtitleLanguages as string[] | undefined) ?? []} onChange={(subtitleLanguages) => set("audio", { subtitleLanguages })} />
+          </Row>
+        )}
       </>
     ),
     save: (
       <>
         <p className="hint" style={{ marginTop: 0 }}>Every result is checked first: it must play and not be broken. A broken result is never saved, and the original stays as it was.</p>
+        <Row label="File type" full hint={fileTypeHint(CONTAINERS.map((o) => whyValue("save", "container", o.value)).filter((w): w is string => Boolean(w)))}>
+          <Seg
+            label="File type"
+            value={String(save_.container ?? "mkv")}
+            options={CONTAINERS.map((o) => ({ value: o.value, label: o.label, disabled: whyValue("save", "container", o.value) !== undefined, title: whyValue("save", "container", o.value) }))}
+            onChange={(v) => set("save", { container: v })}
+          />
+        </Row>
         <Row label="Where the result goes">
-          <div className="wf-save-options" role="radiogroup" aria-label="Where the result goes">
-            {[
+          <Seg
+            label="Where the result goes"
+            value={String(save_.where ?? "replace")}
+            options={[
               { value: "replace", label: "Replace the original" },
               { value: "next_to", label: "Next to the original" },
               { value: "folder", label: "A different folder" },
-            ].map((o) => (
-              <label key={o.value}>
-                <input type="radio" name={`where-${draftId}`} checked={save_.where === o.value} onChange={() => set("save", { where: o.value })} />
-                {o.label}
-              </label>
-            ))}
-          </div>
+            ]}
+            onChange={(v) => set("save", { where: v })}
+          />
         </Row>
         {save_.where === "folder" && (
           <Row label="Folder" hint="Sub-folders of the library are kept.">
@@ -285,7 +334,7 @@ function Editor({ id, initial }: { id: string; initial: Loaded }) {
         {save_.where === "replace" && (
           <p className="hint" style={{ margin: "0 0 8px" }}>The original goes to the trash and is kept 7 days. How long is set for all workflows in Settings › Processing.</p>
         )}
-        <Row label="Add to the file name" hint={`media.mp4 becomes media-${save_.nameSuffix || "…"}.mp4. Empty keeps the name.`}>
+        <Row label="Add to the file name" hint={nameExample(String(save_.container ?? "mkv"), String(save_.nameSuffix ?? ""))}>
           <input className="inp" aria-label="Add to the file name" value={String(save_.nameSuffix ?? "")} onChange={(e) => set("save", { nameSuffix: e.target.value })} />
         </Row>
       </>
@@ -408,9 +457,10 @@ function Editor({ id, initial }: { id: string; initial: Loaded }) {
 // Quality: the 1–5 slider with its name, and the number it resolves to for the picture size.
 function QualityRow({ value, format, card, size, off, onChange }: { value: number; format: string; card: boolean; size: string | null; off?: string; onChange: (q: number) => void }) {
   const ladder = useBitrateLadder();
+  const families = useCardFamilies(card);
   return (
     <div className={off ? "wf-dim" : undefined}>
-      <Row label={`Quality · ${value} · ${QUALITY_NAMES[value - 1]}`} hint={off ?? (ladder ? qualityMeaning(ladder, value, format, card, size) : undefined)}>
+      <Row label={`Quality · ${value} · ${QUALITY_NAMES[value - 1]}`} hint={off ?? (ladder ? qualityMeaning(ladder, value, format, families, size) : undefined)}>
         <div className="wf-quality">
           <input type="range" min={1} max={5} step={1} value={value} disabled={Boolean(off)} aria-label="Quality" aria-valuetext={`${value} · ${QUALITY_NAMES[value - 1]}`} onChange={(e) => onChange(Number(e.target.value))} />
         </div>

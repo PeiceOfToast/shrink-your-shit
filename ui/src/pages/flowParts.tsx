@@ -1,8 +1,9 @@
 import type { ReactNode } from "react";
 import { api, ApiError, type GuideChoice } from "../api/index.ts";
 import type { BitrateLadder } from "../api/flowTypes.ts";
+import type { GpuFamily } from "../api/types.ts";
 import { useApi } from "../api/useApi.ts";
-import { qualityCrf } from "../format/quality.ts";
+import { cardFamilies } from "../format/quality.ts";
 
 // Pieces the guided page (06) and the flow editor (07) share: a setting row, a segmented control, a choice field.
 
@@ -19,15 +20,12 @@ export function useBitrateLadder(): BitrateLadder | null {
   return useApi(() => api.getBitrateLadder(), []).data ?? null;
 }
 
-// The one-line meaning of a Quality setting: the card's number when the card is used, then the processor CRF.
-// `size` is the picture size the number is for (null = 1080p, the default).
-export function qualityMeaning(ladder: BitrateLadder, value: number, format: string, card: boolean, size: string | null): string {
-  const where = size == null ? "at 1080p (one lower at 720p and below, one higher at 2160p)" : size === "custom" ? "at the custom size" : `for ${size}p`;
-  const crf = qualityCrf(ladder, value, format, false, size);
-  if (format === "hevc" && card) {
-    return `Uses the Intel card (QSV) ${qualityCrf(ladder, value, format, true, size)} when it can, otherwise the processor CRF ${crf} ${where}. Lower means a better picture and a bigger file.`;
-  }
-  return `Uses the processor CRF ${crf} ${where}. Lower means a better picture and a bigger file.`;
+// The graphics-card families the workers have, for a Quality line. `useGpu` false (the editor's None, or Guided's
+// no-card answer) gives none, so the line shows only the processor CRF. null while the workers load.
+export function useCardFamilies(useGpu: boolean): GpuFamily[] {
+  const workers = useApi(() => api.getWorkers(), []).data;
+  if (!useGpu || !workers) return [];
+  return cardFamilies(workers);
 }
 
 export const toErr =(e: unknown): Err => (e instanceof ApiError ? { field: e.field, message: e.message } : { message: e instanceof Error ? e.message : String(e) });
@@ -64,10 +62,11 @@ export function Seg<T extends string>({ label, value, options, onChange }: { lab
 
 // A choice from the guide or the step definitions: a segmented control for up to four, a list beyond that.
 // A choice that can't work here is greyed with the server's reason.
-export function ChoiceField({ label, value, choices, onChange, id, full }: { label: string; value: string; choices: GuideChoice[]; onChange: (v: string) => void; id?: string; full?: boolean }) {
+// `hint` replaces the default line, which names each greyed choice's reason.
+export function ChoiceField({ label, value, choices, onChange, id, full, hint }: { label: string; value: string; choices: GuideChoice[]; onChange: (v: string) => void; id?: string; full?: boolean; hint?: string }) {
   const why = choices.filter((c) => !c.available && c.why).map((c) => `${c.label}: ${c.why}`);
   return (
-    <Row label={label} hint={why.length ? why.join(" · ") : undefined} id={id} full={full}>
+    <Row label={label} hint={hint ?? (why.length ? why.join(" · ") : undefined)} id={id} full={full}>
       {choices.length <= 4 ? (
         <Seg
           label={label}

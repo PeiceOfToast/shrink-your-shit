@@ -28,7 +28,8 @@ export const DEFAULT_ANSWERS: Answers = {
 
 const FORMAT_LABEL: Record<string, string> = { hevc: "HEVC", h264: "H.264", av1: "AV1" };
 const CODEC_LABEL: Record<string, string> ={ aac: "AAC", opus: "Opus", ac3: "AC-3", eac3: "E-AC-3", flac: "FLAC", copy: "Same as the source" };
-const CHANNEL_LABEL: Record<string, string> = { stereo: "stereo", source: "same channels as the source", mono: "mono", "5.1": "5.1" };
+const CONTAINER_LABEL: Record<string, string> = { mkv: "MKV", mp4: "MP4", webm: "WebM", keep: "Keep the same" };
+const CHANNEL_LABEL: Record<string, string> ={ stereo: "stereo", source: "same channels as the source", mono: "mono", "5.1": "5.1" };
 
 
 const LADDER: BitrateLadder = {
@@ -216,6 +217,20 @@ const AUDIO_FROM_GUIDED: Record<string, { format: string; channels: string; code
   as_is: { format: "copy", channels: "source", codec: null },
 };
 
+// The file types and what each can hold (page 07; dev's selectors.go). MKV and Keep the same take anything.
+// The rules are one table: a new rule goes here, not into the editor or the guide.
+const CONTAINER_RULES: Record<string, { why: string; ok: (video: string, audio: string) => boolean }> = {
+  mkv: { why: "", ok: () => true },
+  mp4: { why: "MP4 can't hold Opus audio.", ok: (_v, audio) => audio !== "opus" },
+  webm: { why: "WebM needs AV1 video and Opus audio.", ok: (video, audio) => video === "av1" && audio === "opus" },
+  keep: { why: "", ok: () => true },
+};
+
+// The audio codec the step will write: Advanced's codec when set, else the Format choice.
+function audioCodec(au: Record<string, unknown>): string {
+  return String(au.codec ?? au.format);
+}
+
 function step(id: StepId, type: FlowStep["type"], settings: Record<string, unknown>): FlowStep {
   return { id, type, version: 1, settings };
 }
@@ -260,8 +275,15 @@ export function answersToFlow(a: Answers, meta: { name: string; description: str
         commentary: "keep",
         defaultTrack: null,
         keepOriginal: false,
+        subtitles: a.subtitles ?? "keep_all",
+        subtitleLanguages: Array.isArray(a.subtitleLanguages) ? a.subtitleLanguages : [],
       }),
-      step("save", "file.save", { where, folder: where === "folder" ? String(a.folder ?? "") : null, nameSuffix: "" }),
+      step("save", "file.save", {
+        where,
+        folder: where === "folder" ? String(a.folder ?? "") : null,
+        nameSuffix: "",
+        container: a.fileType ?? "mkv",
+      }),
     ],
   };
 }
@@ -299,18 +321,35 @@ export function checkFlow(flow: Flow): FlowCheck {
   if (au.codec) {
     disabled.push({ stepId: "audio", field: "format", why: `Advanced is set: ${CODEC_LABEL[String(au.codec)]}. It replaces Format above.` });
   }
+  // The file types the video and audio can go into. A pick the table rules out is greyed, and a saved pick that is ruled out is a problem.
+  for (const value of Object.keys(CONTAINER_RULES)) {
+    const rule = CONTAINER_RULES[value];
+    if (rule.ok(String(v.format), audioCodec(au))) continue;
+    disabled.push({ stepId: "save", field: "container", value, why: rule.why });
+    if (sv.container === value) {
+      problems.push({ stepId: "save", field: "container", code: "container_unsupported", message: `${rule.why} Pick another file type.` });
+    }
+  }
 
   const videoSummary = v.rateControl
     ? `${FORMAT_LABEL[String(v.format)]} · ${v.rateControl === "vbr" ? "variable" : "constant"} bitrate about ${bitrateFor(v)} Mb/s`
     : `${FORMAT_LABEL[String(v.format)]} · quality ${v.quality} · graphics card ${v.useGpu ? "automatic" : "off"}`;
   const langs = Array.isArray(au.languages) && au.languages.length ? (au.languages as string[]).map(languageName).join(" and ") : "my languages";
-  const audioSummary = `${CODEC_LABEL[String(au.codec ?? au.format)]} · ${CHANNEL_LABEL[String(au.channels)]} · ${langs}`;
+  // The subtitles part follows the Subtitles choice; with no subtitle languages picked, they are the audio's.
+  const subLangs = Array.isArray(au.subtitleLanguages) && au.subtitleLanguages.length ? (au.subtitleLanguages as string[]).map(languageName).join(" and ") : langs;
+  const subPart = au.subtitles === "srt" ? "SRT files"
+    : au.subtitles === "text_only" ? "text only"
+    : au.subtitles === "my_languages" ? `subtitles: ${subLangs}`
+    : "subtitles: keep all";
+  const audioSummary = `${CODEC_LABEL[String(au.codec ?? au.format)]} · ${CHANNEL_LABEL[String(au.channels)]} · ${langs} · ${subPart}`;
+  // The file type, then where the result goes. The trash line is only for replacing the original.
   const where = String(sv.where);
-  const saveSummary = where === "replace"
-    ? "Replace the original · old file in the trash 7 days"
+  const placed = where === "replace"
+    ? "replace the original · old file in the trash 7 days"
     : where === "folder"
-      ? `A different folder${sv.folder ? `: ${String(sv.folder)}` : ""}`
-      : "Next to the original";
+      ? `a different folder${sv.folder ? `: ${String(sv.folder)}` : ""}`
+      : "next to the original";
+  const saveSummary = `${CONTAINER_LABEL[String(sv.container ?? "mkv")] ?? "MKV"} · ${placed}`;
 
   return { problems, disabled, summaries: { video: videoSummary, audio: audioSummary, save: saveSummary } };
 }
@@ -386,7 +425,8 @@ export function guidePreview(answers: Answers): Promise<GuidePreview> {
   return respond(() => {
     checkQuality(answers);
     const flow = answersToFlow(answers, { name: "", description: "" });
-    return { sentences: sentencesFor(flow, answers), flow, problems: checkFlow(flow).problems };
+    const check = checkFlow(flow);
+    return { sentences: sentencesFor(flow, answers), flow, problems: check.problems, disabled: check.disabled };
   });
 }
 

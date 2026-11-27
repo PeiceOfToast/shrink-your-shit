@@ -103,6 +103,10 @@ export function getJobs(params: JobsParams = {}): Promise<JobsPage> {
     }
     let items: Job[] = JOBS;
     if (forced === "running") items = JOBS.filter((j) => j.state === "running");
+    // While the switch is off only the files still finishing are running; the other running jobs are over.
+    const sw = workersSwitch();
+    const over = new Set(sw.paused ? items.filter((j) => j.state === "running").slice(sw.finishing).map((j) => j.id) : []);
+    items = items.filter((j) => !over.has(j.id));
     const state = params.state ?? "all";
     if (state !== "all") items = items.filter((j) => j.state === state);
     // Jobs carry the worker's name, so a worker's page filters by it.
@@ -110,7 +114,8 @@ export function getJobs(params: JobsParams = {}): Promise<JobsPage> {
       const name = workerName(params.worker);
       items = items.filter((j) => j.worker === name);
     }
-    return { counts: forced === "running" ? { ...counts, all: 2, waiting: 0, failed: 0, done: 0, skipped: 0 } : counts, items, next: null };
+    const base = forced === "running" ? { ...counts, all: 2, waiting: 0, failed: 0, done: 0, skipped: 0 } : counts;
+    return { counts: { ...base, all: base.all - over.size, running: base.running - over.size }, items, next: null };
   });
 }
 

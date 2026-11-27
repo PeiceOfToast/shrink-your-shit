@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { drainAllWorkers, FINISH_MS, getWorkers, getWorker, pauseWorker, startAllWorkers, workersSwitch } from "./mockWorkers.ts";
-import { getSummary } from "./mock.ts";
+import { getJobs, getSummary } from "./mock.ts";
 import { SUMMARY } from "./fixtures/index.ts";
 
 test("draining turns the switch off and counts the files still finishing", async () => {
@@ -34,6 +34,20 @@ test("when the finishing files are done, no worker still shows a file in Now", a
   assert.ok((await getWorkers()).some((w) => w.now), "still finishing: the files show");
   await new Promise((resolve) => setTimeout(resolve, FINISH_MS + 200));
   assert.equal((await getWorkers()).filter((w) => w.now).length, 0);
+  await startAllWorkers();
+});
+
+test("when the finishing files are done, a worker's recent jobs show no running job", async () => {
+  const job = (await getJobs({ state: "running" })).items[0];
+  assert.ok(job, "the mock has a running job");
+  const w = (await getWorkers()).find((x) => x.name === job.worker);
+  assert.ok(w, "the running job's worker is in the list");
+  assert.ok((await getJobs({ worker: w.id })).items.some((j) => j.state === "running"), "running before the drain");
+  await drainAllWorkers();
+  assert.ok((await getJobs({ worker: w.id })).items.some((j) => j.state === "running"), "still finishing: the job runs");
+  await new Promise((resolve) => setTimeout(resolve, FINISH_MS + 200));
+  const after = await getJobs({ worker: w.id });
+  assert.equal(after.items.filter((j) => j.state === "running").length, 0);
   await startAllWorkers();
 });
 

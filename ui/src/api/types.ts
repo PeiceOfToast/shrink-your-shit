@@ -331,6 +331,8 @@ export interface JobDetail {
 
 // Workers (page 10 "Data and API"). GET /api/v2/workers returns Worker items; GET /api/v2/workers/{id} returns WorkerDetail.
 export type WorkerState = "converting" | "idle" | "paused" | "offline";
+// The graphics card's family, as the bitrate ladder names its card offsets.
+export type GpuFamily = "qsv" | "nvenc" | "vaapi" | "amf";
 
 export interface Worker {
   id: string;
@@ -341,7 +343,7 @@ export interface Worker {
   since: string | null; // RFC 3339; when the state began (offline and paused show it)
   slots: number; // files at once
   gpuSlots: number;
-  gpu: { name: string } | null;
+  gpu: { name: string; family: GpuFamily } | null;
   now: { jobId: string; file: string; step: JobStepRef } | null;
   doneToday: number;
   // True while the all-workers switch is off. The worker's own state is kept, so it returns when the switch goes back on.
