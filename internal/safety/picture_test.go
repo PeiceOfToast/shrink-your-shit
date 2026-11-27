@@ -43,6 +43,19 @@ func comparedPair(d time.Duration) (media.Info, media.Info) {
 	return src, out
 }
 
+// TestPictureCheckCancelledIsACheckThatCouldNotRun: a Stop while the pictures are being compared
+// is not a verdict about them, even though the run had started (review2 B2 on #861 asks all three
+// checks to tell a cancellation from a failure).
+func TestPictureCheckCancelledIsACheckThatCouldNotRun(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	m := &fake.Media{Captures: []fake.CaptureScript{{Result: media.Result{PID: 4242}}}}
+	src, out := comparedPair(20 * time.Second)
+	if v, err := pictureCheck(ctx, m, src, out, WantedVideo{Compare: true, Width: 320, Height: 180}); err == nil {
+		t.Fatalf("verdict = %+v; a stopped comparison must be an error, not a verdict", v)
+	}
+}
+
 func TestPicturePassesAMatchingEncode(t *testing.T) {
 	src, out := comparedPair(20 * time.Second)
 	m := &fake.Media{Captures: []fake.CaptureScript{ssimScript("0.991", "n:1 Y:0.99 U:0.99 V:0.99 All:0.991 (18.2)")}}

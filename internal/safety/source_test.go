@@ -166,6 +166,33 @@ func TestSourceCheckCountsFramesTheDecoderNeverDelivered(t *testing.T) {
 	}
 }
 
+// TestSourceCheckDoesNotCountTheContainerDurationAsLostPictures: the container's duration includes
+// any audio that runs past the video, so it cannot prove a picture is missing (review2 B1 on #861:
+// a 2.023 s container against 60 decoded pictures and no decode error was called damaged).
+func TestSourceCheckDoesNotCountTheContainerDurationAsLostPictures(t *testing.T) {
+	info := sourceInfo(20 * time.Second)
+	info.Video[0].Duration = 0 // an MKV often carries no stream duration
+	info.Format.Duration = 25 * time.Second
+	m := &fake.Media{Captures: []fake.CaptureScript{{Stderr: []byte(report(0, 500, 500))}}}
+	v, err := SourceCheck(context.Background(), m, Recorder{}, "/original.mkv", info, time.Minute)
+	if err != nil || !v.OK {
+		t.Fatalf("verdict = %+v, %v; want the audio tail's extra seconds ignored", v, err)
+	}
+}
+
+// TestSourceCheckCancelledIsACheckThatCouldNotRun: a Stop while the original is being decoded is
+// not a verdict about the file, whatever the decoder had printed so far.
+func TestSourceCheckCancelledIsACheckThatCouldNotRun(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	m := &fake.Media{Captures: []fake.CaptureScript{{
+		Stderr: []byte(brokenPicture), Result: media.Result{PID: 4242},
+	}}}
+	if v, err := SourceCheck(ctx, m, Recorder{}, "/original.mkv", sourceInfo(20*time.Second), time.Minute); err == nil {
+		t.Fatalf("verdict = %+v; a stopped run must be an error, not a verdict", v)
+	}
+}
+
 // TestSourceCheckRefusesAFileLevelErrorWhateverTheCount: a container or an end of the file that is
 // broken keeps the original however few pictures are named.
 func TestSourceCheckRefusesAFileLevelErrorWhateverTheCount(t *testing.T) {

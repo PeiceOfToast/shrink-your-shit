@@ -43,6 +43,10 @@ func SourceCheck(ctx context.Context, c media.Capturer, rec Recorder, path strin
 	defer cancel()
 	// No -xerror: the decoder must play on past a damaged picture so the damage can be counted.
 	res, err := c.Capture(dctx, args)
+	if ctx.Err() != nil {
+		// The person pressed Stop: the run was cut short by us, so it says nothing about the file.
+		return Verdict{}, fmt.Errorf("source check: %w", ctx.Err())
+	}
 	if errors.Is(dctx.Err(), context.DeadlineExceeded) {
 		return Verdict{}, fmt.Errorf("source check: %w", err)
 	}
@@ -53,25 +57,42 @@ func SourceCheck(ctx context.Context, c media.Capturer, rec Recorder, path strin
 	// The error-level lines are the damage; the end-of-run report, printed only at the verbose
 	// level, says how many packets were read and how many pictures came out of the decoder.
 	rep := sourceDamage(errorLines(res.Stderr))
-	frames, _ := sourceFrameCount(src)
+	frames, exact := sourceFrameCount(src)
 	decoded := int64(-1)
 	if st, ok := media.InputStreamStats(string(res.Stderr), 0, main.Index); ok {
 		decoded = st.Frames
 	}
-	rep = withLostFrames(rep, frames, decoded)
+	// A picture can only be called missing against the video stream's own count. The container's
+	// duration includes any audio that runs past the video, so a pristine MKV would read as
+	// damaged (review2 B1 on #861: 61 expected from a 2.023 s container, 60 decoded, no decode
+	// error). Without an exact count the decode's own error lines still count normally.
+	if exact {
+		rep = withLostFrames(rep, frames, decoded)
+	}
 
-	if !rep.Found() || damageTolerated(rep, frames) {
+	// The share of damage is measured against the pictures that exist: the stream's own count when
+	// it has one, else the number the decoder delivered. The container's duration includes an audio
+	// tail, so it is only a last resort (review2 B1 on #861).
+	count := frames
+	if !exact && decoded >= 0 {
+		count = decoded
+	}
+	if !rep.Found() || damageTolerated(rep, count) {
 		return rec.log("original", Verdict{OK: true}), nil
 	}
 	v := Verdict{
 		OK:         false,
 		Code:       CodeOriginalDamaged,
-		Message:    originalDamageMessage(rep, frames),
+		Message:    originalDamageMessage(rep, count),
 		NextAction: NextKeepOriginal,
 		Detail:     append([]string{"Check: decoding the original before converting it"}, rep.Lines...),
 	}
-	if frames > 0 && decoded >= 0 {
-		v.Detail = append(v.Detail, fmt.Sprintf("Decoded: %d of %d frames", decoded, frames))
+	if decoded >= 0 {
+		if exact && frames > 0 {
+			v.Detail = append(v.Detail, fmt.Sprintf("Decoded: %d of %d frames", decoded, frames))
+		} else {
+			v.Detail = append(v.Detail, fmt.Sprintf("Decoded: %d frames", decoded))
+		}
 	}
 	return rec.log("original", v), nil
 }
@@ -127,7 +148,9 @@ func damageTolerated(rep sourceDamageReport, frames int64) bool {
 
 // withLostFrames counts frames that never came out of the decoder as damaged pictures. A stretch
 // can lose frames with no decoder message (470 of 500 decoded, no error line for the lost 30).
-// decoded is the frame count the run reported; -1 means it did not say, and then nothing is added.
+// frames must be the video stream's own picture count (sourceFrameCount's exact answer): only that
+// count can prove a frame is missing. decoded is the frame count the run reported; -1 means it did
+// not say, and then nothing is added.
 func withLostFrames(rep sourceDamageReport, frames, decoded int64) sourceDamageReport {
 	if frames <= 0 || decoded < 0 || decoded >= frames {
 		return rep

@@ -109,6 +109,37 @@ func TestRealSourceCheckKeepsATruncatedFile(t *testing.T) {
 	}
 }
 
+// TestRealSourceCheckPassesAnMKVWithAudioPastTheVideo: ffmpeg's own MKV whose audio runs past the
+// picture carries no stream duration, so the container's duration is the only count there is — and
+// it includes the audio tail. A pristine file must pass the source check (review2 B1 on #861: the
+// merged #854 subtitle tests' 2.023 s container against 60 decoded pictures).
+func TestRealSourceCheckPassesAnMKVWithAudioPastTheVideo(t *testing.T) {
+	requireFFmpeg(t)
+	dir := t.TempDir()
+	src := filepath.Join(dir, "tail.mkv")
+	runFFmpeg(t, "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=30:duration=2",
+		"-f", "lavfi", "-i", "sine=frequency=440:duration=2.6",
+		"-c:v", "libx264", "-preset", "ultrafast", "-b:v", "6M", "-pix_fmt", "yuv420p",
+		"-c:a", "aac", src)
+	info, err := media.Probe(context.Background(), src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The premise of the test: no stream duration, and a container longer than the picture.
+	if v := info.MainVideo(); v == nil || v.Duration != 0 || info.Format.Duration <= 2*time.Second+500*time.Millisecond {
+		t.Fatalf("info = %+v; want an MKV with no stream duration and an audio tail", info)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	v, err := SourceCheck(ctx, media.MediaFuncs{CaptureFunc: media.Capture}, Recorder{}, src, info, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !v.OK {
+		t.Fatalf("verdict = %+v; want the pristine file to pass", v)
+	}
+}
+
 // TestRealSourceCheckKeepsALargeHole: 300 kB zeroed in the middle of the video (6 % of the file)
 // loses pictures; the original is kept.
 func TestRealSourceCheckKeepsALargeHole(t *testing.T) {

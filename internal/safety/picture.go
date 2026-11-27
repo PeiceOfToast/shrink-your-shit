@@ -290,6 +290,11 @@ func ssimSegment(ctx context.Context, c media.Capturer, srcPath, outPath string,
 	sctx, cancel := context.WithTimeout(ctx, sampleTimeout)
 	defer cancel()
 	res, err := c.Capture(sctx, args)
+	if ctx.Err() != nil {
+		// The person pressed Stop: the comparison was cut short by us, so it says nothing about
+		// the pictures (the same rule as the playback and source checks, review2 B2 on #861).
+		return 0, nil, false, fmt.Errorf("picture comparison: %w", ctx.Err())
+	}
 	if errors.Is(sctx.Err(), context.DeadlineExceeded) {
 		return 0, nil, false, fmt.Errorf("picture comparison: %w", err)
 	}

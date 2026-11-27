@@ -155,6 +155,12 @@ func decodeRun(ctx context.Context, c media.Capturer, path string, out media.Inf
 	dctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	res, err := c.Capture(dctx, args)
+	if ctx.Err() != nil {
+		// The person pressed Stop: the run was cut short by us. A cancelled run has started (its
+		// PID is set) and prints whatever it decoded so far, which must never become a verdict
+		// (review2 B2 on #861: a Stop was recorded as done, "does not play cleanly").
+		return nil, fmt.Errorf("playback: %w", ctx.Err())
+	}
 	if errors.Is(dctx.Err(), context.DeadlineExceeded) {
 		return nil, fmt.Errorf("playback: %w", err)
 	}

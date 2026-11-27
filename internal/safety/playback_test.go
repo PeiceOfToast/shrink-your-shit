@@ -210,6 +210,23 @@ func TestPlaybackRunThatNeverStartedIsACheckThatCouldNotRun(t *testing.T) {
 	}
 }
 
+// TestPlaybackCancelledIsACheckThatCouldNotRun: a Stop while the result is being played back must
+// be a check that could not run, never "does not play cleanly" recorded as a finished job
+// (review2 B2 on #861). A cancelled run has started (its PID is set), so it is not the
+// never-started case.
+func TestPlaybackCancelledIsACheckThatCouldNotRun(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	m := &fake.Media{Captures: []fake.CaptureScript{{
+		Stderr: []byte("[h264 @ 0x1] error while decoding MB 4 5\n"),
+		Result: media.Result{PID: 4242},
+	}}}
+	v, err := playbackCheck(ctx, m, playedInfo("aac"), "/out.mkv")
+	if err == nil {
+		t.Fatalf("verdict = %+v; a stopped playback must be an error, not a verdict", v)
+	}
+}
+
 // TestPlaybackSampleThatHangsIsACheckThatCouldNotRun: the timeout turns a hung child into an
 // error rather than a verdict.
 func TestPlaybackSampleThatHangsIsACheckThatCouldNotRun(t *testing.T) {
