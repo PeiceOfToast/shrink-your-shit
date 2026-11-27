@@ -23,9 +23,9 @@ export function useBitrateLadder(): BitrateLadder | null {
 // `size` is the picture size the number is for (null = 1080p, the default).
 export function qualityMeaning(ladder: BitrateLadder, value: number, format: string, card: boolean, size: string | null): string {
   const where = size == null ? "at 1080p (one lower at 720p and below, one higher at 2160p)" : size === "custom" ? "at the custom size" : `for ${size}p`;
-  const crf = qualityCrf(ladder, value, format, false, size);
+  const crf = qualityCrf(ladder, value, format, null, size);
   if (format === "hevc" && card) {
-    return `Uses the Intel card (QSV) ${qualityCrf(ladder, value, format, true, size)} when it can, otherwise the processor CRF ${crf} ${where}. Lower means a better picture and a bigger file.`;
+    return `Uses the Intel card (QSV) ${qualityCrf(ladder, value, format, "qsv", size)} when it can, otherwise the processor CRF ${crf} ${where}. Lower means a better picture and a bigger file.`;
   }
   return `Uses the processor CRF ${crf} ${where}. Lower means a better picture and a bigger file.`;
 }
