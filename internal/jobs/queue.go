@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"time"
 
@@ -179,7 +180,9 @@ func (q *Queue) Claim(ctx context.Context, workerID string, opts ClaimOptions) (
 			return nil, err
 		}
 		if err := q.emit(events.KindPicked, events.LevelInfo, id, attempt, job.LibraryID, workerID, "picked"); err != nil {
-			return nil, err
+			// The job is already running: returning the error would leave a job nobody holds until
+			// the next start's Recover picks it up. The history line is missing; the run is not.
+			slog.Error("jobs: picked event not emitted", "job", id, "worker", workerID, "error", err)
 		}
 		return &job, nil
 	}
@@ -407,7 +410,7 @@ func (q *Queue) Cancel(ctx context.Context, id int64) (CancelResult, error) {
 			}
 			return err
 		}
-		if err := move(tx, id, verbCancel, Cancelled, change{set: ", finished_at = ?", args: []any{ms(now)}}); err != nil {
+		if err := move(tx, id, verbCancel, Cancelled, change{set: ", finished_at = ?, worker_id = NULL", args: []any{ms(now)}}); err != nil {
 			return err
 		}
 		if state != Running {
