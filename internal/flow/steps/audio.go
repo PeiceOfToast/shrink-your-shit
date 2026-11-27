@@ -113,7 +113,7 @@ func audioNotYet(set AudioSettings) []flow.Problem {
 		out = append(out, flow.Problem{Field: field, Code: "audio.not_yet", Message: message})
 	}
 	if set.Format == "aac" || set.Format == "opus" {
-		add("format", "Converting audio is not built yet; Copy is the only choice for now.") // item 7
+		add("format", flow.AudioWhy) // item 7; the guide's greyed choices read the same constant
 	}
 	if set.Channels != "" && set.Channels != "source" {
 		add("channels", "Changing the channels is not built yet; every track keeps the channels it has.") // item 7

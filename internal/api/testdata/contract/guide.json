@@ -55,26 +55,20 @@
       }
     ],
     "defaults": {
-      "allLanguages": false,
-      "audio": "stereo_aac",
+      "allLanguages": true,
+      "audio": "as_is",
       "fileType": "mkv",
       "folder": "",
       "format": "hevc",
       "ifGpuFails": "cpu",
       "includeDolbyVision": false,
-      "languages": [
-        "eng",
-        "ger"
-      ],
+      "languages": [],
       "languagesEverywhere": false,
       "original": "next_to_original",
       "quality": 3,
       "resolution": "keep",
       "slower": false,
-      "subtitleLanguages": [
-        "eng",
-        "ger"
-      ],
+      "subtitleLanguages": [],
       "subtitles": "keep_all",
       "useGpu": true
     },
@@ -172,29 +166,34 @@
           {
             "choices": [
               {
-                "available": true,
+                "available": false,
                 "label": "Stereo AAC",
-                "value": "stereo_aac"
+                "value": "stereo_aac",
+                "why": "Converting audio is not built yet; Copy is the only choice for now."
               },
               {
-                "available": true,
+                "available": false,
                 "label": "AAC, same channels as the source",
-                "value": "stereo_aac_surround"
+                "value": "stereo_aac_surround",
+                "why": "Converting audio is not built yet; Copy is the only choice for now."
               },
               {
-                "available": true,
+                "available": false,
                 "label": "E-AC-3, surround kept",
-                "value": "eac3_surround"
+                "value": "eac3_surround",
+                "why": "Converting audio is not built yet; Copy is the only choice for now."
               },
               {
-                "available": true,
+                "available": false,
                 "label": "AC-3, surround kept",
-                "value": "ac3_surround"
+                "value": "ac3_surround",
+                "why": "Converting audio is not built yet; Copy is the only choice for now."
               },
               {
-                "available": true,
+                "available": false,
                 "label": "Stereo Opus",
-                "value": "stereo_opus"
+                "value": "stereo_opus",
+                "why": "Converting audio is not built yet; Copy is the only choice for now."
               },
               {
                 "available": true,

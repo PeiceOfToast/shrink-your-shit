@@ -21,16 +21,8 @@
         {
           "id": "audio",
           "settings": {
-            "channels": "stereo",
-            "format": "aac",
-            "languages": [
-              "eng",
-              "ger"
-            ],
-            "subtitleLanguages": [
-              "eng",
-              "ger"
-            ],
+            "channels": "source",
+            "format": "copy",
             "subtitles": "keep_all"
           },
           "type": "audio.tracks",

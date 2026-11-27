@@ -57,6 +57,10 @@ type GuideChoice struct {
 
 // DefaultAnswers is what a new workflow starts from: the page's sensible defaults, ticked.
 func DefaultAnswers() Answers {
+	// The audio default is as_is keeping every track, with the languages left unset: converting the
+	// audio is item 7, so stereo AAC with the person's languages would make the default workflow
+	// unpublishable today. Back to stereo_aac and the default languages with item 7 (ui-shop ask,
+	// 11-27 20:14Z); the other audio choices are offered greyed until then.
 	return Answers{
 		"quality":             3,
 		"slower":              false,
@@ -64,12 +68,12 @@ func DefaultAnswers() Answers {
 		"resolution":          "keep",
 		"useGpu":              true,
 		"ifGpuFails":          "cpu",
-		"audio":               "stereo_aac",
-		"allLanguages":        false,
-		"languages":           []string{"eng", "ger"},
+		"audio":               "as_is",
+		"allLanguages":        true,
+		"languages":           []string{},
 		"languagesEverywhere": false,
 		"subtitles":           "keep_all",
-		"subtitleLanguages":   []string{"eng", "ger"},
+		"subtitleLanguages":   []string{},
 		"fileType":            "mkv",
 		"includeDolbyVision":  false,
 		"original":            "next_to_original",
@@ -114,11 +118,11 @@ func Guide() GuideDoc {
 				ID: "audio", Label: "Audio",
 				Fields: []GuideField{
 					{Key: "audio", Label: "Audio", Type: "choice", Choices: []GuideChoice{
-						{Value: "stereo_aac", Label: "Stereo AAC", Available: true},
-						{Value: "stereo_aac_surround", Label: "AAC, same channels as the source", Available: true},
-						{Value: "eac3_surround", Label: "E-AC-3, surround kept", Available: true},
-						{Value: "ac3_surround", Label: "AC-3, surround kept", Available: true},
-						{Value: "stereo_opus", Label: "Stereo Opus", Available: true},
+						{Value: "stereo_aac", Label: "Stereo AAC", Available: false, Why: AudioWhy},
+						{Value: "stereo_aac_surround", Label: "AAC, same channels as the source", Available: false, Why: AudioWhy},
+						{Value: "eac3_surround", Label: "E-AC-3, surround kept", Available: false, Why: AudioWhy},
+						{Value: "ac3_surround", Label: "AC-3, surround kept", Available: false, Why: AudioWhy},
+						{Value: "stereo_opus", Label: "Stereo Opus", Available: false, Why: AudioWhy},
 						{Value: "as_is", Label: "Leave as it is", Available: true},
 					}},
 					{Key: "languages", Label: "Keep these languages", Type: "languages"},

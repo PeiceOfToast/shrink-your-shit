@@ -142,7 +142,7 @@ func TestGuidedPreview(t *testing.T) {
 	}
 	want := []string{
 		"Converts video to HEVC at quality 3, keeping the picture size, on the graphics card when it can.",
-		"Audio: AAC, stereo, in English and German.",
+		"Audio: Same as the source, same channels as the source, every language.",
 		"Keeps every subtitle.",
 		"Saves as MKV.",
 		"Puts the new file next to the original; the original stays where it is.",
@@ -153,10 +153,10 @@ func TestGuidedPreview(t *testing.T) {
 	if apiQualityOf(t, preview.Flow) != 3 {
 		t.Errorf("preview quality = %d, want 3", apiQualityOf(t, preview.Flow))
 	}
-	// Defaults use stereo AAC, which the engine cannot build yet, so the check says so; the page
-	// shows it above the button.
-	if len(preview.Problems) == 0 {
-		t.Error("preview of the defaults has no problems; the audio gates still refuse AAC")
+	// The defaults are what the guide starts a person on, so they must be publishable today: the
+	// audio default is as_is until item 7 builds conversion (ui-shop ask 11-27).
+	if len(preview.Problems) != 0 {
+		t.Errorf("preview of the defaults has problems: %+v", preview.Problems)
 	}
 	if rows := listWorkflowRows(t, e, cookie); len(rows) != 1 {
 		t.Errorf("preview made rows: %+v; a preview saves nothing", rows)

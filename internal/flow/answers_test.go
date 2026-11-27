@@ -60,7 +60,7 @@ type answerCase struct {
 }
 
 var answerCases = []answerCase{
-	{name: "the defaults", changes: nil},
+	{name: "the defaults", changes: nil, buildable: true},
 	{name: "a different format and size", changes: map[string]any{
 		"format": "h264", "resolution": "480", "useGpu": false, "quality": 5,
 	}},
@@ -86,14 +86,14 @@ var answerCases = []answerCase{
 	}},
 	{name: "every language", changes: map[string]any{
 		"allLanguages": true, "languages": []string{}, "subtitleLanguages": []string{},
-	}},
+	}, buildable: true},
 	{name: "text-only subtitles", changes: map[string]any{"subtitles": "text_only"}},
 	{name: "SRT subtitles", changes: map[string]any{"subtitles": "srt"}},
 	{name: "only my subtitle languages", changes: map[string]any{
 		"subtitles": "my_languages", "subtitleLanguages": []string{"ger"},
 	}},
-	{name: "MP4", changes: map[string]any{"fileType": "mp4"}},
-	{name: "keep the container", changes: map[string]any{"fileType": "keep"}},
+	{name: "MP4", changes: map[string]any{"fileType": "mp4"}, buildable: true},
+	{name: "keep the container", changes: map[string]any{"fileType": "keep"}, buildable: true},
 	{name: "a different folder", changes: map[string]any{
 		"original": "one_folder", "folder": "/media/converted",
 	}},
@@ -102,7 +102,7 @@ var answerCases = []answerCase{
 	}},
 	{name: "replace the original", changes: map[string]any{"original": "replace"}},
 	{name: "keep Dolby Vision", changes: map[string]any{"includeDolbyVision": true}},
-	{name: "a name suffix", changes: map[string]any{"nameSuffix": "small"}},
+	{name: "a name suffix", changes: map[string]any{"nameSuffix": "small"}, buildable: true},
 }
 
 // TestAnswersRoundTrip is flow-model.md's table test: reading the answers back gives the same
@@ -236,10 +236,11 @@ func TestSentencesMatchPage06(t *testing.T) {
 		want    []string
 	}{
 		{
+			// The default audio is as_is until item 7 builds conversion (ui-shop ask 11-27).
 			name: "the defaults",
 			want: []string{
 				"Converts video to HEVC at quality 3, keeping the picture size, on the graphics card when it can.",
-				"Audio: AAC, stereo, in English and German.",
+				"Audio: Same as the source, same channels as the source, every language.",
 				"Keeps every subtitle.",
 				"Saves as MKV.",
 				"Puts the new file next to the original; the original stays where it is.",
@@ -254,7 +255,7 @@ func TestSentencesMatchPage06(t *testing.T) {
 			},
 			want: []string{
 				"Converts video to HEVC at quality 3, at most 1080p.",
-				"Audio: E-AC-3, same channels as the source, in English and German.",
+				"Audio: E-AC-3, same channels as the source, every language.",
 				"Keeps subtitles in English.",
 				"Saves as MKV.",
 				"Puts the new file in /media/converted; the original stays where it is.",
@@ -267,7 +268,7 @@ func TestSentencesMatchPage06(t *testing.T) {
 			},
 			want: []string{
 				"Converts video to HEVC at quality 3, keeping the picture size, on the graphics card when it can.",
-				"Audio: AAC, stereo, every language.",
+				"Audio: Same as the source, same channels as the source, every language.",
 				"Only text subtitles are kept.",
 				"The file keeps its container.",
 				"Puts the new file next to the original; the original stays where it is.",
@@ -278,7 +279,7 @@ func TestSentencesMatchPage06(t *testing.T) {
 			changes: map[string]any{"subtitles": "srt", "original": "replace"},
 			want: []string{
 				"Converts video to HEVC at quality 3, keeping the picture size, on the graphics card when it can.",
-				"Audio: AAC, stereo, in English and German.",
+				"Audio: Same as the source, same channels as the source, every language.",
 				"Subtitles are made into SRT files.",
 				"Saves as MKV.",
 				"Replaces the original. The old file goes to the trash and is kept 7 days.",
