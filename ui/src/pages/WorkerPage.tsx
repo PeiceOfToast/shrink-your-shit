@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, navigate } from "../router.tsx";
 import { clock } from "../format/time.ts";
 import { api, onSummaryChanged, type Job, type WorkerDetail, type WorkerLibrary } from "../api/index.ts";
@@ -50,18 +50,29 @@ export function WorkerPage({ id }: { id: string }) {
 
   const w = worker.data;
 
+  const settingsDirty = !!form && !!saved && JSON.stringify(form) !== JSON.stringify(saved);
+  const libsDirty = JSON.stringify(libForm) !== JSON.stringify(libSaved);
+  // A refresh reads the worker again (the all-workers switch, a save elsewhere). A form with edits in progress keeps
+  // its values through that refresh; only the state fields and the tests update.
+  const dirty = useRef({ settings: false, libs: false });
+  dirty.current = { settings: settingsDirty, libs: libsDirty };
+
   useEffect(() => {
     if (!w) return;
-    const s = settingsOf(w);
-    setSaved(s);
-    setForm(s);
-    const byLib: Record<string, Lib> = {};
-    for (const l of libs.data ?? []) {
-      const have = w.libraries.find((x) => x.libraryId === l.id);
-      byLib[l.id] = { ticked: !!have, workerPath: have?.workerPath ?? "", mode: have?.mode ?? "read_write" };
+    if (!dirty.current.settings) {
+      const s = settingsOf(w);
+      setSaved(s);
+      setForm(s);
     }
-    setLibSaved(byLib);
-    setLibForm(byLib);
+    if (!dirty.current.libs) {
+      const byLib: Record<string, Lib> = {};
+      for (const l of libs.data ?? []) {
+        const have = w.libraries.find((x) => x.libraryId === l.id);
+        byLib[l.id] = { ticked: !!have, workerPath: have?.workerPath ?? "", mode: have?.mode ?? "read_write" };
+      }
+      setLibSaved(byLib);
+      setLibForm(byLib);
+    }
     setTests(Object.fromEntries(w.libraries.map((x) => [x.libraryId, x.test])));
   }, [w, libs.data]);
 
@@ -85,9 +96,9 @@ export function WorkerPage({ id }: { id: string }) {
     jobs.reload();
   };
 
-  const settingsDirty = !!form && !!saved && JSON.stringify(form) !== JSON.stringify(saved);
   const saveSettings = () => {
     if (!form || !saved) return;
+    const sent = form;
     const patch: Parameters<typeof api.patchWorker>[1] = {};
     if (form.slots !== saved.slots) patch.slots = form.slots;
     if (form.gpuSlots !== saved.gpuSlots) patch.gpuSlots = form.gpuSlots;
@@ -95,18 +106,21 @@ export function WorkerPage({ id }: { id: string }) {
     if (form.encoder !== saved.encoder) patch.primaryEncoder = form.encoder === "auto" ? null : form.encoder;
     if (Object.keys(patch).length === 0) return;
     run(() => api.patchWorker(id, patch), () => {
+      // The saved copy is what was sent, so the form stops reading as dirty.
+      setSaved(sent);
       setSavedWhere("settings");
       worker.reload();
     });
   };
 
-  const libsDirty = JSON.stringify(libForm) !== JSON.stringify(libSaved);
   const tickedList = () =>
     Object.entries(libForm)
       .filter(([, l]) => l.ticked)
       .map(([libraryId, l]) => ({ libraryId, workerPath: l.workerPath.trim(), mode: l.mode }));
   const saveLibs = () => {
+    const sent = libForm;
     run(() => api.patchWorker(id, { libraries: tickedList() }), () => {
+      setLibSaved(sent);
       setSavedWhere("libs");
       worker.reload();
     });
