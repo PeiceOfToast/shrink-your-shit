@@ -106,7 +106,9 @@ finish() {
     fi
   fi
   if [ -d "$SLICES" ]; then LOGDEST=$LOG; else LOGDEST=$LOG_TMP; fi
-  [ "$rc" -ne 0 ] && FAILURES=$((FAILURES + 1))
+  # A nonzero exit with no FAIL line is an abort (set -e) the checks never named; count it. When a FAIL was
+  # already recorded, the exit is that failure leaving, not a second one.
+  if [ "$rc" -ne 0 ] && [ "$FAILURES" -eq 0 ]; then FAILURES=1; fi
   say "log: $LOGDEST"
   say "$FAILURES check(s) failed"
   # The log must never carry a sign-in token or a session cookie. It is written last, so the saved copy
