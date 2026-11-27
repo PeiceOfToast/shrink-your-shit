@@ -1,0 +1,6 @@
+frame=42
+fps=23.97
+total_size=1234
+out_time=01:02:03.500000
+speed=1.25x
+progress=end

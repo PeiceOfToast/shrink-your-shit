@@ -17,6 +17,7 @@ const module = "github.com/PeiceOfToast/shrink-your-shit"
 var layers = map[string]int{
 	"cmd/syp":             5,
 	"internal/media":      0,
+	"internal/media/fake": 0,
 	"internal/events":     0,
 	"internal/store":      0,
 	"internal/fsx":        0,
@@ -39,13 +40,14 @@ var layers = map[string]int{
 
 // exceptions are the same-layer imports the plan allows, as "from -> to".
 var exceptions = map[string]bool{
-	"internal/events -> internal/store":    true,
-	"internal/events -> internal/fsx":      true,
-	"internal/store -> internal/fsx":       true,
-	"internal/library -> internal/jobs":    true,
-	"internal/library -> internal/flow":    true,
-	"internal/flow/steps -> internal/flow": true,
-	"internal/flow -> internal/flow/steps": true,
+	"internal/events -> internal/store":     true,
+	"internal/events -> internal/fsx":       true,
+	"internal/store -> internal/fsx":        true,
+	"internal/library -> internal/jobs":     true,
+	"internal/library -> internal/flow":     true,
+	"internal/flow/steps -> internal/flow":  true,
+	"internal/flow -> internal/flow/steps":  true,
+	"internal/media/fake -> internal/media": true,
 }
 
 // TestPackageLayers reads the module's own source with go/parser rather than running `go list`. The test cache
