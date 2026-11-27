@@ -103,6 +103,7 @@
   .wf-index { position: static; flex-direction: row; overflow-x: auto; }
   .wf-index button { width: auto; white-space: nowrap; }
   .wf-side { position: static; }
+  .wf-seg { justify-self: stretch; }
 }
 @media (max-width: 600px) {
   .wf-dlg { position: fixed; inset: 0; transform: none; width: 100%; height: 100%; max-height: none; border-radius: 0; overflow-y: auto; }
