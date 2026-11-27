@@ -117,17 +117,21 @@ func TestAnInstallAtSchemaSixUpgradesThroughSeven(t *testing.T) {
 		t.Fatalf("queue the old job: %v", err)
 	}
 
-	// Take the schema back to 6: remove what migrations 7 and 8 add, and say the database is at 6.
-	// All the data above stays, as it would on a real stage 1 install.
+	// Take the schema back to 6: remove what migrations 7, 8 and 9 add, and say the database is at
+	// 6. All the data above stays, as it would on a real stage 1 install.
 	if err := db.Tx(ctx, func(tx *sql.Tx) error {
-		if _, err := tx.Exec(`DROP TABLE IF EXISTS encoder_state`); err != nil {
-			return err
+		for _, s := range []string{
+			`DROP TABLE IF EXISTS encoder_state`,
+			`ALTER TABLE workflows DROP COLUMN draft_rev`,
+			`DROP TABLE IF EXISTS sidecars`,
+			`ALTER TABLE jobs DROP COLUMN subtitle_files`,
+			`PRAGMA user_version = 6`,
+		} {
+			if _, err := tx.Exec(s); err != nil {
+				return err
+			}
 		}
-		if _, err := tx.Exec(`ALTER TABLE workflows DROP COLUMN draft_rev`); err != nil {
-			return err
-		}
-		_, err := tx.Exec(`PRAGMA user_version = 6`)
-		return err
+		return nil
 	}); err != nil {
 		db.Close()
 		t.Fatalf("make the database a schema 6 install: %v", err)
@@ -150,8 +154,8 @@ func TestAnInstallAtSchemaSixUpgradesThroughSeven(t *testing.T) {
 	if err := db.Read().QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 8 {
-		t.Errorf("schema version after the upgrade = %d, want 8", version)
+	if version != 9 {
+		t.Errorf("schema version after the upgrade = %d, want 9", version)
 	}
 	if err := db.Read().QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'encoder_state'`).
 		Scan(&encoderState); err != nil {
@@ -159,6 +163,22 @@ func TestAnInstallAtSchemaSixUpgradesThroughSeven(t *testing.T) {
 	}
 	if encoderState != 1 {
 		t.Error("migration 7 did not run: encoder_state is missing")
+	}
+	var sidecarTable int
+	if err := db.Read().QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'sidecars'`).
+		Scan(&sidecarTable); err != nil {
+		t.Fatal(err)
+	}
+	if sidecarTable != 1 {
+		t.Error("migration 9 did not run: sidecars is missing")
+	}
+	// The job queued before subtitle files were recorded keeps its NULL, not an invented list.
+	var subtitleFiles sql.NullString
+	if err := db.Read().QueryRow(`SELECT subtitle_files FROM jobs WHERE id = ?`, jobID).Scan(&subtitleFiles); err != nil {
+		t.Fatal(err)
+	}
+	if subtitleFiles.Valid {
+		t.Errorf("the old job's subtitle_files = %q, want NULL", subtitleFiles.String)
 	}
 
 	flows = flow.Open(db)

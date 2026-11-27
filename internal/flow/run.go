@@ -101,6 +101,10 @@ func ProcessorPick(want Want) (encode.Rung, error) {
 // scanned: long enough for a copy that just ended to settle, short enough not to hold a worker.
 const recheckLook = time.Second
 
+// renameSidecar is fsx.RenameNoReplace; a test makes it fail after linking the file, which is the
+// portable fallback's one failure.
+var renameSidecar = fsx.RenameNoReplace
+
 // Run does §7 steps 1-9 for one file and one revision: re-check, probe, plan, encode, check,
 // size, place. It writes every event itself, so a job's log is the same whichever step failed,
 // and it never touches the source except to read it.
@@ -159,10 +163,49 @@ func (e *engine) run(ctx context.Context) (res Result) {
 		return res
 	}
 
-	// 4. Build the command.
+	// 4. Where the new file goes: its staging folder, and the name the place will use. The name is
+	// resolved now, when subtitles become .srt files, because their names are built from it; Place
+	// still never overwrites anything, so a file that appears meanwhile moves the new file instead.
 	if res = ctxStop(ctx); res.Outcome != "" {
 		return res
 	}
+	extracts, err := encode.Extracts(plan, info)
+	if err != nil {
+		return fatal("encode.plan_failed", err.Error(), e.encodeOwner(decisions), "")
+	}
+	if len(extracts) > 0 && !e.in.Try {
+		name, err := safety.FreeName(plan.Output)
+		if err != nil {
+			return fatal("save.name_failed", err.Error(), "save", "")
+		}
+		plan.Output = name
+		// A subtitle file name taken already stops the run now, before anything is written: the
+		// person moves or renames that file and retries (L-AUD-25).
+		for _, x := range extracts {
+			if p := encode.SrtName(plan.Output, x.Part); exists(p) {
+				return Result{Outcome: OutcomeFatal, Reason: "save.srt_exists", Message: srtTaken(p),
+					FailedStep: "save", NextAction: "retry"}
+			}
+		}
+	}
+	// The output is staged beside its destination (a try stages in the app's temp folder instead).
+	// The encoder writes the staged file, not the destination, so nothing appears there until Place
+	// has checked the result; extracted subtitles are staged in the same private folder.
+	staged, err := e.env.Safety.Stage(e.in.StageBase, plan.Output)
+	if err != nil {
+		return fatal("save.stage_failed", err.Error(), "save", "Check the destination folder's permissions.")
+	}
+	placed := false
+	defer func() {
+		if !placed {
+			os.RemoveAll(staged.Folder)
+		}
+	}()
+	if len(extracts) > 0 {
+		plan.SidecarDir = staged.Folder
+	}
+
+	// 5. Build the command.
 	rung, err := e.pick(plan)
 	if err != nil {
 		return fatal("encoder.unavailable", err.Error(), "", "")
@@ -182,23 +225,6 @@ func (e *engine) run(ctx context.Context) (res Result) {
 		e.emit(events.Event{Kind: events.KindWarning, Level: events.LevelWarn, Message: note})
 	}
 	argv := append([]string{"ffmpeg"}, built.Argv...)
-
-	// 5. Stage the output beside its destination (a try stages in the app's temp folder instead).
-	// The encoder writes the staged file, not the destination, so nothing appears there until
-	// Place has checked the result.
-	if res = ctxStop(ctx); res.Outcome != "" {
-		return res
-	}
-	staged, err := e.env.Safety.Stage(e.in.StageBase, plan.Output)
-	if err != nil {
-		return fatal("save.stage_failed", err.Error(), "save", "Check the destination folder's permissions.")
-	}
-	placed := false
-	defer func() {
-		if !placed {
-			os.RemoveAll(staged.Folder)
-		}
-	}()
 	// Build always ends the command with the plan's destination; the run writes the staged file.
 	if argv[len(argv)-1] != plan.Output {
 		return fatal("encode.plan_failed", "the command does not end in the output path", e.encodeOwner(decisions), "")
@@ -242,6 +268,15 @@ func (e *engine) run(ctx context.Context) (res Result) {
 		}
 	}
 
+	// Each subtitle that was to be saved as a file was written, and is not empty.
+	for k := range extracts {
+		st, err := os.Lstat(encode.StagedSidecar(plan.SidecarDir, k))
+		if err != nil || !st.Mode().IsRegular() || st.Size() == 0 {
+			return Result{Outcome: OutcomeBiggerKept, SizeBefore: e.in.Size, Reason: "subtitle.not_saved",
+				Message: "A subtitle could not be saved as a separate file, so the original was kept."}
+		}
+	}
+
 	// 7. The size rule: a result that is not smaller is not worth keeping.
 	st, err := os.Stat(staged.Path)
 	if err != nil {
@@ -261,18 +296,26 @@ func (e *engine) run(ctx context.Context) (res Result) {
 		}
 	}
 
-	// 8. Put it in place, never overwriting anything.
+	// 8. Put it in place, never overwriting anything. The .srt files go beside it first, each
+	// recorded before it is placed, so a name taken mid-run leaves nothing behind and a crash never
+	// leaves one of ours unaccounted for (L-AUD-25).
 	if res = ctxStop(ctx); res.Outcome != "" {
+		return res
+	}
+	sidecars, res := e.placeSidecars(plan, extracts, staged)
+	if res.Outcome != "" {
 		return res
 	}
 	final, err := e.env.Safety.Place(ctx, staged, plan.Output)
 	if err != nil {
+		e.removeSidecars(sidecars) // the new file was not placed: our .srt files go again
 		if ctx.Err() != nil {
 			return cancelled()
 		}
 		if errors.Is(err, safety.ErrSourceLeftBehind) {
 			e.move(staged.Path, final)
 			placed = true
+			e.finishSidecars()
 			return Result{
 				Outcome: OutcomeSmaller, SizeBefore: e.in.Size, SizeAfter: after, OutputPath: final,
 				Reason:  "source.not_removed",
@@ -283,6 +326,10 @@ func (e *engine) run(ctx context.Context) (res Result) {
 	}
 	placed = true
 	e.move(staged.Path, final)
+	e.finishSidecars()
+	if final != plan.Output {
+		e.warn("The new file was saved as " + filepath.Base(final) + ": a file with the name it was going to use appeared meanwhile, and the subtitle files kept the name for it.")
+	}
 
 	// 9. The result is in place; its probe is the last thing the log says.
 	e.probeSide(ctx, "after", final)
@@ -685,6 +732,125 @@ func (e *engine) size(before, after int64) {
 func (e *engine) move(from, to string) {
 	e.emit(events.Event{Kind: events.KindMove, Level: events.LevelInfo,
 		Message: filepath.Base(to), Data: map[string]any{"from": from, "to": to}})
+}
+
+// placeSidecars records the extracted subtitles and puts them beside the new file, never over
+// another file (L-AUD-25). A record goes for every file not placed; one placed before a failure
+// comes back while it is still exactly ours.
+func (e *engine) placeSidecars(plan encode.Plan, extracts []encode.StreamPlan, staged safety.Staged) ([]safety.Sidecar, Result) {
+	if len(extracts) == 0 {
+		return nil, Result{}
+	}
+	vst, err := os.Stat(staged.Path)
+	if err != nil {
+		return nil, fatal("save.read_failed", err.Error(), "save", "")
+	}
+	vhash, err := fsx.SampleHash(staged.Path)
+	if err != nil {
+		return nil, fatal("save.read_failed", err.Error(), "save", "")
+	}
+	recs := make([]safety.Sidecar, 0, len(extracts))
+	for k, x := range extracts {
+		stagedSrt := encode.StagedSidecar(plan.SidecarDir, k)
+		st, err := os.Stat(stagedSrt)
+		if err != nil {
+			return nil, fatal("subtitle.not_saved", err.Error(), "save", "retry")
+		}
+		h, err := fsx.SHA256(stagedSrt)
+		if err != nil {
+			return nil, fatal("subtitle.not_saved", err.Error(), "save", "retry")
+		}
+		recs = append(recs, safety.Sidecar{
+			JobID: e.in.JobID, Path: encode.SrtName(plan.Output, x.Part),
+			Bytes: st.Size(), MTime: st.ModTime().UnixNano(), Hash: h,
+			VideoPath: plan.Output, VideoBytes: vst.Size(), VideoHash: vhash,
+		})
+	}
+	if e.env.Sidecars != nil && e.in.JobID != 0 {
+		if err := e.env.Sidecars.AddSidecars(recs); err != nil {
+			return nil, fatal("subtitle.record_failed", "Could not record the subtitle files: "+err.Error(), "save", "retry")
+		}
+	}
+	var placed []safety.Sidecar
+	for k, c := range recs {
+		from := encode.StagedSidecar(plan.SidecarDir, k)
+		err := renameSidecar(from, c.Path)
+		if errors.Is(err, fsx.ErrNotRemoved) {
+			// Linked into place, the staged name not removed: the file is placed and ours; the
+			// staging folder's cleanup removes the leftover name.
+			err = nil
+		}
+		if err != nil {
+			e.dropSidecars(recs[k:])
+			e.removeSidecars(placed)
+			if errors.Is(err, os.ErrExist) {
+				return nil, Result{Outcome: OutcomeFatal, Reason: "save.srt_exists", Message: srtTaken(c.Path),
+					FailedStep: "save", NextAction: "retry"}
+			}
+			return nil, Result{Outcome: OutcomeFatal, Reason: "subtitle.place_failed",
+				Message:    "A subtitle file could not be put next to the new file, so nothing was changed.",
+				FailedStep: "save", NextAction: "retry"}
+		}
+		e.move(from, c.Path)
+		placed = append(placed, c)
+	}
+	return placed, Result{}
+}
+
+// dropSidecars forgets the records of files that were never placed.
+func (e *engine) dropSidecars(list []safety.Sidecar) {
+	if e.env.Sidecars == nil {
+		return
+	}
+	for _, c := range list {
+		if err := e.env.Sidecars.DropSidecar(c.JobID, c.Path); err != nil {
+			e.warn("A subtitle file's record could not be dropped: " + err.Error())
+		}
+	}
+}
+
+// removeSidecars removes the .srt files this run placed, each only while it is still exactly ours;
+// the record of one that is gone or not ours goes too. One that cannot be removed keeps its
+// record, so the next start tries again.
+func (e *engine) removeSidecars(list []safety.Sidecar) {
+	for _, c := range list {
+		removed, err := safety.RemoveSidecarIfOurs(c)
+		if err != nil {
+			e.warn("Could not remove the subtitle file " + c.Path + " put there before the new file was placed: " + err.Error() +
+				". It is kept on record and removed at the next start.")
+			continue
+		}
+		if removed {
+			e.emit(events.Event{Kind: events.KindMove, Level: events.LevelInfo,
+				Message: "Removed " + filepath.Base(c.Path), Data: map[string]any{"from": c.Path}})
+		}
+		if e.env.Sidecars != nil {
+			if err := e.env.Sidecars.DropSidecar(c.JobID, c.Path); err != nil {
+				e.warn("A subtitle file's record could not be dropped: " + err.Error())
+			}
+		}
+	}
+}
+
+// finishSidecars is the place done: the job keeps the names of its .srt files and their records go.
+func (e *engine) finishSidecars() {
+	if e.env.Sidecars == nil || e.in.JobID == 0 {
+		return
+	}
+	if err := e.env.Sidecars.FinishSidecars(e.in.JobID); err != nil {
+		e.warn("The subtitle files were saved, but the job could not keep their names: " + err.Error())
+	}
+}
+
+// exists says whether anything has this name.
+func exists(path string) bool {
+	_, err := os.Lstat(path)
+	return err == nil
+}
+
+// srtTaken is the sentence for a subtitle file name already there.
+func srtTaken(name string) string {
+	return fmt.Sprintf("A subtitle file named %s is already there. Nothing was changed. Move or rename that file, then press Retry.", filepath.Base(name))
 }
 
 // commandLine is the argv as one line a person can paste into a shell: an argument with nothing

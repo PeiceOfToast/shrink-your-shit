@@ -31,6 +31,17 @@ var (
 	renameNoReplace = fsx.RenameNoReplace
 )
 
+// placeCandidate is the nth name Place tries: final itself, then "name (2).ext", "name (3).ext" and
+// so on. FreeName asks with it too, so the .srt files a run writes are named for the file the place
+// will put them beside (L-SAFE-10).
+func placeCandidate(final string, n int) string {
+	if n <= 1 {
+		return final
+	}
+	ext := filepath.Ext(final)
+	return fmt.Sprintf("%s (%d)%s", final[:len(final)-len(ext)], n, ext)
+}
+
 // Place moves the staged file to final without ever overwriting: if final exists it tries "name (2).ext",
 // "name (3).ext" and so on, each with no-replace rename. It returns the name it used. The staged file is fsynced
 // before the move and the folder after it. EINVAL and ENOTSUP from fsync are ignored, and the folder sync is
@@ -44,8 +55,6 @@ func Place(ctx context.Context, st Staged, final string) (string, error) {
 		return "", fmt.Errorf("place: sync staged file: %w", err)
 	}
 
-	ext := filepath.Ext(final)
-	stem := final[:len(final)-len(ext)]
 	var used string
 	for n := 1; ; n++ {
 		if err := ctx.Err(); err != nil {
@@ -54,10 +63,7 @@ func Place(ctx context.Context, st Staged, final string) (string, error) {
 		if n > maxPlaceNames {
 			return "", fmt.Errorf("place %s: no free name in %d tries", final, maxPlaceNames)
 		}
-		cand := final
-		if n > 1 {
-			cand = fmt.Sprintf("%s (%d)%s", stem, n, ext)
-		}
+		cand := placeCandidate(final, n)
 		err := renameNoReplace(st.Path, cand)
 		if err == nil {
 			used = cand
