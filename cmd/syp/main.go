@@ -19,6 +19,10 @@ import (
 	"github.com/PeiceOfToast/shrink-your-shit/internal/flow"
 	_ "github.com/PeiceOfToast/shrink-your-shit/internal/flow/steps"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/fsx"
+	// The hardware detector's migration (7) is registered by this package's init. Nothing calls the
+	// detector until stage 3 item 3 wires it in, but the import must stay: without it a database
+	// that reached flow's migration 8 could never get 7.
+	_ "github.com/PeiceOfToast/shrink-your-shit/internal/hw"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/jobs"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/library"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/media"
