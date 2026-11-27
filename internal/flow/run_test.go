@@ -246,6 +246,38 @@ func TestRunGoodRunEventFrame(t *testing.T) {
 	}
 }
 
+// TestRunSaysWhichStreamItLeftOut is the file-dependent case the check cannot see: Audio copies, so
+// the flow's container rule passes, but the source's Opus track cannot go into MP4. The run leaves
+// the track out and says so in the job log as a plain warning; it does not fail on a check nobody
+// could pass, and it does not drop the track silently.
+func TestRunSaysWhichStreamItLeftOut(t *testing.T) {
+	root, src, info := libraryFile(t, "clip.mkv", "h264")
+	info.Audio = []media.AudioTrack{{Index: 1, Codec: "opus", Language: "eng"}}
+	want := filepath.Join(root, "clip-shrunk.mp4")
+	m := &fake.Media{Probes: map[string]media.Info{src: info, want: info}}
+	sf := &fakeSafety{verify: safety.Verdict{OK: true}}
+	bus := &recorder{}
+	rev := starterFlow(t)
+	rev.Steps[2].Settings = json.RawMessage(`{"container":"mp4","where":"next_to","nameSuffix":"shrunk"}`)
+	res := flow.Run(context.Background(), runInput(t, root, src), newEnv(m, sf, bus, rev, nil))
+
+	if res.Outcome != flow.OutcomeSmaller {
+		t.Fatalf("outcome = %q (%s: %s), want smaller", res.Outcome, res.Reason, res.Message)
+	}
+	warned := false
+	for _, e := range bus.all() {
+		if e.Level == events.LevelError {
+			t.Errorf("error event %q: a stream the file type cannot hold is a warning, not a failure", e.Message)
+		}
+		if e.Kind == events.KindWarning && e.Message == "dropped audio stream #1 (opus): MP4 cannot hold Opus" {
+			warned = e.Level == events.LevelWarn
+		}
+	}
+	if !warned {
+		t.Errorf("events = %v, want the plain sentence about the dropped Opus track", frameKinds(bus.all()))
+	}
+}
+
 func TestRunSkipsWhenEveryStepSaysNothing(t *testing.T) {
 	root, src, info := libraryFile(t, "clip.mkv", "hevc")
 	m := &fake.Media{Probes: map[string]media.Info{src: info}}

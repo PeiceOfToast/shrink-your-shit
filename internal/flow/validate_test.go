@@ -52,6 +52,16 @@ func TestValidateStarterHasNoProblems(t *testing.T) {
 	if !found {
 		t.Errorf("disabled = %+v, want the WebM choice greyed with its reason", rep.Disabled)
 	}
+	// Replacing the original is item 10's; the page greys that choice with a plain why.
+	found = false
+	for _, d := range rep.Disabled {
+		if d.StepID == "save" && d.Field == "where" && d.Value == "replace" {
+			found = d.Why != ""
+		}
+	}
+	if !found {
+		t.Errorf("disabled = %+v, want Replace the original greyed with its reason", rep.Disabled)
+	}
 }
 
 // TestValidateSummariesForANonDefaultFlow pins the other closed-card lines: another format and

@@ -187,6 +187,55 @@ func TestSaveValidate(t *testing.T) {
 	}
 }
 
+// TestSaveReplaceIsGreyed is item 10's placeholder: the page draws "Replace the original" as a
+// choice it cannot pick, and the check greys the same choice with the same sentence. The stored
+// value still blocks publishing, so a saved flow cannot quietly fall back to next-to.
+func TestSaveReplaceIsGreyed(t *testing.T) {
+	form, err := flow.BuildForm(SaveStep{}.Def(), flow.Env{})
+	if err != nil {
+		t.Fatalf("form: %v", err)
+	}
+	var replace *flow.Option
+	for i := range form.Schema.Properties["where"].Layout.Choices {
+		if o := form.Schema.Properties["where"].Layout.Choices[i]; o.Value == "replace" {
+			replace = &form.Schema.Properties["where"].Layout.Choices[i]
+		}
+	}
+	if replace == nil {
+		t.Fatal("no replace choice on where")
+	}
+	if replace.Available || replace.Why == "" {
+		t.Errorf("form choice = %+v, want it unavailable with a why", *replace)
+	}
+
+	check := SaveStep{}.Validate(saveSettings("mkv", "next_to", "shrunk"), flow.ValidateContext{})
+	why := ""
+	for _, d := range check.Disabled {
+		if d.Field == "where" && d.Value == "replace" {
+			why = d.Why
+		}
+	}
+	if why == "" {
+		t.Fatalf("disabled = %+v, want the replace choice greyed", check.Disabled)
+	}
+	if why != replace.Why {
+		t.Errorf("check says %q, the form says %q; one sentence, not two", why, replace.Why)
+	}
+
+	// A stored replace value is still a problem: the greyed choice is a promise, not a silent
+	// rewrite of what was saved.
+	check = SaveStep{}.Validate(saveSettings("mkv", "replace", "shrunk"), flow.ValidateContext{})
+	blocked := false
+	for _, p := range check.Problems {
+		if p.Field == "where" && p.Code == "save.not_yet" {
+			blocked = true
+		}
+	}
+	if !blocked {
+		t.Errorf("problems = %+v, want save.not_yet for a stored replace", check.Problems)
+	}
+}
+
 func TestSaveDefaults(t *testing.T) {
 	s, err := flow.DecodeSettings(SaveStep{}.Def(), []byte(`{}`))
 	if err != nil {

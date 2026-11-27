@@ -7,6 +7,12 @@
         "why": "The graphics card is not used."
       },
       {
+        "field": "where",
+        "stepId": "save",
+        "value": "replace",
+        "why": "Replacing the original comes in a later update; for now the converted file is saved next to it."
+      },
+      {
         "field": "container",
         "stepId": "save",
         "value": "webm",

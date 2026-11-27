@@ -19,7 +19,7 @@ import (
 // to until item 10 builds replacing and a chosen folder, which Validate reports.
 type SaveSettings struct {
 	Container  string `set:"container" label:"File type" choices:"mkv=MKV,mp4=MP4,webm=WebM,keep=Keep the same" default:"mkv" help:"MKV holds every track and subtitle. MP4 plays on more devices but drops some subtitles."`
-	Where      string `set:"where" label:"Where it goes" choices:"replace=Replace the original,next_to=Next to the original,folder=A different folder" default:"next_to"`
+	Where      string `set:"where" label:"Where it goes" choices:"replace=Replace the original,next_to=Next to the original,folder=A different folder" default:"next_to" notYet:"replace=Replacing the original comes in a later update; for now the converted file is saved next to it."`
 	Folder     string `set:"folder" label:"Folder" widget:"text" showIf:"where=folder"`
 	NameSuffix string `set:"nameSuffix" label:"Add to the file name" default:"" help:"Added after a hyphen: media.mp4 becomes media-small.mp4. Empty keeps the name."`
 }
@@ -94,6 +94,10 @@ func (SaveStep) Validate(s flow.Settings, vc flow.ValidateContext) flow.Check {
 	set := s.(SaveSettings)
 	var c flow.Check
 	c.Problems = append(c.Problems, flow.TagProblems(SaveStep{}.Def(), set)...)
+	// Replacing the original arrives with item 10. The form greys that choice with this sentence
+	// from the notYet tag; the check greys it here with the same words, and a stored value is still
+	// a problem below rather than a silent fall back to next-to.
+	c.Disabled = append(c.Disabled, flow.Disabled{Field: "where", Value: "replace", Why: replaceWhy})
 	if set.Where != "next_to" {
 		c.Problems = append(c.Problems, flow.Problem{
 			Field: "where", Code: "save.not_yet",
@@ -121,6 +125,10 @@ func (SaveStep) Validate(s flow.Settings, vc flow.ValidateContext) flow.Check {
 	c.Summary = saveSummary(set)
 	return c
 }
+
+// replaceWhy is why the page greys "Replace the original" until item 10. The where field's notYet
+// tag repeats it for the form; TestSaveReplaceIsGreyed fails if the two ever differ.
+const replaceWhy = "Replacing the original comes in a later update; for now the converted file is saved next to it."
 
 // trashDays is how long a replaced original stays in the trash. Page 11's
 // processing.keepOriginalsDays is the app-wide setting; until that page feeds the check, the
