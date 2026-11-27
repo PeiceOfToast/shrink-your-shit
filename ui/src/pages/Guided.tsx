@@ -20,7 +20,7 @@ function choiceLabel(field: GuideField, value: unknown): string {
 // The part's value as short text for the index and the card's top right: "HEVC · 3 · eng ger".
 function partValue(part: GuidePart, answers: Answers): string {
   return part.fields
-    .filter((f) => !f.more && (f.type !== "folder" || answers.original === "one_folder"))
+    .filter((f) => !f.more && (f.type !== "folder" || answers.original === "one_folder") && (f.key !== "subtitleLanguages" || answers.subtitles === "my_languages"))
     .map((f) => {
       if (f.type === "choice") return choiceLabel(f, answers[f.key]);
       if (f.type === "number") return String(answers[f.key] ?? "");
@@ -323,7 +323,7 @@ function ChipRow({ chips, answers, onToggle }: { chips: GuideDoc["chips"]; answe
 }
 
 function PartCard({ part, answers, languages, setAnswer }: { part: GuidePart; answers: Answers; languages: string[]; setAnswer: (key: string, v: unknown) => void }) {
-  const shown = part.fields.filter((f) => f.type !== "folder" || answers.original === "one_folder");
+  const shown = part.fields.filter((f) => (f.type !== "folder" || answers.original === "one_folder") && (f.key !== "subtitleLanguages" || answers.subtitles === "my_languages"));
   const field = (f: GuideField) => (
     <FieldRow key={f.key} field={f} value={answers[f.key]} answers={answers} languages={languages} onChange={(v) => setAnswer(f.key, v)} />
   );

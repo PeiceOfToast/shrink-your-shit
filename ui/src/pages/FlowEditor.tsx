@@ -10,6 +10,20 @@ import { LanguageChips } from "./LanguageChips.tsx";
 
 const NEW = "new";
 const ORDER: StepId[] = ["video", "audio", "save"];
+// The file types, in the order the File type row shows them. Greyed ones come from the check's disabled list.
+const CONTAINERS = [
+  { value: "mkv", label: "MKV" },
+  { value: "mp4", label: "MP4" },
+  { value: "webm", label: "WebM" },
+  { value: "keep", label: "Keep the same" },
+];
+// What each Subtitles choice keeps, under the choice.
+const SUBTITLE_HINT: Record<string, string> = {
+  keep_all: "Every subtitle is kept.",
+  my_languages: "Only the subtitles in the languages picked below are kept.",
+  text_only: "Only text subtitles are kept; picture subtitles are dropped.",
+  srt: "Subtitles are made into SRT files.",
+};
 const STEP_NAME: Record<StepId, string> = { video: "Video", audio: "Audio", save: "Save the result" };
 const FORMAT_NAME: Record<string, string> = { hevc: "HEVC", h264: "H.264", av1: "AV1" };
 const ROW_FOR_SIZE: Record<string, string> = { "2160": "2160", "1440": "1440", "1080": "1080", "720": "720", "480": "sd" };
@@ -105,6 +119,9 @@ function Editor({ id, initial }: { id: string; initial: Loaded }) {
     setDirty(true);
   };
   const why = (stepId: StepId, field: string): string | undefined => check?.disabled.find((d) => d.stepId === stepId && d.field === field)?.why;
+  // A choice the check rules out for its value (the file types): the reason, or undefined.
+  const whyValue = (stepId: StepId, field: string, value: string): string | undefined =>
+    check?.disabled.find((d) => d.stepId === stepId && d.field === field && d.value === value)?.why;
   const problemsFor = (stepId: StepId) => (check?.problems ?? []).filter((p) => p.stepId === stepId);
   const problemCount = check?.problems.length ?? 0;
 
@@ -258,11 +275,49 @@ function Editor({ id, initial }: { id: string; initial: Loaded }) {
         <Advanced summary="Advanced" description="Codec, bitrate, downmix, loudness, commentary, original track">
           <AudioAdvanced s={audio} set={(patch) => set("audio", patch)} />
         </Advanced>
+        <Row label="Subtitles" full hint={SUBTITLE_HINT[String(audio.subtitles ?? "keep_all")]}>
+          <Seg
+            label="Subtitles"
+            value={String(audio.subtitles ?? "keep_all")}
+            options={[
+              { value: "keep_all", label: "Keep all" },
+              { value: "my_languages", label: "Keep my languages" },
+              { value: "text_only", label: "Text only" },
+              { value: "srt", label: "Make SRT files" },
+            ]}
+            onChange={(v) => set("audio", { subtitles: v })}
+          />
+        </Row>
+        {audio.subtitles === "my_languages" && (
+          <Row label="Subtitle languages" full hint="None picked keeps the same languages as the audio.">
+            <LanguageChips label="Subtitle languages" value={(audio.subtitleLanguages as string[] | undefined) ?? []} onChange={(subtitleLanguages) => set("audio", { subtitleLanguages })} />
+          </Row>
+        )}
       </>
     ),
     save: (
       <>
         <p className="hint" style={{ marginTop: 0 }}>Every result is checked first: it must play and not be broken. A broken result is never saved, and the original stays as it was.</p>
+        <Row label="File type" full>
+          <div className="wf-save-options" role="radiogroup" aria-label="File type">
+            {CONTAINERS.map((o) => {
+              const off = whyValue("save", "container", o.value);
+              return (
+                <label key={o.value}>
+                  <input
+                    type="radio"
+                    name={`container-${draftId}`}
+                    checked={(save_.container ?? "mkv") === o.value}
+                    disabled={off !== undefined}
+                    onChange={() => set("save", { container: o.value })}
+                  />
+                  {o.label}
+                  {off && <span className="hint">{off}</span>}
+                </label>
+              );
+            })}
+          </div>
+        </Row>
         <Row label="Where the result goes">
           <div className="wf-save-options" role="radiogroup" aria-label="Where the result goes">
             {[

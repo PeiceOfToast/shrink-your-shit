@@ -216,6 +216,20 @@ const AUDIO_FROM_GUIDED: Record<string, { format: string; channels: string; code
   as_is: { format: "copy", channels: "source", codec: null },
 };
 
+// The file types and what each can hold (page 07; dev's selectors.go). MKV and Keep the same take anything.
+// The rules are one table: a new rule goes here, not into the editor or the guide.
+const CONTAINER_RULES: Record<string, { why: string; ok: (video: string, audio: string) => boolean }> = {
+  mkv: { why: "", ok: () => true },
+  mp4: { why: "MP4 can't hold Opus audio.", ok: (_v, audio) => audio !== "opus" },
+  webm: { why: "WebM needs AV1 video and Opus audio.", ok: (video, audio) => video === "av1" && audio === "opus" },
+  keep: { why: "", ok: () => true },
+};
+
+// The audio codec the step will write: Advanced's codec when set, else the Format choice.
+function audioCodec(au: Record<string, unknown>): string {
+  return String(au.codec ?? au.format);
+}
+
 function step(id: StepId, type: FlowStep["type"], settings: Record<string, unknown>): FlowStep {
   return { id, type, version: 1, settings };
 }
@@ -260,8 +274,15 @@ export function answersToFlow(a: Answers, meta: { name: string; description: str
         commentary: "keep",
         defaultTrack: null,
         keepOriginal: false,
+        subtitles: a.subtitles ?? "keep_all",
+        subtitleLanguages: Array.isArray(a.subtitleLanguages) ? a.subtitleLanguages : [],
       }),
-      step("save", "file.save", { where, folder: where === "folder" ? String(a.folder ?? "") : null, nameSuffix: "" }),
+      step("save", "file.save", {
+        where,
+        folder: where === "folder" ? String(a.folder ?? "") : null,
+        nameSuffix: "",
+        container: a.fileType ?? "mkv",
+      }),
     ],
   };
 }
@@ -298,6 +319,15 @@ export function checkFlow(flow: Flow): FlowCheck {
   }
   if (au.codec) {
     disabled.push({ stepId: "audio", field: "format", why: `Advanced is set: ${CODEC_LABEL[String(au.codec)]}. It replaces Format above.` });
+  }
+  // The file types the video and audio can go into. A pick the table rules out is greyed, and a saved pick that is ruled out is a problem.
+  for (const value of Object.keys(CONTAINER_RULES)) {
+    const rule = CONTAINER_RULES[value];
+    if (rule.ok(String(v.format), audioCodec(au))) continue;
+    disabled.push({ stepId: "save", field: "container", value, why: rule.why });
+    if (sv.container === value) {
+      problems.push({ stepId: "save", field: "container", code: "container_unsupported", message: `${rule.why} Pick another file type.` });
+    }
   }
 
   const videoSummary = v.rateControl
