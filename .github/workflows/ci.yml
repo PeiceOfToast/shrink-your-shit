@@ -75,6 +75,18 @@ jobs:
       - name: Test
         run: go test -race ./...
 
+      # The bind-mount test makes a real mount, which needs a user and mount namespace (S2-10a). Run it there and
+      # require PASS, not SKIP. Where unshare is not allowed, the test keeps its own skip.
+      - name: Bind-mount test in a user and mount namespace
+        run: |
+          set -o pipefail
+          if unshare -rm true 2>/dev/null; then
+            unshare -rm go test -count=1 -v -run '^TestNestedThroughASecondMountIsRefused$' ./internal/library | tee bindmount.log
+            grep -q -- '--- PASS: TestNestedThroughASecondMountIsRefused' bindmount.log
+          else
+            echo "unshare is not allowed on this runner; the bind-mount test keeps its skip"
+          fi
+
       - name: Format
         run: test -z "$(gofmt -l .)"
 
