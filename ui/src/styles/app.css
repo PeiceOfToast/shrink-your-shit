@@ -204,3 +204,6 @@ table.tbl.wkr td.wk-sub{display:none}
 /* The Unsaved changes bar sits above the phone's tab bar on every settings page: fixed, not sticky, because a sticky
    bar can't leave its section, so on a short page it covered the tab bar. The section keeps room under its last row. */
 @media (max-width:900px){.savebar{position:fixed;left:12px;right:12px;bottom:64px;margin-top:0;z-index:4}.set-main{padding-bottom:140px}}
+
+/* The bottom bar's problem dot sits on the icon's top-right, like the Jobs badge. Absolute, so the label keeps its place. */
+@media (max-width:900px){.bottomnav a{position:relative}.bottomnav .dot{position:absolute;top:2px;left:calc(50% + 9px);margin:0;width:8px;height:8px}}
