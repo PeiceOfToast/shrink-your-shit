@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { onForcedStateChange } from "./mock.ts";
 import { setConnection } from "./connection.ts";
 import { ApiError } from "./errors.ts";
+import { onRefresh } from "./refresh.ts";
 
 export interface ApiState<T> {
   data?: T;
@@ -18,6 +19,8 @@ export function useApi<T>(load: () => Promise<T>, deps: unknown[] = []): ApiStat
   const [tick, setTick] = useState(0);
 
   useEffect(() => onForcedStateChange(() => setTick((t) => t + 1)), []);
+  // A live event or a resync asks every mounted load to run again.
+  useEffect(() => onRefresh(() => setTick((t) => t + 1)), []);
 
   useEffect(() => {
     let alive = true;

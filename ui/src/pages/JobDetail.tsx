@@ -8,7 +8,7 @@ const gb = (bytes: number) => formatGB(bytes / 1e9);
 const mediaValue = (r: MediaRow, v: string | number) =>
   r.kind === "duration" ? duration(Number(v)) : r.kind === "bytes" ? gb(Number(v)) : String(v);
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { api, type Job, type JobDetail as Detail, type LogLine, type LogStep, type MediaRow, type StepOutcome } from "../api/index.ts";
+import { api, isReal, startJobWire, type Job, type JobDetail as Detail, type LogLine, type LogStep, type MediaRow, type StepOutcome } from "../api/index.ts";
 import { useApi } from "../api/useApi.ts";
 import { Icon } from "../ui/Icon.tsx";
 import { useKeys } from "../ui/useKeys.ts";
@@ -156,6 +156,15 @@ export function JobDetail({ id, initialTab }: { id: string; initialTab: "summary
 
   const job: Job | undefined = d?.job;
   const state = job?.state;
+
+  // Live log, behind the events flag: while the Log tab is open and the job runs, each log line reloads the job.
+  const liveLog = isReal("events") && tab === "log" && (state === "running" || state === "waiting");
+  const reloadRef = useRef(detail.reload);
+  reloadRef.current = detail.reload;
+  useEffect(() => {
+    if (!liveLog) return;
+    return startJobWire({ job: id, reload: () => reloadRef.current() });
+  }, [id, liveLog]);
 
   return (
     <>
