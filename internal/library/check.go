@@ -29,6 +29,8 @@ type FolderProblem struct {
 const (
 	// ProblemAlreadyWatched is a folder another library already has.
 	ProblemAlreadyWatched = "already_watched"
+	// ProblemNestedFolder is a folder inside another library's folder, or one that contains it.
+	ProblemNestedFolder = "nested_folder"
 	// ProblemUnreadable is a part of the folder the check could not read.
 	ProblemUnreadable = "unreadable"
 	// ProblemUnwritable is a folder the app cannot write in, so converted videos could not be saved.
@@ -74,12 +76,19 @@ func (c *Catalog) CheckFolder(ctx context.Context, path string) (FolderCheck, er
 	}
 	out := FolderCheck{}
 	if err := c.refuseWatched(ctx, abs, 0); err != nil {
-		if errors.Is(err, ErrPathAlreadyWatched) {
+		var nested *NestedError
+		switch {
+		case errors.Is(err, ErrPathAlreadyWatched):
 			out.Problems = append(out.Problems, FolderProblem{
 				Code:    ProblemAlreadyWatched,
 				Message: "Another library already watches this folder. Choose a different folder.",
 			})
-		} else {
+		case errors.As(err, &nested):
+			out.Problems = append(out.Problems, FolderProblem{
+				Code:    ProblemNestedFolder,
+				Message: nested.Sentence(),
+			})
+		default:
 			return FolderCheck{}, err
 		}
 	}

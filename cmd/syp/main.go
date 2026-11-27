@@ -121,6 +121,7 @@ func run(dataDir, listen string) error {
 	// Each job a scan enqueues wakes the worker, so the first encode starts before the scan has
 	// finished; the same Wake is what the api's setup uses after the first scan.
 	catalog := library.NewCatalog(db)
+	reportLibraryOverlaps(ctx, catalog, bus)
 	srv.Ready(api.Deps{
 		Access:    access,
 		Events:    bus,
@@ -153,6 +154,24 @@ func run(dataDir, listen string) error {
 		runErr = err
 	}
 	return runErr
+}
+
+// reportLibraryOverlaps writes one System log warning for each pair of stored libraries that watch
+// one folder or nested folders. An install that predates the one-real-folder rule can hold such a
+// pair; start-up carries on, and the folder checks refuse further edits that keep the overlap, so
+// the person can move a library. Failing to read the libraries is reported the same way and does not
+// stop start-up either: the first request that needs them says more.
+func reportLibraryOverlaps(ctx context.Context, catalog *library.Catalog, bus *events.Bus) {
+	overlaps, err := catalog.Overlaps(ctx)
+	if err != nil {
+		_ = bus.Emit(events.Event{Level: events.LevelWarn, Kind: events.KindWarning, Source: "library",
+			Code: "library.overlap_unknown", Message: "The library folders could not be compared: " + err.Error()})
+		return
+	}
+	for _, o := range overlaps {
+		_ = bus.Emit(events.Event{Level: events.LevelWarn, Kind: events.KindWarning, Source: "library",
+			Code: "library.overlap", Message: o.Message()})
+	}
 }
 
 // sweepLeftovers is the startup hook for a job that was running when the app stopped. It removes that job's
