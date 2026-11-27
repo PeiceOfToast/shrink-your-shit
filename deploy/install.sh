@@ -195,7 +195,6 @@ ExecStart=$BIN -data $DATA_DIR -listen 0.0.0.0:$PORT
 Restart=on-failure
 NoNewPrivileges=yes
 ProtectSystem=full
-ProtectHome=read-only
 
 [Install]
 WantedBy=multi-user.target
@@ -225,3 +224,4 @@ fi
 ip="$(hostname -I 2>/dev/null | awk '{ print $1 }')"
 [ -n "$ip" ] || ip="<this machine's address>"
 say "syp is running. Open http://$ip:$PORT to finish setting up."
+say "syp runs as user syp: give it access to your video folders (e.g. add syp to your group, or use a folder outside your home)"
