@@ -242,7 +242,7 @@ export function JobDetail({ id, initialTab }: { id: string; initialTab: "summary
           {confirm === "again" && job && (
             <div className="jd-confirm" role="alert">
               <span>Run this file through {job.workflow} again? The current file is treated as the original.</span>
-              <button type="button" className="btn primary sm" disabled={busy} onClick={() => act(() => api.convertAgain(id), "Queued again. This panel now shows the new attempt.")}>Run again</button>
+              <button type="button" className="btn primary sm" disabled={busy} onClick={() => act(async () => { const r = await api.convertAgain(id); navigate(`/jobs/${r.jobId}${filterQs}`); }, "Queued again. This panel now shows the new attempt.")}>Run again</button>
               <button type="button" className="btn sm" onClick={() => setConfirm(null)}>Keep it</button>
             </div>
           )}
