@@ -29,6 +29,11 @@ test("first run: a password, a starter, then the Dashboard", async ({ page }) =>
 const convert = CONVERT && LIBRARY ? test : test.skip;
 
 convert("a clip converts, and its Job log shows each step", async ({ page }) => {
+  // Each Playwright test gets a fresh browser context, so this test signs in itself (test 1's session is not kept).
+  await page.goto(`${BASE_URL}/signin?api=real`);
+  await page.getByLabel("Password", { exact: true }).fill(PASSWORD);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await page.waitForURL((u) => new URL(u).pathname !== "/signin");
   // Poll the Done jobs (up to 10 minutes): the rows are tr.row-link, opened by a click.
   const deadline = Date.now() + 10 * 60_000;
   let row = page.locator("tr.row-link").first();
