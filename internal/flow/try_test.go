@@ -146,7 +146,7 @@ func TestATryNeverWritesBesideTheOriginal(t *testing.T) {
 
 	m := &fake.Media{Probes: map[string]media.Info{src: info}, Runs: []fake.RunScript{{}}}
 	sf := &trySafety{verify: safety.Verdict{OK: true}, size: 7}
-	res, err := flow.Try(context.Background(), starterFlow(t), src, tryEnv(m, sf))
+	res, err := flow.Try(context.Background(), starterFlow(t), src, tryEnv(m, sf), t.TempDir())
 	if err != nil {
 		t.Fatalf("try: %v", err)
 	}
@@ -179,16 +179,16 @@ func TestATryNeverWritesBesideTheOriginal(t *testing.T) {
 
 // TestATryEncodesOneMinuteFromAThirdIn: a long file is tried on a stream-copied 60 s sample from
 // a third of the way in, the engine encodes the sample itself, and the check compares against the
-// sample's own measured length. The sample's folder is gone when the try ends.
+// sample's own measured length. The sample is cut into the folder the app gave the try (a real
+// copy of the video could fill a small system temp) and is gone when the try ends.
 func TestATryEncodesOneMinuteFromAThirdIn(t *testing.T) {
 	root, src, info := trySource(t, 2*time.Hour)
 	before := entries(t, root)
-	// The sample lives under the source's folder for this test, so a leftover would show.
-	t.Setenv("TMPDIR", root)
+	scratch := t.TempDir()
 	mf := &fake.Media{Probes: map[string]media.Info{src: info}, Runs: []fake.RunScript{{}, {}}}
 	m := &tryMedia{Media: mf, src: src, whole: info, sample: 60 * time.Second}
 	sf := &trySafety{verify: safety.Verdict{OK: true}}
-	if _, err := flow.Try(context.Background(), starterFlow(t), src, tryEnv(m, sf)); err != nil {
+	if _, err := flow.Try(context.Background(), starterFlow(t), src, tryEnv(m, sf), scratch); err != nil {
 		t.Fatalf("try: %v", err)
 	}
 	argvs := mf.Argvs()
@@ -205,8 +205,8 @@ func TestATryEncodesOneMinuteFromAThirdIn(t *testing.T) {
 		t.Errorf("cut = %q, want a stream copy so the audio stays aligned", joined)
 	}
 	sample := cut[len(cut)-1]
-	if filepath.Base(sample) != "sample.mkv" || !strings.HasPrefix(filepath.Dir(sample), root) {
-		t.Errorf("cut writes %q, want a sample in a fresh folder under %s", sample, root)
+	if filepath.Base(sample) != "sample.mkv" || !strings.HasPrefix(filepath.Dir(sample), scratch+string(filepath.Separator)) {
+		t.Errorf("cut writes %q, want a sample in a fresh folder under the app's %s", sample, scratch)
 	}
 
 	enc := strings.Join(argvs[1], " ")
@@ -220,7 +220,11 @@ func TestATryEncodesOneMinuteFromAThirdIn(t *testing.T) {
 		t.Errorf("the check compared against %s, want the sample's own length", got)
 	}
 
-	// Neither the sample's folder nor the staging outlives the try.
+	// Neither the sample's folder nor the staging outlives the try, and the source's folder never
+	// held either.
+	if got := entries(t, scratch); len(got) != 0 {
+		t.Errorf("the app's try folder still holds %v after the try", got)
+	}
 	if got := entries(t, root); strings.Join(got, ",") != strings.Join(before, ",") {
 		t.Errorf("the folder changed: %v -> %v", before, got)
 	}
@@ -231,7 +235,7 @@ func TestATryOfAShortFileUsesTheWholeFile(t *testing.T) {
 	_, src, info := trySource(t, 150*time.Second)
 	m := &fake.Media{Probes: map[string]media.Info{src: info}, Runs: []fake.RunScript{{}}}
 	sf := &trySafety{verify: safety.Verdict{OK: true}}
-	if _, err := flow.Try(context.Background(), starterFlow(t), src, tryEnv(m, sf)); err != nil {
+	if _, err := flow.Try(context.Background(), starterFlow(t), src, tryEnv(m, sf), t.TempDir()); err != nil {
 		t.Fatalf("try: %v", err)
 	}
 	if argvs := m.Argvs(); len(argvs) != 1 {
@@ -291,7 +295,7 @@ func TestATrySaysWhatTheSizeLineSays(t *testing.T) {
 				m = &tryMedia{Media: mf, src: src, whole: info, sample: 60 * time.Second}
 			}
 			sf := &trySafety{verify: c.verify, size: c.size}
-			res, err := flow.Try(context.Background(), starterFlow(t), src, tryEnv(m, sf))
+			res, err := flow.Try(context.Background(), starterFlow(t), src, tryEnv(m, sf), t.TempDir())
 			if err != nil {
 				t.Fatalf("try: %v", err)
 			}
@@ -315,8 +319,7 @@ func TestATrySaysWhatTheSizeLineSays(t *testing.T) {
 func TestAStoppedTryLeavesNothingBehind(t *testing.T) {
 	root, src, info := trySource(t, 2*time.Hour)
 	before := entries(t, root)
-	// The sample lives under the source's folder for this test, so a leftover would show.
-	t.Setenv("TMPDIR", root)
+	scratch := t.TempDir()
 	mf := &fake.Media{Probes: map[string]media.Info{src: info}, Runs: []fake.RunScript{{}, {Hang: true}}}
 	m := &tryMedia{Media: mf, src: src, whole: info, sample: 60 * time.Second}
 	sf := &trySafety{verify: safety.Verdict{OK: true}, staged: make(chan struct{})}
@@ -326,9 +329,12 @@ func TestAStoppedTryLeavesNothingBehind(t *testing.T) {
 		<-sf.staged
 		cancel()
 	}()
-	_, err := flow.Try(ctx, starterFlow(t), src, tryEnv(m, sf))
+	_, err := flow.Try(ctx, starterFlow(t), src, tryEnv(m, sf), scratch)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("try error = %v, want context.Canceled", err)
+	}
+	if got := entries(t, scratch); len(got) != 0 {
+		t.Errorf("a stopped try left %v in the app's try folder", got)
 	}
 	if got := entries(t, root); strings.Join(got, ",") != strings.Join(before, ",") {
 		t.Errorf("a stopped try left %v behind (was %v)", got, before)
@@ -349,7 +355,7 @@ func TestATryRefusesWhatItCannotRead(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			_, err := flow.Try(context.Background(), starterFlow(t), c.file, tryEnv(c.m, &trySafety{verify: safety.Verdict{OK: true}}))
+			_, err := flow.Try(context.Background(), starterFlow(t), c.file, tryEnv(c.m, &trySafety{verify: safety.Verdict{OK: true}}), t.TempDir())
 			var refuse *flow.TryError
 			if !errors.As(err, &refuse) || refuse.Code != c.code {
 				t.Fatalf("error = %v, want %s", err, c.code)
@@ -361,7 +367,7 @@ func TestATryRefusesWhatItCannotRead(t *testing.T) {
 	audioOnly := info
 	audioOnly.Video = nil
 	m := &fake.Media{Probes: map[string]media.Info{src: audioOnly}}
-	_, err := flow.Try(context.Background(), starterFlow(t), src, tryEnv(m, &trySafety{verify: safety.Verdict{OK: true}}))
+	_, err := flow.Try(context.Background(), starterFlow(t), src, tryEnv(m, &trySafety{verify: safety.Verdict{OK: true}}), t.TempDir())
 	var refuse *flow.TryError
 	if !errors.As(err, &refuse) || refuse.Code != "invalid_file" || !strings.Contains(refuse.Message, "no video") {
 		t.Errorf("audio-only error = %v, want invalid_file saying there is no video", err)

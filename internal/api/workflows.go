@@ -467,6 +467,16 @@ func (s *Server) tryWorkflow(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "has_problems", "Fix this first: "+rep.Problems[0].Message, "", 0)
 		return
 	}
+	// A try reads only what a library owns: the resolved path must sit inside a library's folder.
+	inside, err := rs.Catalog.FileInLibrary(r.Context(), body.File)
+	if err != nil {
+		internalError(w)
+		return
+	}
+	if !inside {
+		writeError(w, http.StatusBadRequest, "not_in_library", "Pick a file inside one of your libraries.", "file", 0)
+		return
+	}
 	if rs.Try == nil {
 		internalError(w)
 		return

@@ -7,12 +7,15 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/PeiceOfToast/shrink-your-shit/internal/flow"
+	"github.com/PeiceOfToast/shrink-your-shit/internal/library"
 )
 
 // tryEnv is newEnv whose try double answers with the given lines, recording what it was asked.
@@ -26,6 +29,21 @@ func tryEnv(t *testing.T, lines []flow.TryLine) (*env, *tryCall) {
 	}
 	e.ready()
 	return e, call
+}
+
+// tryLibrary makes a library the api knows about, with one video in it, and answers the file's path.
+// A try reads library files only, so every accepted request needs one.
+func tryLibrary(t *testing.T, e *env) string {
+	t.Helper()
+	root := t.TempDir()
+	file := filepath.Join(root, "holiday.mkv")
+	if err := os.WriteFile(file, []byte("video"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.catalog.AddLibrary(context.Background(), library.NewLibrary{Path: root}); err != nil {
+		t.Fatalf("add the library: %v", err)
+	}
+	return file
 }
 
 // tryCall is what the try double was asked.
@@ -46,7 +64,7 @@ func TestTryAnswersTheLines(t *testing.T) {
 	}
 	e, call := tryEnv(t, lines)
 	cookie := e.setup()
-	file := filepath.Join(t.TempDir(), "holiday.mkv")
+	file := tryLibrary(t, e)
 
 	rec := e.do(http.MethodPost, "/api/v2/workflows/try",
 		mustJSON(t, map[string]any{"flow": apiFlow(t, "Try", 3), "file": file}),
@@ -133,9 +151,10 @@ func TestTryAnswersItsOwnRefusal(t *testing.T) {
 	}
 	e.ready()
 	cookie := e.setup()
+	file := tryLibrary(t, e)
 
 	rec := e.do(http.MethodPost, "/api/v2/workflows/try",
-		mustJSON(t, map[string]any{"flow": apiFlow(t, "Try", 3), "file": filepath.Join(t.TempDir(), "holiday.mkv")}),
+		mustJSON(t, map[string]any{"flow": apiFlow(t, "Try", 3), "file": file}),
 		write(withSession(cookie)), false)
 	code, msg, _ := errorBody(t, rec)
 	if rec.Code != http.StatusBadRequest || code != "invalid_file" || msg != "The file could not be read as media." {
@@ -157,9 +176,10 @@ func TestAStoppedTryAnswersNothing(t *testing.T) {
 	}
 	e.ready()
 	cookie := e.setup()
+	file := tryLibrary(t, e)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	body := mustJSON(t, map[string]any{"flow": apiFlow(t, "Try", 3), "file": filepath.Join(t.TempDir(), "holiday.mkv")})
+	body := mustJSON(t, map[string]any{"flow": apiFlow(t, "Try", 3), "file": file})
 	req := httptest.NewRequest(http.MethodPost, "/api/v2/workflows/try", strings.NewReader(body)).WithContext(ctx)
 	req.Header.Set("Content-Type", "application/json")
 	for k, v := range write(withSession(cookie)) {
@@ -185,5 +205,52 @@ func TestAStoppedTryAnswersNothing(t *testing.T) {
 	}
 	if rec.Body.Len() != 0 {
 		t.Errorf("a stopped try answered %q, want nothing", rec.Body)
+	}
+}
+
+// TestTryReadsOnlyFilesInsideALibrary: a try reads a file a library owns, judged by its real path.
+// A file no library holds is refused, and so is a link inside a library that points outside it.
+func TestTryReadsOnlyFilesInsideALibrary(t *testing.T) {
+	e, call := tryEnv(t, nil)
+	cookie := e.setup()
+	libraryFile := tryLibrary(t, e)
+
+	outside := filepath.Join(t.TempDir(), "elsewhere.mkv")
+	if err := os.WriteFile(outside, []byte("video"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out := []string{outside}
+	link := filepath.Join(filepath.Dir(libraryFile), "link.mkv")
+	if err := os.Symlink(outside, link); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("this Windows account cannot make a symlink: %v", err)
+		}
+		t.Fatalf("make the link: %v", err)
+	}
+	out = append(out, link)
+
+	for _, file := range out {
+		call.flow = nil
+		rec := e.do(http.MethodPost, "/api/v2/workflows/try",
+			mustJSON(t, map[string]any{"flow": apiFlow(t, "Try", 3), "file": file}),
+			write(withSession(cookie)), false)
+		code, msg, env := errorBody(t, rec)
+		if rec.Code != http.StatusBadRequest || code != "not_in_library" || env["field"] != "file" {
+			t.Fatalf("%s = %d %q field %v; want 400 not_in_library on file", file, rec.Code, code, env["field"])
+		}
+		if msg != "Pick a file inside one of your libraries." {
+			t.Errorf("message = %q, want ui-shop's sentence", msg)
+		}
+		if call.flow != nil {
+			t.Errorf("%s was tried anyway", file)
+		}
+	}
+
+	// The library's own file passes the check; the double then answers.
+	rec := e.do(http.MethodPost, "/api/v2/workflows/try",
+		mustJSON(t, map[string]any{"flow": apiFlow(t, "Try", 3), "file": libraryFile}),
+		write(withSession(cookie)), false)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("a library file = %d %s; want 200", rec.Code, rec.Body)
 	}
 }

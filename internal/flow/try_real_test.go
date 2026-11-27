@@ -75,7 +75,7 @@ func TestRealTryOnAFile(t *testing.T) {
 				Sleep:      time.Sleep,
 				AppVersion: "test",
 			}
-			res, err := flow.Try(context.Background(), starterFlow(t), src, env)
+			res, err := flow.Try(context.Background(), starterFlow(t), src, env, t.TempDir())
 			if err != nil {
 				t.Fatalf("try: %v", err)
 			}

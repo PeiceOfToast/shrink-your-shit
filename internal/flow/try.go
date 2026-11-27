@@ -59,8 +59,9 @@ const (
 
 // Try runs f on one file and answers the lines the pages show. It never asks for a saved revision
 // and never writes beside the file: the engine stops after the result check, and its staging goes
-// with the run, whether it passed, failed or was stopped.
-func Try(ctx context.Context, f Flow, file string, env Env) (TryResult, error) {
+// with the run, whether it passed, failed or was stopped. A sample is cut in scratch, a folder the
+// app made for this (never the system temp, which can be a small memory-backed folder).
+func Try(ctx context.Context, f Flow, file string, env Env, scratch string) (TryResult, error) {
 	if err := CheckShape(f); err != nil {
 		return TryResult{}, &TryError{Code: "invalid_flow", Message: err.Error()}
 	}
@@ -97,7 +98,7 @@ func Try(ctx context.Context, f Flow, file string, env Env) (TryResult, error) {
 	source := file
 	sample := time.Duration(0)
 	if whole > TryWhole {
-		dir, path, err := cutSample(ctx, file, whole, env)
+		dir, path, err := cutSample(ctx, file, whole, env, scratch)
 		if err != nil {
 			return TryResult{}, err
 		}
@@ -155,8 +156,11 @@ func Try(ctx context.Context, f Flow, file string, env Env) (TryResult, error) {
 // aligned; seeking while re-encoding is the one arrangement that does not (Mkv kept the video
 // about eight seconds late, and the result check said so). The pre-roll a keyframe adds is part
 // of the sample and of its measured length, so the estimate is not skewed by it.
-func cutSample(ctx context.Context, file string, whole time.Duration, env Env) (dir, path string, err error) {
-	dir, err = os.MkdirTemp("", "syp-try-*")
+func cutSample(ctx context.Context, file string, whole time.Duration, env Env, scratch string) (dir, path string, err error) {
+	if scratch == "" {
+		return "", "", errors.New("flow: a try needs a folder to cut its sample in")
+	}
+	dir, err = os.MkdirTemp(scratch, "try-*")
 	if err != nil {
 		return "", "", fmt.Errorf("try: make a sample folder: %w", err)
 	}

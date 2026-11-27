@@ -134,7 +134,15 @@ func run(dataDir, listen string) error {
 		// Try on one file (S2-5): the same engine as a job, with its own events that answer the
 		// page rather than going to the log.
 		Try: func(ctx context.Context, f flow.Flow, file string) (flow.TryResult, error) {
-			return flow.Try(ctx, f, file, engineEnv())
+			// A sample is a real copy of the video (a 4K minute can be hundreds of MB), so it goes
+			// in the app's own data folder rather than the system temp, which is often a small
+			// memory-backed one. The folder is made private and each sample's own folder is removed
+			// when the try ends.
+			scratch := filepath.Join(dataDir, "tmp")
+			if err := os.MkdirAll(scratch, 0o700); err != nil {
+				return flow.TryResult{}, fmt.Errorf("make the try folder: %w", err)
+			}
+			return flow.Try(ctx, f, file, engineEnv(), scratch)
 		},
 	})
 	fmt.Fprintln(os.Stderr, "syp serving on", ln.Addr())
