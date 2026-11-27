@@ -1,9 +1,9 @@
-// Real client for the job log and history (GET /jobs/{id}/events, GET /jobs/{id}/history). The mock has no such
-// functions yet (its job detail carries grouped logs and history), so these are typed from types.ts, not typeof mock.
-import { request } from "../http.ts";
-import type { HistoryLine, LogEvent } from "../types.ts";
+// Real client for the job log and history (GET /jobs/{id}/events, GET /jobs/{id}/history). Typed against the mock, so tsc
+// checks the same signatures.
+import type * as mock from "../mock.ts";
+import { request, type Out } from "../http.ts";
 
-export const getJobEvents = (id: string): Promise<LogEvent[]> =>
-  request<LogEvent[]>("GET", `/jobs/${encodeURIComponent(id)}/events`);
-export const getJobHistory = (id: string): Promise<HistoryLine[]> =>
-  request<HistoryLine[]>("GET", `/jobs/${encodeURIComponent(id)}/history`);
+export const getJobEvents: typeof mock.getJobEvents = (id) =>
+  request<Out<typeof mock.getJobEvents>>("GET", `/jobs/${encodeURIComponent(id)}/events`);
+export const getJobHistory: typeof mock.getJobHistory = (id) =>
+  request<Out<typeof mock.getJobHistory>>("GET", `/jobs/${encodeURIComponent(id)}/history`);

@@ -1,4 +1,4 @@
-import type { Attention, Job, JobDetail, JobsPage, JobsParams, Overview, Summary } from "./types.ts";
+import type { Attention, HistoryLine, Job, JobDetail, JobsPage, JobsParams, LogEvent, Overview, Summary } from "./types.ts";
 import { ATTENTION, OVERVIEW, SUMMARY } from "./fixtures/index.ts";
 import { JOBS } from "./fixtures/jobs.ts";
 import { jobDetail } from "./fixtures/jobDetail.ts";
@@ -120,8 +120,11 @@ export function getJobs(params: JobsParams = {}): Promise<JobsPage> {
   });
 }
 
-export function runJobsAction(action: "retry" | "cancel" | "top", ids: string[]): Promise<{ ok: true; action: string; count: number }> {
-  return respond(() => ({ ok: true as const, action, count: ids.length }));
+// POST /api/v2/jobs/actions: {done, refused[{id, code, message}]}. The mock refuses nothing.
+export function runJobsAction(action: "retry" | "cancel" | "top", ids: string[]): Promise<{ done: number; refused: { id: string; code: string; message: string }[] }> {
+  // The mock refuses nothing, so every id is done.
+  void action;
+  return respond(() => ({ done: ids.length, refused: [] }));
 }
 
 export function scanAllLibraries(): Promise<{ ok: true }> {
@@ -162,6 +165,41 @@ export function getJob(id: string): Promise<JobDetail> {
     const job = JOBS.find((j) => j.id === id);
     if (!job) throw new ApiError("job_not_found", "That job doesn't exist.");
     return jobDetail(job);
+  });
+}
+
+// GET /api/v2/jobs/{id}/events: the job log as flat events, oldest first. Derived from the job's logged steps: run start,
+// each step's start, its lines, and its end, then the run end.
+export function getJobEvents(id: string): Promise<LogEvent[]> {
+  return respond(() => {
+    const job = JOBS.find((j) => j.id === id);
+    if (!job) throw new ApiError("job_not_found", "That job doesn't exist.");
+    const d = jobDetail(job);
+    const out: LogEvent[] = [];
+    let seq = 0;
+    const push = (ts: string, level: LogEvent["level"], kind: LogEvent["kind"], message: string) =>
+      out.push({ seq: ++seq, ts, level, kind, source: job.worker, message, jobId: id, libraryId: null, workerId: null });
+    const logs = d.logs ?? [];
+    const first = logs[0]?.lines[0]?.time ?? job.startedAt ?? job.queuedAt ?? "";
+    const last = logs[logs.length - 1]?.lines.at(-1)?.time ?? job.finishedAt ?? first;
+    if (logs.length) push(first, "info", "run_start", `Run started for ${job.file}`);
+    for (const s of logs) {
+      const t = s.lines[0]?.time ?? first;
+      push(t, "info", "step_start", `${s.index}. ${s.name}`);
+      for (const l of s.lines) push(l.time, l.level === "detail" ? "info" : l.level, "note", l.text);
+      push(s.lines.at(-1)?.time ?? t, "info", "step_end", `${s.index}. ${s.name}`);
+    }
+    if (logs.length) push(last, job.state === "failed" ? "error" : "info", "run_end", `Run ${job.state}`);
+    return out;
+  });
+}
+
+// GET /api/v2/jobs/{id}/history: the job's history lines, oldest first.
+export function getJobHistory(id: string): Promise<HistoryLine[]> {
+  return respond(() => {
+    const job = JOBS.find((j) => j.id === id);
+    if (!job) throw new ApiError("job_not_found", "That job doesn't exist.");
+    return jobDetail(job).history;
   });
 }
 
