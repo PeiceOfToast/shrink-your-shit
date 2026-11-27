@@ -32,6 +32,12 @@ func startWithReportedChild(t *testing.T) (*exec.Cmd, *tree, int) {
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
+	// Every path out of the test ends the tree, including a Fatal inside waitForChildPID. After a
+	// test has already killed and released it the handles are zero, so this is a harmless no-op.
+	t.Cleanup(func() {
+		started.kill()
+		started.release()
+	})
 	return cmd, started, waitForChildPID(t, pidFile)
 }
 

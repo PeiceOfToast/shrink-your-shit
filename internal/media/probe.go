@@ -177,8 +177,14 @@ func Probe(ctx context.Context, path string) (Info, error) {
 	if err := ctx.Err(); err != nil {
 		return Info{}, fmt.Errorf("probe %s: %w", path, err)
 	}
-	if _, err := os.Stat(path); err != nil {
+	stat, err := os.Stat(path)
+	if err != nil {
 		return Info{}, fmt.Errorf("probe %s: %w", path, err)
+	}
+	// A named pipe or device is not a video, and open() on a pipe blocks until a writer arrives —
+	// a wait the context cannot interrupt. The stat already answers it.
+	if !stat.Mode().IsRegular() {
+		return Info{}, fmt.Errorf("%s: %w: not a regular file", path, ErrNotMedia)
 	}
 	// Opening it proves readability the same way ffprobe would; a file we cannot open is not a
 	// verdict about its contents.

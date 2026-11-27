@@ -75,6 +75,11 @@ func Run(ctx context.Context, argv []string, onProgress func(Progress)) (Result,
 		stdoutW.Close()
 		return Result{}, fmt.Errorf("run %s: make an error pipe: %w", program, err)
 	}
+	// The read ends are ours, so closing them is ours too: waitRead closes one early only when a
+	// reader is still stuck past the grace, and the defer is what keeps the normal EOF path from
+	// leaking two descriptors per run until a finalizer happens to collect them.
+	defer stdout.Close()
+	defer stderr.Close()
 	cmd.Stdout = stdoutW
 	cmd.Stderr = stderrW
 	key := &lineRing{max: keyLineCount}
@@ -83,9 +88,8 @@ func Run(ctx context.Context, argv []string, onProgress func(Progress)) (Result,
 	started := time.Now()
 	tree, err := startTree(cmd)
 	if err != nil {
-		for _, f := range []*os.File{stdout, stdoutW, stderr, stderrW} {
-			f.Close()
-		}
+		stdoutW.Close()
+		stderrW.Close()
 		return res, fmt.Errorf("run %s: %w", program, err)
 	}
 	res.PID = cmd.Process.Pid
