@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/PeiceOfToast/shrink-your-shit/internal/events"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/flow"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/jobs"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/library"
@@ -22,6 +23,8 @@ import (
 // the newest still waiting. Their files sit in one library that runs the Shrink workflow.
 type jobsFixture struct {
 	e       *env
+	q       *jobs.Queue
+	videos  string // the library folder; a golden shows it as /videos
 	cookie  *http.Cookie
 	done    int64 // the done job's id
 	failed  int64
@@ -59,10 +62,10 @@ func newJobsFixture(t *testing.T) *jobsFixture {
 	if err != nil {
 		t.Fatalf("save workflow: %v", err)
 	}
-	q := jobs.New(jobs.Options{DB: e.db, Bus: e.bus})
+	q := jobs.New(jobs.Options{DB: e.db, Bus: e.bus, Clock: e.clock.Now})
 	e.srv.Jobs(q, library.NewCatalog(e.db), flows, e.bus)
 
-	f := &jobsFixture{e: e, cookie: cookie}
+	f := &jobsFixture{e: e, cookie: cookie, videos: videos, q: q}
 	var ids []int64
 	for i, name := range []string{"one.mkv", "two.mkv", "three.mkv"} {
 		id, _, err := q.Enqueue(ctx, fileIDs[i], lib.ID, wf, filepath.Join(videos, name), "test")
@@ -336,5 +339,89 @@ func TestJobLogIsOldestFirstAndHistoryKeepsLifecycle(t *testing.T) {
 	}
 	if rec := f.e.do(http.MethodGet, fmt.Sprintf("/api/v2/jobs/%d/events", f.done), "", nil, false); rec.Code != http.StatusUnauthorized {
 		t.Errorf("log without a session: %d, want 401", rec.Code)
+	}
+}
+
+// A step's duration is its end time minus its start time, and the worker is the one that ran the job's attempt.
+func TestJobDetailHasStepDurationsAndWorker(t *testing.T) {
+	f := newJobsFixture(t)
+	bus := f.e.bus
+	if err := bus.Emit(events.Event{JobID: f.done, Attempt: 1, Kind: events.KindStepStart, Level: events.LevelInfo,
+		StepIndex: 1, StepName: "Video", Message: "1. Video"}); err != nil {
+		t.Fatal(err)
+	}
+	f.e.clock.Advance(2 * time.Second)
+	if err := bus.Emit(events.Event{JobID: f.done, Attempt: 1, Kind: events.KindStepEnd, Level: events.LevelInfo,
+		StepIndex: 1, StepName: "Video"}); err != nil {
+		t.Fatal(err)
+	}
+	var d struct {
+		Job    struct{ Worker string } `json:"job"`
+		Worker string                  `json:"worker"`
+		Steps  []struct {
+			Name       string `json:"name"`
+			DurationMs *int64 `json:"durationMs"`
+		} `json:"steps"`
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		decodeInto(t, f.get(fmt.Sprintf("/api/v2/jobs/%d", f.done)), &d)
+		if len(d.Steps) > 0 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if len(d.Steps) != 1 || d.Steps[0].DurationMs == nil || *d.Steps[0].DurationMs != 2000 {
+		t.Fatalf("steps = %+v; want one step of 2000 ms", d.Steps)
+	}
+	if d.Worker != "local" || d.Job.Worker != "local" {
+		t.Errorf("worker = %q (job %q); want local", d.Worker, d.Job.Worker)
+	}
+}
+
+// A retried job's steps come from its latest attempt only: attempt 1 failed in step 1, attempt 2 ran it again, and
+// step 1 shows attempt 2's duration, not the time across the retry.
+func TestJobDetailStepsAreTheLatestAttemptOnly(t *testing.T) {
+	f := newJobsFixture(t)
+	bus := f.e.bus
+	emit := func(e events.Event) {
+		t.Helper()
+		if err := bus.Emit(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	emit(events.Event{JobID: f.failed, Attempt: 1, Kind: events.KindStepStart, Level: events.LevelInfo, StepIndex: 1, StepName: "Video"})
+	f.e.clock.Advance(1 * time.Second)
+	emit(events.Event{JobID: f.failed, Attempt: 1, Kind: events.KindStepEnd, Level: events.LevelError, StepIndex: 1, StepName: "Video"})
+	f.e.clock.Advance(10 * time.Second)
+
+	// Retry the failed job and claim it again: the second claim is attempt 2.
+	ctx := context.Background()
+	if err := f.q.Retry(ctx, f.failed); err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	j, err := f.q.Claim(ctx, "local", jobs.ClaimOptions{})
+	if err != nil || j == nil || j.ID != f.failed || j.Attempt != 2 {
+		t.Fatalf("claim after retry = %+v, %v; want the failed job as attempt 2", j, err)
+	}
+	emit(events.Event{JobID: f.failed, Attempt: 2, Kind: events.KindStepStart, Level: events.LevelInfo, StepIndex: 1, StepName: "Video"})
+	f.e.clock.Advance(2 * time.Second)
+	emit(events.Event{JobID: f.failed, Attempt: 2, Kind: events.KindStepEnd, Level: events.LevelInfo, StepIndex: 1, StepName: "Video"})
+
+	var d struct {
+		Steps []struct {
+			DurationMs *int64 `json:"durationMs"`
+		} `json:"steps"`
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		decodeInto(t, f.get(fmt.Sprintf("/api/v2/jobs/%d", f.failed)), &d)
+		if len(d.Steps) == 1 && d.Steps[0].DurationMs != nil && *d.Steps[0].DurationMs == 2000 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if len(d.Steps) != 1 || d.Steps[0].DurationMs == nil || *d.Steps[0].DurationMs != 2000 {
+		t.Fatalf("steps = %+v; want one step of attempt 2's 2000 ms only", d.Steps)
 	}
 }

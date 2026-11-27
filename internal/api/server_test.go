@@ -131,7 +131,7 @@ func newEnv(t *testing.T, ready bool) *env {
 		t: t, srv: New("test-version"), db: db, scans: newScanRecorder(),
 		clock: &clock{now: time.Date(2026, 11, 27, 4, 0, 0, 0, time.UTC)}, dir: dir, stderr: &bytes.Buffer{},
 	}
-	e.bus, err = events.New(events.Options{DataDir: dir, DB: db, Stderr: e.stderr})
+	e.bus, err = events.New(events.Options{DataDir: dir, DB: db, Stderr: e.stderr, Clock: e.clock.Now})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -312,7 +312,8 @@ func TestHealthNeedsNoAuth(t *testing.T) {
 	}
 }
 
-// Before setup only page 13's allow-list answers; everything else says set up first (L-ACC-3).
+// Before setup only page 13's allow-list answers; every other /api call says set up first
+// (L-ACC-3). The pages themselves answer, so the first-run screen can load and call that list.
 func TestBeforeSetupOnlyTheAllowListWorks(t *testing.T) {
 	e := newEnv(t, true)
 	rec := e.do(http.MethodGet, "/api/v2/setup", "", nil, false)
@@ -326,9 +327,7 @@ func TestBeforeSetupOnlyTheAllowListWorks(t *testing.T) {
 	}
 	for _, c := range []struct{ method, path, body string }{
 		{http.MethodGet, "/api/v2/library", ""},
-		{http.MethodGet, "/", ""},
 		{http.MethodPost, "/api/v2/signin", `{"password":"` + testPassword + `"}`},
-		{http.MethodGet, "/?token=abc", ""},
 	} {
 		rec := e.do(c.method, c.path, c.body, write(nil), false)
 		if rec.Code != http.StatusForbidden {
@@ -336,6 +335,13 @@ func TestBeforeSetupOnlyTheAllowListWorks(t *testing.T) {
 		}
 		if code, _, _ := errorBody(t, rec); code != "setup_needed" {
 			t.Fatalf("%s %s: code %q, want setup_needed", c.method, c.path, code)
+		}
+	}
+	// A page is the interface's job, not the setup gate's. This env has no interface set, so the
+	// page is a plain not found; the static tests cover the shell itself.
+	for _, p := range []string{"/", "/?token=abc"} {
+		if code, _, _ := errorBody(t, e.do(http.MethodGet, p, "", write(nil), false)); code == "setup_needed" {
+			t.Fatalf("GET %s before setup: the setup gate refused a page", p)
 		}
 	}
 }

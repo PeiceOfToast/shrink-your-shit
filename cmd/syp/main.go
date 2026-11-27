@@ -25,6 +25,7 @@ import (
 	"github.com/PeiceOfToast/shrink-your-shit/internal/safety"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/store"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/system"
+	"github.com/PeiceOfToast/shrink-your-shit/internal/ui"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/worker"
 )
 
@@ -39,10 +40,16 @@ func main() {
 	fs := flag.NewFlagSet("syp", flag.ContinueOnError)
 	dataDir := fs.String("data", "", "the data folder (required)")
 	listen := fs.String("listen", "127.0.0.1:8484", "the address to serve on")
+	ffmpegDir := fs.String("ffmpeg", "", "the folder with ffmpeg and ffprobe (default: $SYP_FFMPEG_DIR, then PATH)")
 	if err := fs.Parse(os.Args[1:]); err != nil || *dataDir == "" {
-		fmt.Fprintln(os.Stderr, "usage: syp version | syp -data <dir> [-listen <addr>]")
+		fmt.Fprintln(os.Stderr, "usage: syp version | syp -data <dir> [-listen <addr>] [-ffmpeg <dir>]")
 		os.Exit(2)
 	}
+	dir := *ffmpegDir
+	if dir == "" {
+		dir = os.Getenv("SYP_FFMPEG_DIR")
+	}
+	media.SetToolDir(dir)
 	if err := run(*dataDir, *listen); err != nil {
 		fmt.Fprintln(os.Stderr, "syp:", err)
 		os.Exit(1)
@@ -57,6 +64,7 @@ func run(dataDir, listen string) error {
 	defer stop()
 
 	srv := api.New(version)
+	srv.SetUI(ui.Files()) // the built interface, embedded; a build without it serves the page that says so
 	ln, err := net.Listen("tcp", listen)
 	if err != nil {
 		return fmt.Errorf("listen on %s: %w", listen, err)

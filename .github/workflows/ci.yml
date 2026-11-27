@@ -56,6 +56,19 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # The web interface is embedded in the binary (internal/ui), so build it before the Go
+      # steps: the tests then run against the real dist, not the committed placeholder page. A
+      # build wipes internal/ui/dist and writes new hashed assets; nothing here is committed.
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ui/.nvmrc
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Build the web interface
+        working-directory: ui
+        run: npm ci --no-audit --no-fund && npm run build
+
       - name: Vet
         run: go vet ./...
 
@@ -119,3 +132,12 @@ jobs:
 
       - name: Test
         run: go test ./...
+
+  shellcheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint the deploy scripts
+        run: shellcheck deploy/*.sh

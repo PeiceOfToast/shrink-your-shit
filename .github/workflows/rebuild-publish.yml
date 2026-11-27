@@ -1,0 +1,91 @@
+name: rebuild publish
+
+# Publishes the rolling pre-release tagged "rebuild" on every push to the rebuild branch: install.sh, the two
+# binaries and checksums.txt. It creates that release once, never marks anything Latest, never moves a tag, never
+# touches main, and never creates any other tag or release. The tag is deleted at the first real release (the user's call).
+
+on:
+  push:
+    branches: [rebuild]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rebuild-publish
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ui/.nvmrc
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Build the UI (the same build CI checks)
+        working-directory: ui
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: Build syp for amd64 and arm64
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          set -eu
+          ver="rebuild-${GITHUB_SHA::7}"
+          for arch in amd64 arm64; do
+            GOOS=linux GOARCH="$arch" go build -trimpath \
+              -ldflags "-X main.version=$ver" -o "syp-linux-$arch" ./cmd/syp
+          done
+          cp deploy/install.sh install.sh
+          sha256sum syp-linux-amd64 syp-linux-arm64 install.sh > checksums.txt
+          cat checksums.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: syp-rebuild
+          path: |
+            install.sh
+            syp-linux-amd64
+            syp-linux-arm64
+            checksums.txt
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: syp-rebuild
+
+      - name: Update the rebuild pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          repo="$GITHUB_REPOSITORY"
+          # The tag is created once, with the release, at the commit that first published it. It is never moved:
+          # later runs only edit the release and replace its assets.
+          if ! gh release view rebuild --repo "$repo" >/dev/null 2>&1; then
+            gh release create rebuild --repo "$repo" --target "$GITHUB_SHA" --prerelease --latest=false \
+              --title "rebuild (rolling pre-release)" \
+              --notes "Rolling pre-release from the rebuild branch. Replaced on every push to rebuild. Not a release."
+          else
+            gh release edit rebuild --repo "$repo" --prerelease --latest=false
+          fi
+          gh release upload rebuild --repo "$repo" --clobber install.sh syp-linux-amd64 syp-linux-arm64 checksums.txt

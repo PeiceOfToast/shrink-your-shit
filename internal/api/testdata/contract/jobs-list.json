@@ -11,11 +11,11 @@
     "items": [
       {
         "file": "three.mkv",
-        "finishedAt": "2026-11-27T16:27:07.954Z",
+        "finishedAt": "2026-11-27T04:00:00.000Z",
         "id": "3",
         "library": "Clips",
         "progress": null,
-        "queuedAt": "2026-11-27T16:27:07.953Z",
+        "queuedAt": "2026-11-27T04:00:00.000Z",
         "result": {
           "failedStep": null,
           "outcome": "smaller",
@@ -24,20 +24,20 @@
           "sizeBefore": 1000,
           "warnings": 0
         },
-        "startedAt": "2026-11-27T16:27:07.954Z",
+        "startedAt": "2026-11-27T04:00:00.000Z",
         "state": "done",
         "step": null,
         "tookMs": 0,
-        "worker": "",
+        "worker": "local",
         "workflow": "Shrink"
       },
       {
         "file": "two.mkv",
-        "finishedAt": "2026-11-27T16:27:07.955Z",
+        "finishedAt": "2026-11-27T04:00:00.000Z",
         "id": "2",
         "library": "Clips",
         "progress": null,
-        "queuedAt": "2026-11-27T16:27:07.953Z",
+        "queuedAt": "2026-11-27T04:00:00.000Z",
         "result": {
           "failedStep": "encode",
           "outcome": null,
@@ -46,11 +46,11 @@
           "sizeBefore": 0,
           "warnings": 0
         },
-        "startedAt": "2026-11-27T16:27:07.954Z",
+        "startedAt": "2026-11-27T04:00:00.000Z",
         "state": "failed",
         "step": null,
-        "tookMs": 1,
-        "worker": "",
+        "tookMs": 0,
+        "worker": "local",
         "workflow": "Shrink"
       },
       {
@@ -59,7 +59,7 @@
         "id": "1",
         "library": "Clips",
         "progress": null,
-        "queuedAt": "2026-11-27T16:27:07.953Z",
+        "queuedAt": "2026-11-27T04:00:00.000Z",
         "result": {
           "failedStep": null,
           "outcome": null,

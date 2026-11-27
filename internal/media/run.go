@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -55,13 +56,14 @@ func Run(ctx context.Context, argv []string, onProgress func(Progress)) (Result,
 	if err := ctx.Err(); err != nil {
 		return Result{}, fmt.Errorf("run %s: %w", program, err)
 	}
-	if _, err := exec.LookPath(program); err != nil {
+	bin := tool(program)
+	if _, err := exec.LookPath(bin); err != nil {
 		return Result{}, fmt.Errorf("run %s: %w: %v", program, ErrFFmpegMissing, err)
 	}
 
 	args := append([]string(nil), argv[1:]...)
 	args = append(args, "-progress", "pipe:1", "-nostats")
-	cmd := exec.Command(program, args...)
+	cmd := exec.Command(bin, args...)
 	// The pipes are ours rather than StdoutPipe/StderrPipe, because Wait closes the read ends of
 	// those while a reader may still be using them, and a reader beside Wait is what lets a
 	// leftover child holding the pipe be handled at all.
@@ -301,4 +303,18 @@ func (l *lineRing) push(line string) {
 	if len(l.ring) > l.max {
 		l.ring = l.ring[len(l.ring)-l.max:]
 	}
+}
+
+// toolDir, when set, is the folder with the ffmpeg and ffprobe the installer put in place. PATH is the fallback.
+var toolDir string
+
+// SetToolDir makes media use <dir>/ffmpeg and <dir>/ffprobe. An empty dir keeps the PATH lookup.
+func SetToolDir(dir string) { toolDir = dir }
+
+// tool is the program to run for name. Only ffmpeg and ffprobe come from toolDir; anything else is left to PATH.
+func tool(name string) string {
+	if toolDir == "" || (name != "ffmpeg" && name != "ffprobe") {
+		return name
+	}
+	return filepath.Join(toolDir, name)
 }
