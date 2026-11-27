@@ -317,17 +317,24 @@ func scaleTo(v media.VideoTrack, box Scale) (int, int, error) {
 	if v.Width <= 0 || v.Height <= 0 {
 		return 0, 0, fmt.Errorf("%w: the source has no picture size", ErrInvalidPlan)
 	}
+	// ffmpeg applies the Display Matrix rotation before the filter chain, so the picture `scale`
+	// sees is the upright one: a quarter turn swaps the coded sides (review 44dbabe). The output
+	// literal is therefore the upright size, which is also what a player will show.
+	srcW, srcH := v.Width, v.Height
+	if v.Rotation%180 != 0 {
+		srcW, srcH = v.Height, v.Width
+	}
 	width, height := box.Width, box.Height
 	if width == 0 {
-		width = v.Width
+		width = srcW
 	}
 	if height == 0 {
-		height = v.Height
+		height = srcH
 	}
-	factor := math.Min(math.Min(float64(width)/float64(v.Width), float64(height)/float64(v.Height)), 1)
-	w := evenRound(float64(v.Width) * factor)
-	h := evenRound(float64(v.Height) * factor)
-	if w >= v.Width && h >= v.Height {
+	factor := math.Min(math.Min(float64(width)/float64(srcW), float64(height)/float64(srcH)), 1)
+	w := evenRound(float64(srcW) * factor)
+	h := evenRound(float64(srcH) * factor)
+	if w >= srcW && h >= srcH {
 		return 0, 0, nil
 	}
 	return w, h, nil

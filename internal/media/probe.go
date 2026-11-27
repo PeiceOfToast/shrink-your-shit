@@ -66,20 +66,23 @@ func (r Rational) String() string {
 // VideoTrack is one video stream. AttachedPicture marks cover art, which is a video stream in some
 // containers but must never be mistaken for the main video.
 type VideoTrack struct {
-	Index           int
-	Codec           string
-	Tag             string // the container codec tag ("hvc1", "avc1", "hev1"); "" when unset
-	Profile         string
-	Width, Height   int
-	FrameRate       Rational
-	PixelFormat     string
-	BitDepth        int
-	BitRate         int64
-	ColorPrimaries  string
-	ColorTransfer   string
-	ColorSpace      string
-	ColorRange      string
-	HDR             HDR
+	Index          int
+	Codec          string
+	Tag            string // the container codec tag ("hvc1", "avc1", "hev1"); "" when unset
+	Profile        string
+	Width, Height  int
+	FrameRate      Rational
+	PixelFormat    string
+	BitDepth       int
+	BitRate        int64
+	ColorPrimaries string
+	ColorTransfer  string
+	ColorSpace     string
+	ColorRange     string
+	HDR            HDR
+	// Rotation is the Display Matrix's rotation in degrees (−90, 90, 180 or 270): how far the
+	// player must turn the coded picture to show it upright. 0 when there is no matrix.
+	Rotation        int
 	AttachedPicture bool
 	Language        string
 	Title           string
@@ -294,8 +297,9 @@ type probeDisposition struct {
 }
 
 type probeSideData struct {
-	Type      string  `json:"side_data_type"`
-	DVProfile flexInt `json:"dv_profile"`
+	Type      string    `json:"side_data_type"`
+	DVProfile flexInt   `json:"dv_profile"`
+	Rotation  flexFloat `json:"rotation"`
 }
 
 type probeChapter struct {
@@ -423,6 +427,8 @@ func videoTrack(s *probeStream) VideoTrack {
 		case "DOVI configuration record":
 			v.HDR.DolbyVision = true
 			v.HDR.DVProfile = int(sd.DVProfile)
+		case "Display Matrix":
+			v.Rotation = int(math.Round(float64(sd.Rotation)))
 		}
 	}
 	return v

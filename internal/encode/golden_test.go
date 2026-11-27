@@ -83,6 +83,22 @@ func goldenCases() []goldenCase {
 			}
 		}
 	}
+	// A rotated phone clip: ffmpeg autorotates before -vf, so the 1080 box fits the upright
+	// 2160×3840 picture and writes 608×1080 rather than squashing it into 1920×1080 (review
+	// 44dbabe). This row fails if the coded size is used again.
+	rotated := goldenInfo(8, "bt709")
+	rotated.Video[0].Rotation = 90
+	cases = append(cases, goldenCase{
+		name:    "rotated90-1080-mkv",
+		summary: "hevc 8 rotated90 1080 mkv",
+		plan: Plan{
+			Video:     VideoPlan{Codec: CodecHEVC, CRF: intp(22), Preset: "normal", Scale: Scale{Height: 1080}},
+			Container: ContainerMKV,
+			Output:    "out.mkv",
+		},
+		info: rotated,
+		rung: cpuRung(CodecHEVC),
+	})
 	return cases
 }
 

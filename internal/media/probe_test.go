@@ -147,6 +147,21 @@ func TestParseProbeCodecTagAndDolbyVisionProfile(t *testing.T) {
 	}
 }
 
+// TestParseProbeRotation covers the Display Matrix's rotation, the fact the encoder needs to fit
+// a scale box to the upright picture rather than the coded one (review 44dbabe).
+func TestParseProbeRotation(t *testing.T) {
+	v := loadProbe(t, "mp4-rotated90.json").Video[0]
+	if v.Width != 320 || v.Height != 240 {
+		t.Errorf("coded size = %dx%d, want 320x240", v.Width, v.Height)
+	}
+	if v.Rotation != 90 {
+		t.Errorf("rotation = %d, want 90", v.Rotation)
+	}
+	if got := loadProbe(t, "mp4-h264-aac.json").Video[0].Rotation; got != 0 {
+		t.Errorf("rotation without a matrix = %d, want 0", got)
+	}
+}
+
 func TestParseProbeLanguagesAndSubtitles(t *testing.T) {
 	info := loadProbe(t, "mkv-chapters.json")
 

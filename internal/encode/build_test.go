@@ -342,19 +342,27 @@ func TestBuildScaleNeverUpsizes(t *testing.T) {
 		name       string
 		sourceW    int
 		sourceH    int
+		rotation   int
 		box        Scale
 		wantFilter string
 	}{
-		{"1080 from 2160", 3840, 2160, Scale{Height: 1080}, "scale=1920:1080"},
-		{"720 from 2160", 3840, 2160, Scale{Height: 720}, "scale=1280:720"},
-		{"custom box keeps the shape", 3840, 2160, Scale{Width: 1920, Height: 800}, "scale=1422:800"},
-		{"box 640 on a 720p source", 1280, 720, Scale{Width: 640, Height: 640}, "scale=640:360"},
-		{"same height is no scaling", 1920, 1080, Scale{Height: 1080}, ""},
-		{"never larger than the source", 320, 240, Scale{Height: 1080}, ""},
+		{"1080 from 2160", 3840, 2160, 0, Scale{Height: 1080}, "scale=1920:1080"},
+		{"720 from 2160", 3840, 2160, 0, Scale{Height: 720}, "scale=1280:720"},
+		{"custom box keeps the shape", 3840, 2160, 0, Scale{Width: 1920, Height: 800}, "scale=1422:800"},
+		{"box 640 on a 720p source", 1280, 720, 0, Scale{Width: 640, Height: 640}, "scale=640:360"},
+		{"same height is no scaling", 1920, 1080, 0, Scale{Height: 1080}, ""},
+		{"never larger than the source", 320, 240, 0, Scale{Height: 1080}, ""},
+		// ffmpeg autorotates before -vf, so a quarter turn is fitted as the upright (swapped) size.
+		{"quarter turn 90", 320, 240, 90, Scale{Height: 180}, "scale=134:180"},
+		{"quarter turn -90", 320, 240, -90, Scale{Height: 180}, "scale=134:180"},
+		{"quarter turn 270", 320, 240, 270, Scale{Height: 180}, "scale=134:180"},
+		{"half turn does not swap", 320, 240, 180, Scale{Height: 180}, "scale=240:180"},
+		{"phone clip in a 1080 box upright", 3840, 2160, 90, Scale{Height: 1080}, "scale=608:1080"},
 	}
 	for _, c := range cases {
 		info := baseInfo()
 		info.Video[0].Width, info.Video[0].Height = c.sourceW, c.sourceH
+		info.Video[0].Rotation = c.rotation
 		plan := basePlan(CodecHEVC)
 		plan.Video.Scale = c.box
 		res := buildOK(t, plan, info, cpuRung(CodecHEVC))
