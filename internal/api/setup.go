@@ -134,6 +134,12 @@ func writeSetupLibraryError(w http.ResponseWriter, err error) {
 		message = pathErr.Error()
 	} else if errors.Is(err, library.ErrPathAlreadyWatched) {
 		message = "Another library already watches this folder. Choose a different folder."
+	} else if errors.Is(err, library.ErrPathNested) {
+		var nested *library.NestedError
+		errors.As(err, &nested)
+		if nested != nil {
+			message = nested.Sentence()
+		}
 	} else if errors.Is(err, library.ErrInvalidWatch) {
 		message = "Pick hourly, daily or weekly."
 	}

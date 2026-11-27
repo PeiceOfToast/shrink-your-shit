@@ -24,6 +24,35 @@ var ErrNotFound = errors.New("library not found")
 // ErrPathAlreadyWatched means another library already has this folder.
 var ErrPathAlreadyWatched = errors.New("another library already watches this folder")
 
+// ErrPathNested means the folder is inside another library's folder, or contains it: a file can
+// belong to one library only, and with replace mode two jobs would swap out the same original.
+var ErrPathNested = errors.New("the folder overlaps another library's folder")
+
+// NestedError is the refusal of a nested folder; it names the library the folder overlaps and which
+// way the overlap runs, so the page says which one.
+type NestedError struct {
+	Path    string
+	Library string
+	// Contains is true when the refused folder holds the library's folder, rather than sitting
+	// inside it.
+	Contains bool
+}
+
+func (e *NestedError) Error() string {
+	return fmt.Sprintf("%s: %s overlaps the library %q", ErrPathNested, e.Path, e.Library)
+}
+
+// Sentence is what the pages show for this refusal, in ui-shop's words: it names the direction of
+// the overlap, not just that there is one.
+func (e *NestedError) Sentence() string {
+	if e.Contains {
+		return fmt.Sprintf("This folder contains the library %q. A file can belong to one library only.", e.Library)
+	}
+	return fmt.Sprintf("This folder is inside the library %q. A file can belong to one library only.", e.Library)
+}
+
+func (e *NestedError) Unwrap() error { return ErrPathNested }
+
 // ErrInvalidWatch means a watch value other than hourly, daily or weekly.
 var ErrInvalidWatch = errors.New("watch must be hourly, daily or weekly")
 
@@ -478,16 +507,29 @@ func (c *Catalog) checkPath(path string) (string, error) {
 	return abs, nil
 }
 
-// refuseWatched stops two libraries from pointing at the same folder.
+// refuseWatched stops two libraries from watching one real folder, or folders nested in each
+// other. Folders compare by their real path and by the identity the file system gives them, so a
+// symlink or a second mount of a folder is caught; nesting also compares each ancestor's identity,
+// so a folder reached through a second mount is still inside the folder it really sits in.
 func (c *Catalog) refuseWatched(ctx context.Context, path string, exceptID int64) error {
-	var id int64
-	err := c.db.Read().QueryRowContext(ctx,
-		`SELECT id FROM libraries WHERE path = ? AND id <> ?`, path, exceptID).Scan(&id)
-	if err == nil {
-		return fmt.Errorf("%w: %s", ErrPathAlreadyWatched, path)
+	libs, err := c.ListLibraries(ctx)
+	if err != nil {
+		return fmt.Errorf("check the library paths: %w", err)
 	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("check the library path %s: %w", path, err)
+	candidate := identifyFolder(path)
+	for _, lib := range libs {
+		if lib.ID == exceptID {
+			continue
+		}
+		other := identifyFolder(lib.Path)
+		switch {
+		case candidate.same(other):
+			return fmt.Errorf("%w: %s", ErrPathAlreadyWatched, path)
+		case candidate.inside(other):
+			return &NestedError{Path: path, Library: lib.Name}
+		case other.inside(candidate):
+			return &NestedError{Path: path, Library: lib.Name, Contains: true}
+		}
 	}
 	return nil
 }

@@ -123,6 +123,14 @@ func (s *Server) postLibrary(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid_request", pathErr.Error(), "path", 0)
 		case errors.Is(err, library.ErrPathAlreadyWatched):
 			writeError(w, http.StatusBadRequest, "invalid_request", "Another library already watches this folder. Choose a different folder.", "path", 0)
+		case errors.Is(err, library.ErrPathNested):
+			var nested *library.NestedError
+			errors.As(err, &nested)
+			message := "This folder overlaps another library's folder. Choose a folder of its own."
+			if nested != nil {
+				message = nested.Sentence()
+			}
+			writeError(w, http.StatusBadRequest, "invalid_request", message, "path", 0)
 		case errors.Is(err, library.ErrInvalidWatch):
 			writeError(w, http.StatusBadRequest, "invalid_request", "Pick hourly, daily or weekly.", "watch", 0)
 		default:
