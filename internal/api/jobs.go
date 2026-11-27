@@ -381,8 +381,10 @@ func (s *Server) steps(ctx context.Context, d *jobDeps, j jobs.Job) []stepJSON {
 	if d.bus == nil {
 		return []stepJSON{}
 	}
+	// Only the latest attempt's steps count: an earlier attempt that failed in a step must not stretch that step.
 	starts, _ := s.kindEvents(ctx, d, j.ID, events.KindStepStart)
 	ends, _ := s.kindEvents(ctx, d, j.ID, events.KindStepEnd)
+	starts, ends = onAttempt(starts, j.Attempt), onAttempt(ends, j.Attempt)
 	endBy := map[int]events.Event{}
 	for _, e := range ends {
 		endBy[e.StepIndex] = e
@@ -472,4 +474,15 @@ func (s *Server) workerOf(ctx context.Context, d *jobDeps, j jobs.Job) string {
 		return w
 	}
 	return j.WorkerID
+}
+
+// onAttempt keeps the events of one attempt, in their order.
+func onAttempt(evs []events.Event, attempt int) []events.Event {
+	var out []events.Event
+	for _, e := range evs {
+		if e.Attempt == attempt {
+			out = append(out, e)
+		}
+	}
+	return out
 }
