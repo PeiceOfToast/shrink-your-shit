@@ -468,6 +468,11 @@ export function healthFailing(): boolean {
 
 let token: string | null = "syp_7Hk2mQ9xR4vL0pZa8Wb3nJ6tF1cE5dG";
 
+// The access token the sign-in link carries (sign-in checks it synchronously in the mock).
+export function currentToken(): string | null {
+  return token;
+}
+
 export function changePassword(password: string): Promise<void> {
   return respond(() => {
     if (password.length < 8) throw new ApiError("password_too_short", "Use at least 8 characters.", "password");

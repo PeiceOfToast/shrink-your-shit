@@ -25,7 +25,10 @@ function activeKey(pathname: string): string {
 }
 
 // A small dropdown: opens on click, closes on outside click or Escape.
-function Menu({ label, icon, primary, items }: { label: string; icon?: IconName; primary?: boolean; items: { label: string; to: string }[] }) {
+// An item goes to a route, or runs its own action (sign out ends the session first).
+type MenuItem = { label: string; to?: string; onSelect?: () => void };
+
+function Menu({ label, icon, primary, items }: { label: string; icon?: IconName; primary?: boolean; items: MenuItem[] }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -58,7 +61,8 @@ function Menu({ label, icon, primary, items }: { label: string; icon?: IconName;
               role="menuitem"
               onClick={() => {
                 setOpen(false);
-                navigate(it.to);
+                if (it.onSelect) it.onSelect();
+                else if (it.to) navigate(it.to);
               }}
             >
               {it.label}
@@ -187,7 +191,19 @@ export function Shell({ children }: { children: ReactNode }) {
             { label: "Add worker", to: "/workers?add=1" },
           ]}
         />
-        <Menu label="Account" items={[{ label: "Your access tokens", to: "/settings/access" }, { label: "Sign out", to: "/signin" }]} />
+        <Menu
+          label="Account"
+          items={[
+            { label: "Your access tokens", to: "/settings/access" },
+            {
+              label: "Sign out",
+              onSelect: () => {
+                // The session ends on the server first; the sign-in page then shows whether or not the call worked.
+                api.signOut().finally(() => navigate("/signin"));
+              },
+            },
+          ]}
+        />
         <button
           type="button"
           className="btn ghost sm"

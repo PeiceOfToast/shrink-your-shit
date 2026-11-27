@@ -3,7 +3,7 @@ import { ATTENTION, OVERVIEW, SUMMARY } from "./fixtures/index.ts";
 import { JOBS } from "./fixtures/jobs.ts";
 import { jobDetail } from "./fixtures/jobDetail.ts";
 import { ApiError } from "./errors.ts";
-import { getForcedState, respond } from "./mockState.ts";
+import { getForcedState, isFreshInstall, respond } from "./mockState.ts";
 import { currentLibraries, reconnectShare } from "./mockLibraries.ts";
 import { setAllWorkers, workerName } from "./mockWorkers.ts";
 import { healthFailing } from "./mockSettings.ts";
@@ -18,6 +18,7 @@ export * from "./mockWorkflows.ts";
 export * from "./mockWorkers.ts";
 export * from "./mockSettings.ts";
 export * from "./mockLog.ts";
+export * from "./mockSetup.ts";
 
 // The status line reads this even when a page's own call is forced to fail, so it keeps its counts.
 export function getSummary(): Promise<Summary> {
@@ -26,7 +27,7 @@ export function getSummary(): Promise<Summary> {
       const s = getForcedState();
       // New errors are error lines the System log hasn't been opened past yet (mockLog.ts).
       // Fresh install: no job has finished and no library is watched yet.
-      const fresh = s === "fresh" ? { lastDoneAt: null, nextScanAt: null } : {};
+      const fresh = s === "fresh" || isFreshInstall() ? { lastDoneAt: null, nextScanAt: null } : {};
       // A fresh install has no log lines yet, so no new errors.
       const none = s === "empty" || s === "fresh";
       const seenAt = none ? null : getSeenAt();

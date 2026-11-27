@@ -41,6 +41,8 @@ export type Route =
   | { name: "library"; id: string }
   | { name: "systemLog" }
   | { name: "settings"; section: SettingsSection | null }
+  | { name: "start" }
+  | { name: "signin" }
   | { name: "placeholder"; title: string };
 
 const TITLES: Record<string, string> = {
@@ -74,6 +76,8 @@ export function resolve(pathname: string): Route {
     if (parts.length === 1) return { name: "libraries" };
     if (parts.length === 2) return { name: "library", id: parts[1] };
   }
+  if (parts[0] === "start" && parts.length === 1) return { name: "start" };
+  if (parts[0] === "signin" && parts.length === 1) return { name: "signin" };
   if (parts[0] === "settings" && parts[1] === "log") return { name: "systemLog" };
   if (parts[0] === "settings") {
     if (parts.length === 1) return { name: "settings", section: null };

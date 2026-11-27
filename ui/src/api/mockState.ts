@@ -1,10 +1,19 @@
 // The dev state switcher's forced state, and the delay every mock call waits. Shared by the mock modules.
 import { ApiError } from "./errors.ts";
 
-export type ForcedState = "none" | "empty" | "loading" | "error" | "running" | "fresh";
+export type ForcedState = "none" | "empty" | "loading" | "error" | "running" | "fresh" | "setup" | "starting";
 
 let forced: ForcedState = "none";
 const listeners = new Set<() => void>();
+
+// Set when the first run was finished without a library: the dashboard then shows its first-run look (page 13).
+let freshInstall = false;
+export function setFreshInstall(v: boolean): void {
+  freshInstall = v;
+}
+export function isFreshInstall(): boolean {
+  return freshInstall;
+}
 
 export function setForcedState(state: ForcedState): void {
   forced = state;
