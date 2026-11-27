@@ -853,3 +853,18 @@
 .syslog-since {
   margin: 0 0 8px;
 }
+
+/* 390 px pass: tap targets reach 32 px on phones. Layout only; desktop sizes are unchanged. */
+@media (max-width: 600px) {
+  .btn { min-height: 32px; }
+  .btn.sm { height: 32px; }
+  .topbar a, .statusbar a, .card a:not(.btn), .card button:not(.btn), .syslog-link, .syslog button:not(.btn),
+  .syslog a:not(.btn), .row a, .set-back, .seg button, .tabs button, .jd-seg button {
+    display: inline-flex;
+    align-items: center;
+    min-height: 32px;
+  }
+  .btn, .btn.sm { min-width: 32px; }
+  .jd-sec-toggle { min-height: 32px; }
+  input:not([type="checkbox"]):not([type="radio"]), select { min-height: 32px; }
+}
