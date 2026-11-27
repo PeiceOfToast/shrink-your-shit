@@ -55,6 +55,13 @@ var hookAfterOriginalMoved = func() {}
 // stranger's file could take the name (review #865).
 var hookBeforeOriginalMove = func() {}
 
+// hookBeforePutBack and hookBeforeSettle are test hooks: the first runs before a stranger's put-back, the second before
+// the row is settled after a verified swap (review #865 add-on).
+var (
+	hookBeforePutBack = func() {}
+	hookBeforeSettle  = func() {}
+)
+
 func crashPoint(step int) {
 	if crashHook != nil {
 		crashHook(step)
@@ -113,6 +120,7 @@ func Swap(ctx context.Context, j *Journal, p SwapPlan) (SwapResult, error) {
 	// moved. The trash copy is identified against the recorded original: a mismatch is put back (no-replace) and the
 	// row waits for a person. The stranger is never lost or replaced (review #865).
 	if got, err := identify(trash); err != nil || !sameIdent(got, origID) {
+		hookBeforePutBack()
 		if rerr := fsx.RenameNoReplace(trash, p.Original); rerr != nil {
 			_ = j.SetState(ctx, id, StateAttention)
 			return SwapResult{}, fmt.Errorf("%w (%v)", ErrStrangerInTrash, rerr)
@@ -137,6 +145,7 @@ func Swap(ctx context.Context, j *Journal, p SwapPlan) (SwapResult, error) {
 
 	// Step 7: settle the row. With keep 0 the trash copy goes now that the swap is verified.
 	res := SwapResult{Trash: trash, Final: p.Final}
+	hookBeforeSettle()
 	if p.KeepDays == 0 {
 		if err := os.Remove(trash); err != nil {
 			// The swap is verified; the copy stays and the row stays "done" for the sweep to report.

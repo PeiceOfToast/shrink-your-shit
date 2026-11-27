@@ -176,8 +176,9 @@ func (e *engine) run(ctx context.Context) (res Result) {
 		return fatal("encode.plan_failed", err.Error(), e.encodeOwner(decisions), "")
 	}
 	if len(extracts) > 0 && !e.in.Try {
-		// A replace takes the original's own name (its stem, the new extension): the original is swapped out, so that
-		// name is free by design and must not be renamed (review #865).
+		// A replace takes the original's stem with the new extension. The swap moves the original out first, and
+		// refuses a final name another file already holds (replace.failed, the original back), so the name is not
+		// renamed here (review #865).
 		if !e.replace {
 			name, err := safety.FreeName(plan.Output)
 			if err != nil {

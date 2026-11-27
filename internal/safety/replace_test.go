@@ -593,3 +593,97 @@ func TestUnwritableTrashKeepsTheOriginal(t *testing.T) {
 		t.Errorf("original = %q, want it untouched", got)
 	}
 }
+
+// TestStrangerPutBackFailsAttentionWrapsStranger (G1): a stranger moved to the trash cannot go back to the name, so the
+// row is attention and the error says the stranger is in the trash (review #865 add-on).
+func TestStrangerPutBackFailsAttentionWrapsStranger(t *testing.T) {
+	f := newSwapFixture(t, "")
+	aside := f.original + ".aside"
+	hookBeforeOriginalMove = func() {
+		if err := os.Rename(f.original, aside); err != nil {
+			t.Fatalf("move the original aside: %v", err)
+		}
+		if err := os.WriteFile(f.original, []byte("STRANGER-1"), 0o644); err != nil {
+			t.Fatalf("write the first stranger: %v", err)
+		}
+	}
+	hookBeforePutBack = func() {
+		// A second stranger takes the name before the put-back, so the no-replace rename cannot go back there.
+		if err := os.WriteFile(f.original, []byte("STRANGER-2"), 0o644); err != nil {
+			t.Fatalf("write the second stranger: %v", err)
+		}
+	}
+	t.Cleanup(func() {
+		hookBeforeOriginalMove = func() {}
+		hookBeforePutBack = func() {}
+	})
+	_, err := Swap(context.Background(), f.j, f.plan(15, 1))
+	if !errors.Is(err, ErrStrangerInTrash) {
+		t.Fatalf("error = %v, want it to wrap ErrStrangerInTrash", err)
+	}
+	var state string
+	if err := f.j.db.Read().QueryRow(`SELECT state FROM replace_journal WHERE job_id = 15`).Scan(&state); err != nil {
+		t.Fatal(err)
+	}
+	if state != StateAttention {
+		t.Errorf("journal state = %q, want attention", state)
+	}
+	if got := readFile(t, f.original); got != "STRANGER-2" {
+		t.Errorf("the name = %q, want the second stranger kept", got)
+	}
+	if got := readFile(t, filepath.Join(f.lib, TrashDir, "movie.15.mkv")); got != "STRANGER-1" {
+		t.Errorf("the trash copy = %q, want the first stranger, not replaced", got)
+	}
+	if got := readFile(t, aside); got != origBytes {
+		t.Errorf("the original set aside = %q, want it untouched", got)
+	}
+}
+
+// TestSettleFailsAfterAVerifiedSwap (G2): the journal cannot be settled after the swap is verified. The new file is at
+// its name, and the error says so, not that the swap failed (review #865 add-on).
+func TestSettleFailsAfterAVerifiedSwap(t *testing.T) {
+	f := newSwapFixture(t, "")
+	hookBeforeSettle = func() {
+		// The journal goes away between the verified swap and its settle.
+		_ = f.j.db.Close()
+	}
+	t.Cleanup(func() { hookBeforeSettle = func() {} })
+	_, err := Swap(context.Background(), f.j, f.plan(16, 1))
+	if !errors.Is(err, ErrRecordNotSettled) {
+		t.Fatalf("error = %v, want ErrRecordNotSettled", err)
+	}
+	if got := readFile(t, f.final); got != newBytes {
+		t.Errorf("the name = %q, want the new file in place", got)
+	}
+	if got := readFile(t, filepath.Join(f.lib, TrashDir, "movie.16.mkv")); got != origBytes {
+		t.Errorf("the trash copy = %q, want the original", got)
+	}
+}
+
+// TestExtensionChangeOntoAnExistingNameRefuses (N1): a replace that changes the extension to a name another file already
+// holds refuses cleanly: the original is back, and nothing is overwritten (review #865 add-on).
+func TestExtensionChangeOntoAnExistingNameRefuses(t *testing.T) {
+	f := newSwapFixture(t, "")
+	orig := filepath.Join(f.lib, "clip.mp4")
+	final := filepath.Join(f.lib, "clip.mkv")
+	if err := os.WriteFile(orig, []byte(origBytes), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(final, []byte("ANOTHER-FILE"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f.original, f.final = orig, final
+	_, err := Swap(context.Background(), f.j, f.plan(17, 1))
+	if !errors.Is(err, ErrSwapFailed) {
+		t.Fatalf("error = %v, want ErrSwapFailed", err)
+	}
+	if got := readFile(t, orig); got != origBytes {
+		t.Errorf("the original = %q, want it back at its name", got)
+	}
+	if got := readFile(t, final); got != "ANOTHER-FILE" {
+		t.Errorf("the file at the new name = %q, want it not overwritten", got)
+	}
+	if got := readFile(t, f.staged); got != newBytes {
+		t.Errorf("the staged file = %q, want it still there", got)
+	}
+}
