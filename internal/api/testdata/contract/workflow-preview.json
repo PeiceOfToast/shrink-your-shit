@@ -10,7 +10,13 @@
         "field": "where",
         "stepId": "save",
         "value": "replace",
-        "why": "Replacing the original comes in a later update; for now the converted file is saved next to it."
+        "why": "Replacing the original comes in a later update; for now the new file is saved next to it."
+      },
+      {
+        "field": "where",
+        "stepId": "save",
+        "value": "folder",
+        "why": "Saving to a different folder comes in a later update; for now the new file is saved next to it."
       },
       {
         "field": "container",

@@ -5,7 +5,9 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/PeiceOfToast/shrink-your-shit/internal/flow"
@@ -36,6 +38,25 @@ func answersJSON(t *testing.T, a any) string {
 type guideAnswers struct {
 	Answers    map[string]any `json:"answers"`
 	FitsGuided bool           `json:"fitsGuided"`
+	Rev        int            `json:"rev"`
+}
+
+// conflictBody is the 409 changed_since envelope: the error and the draft's current revision.
+type conflictBody struct {
+	Error struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	} `json:"error"`
+	Rev int `json:"rev"`
+}
+
+func changedSince(t *testing.T, rec *httptest.ResponseRecorder) conflictBody {
+	t.Helper()
+	var got conflictBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("conflict body: %v; %s", err, rec.Body)
+	}
+	return got
 }
 
 // The guided page's reads and its save: "new" opens on the defaults, an existing workflow on its
@@ -46,8 +67,8 @@ func TestGuidedAnswersRoutes(t *testing.T) {
 
 	var fresh guideAnswers
 	get(t, e, cookie, "/api/v2/workflows/new/answers", &fresh)
-	if !fresh.FitsGuided || answersJSON(t, fresh.Answers) != answersJSON(t, flow.DefaultAnswers()) {
-		t.Fatalf("new answers = %+v; want the guide's defaults", fresh)
+	if !fresh.FitsGuided || fresh.Rev != 0 || answersJSON(t, fresh.Answers) != answersJSON(t, flow.DefaultAnswers()) {
+		t.Fatalf("new answers = %+v; want the guide's defaults at rev 0", fresh)
 	}
 	if fresh.Answers["original"] != "next_to_original" {
 		t.Errorf("new original = %v, want next_to_original", fresh.Answers["original"])
@@ -61,8 +82,8 @@ func TestGuidedAnswersRoutes(t *testing.T) {
 		t.Fatal("no shrink-videos starter")
 	}
 	own, fits := flow.ToAnswers(starter.Flow)
-	if !fits || !saved.FitsGuided || answersJSON(t, saved.Answers) != answersJSON(t, own) {
-		t.Fatalf("the setup workflow's answers = %+v; want the starter's %+v", saved, own)
+	if !fits || !saved.FitsGuided || saved.Rev != 0 || answersJSON(t, saved.Answers) != answersJSON(t, own) {
+		t.Fatalf("the setup workflow's answers = %+v; want the starter's %+v at rev 0", saved, own)
 	}
 
 	// The guided save writes the answers' flow as the draft and answers with it.
@@ -80,6 +101,12 @@ func TestGuidedAnswersRoutes(t *testing.T) {
 	}
 	if savedFlow.Rev != 1 || apiQualityOf(t, savedFlow.Flow) != 5 {
 		t.Fatalf("put answers = rev %d quality %d; want rev 1 at quality 5", savedFlow.Rev, apiQualityOf(t, savedFlow.Flow))
+	}
+	// The read serves the revision the page sends back as baseRev.
+	var reread guideAnswers
+	get(t, e, cookie, "/api/v2/workflows/1/answers", &reread)
+	if reread.Rev != 1 {
+		t.Errorf("answers read after the save = rev %d, want 1", reread.Rev)
 	}
 	var got struct {
 		Flow       flow.Flow `json:"flow"`
@@ -117,6 +144,91 @@ func TestGuidedAnswersRoutes(t *testing.T) {
 		if code, _, _ := errorBody(t, rec); rec.Code != http.StatusNotFound || code != "workflow_not_found" {
 			t.Fatalf("%s %s = %d %q; want 404 workflow_not_found", method, path, rec.Code, code)
 		}
+	}
+}
+
+// A guided save must not silently undo an editor save that came after the guide opened (lead,
+// 11-27 20:16Z). An editor draft the guide cannot say refuses the save with 409 changed_since and
+// its own sentence, whether or not the page sent baseRev; a baseRev that has moved on refuses the
+// editor route's way.
+func TestAGuidedSaveCannotUndoAnEditorDraft(t *testing.T) {
+	e := newEnv(t, true)
+	cookie := e.setup()
+
+	// What the guide opened on: the setup workflow's own answers at rev 0.
+	var opened guideAnswers
+	get(t, e, cookie, "/api/v2/workflows/1/answers", &opened)
+	if !opened.FitsGuided || opened.Rev != 0 {
+		t.Fatalf("opened = rev %d fits %v; want the setup workflow's answers at rev 0", opened.Rev, opened.FitsGuided)
+	}
+
+	// A guided save the page really did gets rev 1.
+	rec := e.do(http.MethodPut, "/api/v2/workflows/1/answers",
+		mustJSON(t, map[string]any{"answers": guidedBuildable(4), "baseRev": opened.Rev}),
+		write(withSession(cookie)), false)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("guided save = %d %s", rec.Code, rec.Body)
+	}
+	var saved struct {
+		Rev int `json:"rev"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &saved); err != nil || saved.Rev != 1 {
+		t.Fatalf("guided save rev = %d, %v; want 1", saved.Rev, err)
+	}
+
+	// The same page saves again with the revision it read before, which has moved on.
+	rec = e.do(http.MethodPut, "/api/v2/workflows/1/answers",
+		mustJSON(t, map[string]any{"answers": guidedBuildable(4), "baseRev": opened.Rev}),
+		write(withSession(cookie)), false)
+	if got := changedSince(t, rec); rec.Code != http.StatusConflict || got.Error.Code != "changed_since" ||
+		got.Rev != 1 || !strings.Contains(got.Error.Message, "saved somewhere else") {
+		t.Fatalf("stale baseRev save = %d %+v; want 409 changed_since at rev 1", rec.Code, got)
+	}
+
+	// With the revision it now holds, the save goes through.
+	rec = e.do(http.MethodPut, "/api/v2/workflows/1/answers",
+		mustJSON(t, map[string]any{"answers": guidedBuildable(4), "baseRev": 1}),
+		write(withSession(cookie)), false)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("save with the current baseRev = %d %s; want 200", rec.Code, rec.Body)
+	}
+
+	// Someone edits the workflow in the editor into a flow the guide cannot say: Audio's Advanced
+	// codec Copy. That save clears the answers.
+	edited := apiFlow(t, "Edited", 3)
+	audio, err := json.Marshal(map[string]any{"format": "copy", "codec": "copy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	edited.Steps[1].Settings = audio
+	rec = e.do(http.MethodPut, "/api/v2/workflows/1/draft",
+		mustJSON(t, map[string]any{"flow": edited, "baseRev": 2}), write(withSession(cookie)), false)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("editor save = %d %s; want 200", rec.Code, rec.Body)
+	}
+
+	// The guided page's next save is refused, with or without the baseRev the page may not send
+	// yet, and it says an editor changed the workflow rather than that it was saved elsewhere.
+	for _, body := range []map[string]any{
+		{"answers": guidedBuildable(5)},
+		{"answers": guidedBuildable(5), "baseRev": 1},
+	} {
+		rec = e.do(http.MethodPut, "/api/v2/workflows/1/answers", mustJSON(t, body), write(withSession(cookie)), false)
+		if got := changedSince(t, rec); rec.Code != http.StatusConflict || got.Error.Code != "changed_since" ||
+			got.Rev != 3 || got.Error.Message != changedInEditor {
+			t.Fatalf("guided save over the editor draft = %d %+v; want 409 changed_since at rev 3", rec.Code, got)
+		}
+	}
+
+	// Nothing was saved: the editor's flow is still the draft, and it does not claim to fit.
+	var after struct {
+		Flow       flow.Flow `json:"flow"`
+		FitsGuided bool      `json:"fitsGuided"`
+	}
+	get(t, e, cookie, "/api/v2/workflows/1", &after)
+	if after.FitsGuided || apiQualityOf(t, after.Flow) != 3 || string(after.Flow.Steps[1].Settings) != string(audio) {
+		t.Fatalf("workflow after the refused saves = quality %d fits %v audio %s; want the editor's flow",
+			apiQualityOf(t, after.Flow), after.FitsGuided, after.Flow.Steps[1].Settings)
 	}
 }
 
@@ -226,5 +338,12 @@ func TestAFlowTheGuideCannotSayDoesNotFit(t *testing.T) {
 	get(t, e, cookie, "/api/v2/workflows/"+made.ID+"/answers", &answers)
 	if answers.FitsGuided || answersJSON(t, answers.Answers) != answersJSON(t, flow.DefaultAnswers()) {
 		t.Errorf("answers read = %+v; want the defaults with fitsGuided false", answers)
+	}
+	// The guide cannot write its own answers over that flow either: the save is the editor's 409.
+	rec = e.do(http.MethodPut, "/api/v2/workflows/"+made.ID+"/answers",
+		mustJSON(t, map[string]any{"answers": flow.DefaultAnswers()}), write(withSession(cookie)), false)
+	if conflict := changedSince(t, rec); rec.Code != http.StatusConflict ||
+		conflict.Error.Code != "changed_since" || conflict.Error.Message != changedInEditor || conflict.Rev != 1 {
+		t.Errorf("guided save over a flow the guide cannot say = %d %+v; want 409 changed_since", rec.Code, conflict)
 	}
 }

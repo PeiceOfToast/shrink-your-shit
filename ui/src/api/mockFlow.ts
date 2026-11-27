@@ -27,6 +27,11 @@ export const DEFAULT_ANSWERS: Answers = {
   folder: "",
 };
 
+// Why the guide and the editor grey replacing the original and saving to a chosen folder until item
+// 10. The server says the same sentences (internal/flow/answers.go); design's wording is "new file".
+const REPLACE_WHY = "Replacing the original comes in a later update; for now the new file is saved next to it.";
+const FOLDER_WHY = "Saving to a different folder comes in a later update; for now the new file is saved next to it.";
+
 const FORMAT_LABEL: Record<string, string> = { hevc: "HEVC", h264: "H.264", av1: "AV1" };
 const CODEC_LABEL: Record<string, string> ={ aac: "AAC", opus: "Opus", ac3: "AC-3", eac3: "E-AC-3", flac: "FLAC", copy: "Same as the source" };
 const CONTAINER_LABEL: Record<string, string> = { mkv: "MKV", mp4: "MP4", webm: "WebM", keep: "Keep the same" };
@@ -195,9 +200,10 @@ const GUIDE: GuideDoc = {
           label: "Where the new file goes",
           type: "choice",
           choices: [
-            { value: "replace", label: "Replace the original", available: false, why: "Replacing the original comes in a later update; for now the converted file is saved next to it." },
+            { value: "replace", label: "Replace the original", available: false, why: REPLACE_WHY },
             { value: "next_to_original", label: "Next to the original", available: true },
-            { value: "one_folder", label: "A different folder", available: true },
+            { value: "one_folder", label: "A different folder", available: false, why: FOLDER_WHY },
+            { value: "beside_library", label: "A folder beside the library", available: false, why: FOLDER_WHY },
           ],
         },
         { key: "folder", label: "Folder", type: "folder" },
@@ -320,6 +326,15 @@ export function checkFlow(flow: Flow): FlowCheck {
   if (v.rateControl === "vbr" && !LADDER.vbrFormats.includes(String(v.format))) {
     problems.push({ stepId: "video", field: "rateControl", code: "vbr_av1", message: "Variable bitrate doesn't work with AV1 yet. Pick Constant bitrate or Quality, or another format." });
   }
+  // Replacing the original and a chosen folder arrive with item 10: the choices are greyed with the
+  // same sentences the server uses, and a stored pick is a problem with its own sentence.
+  disabled.push({ stepId: "save", field: "where", value: "replace", why: REPLACE_WHY });
+  disabled.push({ stepId: "save", field: "where", value: "folder", why: FOLDER_WHY });
+  if (sv.where === "replace") {
+    problems.push({ stepId: "save", field: "where", code: "save.not_yet", message: REPLACE_WHY });
+  } else if (sv.where === "folder") {
+    problems.push({ stepId: "save", field: "where", code: "save.not_yet", message: FOLDER_WHY });
+  }
   if (sv.where === "folder" && !sv.folder) {
     problems.push({ stepId: "save", field: "folder", code: "folder_required", message: "Choose the folder for the new file." });
   }
@@ -424,12 +439,13 @@ export function getGuide(): Promise<GuideDoc> {
   return respond(() => GUIDE);
 }
 
-// Opening the guided page: the saved answers (or the defaults for a new one), and whether the guide still fits.
-export function getGuideAnswers(id: string): Promise<{ answers: Answers; fitsGuided: boolean }> {
+// Opening the guided page: the saved answers (or the defaults for a new one), whether the guide still fits,
+// and the draft's revision the page sends back as baseRev.
+export function getGuideAnswers(id: string): Promise<{ answers: Answers; fitsGuided: boolean; rev: number }> {
   return respond(() => {
-    if (id === "new") return { answers: { ...DEFAULT_ANSWERS }, fitsGuided: true };
+    if (id === "new") return { answers: { ...DEFAULT_ANSWERS }, fitsGuided: true, rev: 0 };
     const d = docFor(id);
-    return { answers: { ...d.answers }, fitsGuided: d.fitsGuided };
+    return { answers: { ...d.answers }, fitsGuided: d.fitsGuided, rev: d.rev };
   });
 }
 

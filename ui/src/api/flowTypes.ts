@@ -92,6 +92,9 @@ export interface WorkflowDraft {
 export interface GuideAnswers {
   answers: Answers;
   fitsGuided: boolean;
+  // The draft's revision, sent back as baseRev on the save so an editor save since the guide
+  // opened is not overwritten.
+  rev: number;
 }
 
 // PUT /workflows/{id}/answers: the flow the answers made, written into the draft at its new revision.

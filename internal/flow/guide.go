@@ -157,8 +157,8 @@ func Guide() GuideDoc {
 					{Key: "original", Label: "Where the new file goes", Type: "choice", Choices: []GuideChoice{
 						{Value: "replace", Label: "Replace the original", Available: false, Why: ReplaceWhy},
 						{Value: "next_to_original", Label: "Next to the original", Available: true},
-						{Value: "one_folder", Label: "A different folder", Available: true},
-						{Value: "beside_library", Label: "A folder beside the library", Available: true},
+						{Value: "one_folder", Label: "A different folder", Available: false, Why: FolderWhy},
+						{Value: "beside_library", Label: "A folder beside the library", Available: false, Why: FolderWhy},
 					}},
 					{Key: "folder", Label: "Folder", Type: "folder"},
 				},

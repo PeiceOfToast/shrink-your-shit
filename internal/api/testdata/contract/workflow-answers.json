@@ -19,7 +19,8 @@
       "subtitles": "keep_all",
       "useGpu": false
     },
-    "fitsGuided": true
+    "fitsGuided": true,
+    "rev": 0
   },
   "method": "GET",
   "path": "/api/v2/workflows/1/answers",

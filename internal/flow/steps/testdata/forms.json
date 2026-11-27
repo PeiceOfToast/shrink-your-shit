@@ -472,7 +472,7 @@
                 "value": "replace",
                 "label": "Replace the original",
                 "available": false,
-                "why": "Replacing the original comes in a later update; for now the converted file is saved next to it."
+                "why": "Replacing the original comes in a later update; for now the new file is saved next to it."
               },
               {
                 "value": "next_to",
@@ -482,7 +482,8 @@
               {
                 "value": "folder",
                 "label": "A different folder",
-                "available": true
+                "available": false,
+                "why": "Saving to a different folder comes in a later update; for now the new file is saved next to it."
               }
             ]
           }

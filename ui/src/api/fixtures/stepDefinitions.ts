@@ -1025,7 +1025,7 @@ export const STEP_DEFINITIONS: StepDefinition[] = [
                   "available": false,
                   "label": "Replace the original",
                   "value": "replace",
-                  "why": "Replacing the original comes in a later update; for now the converted file is saved next to it."
+                  "why": "Replacing the original comes in a later update; for now the new file is saved next to it."
                 },
                 {
                   "available": true,
@@ -1033,9 +1033,10 @@ export const STEP_DEFINITIONS: StepDefinition[] = [
                   "value": "next_to"
                 },
                 {
-                  "available": true,
+                  "available": false,
                   "label": "A different folder",
-                  "value": "folder"
+                  "value": "folder",
+                  "why": "Saving to a different folder comes in a later update; for now the new file is saved next to it."
                 }
               ],
               "group": "basic",

@@ -30,6 +30,13 @@ type ChangedSinceError struct{ Rev int }
 
 func (e *ChangedSinceError) Error() string { return "the workflow was saved somewhere else" }
 
+// NotGuidedError is the guided save's 409 when the draft no longer fits the guide: the answers
+// column is gone, because someone saved a flow the guide cannot say from the editor since the
+// guide opened. Rev is the draft's revision now, so the page can reload.
+type NotGuidedError struct{ Rev int }
+
+func (e *NotGuidedError) Error() string { return "the workflow was changed in the editor" }
+
 // PublishBlockedError is the editor's 409 has_problems: the check said no. Problem is the first
 // one, whose sentence the page shows after "Fix this first:".
 type PublishBlockedError struct{ Problem Problem }
@@ -306,23 +313,35 @@ func (s *Store) SaveDraft(ctx context.Context, id int64, f Flow, baseRev int) (r
 	return rev, err
 }
 
-// SaveGuidedDraft saves the flow the guided builder made from its answers as the draft. There is
-// no baseRev: the guided page does not hold the editor's draft revision, and a guided save
-// replaces whatever draft was there. An empty name or description keeps the workflow's own, the
-// way the mock's putAnswers does.
-func (s *Store) SaveGuidedDraft(ctx context.Context, id int64, f Flow) (rev int, err error) {
+// SaveGuidedDraft saves the flow the guided builder made from its answers as the draft. A guided
+// save must not undo an editor save that came after the guide opened: in the same transaction it
+// refuses when the draft no longer fits the guide (NotGuidedError, the answers are gone) and, when
+// the page sends the revision it read, when the draft moved on (ChangedSinceError). baseRev nil is
+// the page that has not sent one yet; the fits check still holds. An empty name or description
+// keeps the workflow's own, the way the mock's putAnswers does.
+func (s *Store) SaveGuidedDraft(ctx context.Context, id int64, f Flow, baseRev *int) (rev int, err error) {
 	now := s.clock().UTC().UnixMilli()
 	err = s.db.Tx(ctx, func(tx *sql.Tx) error {
 		var have int
 		var name, description string
+		var held sql.NullString
 		err := tx.QueryRowContext(ctx,
-			`SELECT draft_rev, name, description FROM workflows WHERE id = ? AND deleted_at IS NULL`, id).
-			Scan(&have, &name, &description)
+			`SELECT draft_rev, name, description, answers FROM workflows WHERE id = ? AND deleted_at IS NULL`, id).
+			Scan(&have, &name, &description, &held)
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
 		if err != nil {
 			return fmt.Errorf("read workflow %d: %w", id, err)
+		}
+		// The editor's save of a flow the guide cannot say cleared the answers; the guide's save
+		// would put back the flow it opened on and hide that edit. BaseRev alone cannot say this:
+		// the page may not send one yet, and an editor save of a fitting flow keeps the answers.
+		if !held.Valid {
+			return &NotGuidedError{Rev: have}
+		}
+		if baseRev != nil && *baseRev != have {
+			return &ChangedSinceError{Rev: have}
 		}
 		if strings.TrimSpace(f.Name) == "" {
 			f.Name = name
@@ -519,12 +538,12 @@ func (s *Store) Duplicate(ctx context.Context, id int64) (Workflow, error) {
 	if err != nil {
 		return Workflow{}, fmt.Errorf("save the copy of workflow %d: %w", id, err)
 	}
-	// The copy fits the guide exactly when the source does: the answers column comes along.
-	var answers sql.NullString
-	err = s.db.Read().QueryRowContext(ctx,
-		`SELECT answers FROM workflows WHERE id = ?`, id).Scan(&answers)
+	// The copy's answers come from the flow the copy takes, not from the source's answers column:
+	// while a draft is pending that column holds the draft's answers, and the copy's flow is the
+	// published revision (dev-review, #840).
+	answers, err := answersColumn(f)
 	if err != nil {
-		return Workflow{}, fmt.Errorf("read the answers of workflow %d: %w", id, err)
+		return Workflow{}, err
 	}
 	now := s.clock().UTC().UnixMilli()
 	var newID int64

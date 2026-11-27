@@ -111,7 +111,7 @@ func TestGuidedSaveWritesTheAnswersAndKeepsTheName(t *testing.T) {
 	if len(problems) > 0 {
 		t.Fatalf("FromAnswers = %+v", problems)
 	}
-	if rev, err := s.SaveGuidedDraft(ctx, id, f); err != nil || rev != 1 {
+	if rev, err := s.SaveGuidedDraft(ctx, id, f, nil); err != nil || rev != 1 {
 		t.Fatalf("guided save = rev %d, %v; want 1", rev, err)
 	}
 	info, err := s.Draft(ctx, id)
@@ -144,12 +144,21 @@ func TestGuidedSaveWritesTheAnswersAndKeepsTheName(t *testing.T) {
 	}
 }
 
-// TestDuplicateCopiesTheAnswers: the copy fits the guide exactly when its source does.
+// TestDuplicateCopiesTheAnswers: the copy's answers are the ones its own flow makes, not the
+// source's answers column. Duplicating copies the PUBLISHED flow, and while a draft is pending the
+// source's answers column holds the draft's answers, so taking the column would pair the copy's
+// published flow with a different flow's answers and still claim it fits the guide (#840 review).
 func TestDuplicateCopiesTheAnswers(t *testing.T) {
 	s, ctx := workflowStore(t)
 	id, _, err := s.CreateFromStarter(ctx, "shrink-videos", "Shrink")
 	if err != nil {
 		t.Fatalf("create the setup workflow: %v", err)
+	}
+	// The starter is published (revision 1) when it is created. A guided save after that: the draft
+	// is quality 4, the published flow stays quality 3, and the answers column follows the draft.
+	draftFlow := flowWithQuality(t, "Shrink", 4)
+	if _, err := s.SaveGuidedDraft(ctx, id, draftFlow, nil); err != nil {
+		t.Fatalf("save a guided draft: %v", err)
 	}
 	copyRow, err := s.Duplicate(ctx, id)
 	if err != nil {
@@ -162,13 +171,38 @@ func TestDuplicateCopiesTheAnswers(t *testing.T) {
 	if info.Answers == nil {
 		t.Fatal("the copy lost the source's answers")
 	}
-	src, err := s.Draft(ctx, id)
+	if got := qualityOfSettings(t, info.Flow.Steps[0].Settings); got != 3 {
+		t.Errorf("copy's flow quality = %d, want the published 3", got)
+	}
+	var stored float64
+	raw, err := json.Marshal(info.Answers["quality"])
 	if err != nil {
-		t.Fatalf("source's draft: %v", err)
+		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(info.Answers, src.Answers) {
-		t.Errorf("copy's answers = %#v, want the source's %#v", info.Answers, src.Answers)
+	if err := json.Unmarshal(raw, &stored); err != nil || stored != 3 {
+		t.Errorf("copy's answers quality = %v, %v; want the published flow's 3", stored, err)
 	}
+	// The copy's answers rebuild its own flow: a quality-4 answer would not make the quality-3
+	// copy the guide offers.
+	rebuilt, problems := flow.FromAnswers(info.Answers, flow.DefaultAnswers())
+	if len(problems) > 0 {
+		t.Fatalf("FromAnswers on the copy's answers = %+v", problems)
+	}
+	if got := qualityOfSettings(t, rebuilt.Steps[0].Settings); got != 3 {
+		t.Errorf("the copy's answers make quality %d, want its flow's 3", got)
+	}
+}
+
+// qualityOfSettings reads the video step's quality from its settings bytes.
+func qualityOfSettings(t *testing.T, settings json.RawMessage) int {
+	t.Helper()
+	var set struct {
+		Quality int `json:"quality"`
+	}
+	if err := json.Unmarshal(settings, &set); err != nil {
+		t.Fatalf("read the video settings: %v", err)
+	}
+	return set.Quality
 }
 
 // TestRestoreDerivesTheAnswers: restoring an old guided revision makes it the current one, and the

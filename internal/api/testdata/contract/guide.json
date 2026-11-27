@@ -293,7 +293,7 @@
                 "available": false,
                 "label": "Replace the original",
                 "value": "replace",
-                "why": "Replacing the original comes in a later update; for now the converted file is saved next to it."
+                "why": "Replacing the original comes in a later update; for now the new file is saved next to it."
               },
               {
                 "available": true,
@@ -301,14 +301,16 @@
                 "value": "next_to_original"
               },
               {
-                "available": true,
+                "available": false,
                 "label": "A different folder",
-                "value": "one_folder"
+                "value": "one_folder",
+                "why": "Saving to a different folder comes in a later update; for now the new file is saved next to it."
               },
               {
-                "available": true,
+                "available": false,
                 "label": "A folder beside the library",
-                "value": "beside_library"
+                "value": "beside_library",
+                "why": "Saving to a different folder comes in a later update; for now the new file is saved next to it."
               }
             ],
             "key": "original",

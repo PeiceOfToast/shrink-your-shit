@@ -196,6 +196,41 @@ func TestToAnswersRefusesWhatTheGuideCannotSay(t *testing.T) {
 	}
 }
 
+// TestToAnswersRefusesAFlowTheRebuildChanges is the exactness gate's own test: every mapped field
+// is one the guide offers, and the flow validates, so the field-by-field reads all succeed, but the
+// answers the mapping makes rebuild a different flow (a folder left behind when the page switched
+// back to next-to). ToAnswers must refuse, so the page keeps the person in the editor instead of
+// saving answers that quietly drop a setting they can see (#840 review).
+func TestToAnswersRefusesAFlowTheRebuildChanges(t *testing.T) {
+	f, problems := flow.FromAnswers(flow.DefaultAnswers(), flow.DefaultAnswers())
+	if len(problems) > 0 {
+		t.Fatalf("FromAnswers on the defaults = %+v", problems)
+	}
+	// The editor keeps the folder when the where choice moves back to next-to, so this is a flow a
+	// person can save and publish; nothing about it is invalid.
+	f.Steps = append([]flow.StepRef(nil), f.Steps...)
+	f.Steps[2].Settings = mergeJSON(t, f.Steps[2].Settings, `{"folder":"/media/kept"}`)
+	if rep := flow.Validate(f, flow.ValidateContext{Flow: f}); !rep.OK() {
+		t.Fatalf("the flow has problems, so it is not the case this test is about: %+v", rep.Problems)
+	}
+	if answers, ok := flow.ToAnswers(f); ok {
+		t.Errorf("ToAnswers accepted a flow whose rebuild drops its folder: %#v", answers)
+	}
+	// The same flow saves as a real editor draft and reports fitsGuided false.
+	store, ctx := workflowStore(t)
+	id, _, err := store.Create(ctx, f, "editor")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	info, err := store.Draft(ctx, id)
+	if err != nil {
+		t.Fatalf("draft: %v", err)
+	}
+	if info.Answers != nil {
+		t.Errorf("answers = %#v; want none for a flow ToAnswers refuses", info.Answers)
+	}
+}
+
 // TestFromAnswersProblemNamesTheField: page 06 shows the first problem on its field with the
 // invalid_answer code, so the mapping has to name both.
 func TestFromAnswersProblemNamesTheField(t *testing.T) {
@@ -299,34 +334,43 @@ func TestSentencesMatchPage06(t *testing.T) {
 	}
 }
 
-// TestTheGuideGreysReplacingTheOriginal: page 06 offers the choice but greys it with the editor's
-// sentence, and a new workflow's answers start next to the original.
-func TestTheGuideGreysReplacingTheOriginal(t *testing.T) {
+// TestTheGuideGreysWhereItCannotSave: page 06 offers replace and both folder choices but greys
+// them with the editor's own sentences, and a new workflow's answers start next to the original.
+func TestTheGuideGreysWhereItCannotSave(t *testing.T) {
 	guide := flow.Guide()
 	if got := guide.Defaults["original"]; got != "next_to_original" {
 		t.Errorf("default original = %v, want next_to_original", got)
 	}
-	found := false
+	want := map[string]string{
+		"replace":        flow.ReplaceWhy,
+		"one_folder":     flow.FolderWhy,
+		"beside_library": flow.FolderWhy,
+	}
+	seen := map[string]bool{}
 	for _, part := range guide.Parts {
 		for _, field := range part.Fields {
 			if field.Key != "original" {
 				continue
 			}
 			for _, choice := range field.Choices {
-				if choice.Value == "replace" {
-					found = true
-					if choice.Available || choice.Why != flow.ReplaceWhy {
-						t.Errorf("replace = %+v, want greyed with the editor's sentence", choice)
+				why, greyed := want[choice.Value]
+				if !greyed {
+					if !choice.Available {
+						t.Errorf("%s is greyed: %+v", choice.Value, choice)
 					}
+					continue
 				}
-				if choice.Value == "beside_library" && !choice.Available {
-					t.Errorf("beside_library is greyed: %+v", choice)
+				seen[choice.Value] = true
+				if choice.Available || choice.Why != why {
+					t.Errorf("%s = %+v, want greyed with %q", choice.Value, choice, why)
 				}
 			}
 		}
 	}
-	if !found {
-		t.Error("the guide has no replace choice to grey")
+	for value := range want {
+		if !seen[value] {
+			t.Errorf("the guide has no %s choice to grey", value)
+		}
 	}
 }
 

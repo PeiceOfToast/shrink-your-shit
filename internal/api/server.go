@@ -59,8 +59,9 @@ type Workflows interface {
 	Create(ctx context.Context, f flow.Flow, madeWith string) (int64, int, error)
 	Draft(ctx context.Context, id int64) (flow.DraftInfo, error)
 	SaveDraft(ctx context.Context, id int64, f flow.Flow, baseRev int) (int, error)
-	// S2-4: the guided page's save, which has no draft revision to send back.
-	SaveGuidedDraft(ctx context.Context, id int64, f flow.Flow) (int, error)
+	// S2-4: the guided page's save. baseRev is the draft revision the page read, when it sends
+	// one; the save refuses both a stale revision and a draft the editor changed out from under it.
+	SaveGuidedDraft(ctx context.Context, id int64, f flow.Flow, baseRev *int) (int, error)
 	Publish(ctx context.Context, id int64, given *flow.Flow, vc flow.ValidateContext) (int, error)
 	Revisions(ctx context.Context, id int64) ([]flow.RevisionInfo, error)
 	Restore(ctx context.Context, id int64, rev int) (int, error)

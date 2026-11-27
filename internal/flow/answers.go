@@ -21,7 +21,12 @@ import (
 
 // ReplaceWhy is why page 06 greys "Replace the original" until stage 2 item 10, and why the Save
 // step's check greys it. One sentence, so the guide and the editor say the same thing.
-const ReplaceWhy = "Replacing the original comes in a later update; for now the converted file is saved next to it."
+const ReplaceWhy = "Replacing the original comes in a later update; for now the new file is saved next to it."
+
+// FolderWhy is why page 06 greys "A different folder" (and its beside-the-library sibling) until
+// stage 2 item 10, and why the Save step's check greys the choice. The guide and the editor read
+// the same sentence. "New file" is design's wording (11-27 20:19Z).
+const FolderWhy = "Saving to a different folder comes in a later update; for now the new file is saved next to it."
 
 // AudioWhy is why page 06 offers "Leave as it is" alone until stage 2 item 7 builds audio
 // conversion, and why the Audio step's check greys the other formats. One sentence, so the guide

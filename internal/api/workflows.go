@@ -279,16 +279,18 @@ func writeAnswerProblem(w http.ResponseWriter, p flow.Problem) {
 	writeError(w, http.StatusBadRequest, "invalid_answer", p.Message, p.Field, 0)
 }
 
-// guideAnswersJSON is getGuideAnswers' answer: the saved answers and whether the guide still fits.
+// guideAnswersJSON is getGuideAnswers' answer: the saved answers, whether the guide still fits,
+// and the draft revision the page sends back as baseRev when it saves.
 type guideAnswersJSON struct {
 	Answers    flow.Answers `json:"answers"`
 	FitsGuided bool         `json:"fitsGuided"`
+	Rev        int          `json:"rev"`
 }
 
 // getGuideAnswers is GET /workflows/{id}/answers: the answers the guided page opens with. "new" is
-// the guide's own defaults (a workflow the page has not saved yet). A saved workflow the guide
-// cannot say opens on the defaults with fitsGuided false, so the person starts from somewhere
-// usable; saving those answers is a new guided draft.
+// the guide's own defaults (a workflow the page has not saved yet; rev 0). A saved workflow the
+// guide cannot say opens on the defaults with fitsGuided false, so the person starts from somewhere
+// usable; the save then refuses (NotGuidedError), because the guide cannot write that flow back.
 func (s *Server) getGuideAnswers(w http.ResponseWriter, r *http.Request) {
 	if r.PathValue("id") == "new" {
 		writeJSON(w, http.StatusOK, guideAnswersJSON{Answers: flow.DefaultAnswers(), FitsGuided: true})
@@ -312,17 +314,25 @@ func (s *Server) getGuideAnswers(w http.ResponseWriter, r *http.Request) {
 	if answers == nil {
 		answers = flow.DefaultAnswers()
 	}
-	writeJSON(w, http.StatusOK, guideAnswersJSON{Answers: answers, FitsGuided: info.Answers != nil})
+	writeJSON(w, http.StatusOK, guideAnswersJSON{Answers: answers, FitsGuided: info.Answers != nil, Rev: info.Rev})
 }
 
-// putAnswersBody is PUT /workflows/{id}/answers: the answers the guided page saved.
+// putAnswersBody is PUT /workflows/{id}/answers: the answers the guided page saved, and the draft
+// revision it read (baseRev). baseRev is optional until the page sends it; without it the fits
+// guard below still refuses to overwrite an editor draft.
 type putAnswersBody struct {
 	Answers json.RawMessage `json:"answers"`
+	BaseRev *int            `json:"baseRev"`
 }
+
+// changedInEditor is the guided save's 409: the draft it would overwrite is no longer what the
+// guide can say, so someone edited it in the editor after the guide opened.
+const changedInEditor = "This workflow was changed in the editor since you opened it. Reload to see it."
 
 // putWorkflowAnswers saves the guided page's answers as the workflow's draft. The answers make the
 // flow here (the mapping is the flow package's), and the store keeps the answers only when they
-// still say that flow exactly.
+// still say that flow exactly. A guided save never overwrites an editor draft silently: it is
+// refused when the draft no longer fits the guide, and when the page's baseRev is stale.
 func (s *Server) putWorkflowAnswers(w http.ResponseWriter, r *http.Request) {
 	rs := s.ready.Load()
 	id, ok := pathID(r, "id")
@@ -347,8 +357,16 @@ func (s *Server) putWorkflowAnswers(w http.ResponseWriter, r *http.Request) {
 		writeAnswerProblem(w, problems[0])
 		return
 	}
-	rev, err := rs.Workflows.SaveGuidedDraft(r.Context(), id, f)
+	// The store makes both lost-update checks in the same transaction: an editor save since the
+	// guide opened clears the answers, and the guided save would silently undo that edit.
+	rev, err := rs.Workflows.SaveGuidedDraft(r.Context(), id, f, body.BaseRev)
+	var notGuided *flow.NotGuidedError
+	var changed *flow.ChangedSinceError
 	switch {
+	case errors.As(err, &notGuided):
+		writeChangedSinceMessage(w, notGuided.Rev, changedInEditor)
+	case errors.As(err, &changed):
+		writeChangedSince(w, changed.Rev)
 	case errors.Is(err, flow.ErrNotFound):
 		writeWorkflowNotFound(w)
 	case err != nil:
@@ -448,6 +466,13 @@ func (s *Server) putWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 // writeChangedSince is the editor's 409: the envelope plus the draft's current rev, so the page
 // can say what happened and reload.
 func writeChangedSince(w http.ResponseWriter, rev int) {
+	writeChangedSinceMessage(w, rev,
+		"This workflow was saved somewhere else since you opened it. Reload to see the newer version.")
+}
+
+// writeChangedSinceMessage is the same 409 with the caller's sentence (the guided save says it
+// differently when an editor draft is what changed).
+func writeChangedSinceMessage(w http.ResponseWriter, rev int, message string) {
 	body := struct {
 		Error struct {
 			Code    string `json:"code"`
@@ -456,7 +481,7 @@ func writeChangedSince(w http.ResponseWriter, rev int) {
 		Rev int `json:"rev"`
 	}{Rev: rev}
 	body.Error.Code = "changed_since"
-	body.Error.Message = "This workflow was saved somewhere else since you opened it. Reload to see the newer version."
+	body.Error.Message = message
 	writeJSON(w, http.StatusConflict, body)
 }
 
