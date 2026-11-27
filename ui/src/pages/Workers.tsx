@@ -1,5 +1,6 @@
+import { useEffect } from "react";
 import { navigate, useLocation } from "../router.tsx";
-import { api, formatCount, type Worker } from "../api/index.ts";
+import { api, formatCount, onSummaryChanged, type Worker } from "../api/index.ts";
 import { useApi } from "../api/useApi.ts";
 import { AddWorker } from "./AddWorker.tsx";
 import { StatePill } from "./workerParts.tsx";
@@ -54,6 +55,8 @@ export function Workers() {
   const adding = query.get("add") === "1";
   // Reload when Add worker opens or closes, so a joined worker shows at once.
   const list = useApi(() => api.getWorkers(), [adding]);
+  // The all-workers switch changes every worker's paused-for-all line, so the list reads again when it changes.
+  useEffect(() => onSummaryChanged(list.reload), [list.reload]);
   const data = list.data;
   const addWorker = () => navigate("/workers?add=1");
 

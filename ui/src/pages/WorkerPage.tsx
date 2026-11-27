@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, navigate } from "../router.tsx";
 import { clock } from "../format/time.ts";
-import { api, type Job, type WorkerDetail, type WorkerLibrary } from "../api/index.ts";
+import { api, onSummaryChanged, type Job, type WorkerDetail, type WorkerLibrary } from "../api/index.ts";
 import { useApi } from "../api/useApi.ts";
 import { JobRow } from "./Jobs.tsx";
 import { PauseDialog, RemoveDialog, StatePill, errorText } from "./workerParts.tsx";
@@ -34,6 +34,8 @@ export function WorkerPage({ id }: { id: string }) {
   const worker = useApi(() => api.getWorker(id), [id]);
   const libs = useApi(() => api.getLibraries(), []);
   const jobs = useApi(() => api.getJobs({ worker: id }), [id]);
+  // The all-workers switch changes pausedGlobally here, so the page reads the worker again when it changes.
+  useEffect(() => onSummaryChanged(worker.reload), [worker.reload]);
   const [saved, setSaved] = useState<Settings | null>(null);
   const [form, setForm] = useState<Settings | null>(null);
   const [libForm, setLibForm] = useState<Record<string, Lib>>({});

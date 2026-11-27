@@ -172,7 +172,7 @@ export function Shell({ children }: { children: ReactNode }) {
           ))}
         </nav>
         <span className="sp"></span>
-        <WorkersSwitch summary={summary.data} reload={summary.reload} />
+        <WorkersSwitch summary={summary.data} />
         <Menu
           label="New"
           icon="plus"
