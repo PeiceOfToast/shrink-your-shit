@@ -34,7 +34,7 @@ export function viewsFor(kind: string): string[] {
   return [];
 }
 
-// The reconnect rule: no frame for 45 s.
+// The reconnect rule: no frame or ping for 45 s.
 export const STALE_MS = 45_000;
 export function isStale(lastFrameAt: number, now: number, limitMs = STALE_MS): boolean {
   return now - lastFrameAt >= limitMs;
@@ -71,6 +71,11 @@ export function openEvents(opts: EventsOptions): () => void {
     const es = new Ctor(url);
     source = es;
     lastFrameAt = clock();
+    // A ping is liveness only: it resets the stale timer and reaches no page.
+    es.addEventListener("ping", () => {
+      if (closed || source !== es) return;
+      lastFrameAt = clock();
+    });
     for (const kind of KINDS) {
       es.addEventListener(kind, (e) => {
         if (closed || source !== es) return;

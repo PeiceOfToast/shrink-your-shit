@@ -104,3 +104,16 @@ test("close shuts the stream and stops the stale check", () => {
   assert.equal(src.closed, true);
   assert.equal(h.stopped(), 1);
 });
+
+test("a ping keeps a quiet stream alive without reaching the page", () => {
+  const h = harness();
+  const src = FakeSource.made[0];
+  h.advance(40_000);
+  src.emit("ping", "", "");
+  h.advance(40_000);
+  h.tick();
+  assert.equal(src.closed, false, "a ping 40 s ago is not stale");
+  assert.equal(h.seen.frames.length, 0, "a ping is not a frame");
+  assert.equal(h.seen.resyncs, 0);
+});
+
