@@ -60,13 +60,14 @@ jobs:
         run: go vet ./...
 
       - name: Test
-        run: go test ./...
+        run: go test -race ./...
 
       - name: Format
         run: test -z "$(gofmt -l .)"
 
   go-build:
     strategy:
+      fail-fast: false
       matrix:
         os: [windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
