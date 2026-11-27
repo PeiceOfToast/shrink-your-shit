@@ -53,6 +53,9 @@ export interface GuideField {
   // Rare settings: the guided page puts them under "More".
   more?: boolean;
   choices?: GuideChoice[];
+  // false greys the whole field with why until the app can act on it (the audio languages until item 7).
+  available?: boolean;
+  why?: string;
 }
 
 export interface GuidePart {
@@ -85,6 +88,22 @@ export interface WorkflowDraft {
   flow: Flow;
   rev: number;
   fitsGuided: boolean;
+}
+
+// GET /workflows/{id}/answers: the answers the guided page opens on, and whether the workflow is
+// exactly what they make (id "new" is the guide's defaults, which always fit).
+export interface GuideAnswers {
+  answers: Answers;
+  fitsGuided: boolean;
+  // The draft's revision, sent back as baseRev on the save so an editor save since the guide
+  // opened is not overwritten.
+  rev: number;
+}
+
+// PUT /workflows/{id}/answers: the flow the answers made, written into the draft at its new revision.
+export interface AnswersSaved {
+  flow: Flow;
+  rev: number;
 }
 
 // POST /workflows: the new workflow's id and the draft revision the editor starts from.

@@ -1,7 +1,7 @@
 {
   "body": {
     "description": "Smaller HEVC files next to the originals.",
-    "fitsGuided": false,
+    "fitsGuided": true,
     "id": "3",
     "kind": "video",
     "madeWith": "editor",

@@ -113,10 +113,16 @@ func TestEverySentenceIsPinned(t *testing.T) {
 
 		// Save's own rules and the file types the flow rules out.
 		{name: "save replace", save: `{"container":"mkv","where":"replace"}`,
-			problems: []string{`where|save.not_yet|Saving somewhere else is not built yet; next to the original is the only choice for now.`},
-			disabled: []string{`save|where|replace|Replacing the original comes in a later update; for now the converted file is saved next to it.`}},
+			problems: []string{`where|save.not_yet|Replacing the original comes in a later update; for now the new file is saved next to it.`},
+			disabled: []string{`save|where|replace|Replacing the original comes in a later update; for now the new file is saved next to it.`}},
+		{name: "save folder", save: `{"container":"mkv","where":"folder","folder":"/library/Shrunk"}`,
+			problems: []string{`where|save.not_yet|Saving to a different folder comes in a later update; for now the new file is saved next to it.`},
+			disabled: []string{`save|where|folder|Saving to a different folder comes in a later update; for now the new file is saved next to it.`}},
 		{name: "save folder missing", save: `{"container":"mkv","where":"folder"}`,
-			problems: []string{`folder|save.folder_missing|Choose the folder the new file goes in.`}},
+			problems: []string{
+				`where|save.not_yet|Saving to a different folder comes in a later update; for now the new file is saved next to it.`,
+				`folder|save.folder_missing|Choose the folder the new file goes in.`,
+			}},
 		{name: "save suffix emptied", save: `{"container":"keep","where":"next_to","nameSuffix":"///"}`,
 			problems: []string{`nameSuffix|save.empty_suffix|The suffix has no characters a file name can keep, so the new file would take the original's name.`}},
 		{name: "save file type is not a choice", save: `{"container":"avi","where":"next_to"}`,
@@ -140,7 +146,8 @@ func TestEverySentenceIsPinned(t *testing.T) {
 		"No worker has a graphics card.",
 		"No worker can encode H.264: libx264 is not installed.",
 		"Advanced is set: Opus. It replaces Format above.",
-		"Replacing the original comes in a later update; for now the converted file is saved next to it.",
+		"Replacing the original comes in a later update; for now the new file is saved next to it.",
+		"Saving to a different folder comes in a later update; for now the new file is saved next to it.",
 		"WebM needs AV1 video and Opus audio.",
 		"MP4 can't hold Opus audio.",
 	}

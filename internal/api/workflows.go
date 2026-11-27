@@ -56,16 +56,24 @@ func (s *Server) workflowSubtree(w http.ResponseWriter, r *http.Request) {
 		case len(segs) == 2 && segs[1] == "revisions":
 			id()
 			s.listWorkflowRevisions(w, r)
+		case len(segs) == 2 && segs[1] == "answers":
+			// "new" is not an id: the guided page asks for the answers it starts from.
+			r.SetPathValue("id", segs[0])
+			s.getGuideAnswers(w, r)
 		default:
 			notFound(w, r)
 		}
 	case http.MethodPut:
-		if len(segs) == 2 && segs[1] == "draft" {
+		switch {
+		case len(segs) == 2 && segs[1] == "draft":
 			id()
 			s.putWorkflowDraft(w, r)
-			return
+		case len(segs) == 2 && segs[1] == "answers":
+			id()
+			s.putWorkflowAnswers(w, r)
+		default:
+			notFound(w, r)
 		}
-		notFound(w, r)
 	case http.MethodPost:
 		switch {
 		case len(segs) == 2 && segs[1] == "publish":
@@ -136,8 +144,8 @@ func workflowRowOf(it flow.ListItem, uses []workflowUseJSON) workflowRowJSON {
 		State:        state,
 		ProblemCount: len(rep.Problems),
 		MadeWith:     madeWithJSON(it.MadeWith),
-		// The guided builder is item 4; until it can read a flow as answers, no flow fits it.
-		FitsGuided: false,
+		// The store keeps the answers only when the guide can say the flow exactly (S2-4).
+		FitsGuided: it.Answers != nil,
 	}
 }
 
@@ -168,7 +176,8 @@ func (s *Server) workflowUses(ctx context.Context, rs *Deps) (map[int64][]workfl
 	return uses, nil
 }
 
-// createWorkflowBody is POST /workflows: the editor's flow, or the guided builder's answers (item 4).
+// createWorkflowBody is POST /workflows: the editor's flow, or the guided builder's answers. A
+// flow wins when both are sent: it is the more specific thing the page drew.
 type createWorkflowBody struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
@@ -182,17 +191,30 @@ func (s *Server) createWorkflow(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &body) {
 		return
 	}
-	// The guided page saves answers; they are item 4. A plain "not yet" keeps the page honest
-	// instead of inventing a flow from them.
-	if len(body.Answers) > 0 && string(body.Answers) != "null" {
-		writeError(w, http.StatusBadRequest, "not_yet", "The guided builder is not built yet; use the editor.", "", 0)
-		return
-	}
-	if body.Flow == nil {
+	madeWith := "editor"
+	var f flow.Flow
+	switch {
+	case body.Flow != nil:
+		f = *body.Flow
+		if err := flow.CheckShape(f); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_flow", err.Error(), "", 0)
+			return
+		}
+	case answersGiven(body.Answers):
+		answers, ok := decodeAnswers(w, body.Answers)
+		if !ok {
+			return
+		}
+		made, problems := flow.FromAnswers(answers, flow.DefaultAnswers())
+		if len(problems) > 0 {
+			writeAnswerProblem(w, problems[0])
+			return
+		}
+		f, madeWith = made, "guided"
+	default:
 		writeError(w, http.StatusBadRequest, "invalid_flow", "A workflow needs its three steps.", "", 0)
 		return
 	}
-	f := *body.Flow
 	name := strings.TrimSpace(body.Name)
 	if name == "" {
 		name = strings.TrimSpace(f.Name)
@@ -202,11 +224,7 @@ func (s *Server) createWorkflow(w http.ResponseWriter, r *http.Request) {
 	}
 	f.Name = name
 	f.Description = body.Description
-	if err := flow.CheckShape(f); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_flow", err.Error(), "", 0)
-		return
-	}
-	id, rev, err := rs.Workflows.Create(r.Context(), f, "editor")
+	id, rev, err := rs.Workflows.Create(r.Context(), f, madeWith)
 	if err != nil {
 		internalError(w)
 		return
@@ -237,7 +255,161 @@ func (s *Server) getWorkflow(w http.ResponseWriter, r *http.Request) {
 		Flow       flow.Flow `json:"flow"`
 		Rev        int       `json:"rev"`
 		FitsGuided bool      `json:"fitsGuided"`
-	}{Flow: info.Flow, Rev: info.Rev, FitsGuided: false})
+	}{Flow: info.Flow, Rev: info.Rev, FitsGuided: info.Answers != nil})
+}
+
+// answersGiven is true when the body carries an answers object (not absent, not null).
+func answersGiven(raw json.RawMessage) bool {
+	return len(raw) > 0 && string(raw) != "null"
+}
+
+// decodeAnswers reads the answers object. The mapping reads the values' types itself; a body that
+// is not an object at all is refused here.
+func decodeAnswers(w http.ResponseWriter, raw json.RawMessage) (flow.Answers, bool) {
+	var answers flow.Answers
+	if err := json.Unmarshal(raw, &answers); err != nil || answers == nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "The answers must be an object.", "answers", 0)
+		return nil, false
+	}
+	return answers, true
+}
+
+// writeAnswerProblem is page 06's refusal: the first answer the guide does not offer, on its field.
+func writeAnswerProblem(w http.ResponseWriter, p flow.Problem) {
+	writeError(w, http.StatusBadRequest, "invalid_answer", p.Message, p.Field, 0)
+}
+
+// guideAnswersJSON is getGuideAnswers' answer: the saved answers, whether the guide still fits,
+// and the draft revision the page sends back as baseRev when it saves.
+type guideAnswersJSON struct {
+	Answers    flow.Answers `json:"answers"`
+	FitsGuided bool         `json:"fitsGuided"`
+	Rev        int          `json:"rev"`
+}
+
+// getGuideAnswers is GET /workflows/{id}/answers: the answers the guided page opens with. "new" is
+// the guide's own defaults (a workflow the page has not saved yet; rev 0). A saved workflow the
+// guide cannot say opens on the defaults with fitsGuided false, so the person starts from somewhere
+// usable; saving the answers is then their choice, and the save writes the flow they make.
+func (s *Server) getGuideAnswers(w http.ResponseWriter, r *http.Request) {
+	if r.PathValue("id") == "new" {
+		writeJSON(w, http.StatusOK, guideAnswersJSON{Answers: flow.DefaultAnswers(), FitsGuided: true})
+		return
+	}
+	id, ok := pathID(r, "id")
+	if !ok {
+		writeWorkflowNotFound(w)
+		return
+	}
+	info, err := s.ready.Load().Workflows.Draft(r.Context(), id)
+	if errors.Is(err, flow.ErrNotFound) {
+		writeWorkflowNotFound(w)
+		return
+	}
+	if err != nil {
+		internalError(w)
+		return
+	}
+	answers := info.Answers
+	if answers == nil {
+		answers = flow.DefaultAnswers()
+	}
+	writeJSON(w, http.StatusOK, guideAnswersJSON{Answers: answers, FitsGuided: info.Answers != nil, Rev: info.Rev})
+}
+
+// putAnswersBody is PUT /workflows/{id}/answers: the answers the guided page saved, and the draft
+// revision it read (baseRev). baseRev is optional until the page sends it; without it the fits
+// guard below still refuses to overwrite an editor draft.
+type putAnswersBody struct {
+	Answers json.RawMessage `json:"answers"`
+	BaseRev *int            `json:"baseRev"`
+}
+
+// putWorkflowAnswers saves the guided page's answers as the workflow's draft. The answers make the
+// flow here (the mapping is the flow package's), and the store keeps the answers only when they
+// still say that flow exactly. A guided save never overwrites an editor save silently: a stale
+// baseRev is refused; without one the save is allowed (the page that has not sent it yet, and a
+// person choosing the guide's flow for a workflow the guide could not read back).
+func (s *Server) putWorkflowAnswers(w http.ResponseWriter, r *http.Request) {
+	rs := s.ready.Load()
+	id, ok := pathID(r, "id")
+	if !ok {
+		writeWorkflowNotFound(w)
+		return
+	}
+	var body putAnswersBody
+	if !decode(w, r, &body) {
+		return
+	}
+	if !answersGiven(body.Answers) {
+		writeError(w, http.StatusBadRequest, "invalid_request", "The request is missing answers.", "answers", 0)
+		return
+	}
+	answers, ok := decodeAnswers(w, body.Answers)
+	if !ok {
+		return
+	}
+	f, problems := flow.FromAnswers(answers, flow.DefaultAnswers())
+	if len(problems) > 0 {
+		writeAnswerProblem(w, problems[0])
+		return
+	}
+	// The store makes the lost-update check in the same transaction: an editor save since the
+	// guide opened moved the revision on.
+	rev, err := rs.Workflows.SaveGuidedDraft(r.Context(), id, f, body.BaseRev)
+	var changed *flow.ChangedSinceError
+	switch {
+	case errors.As(err, &changed):
+		writeChangedSince(w, changed.Rev)
+	case errors.Is(err, flow.ErrNotFound):
+		writeWorkflowNotFound(w)
+	case err != nil:
+		internalError(w)
+	default:
+		info, err := rs.Workflows.Draft(r.Context(), id)
+		if err != nil {
+			internalError(w)
+			return
+		}
+		writeJSON(w, http.StatusOK, struct {
+			Flow flow.Flow `json:"flow"`
+			Rev  int       `json:"rev"`
+		}{Flow: info.Flow, Rev: rev})
+	}
+}
+
+// previewBody is POST /workflows/preview: the answers the page is drawing.
+type previewBody struct {
+	Answers json.RawMessage `json:"answers"`
+}
+
+// previewWorkflow is the guide's "What this does": the sentences, the flow they make and the same
+// check the editor runs, nothing saved. An answer the guide does not offer is page 06's refusal.
+func (s *Server) previewWorkflow(w http.ResponseWriter, r *http.Request) {
+	var body previewBody
+	if !decode(w, r, &body) {
+		return
+	}
+	if !answersGiven(body.Answers) {
+		writeError(w, http.StatusBadRequest, "invalid_request", "The request is missing answers.", "answers", 0)
+		return
+	}
+	answers, ok := decodeAnswers(w, body.Answers)
+	if !ok {
+		return
+	}
+	f, problems := flow.FromAnswers(answers, flow.DefaultAnswers())
+	if len(problems) > 0 {
+		writeAnswerProblem(w, problems[0])
+		return
+	}
+	rep := flow.Validate(f, flow.ValidateContext{Env: flow.Env{}})
+	writeJSON(w, http.StatusOK, struct {
+		Sentences []string        `json:"sentences"`
+		Flow      flow.Flow       `json:"flow"`
+		Problems  []flow.Problem  `json:"problems"`
+		Disabled  []flow.Disabled `json:"disabled"`
+	}{Sentences: flow.Sentences(f), Flow: f, Problems: rep.Problems, Disabled: rep.Disabled})
 }
 
 // putDraftBody is PUT /workflows/{id}/draft: the flow the editor holds and the revision it read.
@@ -285,8 +457,8 @@ func (s *Server) putWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// writeChangedSince is the editor's 409: the envelope plus the draft's current rev, so the page
-// can say what happened and reload.
+// writeChangedSince is the 409 changed_since: the envelope plus the draft's current rev, so the
+// page can say what happened and reload.
 func writeChangedSince(w http.ResponseWriter, rev int) {
 	body := struct {
 		Error struct {
@@ -418,7 +590,7 @@ func (s *Server) duplicateWorkflow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, workflowRowOf(flow.ListItem{
-		Workflow: copied, DraftAhead: true, Flow: info.Flow,
+		Workflow: copied, DraftAhead: true, Flow: info.Flow, Answers: info.Answers,
 	}, uses[copied.ID]))
 }
 

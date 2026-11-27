@@ -1,0 +1,82 @@
+{
+  "body": {
+    "disabled": [
+      {
+        "field": "ifGpuFails",
+        "stepId": "video",
+        "why": "The graphics card is not used."
+      },
+      {
+        "field": "where",
+        "stepId": "save",
+        "value": "replace",
+        "why": "Replacing the original comes in a later update; for now the new file is saved next to it."
+      },
+      {
+        "field": "where",
+        "stepId": "save",
+        "value": "folder",
+        "why": "Saving to a different folder comes in a later update; for now the new file is saved next to it."
+      },
+      {
+        "field": "container",
+        "stepId": "save",
+        "value": "webm",
+        "why": "WebM needs AV1 video and Opus audio."
+      }
+    ],
+    "flow": {
+      "description": "",
+      "name": "",
+      "steps": [
+        {
+          "id": "video",
+          "settings": {
+            "format": "hevc",
+            "ifGpuFails": "cpu",
+            "keepDolbyVision": false,
+            "preset": "normal",
+            "quality": 3,
+            "size": null,
+            "useGpu": false
+          },
+          "type": "video.convert",
+          "version": 1
+        },
+        {
+          "id": "audio",
+          "settings": {
+            "channels": "source",
+            "format": "copy",
+            "subtitles": "keep_all"
+          },
+          "type": "audio.tracks",
+          "version": 1
+        },
+        {
+          "id": "save",
+          "settings": {
+            "container": "mkv",
+            "folder": "",
+            "nameSuffix": "shrunk",
+            "where": "next_to"
+          },
+          "type": "file.save",
+          "version": 1
+        }
+      ]
+    },
+    "problems": [],
+    "sentences": [
+      "Converts video to HEVC at quality 3, keeping the picture size.",
+      "Audio: Same as the source, same channels as the source, every language.",
+      "Keeps every subtitle.",
+      "Saves as MKV.",
+      "Puts the new file next to the original; the original stays where it is."
+    ]
+  },
+  "method": "POST",
+  "path": "/api/v2/workflows/preview",
+  "status": 200,
+  "type": "GuidePreview"
+}

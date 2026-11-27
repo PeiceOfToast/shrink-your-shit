@@ -4,8 +4,8 @@ package steps
 
 import (
 	"errors"
+	"fmt"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/PeiceOfToast/shrink-your-shit/internal/encode"
@@ -148,11 +148,11 @@ func TestSaveValidate(t *testing.T) {
 		t.Errorf("summary = %q", check.Summary)
 	}
 
-	for _, where := range []string{"replace", "folder"} {
+	for where, why := range map[string]string{"replace": flow.ReplaceWhy, "folder": flow.FolderWhy} {
 		check = SaveStep{}.Validate(saveSettings("mkv", where, "shrunk"), flow.ValidateContext{})
 		if len(check.Problems) == 0 || check.Problems[0].Field != "where" ||
-			!strings.Contains(check.Problems[0].Message, "not built yet") {
-			t.Errorf("%s problems = %+v, want the not-yet problem first", where, check.Problems)
+			check.Problems[0].Code != "save.not_yet" || check.Problems[0].Message != why {
+			t.Errorf("%s problems = %+v, want the not-yet problem first with %q", where, check.Problems, why)
 		}
 	}
 	// A folder it is told to use but that is empty is its own problem, and a folder it has fills it.
@@ -187,52 +187,54 @@ func TestSaveValidate(t *testing.T) {
 	}
 }
 
-// TestSaveReplaceIsGreyed is item 10's placeholder: the page draws "Replace the original" as a
-// choice it cannot pick, and the check greys the same choice with the same sentence. The stored
-// value still blocks publishing, so a saved flow cannot quietly fall back to next-to.
-func TestSaveReplaceIsGreyed(t *testing.T) {
+// TestSaveChoicesAreGreyed is item 10's placeholder: the page draws "Replace the original" and "A
+// different folder" as choices it cannot pick, and the check greys the same choices with the same
+// sentences. A stored value still blocks publishing with its own sentence, so a saved flow cannot
+// quietly fall back to next-to (lead, 11-27 20:19Z).
+func TestSaveChoicesAreGreyed(t *testing.T) {
 	form, err := flow.BuildForm(SaveStep{}.Def(), flow.Env{})
 	if err != nil {
 		t.Fatalf("form: %v", err)
 	}
-	var replace *flow.Option
-	for i := range form.Schema.Properties["where"].Layout.Choices {
-		if o := form.Schema.Properties["where"].Layout.Choices[i]; o.Value == "replace" {
-			replace = &form.Schema.Properties["where"].Layout.Choices[i]
+	formWhy := map[string]string{}
+	for _, o := range form.Schema.Properties["where"].Layout.Choices {
+		if o.Available {
+			continue
 		}
+		formWhy[fmt.Sprint(o.Value)] = o.Why
 	}
-	if replace == nil {
-		t.Fatal("no replace choice on where")
-	}
-	if replace.Available || replace.Why == "" {
-		t.Errorf("form choice = %+v, want it unavailable with a why", *replace)
+	for value, why := range map[string]string{"replace": replaceWhy, "folder": folderWhy} {
+		if formWhy[value] != why {
+			t.Errorf("form greys %s with %q, want %q", value, formWhy[value], why)
+		}
 	}
 
 	check := SaveStep{}.Validate(saveSettings("mkv", "next_to", "shrunk"), flow.ValidateContext{})
-	why := ""
+	checkWhy := map[string]string{}
 	for _, d := range check.Disabled {
-		if d.Field == "where" && d.Value == "replace" {
-			why = d.Why
+		if d.Field == "where" {
+			checkWhy[d.Value] = d.Why
 		}
 	}
-	if why == "" {
-		t.Fatalf("disabled = %+v, want the replace choice greyed", check.Disabled)
-	}
-	if why != replace.Why {
-		t.Errorf("check says %q, the form says %q; one sentence, not two", why, replace.Why)
+	for value, why := range map[string]string{"replace": replaceWhy, "folder": folderWhy} {
+		if checkWhy[value] != why {
+			t.Errorf("check greys %s with %q, want the form's %q", value, checkWhy[value], why)
+		}
 	}
 
-	// A stored replace value is still a problem: the greyed choice is a promise, not a silent
-	// rewrite of what was saved.
-	check = SaveStep{}.Validate(saveSettings("mkv", "replace", "shrunk"), flow.ValidateContext{})
-	blocked := false
-	for _, p := range check.Problems {
-		if p.Field == "where" && p.Code == "save.not_yet" {
-			blocked = true
+	// A stored value is still a problem, with its own sentence: the greyed choice is a promise,
+	// not a silent rewrite of what was saved.
+	for where, why := range map[string]string{"replace": replaceWhy, "folder": folderWhy} {
+		check = SaveStep{}.Validate(saveSettings("mkv", where, "shrunk"), flow.ValidateContext{})
+		blocked := false
+		for _, p := range check.Problems {
+			if p.Field == "where" && p.Code == "save.not_yet" && p.Message == why {
+				blocked = true
+			}
 		}
-	}
-	if !blocked {
-		t.Errorf("problems = %+v, want save.not_yet for a stored replace", check.Problems)
+		if !blocked {
+			t.Errorf("%s problems = %+v, want save.not_yet with %q", where, check.Problems, why)
+		}
 	}
 }
 

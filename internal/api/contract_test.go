@@ -117,6 +117,11 @@ func TestContractGoldens(t *testing.T) {
 	if !ok {
 		t.Fatal("no shrink-videos starter")
 	}
+	// Read the guided starter's answers before the editor's flow below shares and edits its steps.
+	starterGuided, fits := flow.ToAnswers(starter.Flow)
+	if !fits {
+		t.Fatal("the guided starter's answers do not rebuild it")
+	}
 	writeGolden(t, "workflow-validate", "FlowCheck", http.MethodPost, "/api/v2/workflows/1/validate",
 		e.do(http.MethodPost, "/api/v2/workflows/1/validate",
 			mustJSON(t, map[string]any{"flow": starter.Flow}), write(withSession(cookie)), false))
@@ -145,6 +150,20 @@ func TestContractGoldens(t *testing.T) {
 		e.do(http.MethodPost, "/api/v2/workflows/2/revisions/1/restore", "", write(withSession(cookie)), false))
 	writeGolden(t, "workflow-duplicate", "WorkflowRow", http.MethodPost, "/api/v2/workflows/2/duplicate",
 		e.do(http.MethodPost, "/api/v2/workflows/2/duplicate", "", write(withSession(cookie)), false))
+	// The guided builder (S2-4): the answers a workflow opens on, "new" for the defaults, the save
+	// that turns them into the draft, and "What this does" from the starter's answers.
+	writeGolden(t, "workflow-answers", "GuideAnswers", http.MethodGet, "/api/v2/workflows/1/answers",
+		e.do(http.MethodGet, "/api/v2/workflows/1/answers", "", withSession(cookie), false))
+	writeGolden(t, "workflow-answers-new", "GuideAnswers", http.MethodGet, "/api/v2/workflows/new/answers",
+		e.do(http.MethodGet, "/api/v2/workflows/new/answers", "", withSession(cookie), false))
+	guidedAnswers := flow.DefaultAnswers()
+	guidedAnswers["quality"] = 4
+	writeGolden(t, "workflow-answers-put", "AnswersSaved", http.MethodPut, "/api/v2/workflows/2/answers",
+		e.do(http.MethodPut, "/api/v2/workflows/2/answers",
+			mustJSON(t, map[string]any{"answers": guidedAnswers}), write(withSession(cookie)), false))
+	writeGolden(t, "workflow-preview", "GuidePreview", http.MethodPost, "/api/v2/workflows/preview",
+		e.do(http.MethodPost, "/api/v2/workflows/preview",
+			mustJSON(t, map[string]any{"answers": starterGuided}), write(withSession(cookie)), false))
 	writeGolden(t, "workflow-delete", "WorkflowDeleted", http.MethodDelete, "/api/v2/workflows/1",
 		e.do(http.MethodDelete, "/api/v2/workflows/1", "", write(withSession(cookie)), false))
 

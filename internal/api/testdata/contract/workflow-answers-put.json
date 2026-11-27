@@ -1,0 +1,50 @@
+{
+  "body": {
+    "flow": {
+      "description": "Smaller HEVC files next to the originals.",
+      "name": "Holidays",
+      "steps": [
+        {
+          "id": "video",
+          "settings": {
+            "format": "hevc",
+            "ifGpuFails": "cpu",
+            "keepDolbyVision": false,
+            "preset": "normal",
+            "quality": 4,
+            "size": null,
+            "useGpu": true
+          },
+          "type": "video.convert",
+          "version": 1
+        },
+        {
+          "id": "audio",
+          "settings": {
+            "channels": "source",
+            "format": "copy",
+            "subtitles": "keep_all"
+          },
+          "type": "audio.tracks",
+          "version": 1
+        },
+        {
+          "id": "save",
+          "settings": {
+            "container": "mkv",
+            "folder": "",
+            "nameSuffix": "",
+            "where": "next_to"
+          },
+          "type": "file.save",
+          "version": 1
+        }
+      ]
+    },
+    "rev": 5
+  },
+  "method": "PUT",
+  "path": "/api/v2/workflows/2/answers",
+  "status": 200,
+  "type": "AnswersSaved"
+}

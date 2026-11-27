@@ -1,28 +1,23 @@
 {
   "body": {
     "answers": {
-      "allLanguages": false,
-      "audio": "stereo_aac",
+      "allLanguages": true,
+      "audio": "as_is",
       "fileType": "mkv",
       "folder": "",
       "format": "hevc",
       "ifGpuFails": "cpu",
       "includeDolbyVision": false,
-      "languages": [
-        "eng",
-        "ger"
-      ],
+      "languages": [],
       "languagesEverywhere": false,
-      "original": "replace",
+      "nameSuffix": "shrunk",
+      "original": "next_to_original",
       "quality": 3,
       "resolution": "keep",
       "slower": false,
-      "subtitleLanguages": [
-        "eng",
-        "ger"
-      ],
+      "subtitleLanguages": [],
       "subtitles": "keep_all",
-      "useGpu": true
+      "useGpu": false
     },
     "guided": true,
     "icon": "flow",

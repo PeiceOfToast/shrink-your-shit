@@ -1,7 +1,7 @@
 // Real client, workflows group (contract section 1): the list, create, the editor's draft, publish,
-// the check, the revisions and restore, duplicate and delete. The guided builder's answers and the
-// try-it preview (items 4-5) answer a plain not-yet the page shows; export and import are not part
-// of S2-3 and say so the same way.
+// the check, the revisions and restore, duplicate and delete, and the guided builder's answers and
+// preview. The try-it preview answers a plain not-yet the page shows; export and import are not
+// part of S2-3 and say so the same way.
 import type * as mock from "../mock.ts";
 import { request, type Out } from "../http.ts";
 import { ApiError } from "../errors.ts";
@@ -19,15 +19,19 @@ export const putDraft: typeof mock.putDraft = (id, flow, baseRev) =>
   request<Out<typeof mock.putDraft>>("PUT", `/workflows/${encodeURIComponent(id)}/draft`, { flow, baseRev });
 export const publishFlow: typeof mock.publishFlow = (id, flow) =>
   request<Out<typeof mock.publishFlow>>("POST", `/workflows/${encodeURIComponent(id)}/publish`, { flow });
-// The editor's first save; with answers the server answers 400 not_yet, which the page shows.
+// The editor's first save, with a flow or with the guided page's answers; either makes the draft.
 export const createDraft: typeof mock.createDraft = (input) => request<Out<typeof mock.createDraft>>("POST", "/workflows", input);
 export const getStepDefinitions: typeof mock.getStepDefinitions = () =>
   request<Out<typeof mock.getStepDefinitions>>("GET", "/step-definitions");
 
-// Item 4: the guided builder (answers to a flow) is not built yet.
-export const getGuideAnswers: typeof mock.getGuideAnswers = () => notYet("The guided builder is not built yet; use the editor.");
-export const putAnswers: typeof mock.putAnswers = () => notYet("The guided builder is not built yet; use the editor.");
-export const guidePreview: typeof mock.guidePreview = () => notYet("The guided builder is not built yet; use the editor.");
+// The guided builder: the answers a workflow opens on (id "new" is the defaults), the save that
+// turns them into the draft, and "What this does", which saves nothing.
+export const getGuideAnswers: typeof mock.getGuideAnswers = (id) =>
+  request<Out<typeof mock.getGuideAnswers>>("GET", `/workflows/${encodeURIComponent(id)}/answers`);
+export const putAnswers: typeof mock.putAnswers = (id, answers, baseRev) =>
+  request<Out<typeof mock.putAnswers>>("PUT", `/workflows/${encodeURIComponent(id)}/answers`, { answers, baseRev });
+export const guidePreview: typeof mock.guidePreview = (answers) =>
+  request<Out<typeof mock.guidePreview>>("POST", "/workflows/preview", { answers });
 // The editor's live check (S2-2's route). The check is pure: the body's flow is the whole input and
 // the path's id only names the workflow, so an unsaved draft checks the same way.
 export const validateFlow: typeof mock.validateFlow = (flow) =>

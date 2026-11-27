@@ -6,7 +6,7 @@ import { ApiError } from "../errors.ts";
 import { getJobNeighbours, getJobs } from "./jobs.ts";
 import { getLibraries, createLibrary } from "./libraries.ts";
 import { getAttention, getOverview } from "./overview.ts";
-import { createDraft, deleteWorkflow, duplicateWorkflow, exportWorkflow, getFlow, listWorkflows, publishFlow, putDraft, validateFlow } from "./workflows.ts";
+import { createDraft, deleteWorkflow, duplicateWorkflow, exportWorkflow, getFlow, getGuideAnswers, guidePreview, listWorkflows, publishFlow, putAnswers, putDraft, validateFlow } from "./workflows.ts";
 
 type Call = { url: string; init: RequestInit };
 const realFetch = globalThis.fetch;
@@ -79,7 +79,7 @@ test("a network failure becomes ApiError unreachable", async () => {
   await assert.rejects(request("GET", "/summary"), (e: unknown) => e instanceof ApiError && e.code === "unreachable");
 });
 
-// The workflows group: the editor's routes and bodies, and the calls that have no route yet.
+// The workflows group: the editor's routes and bodies, the guided builder's, and the export that has no route yet.
 test("the workflow calls use the editor's routes and bodies", async () => {
   const flow = { name: "Holidays", description: "", steps: [] };
   let calls = stub(200, JSON.stringify({ flow, rev: 1, fitsGuided: false }));
@@ -110,10 +110,36 @@ test("the workflow calls use the editor's routes and bodies", async () => {
   assert.equal(calls[0].init.method, "POST");
   assert.deepEqual(JSON.parse(String(calls[0].init.body)), { name: "Holidays", description: "Smaller files", flow });
 
-  // The guided page's save carries answers; the server answers a plain not_yet for them.
-  calls = stub(400, JSON.stringify({ error: { code: "not_yet", message: "The guided builder is not built yet; use the editor." } }));
-  await assert.rejects(createDraft({ name: "Holidays", answers: { smaller: true } }), (e: unknown) => e instanceof ApiError && e.code === "not_yet");
+  // The guided page's create carries answers and no flow.
+  calls = stub(201, JSON.stringify({ id: "9", rev: 1 }));
+  assert.deepEqual(await createDraft({ name: "Holidays", answers: { smaller: true } }), { id: "9", rev: 1 });
+  assert.equal(calls[0].url, "/api/v2/workflows");
   assert.deepEqual(JSON.parse(String(calls[0].init.body)), { name: "Holidays", answers: { smaller: true } });
+});
+
+test("the guided builder's answers and preview use the routes the server has", async () => {
+  const flow = { name: "Holidays", description: "", steps: [] };
+  let calls = stub(200, JSON.stringify({ answers: { quality: 3 }, fitsGuided: true }));
+  assert.deepEqual(await getGuideAnswers("new"), { answers: { quality: 3 }, fitsGuided: true });
+  assert.equal(calls[0].url, "/api/v2/workflows/new/answers");
+  assert.equal(calls[0].init.method, "GET");
+
+  calls = stub(200, JSON.stringify({ answers: { quality: 4 }, fitsGuided: false }));
+  await getGuideAnswers("7");
+  assert.equal(calls[0].url, "/api/v2/workflows/7/answers");
+
+  calls = stub(200, JSON.stringify({ flow, rev: 2 }));
+  assert.deepEqual(await putAnswers("7", { quality: 4 }, 1), { flow, rev: 2 });
+  assert.equal(calls[0].url, "/api/v2/workflows/7/answers");
+  assert.equal(calls[0].init.method, "PUT");
+  assert.deepEqual(JSON.parse(String(calls[0].init.body)), { answers: { quality: 4 }, baseRev: 1 });
+
+  // The preview is pure and saves nothing, so any workflow may ask it.
+  calls = stub(200, JSON.stringify({ sentences: ["Converts video."], flow, problems: [], disabled: [] }));
+  assert.deepEqual(await guidePreview({ quality: 4 }), { sentences: ["Converts video."], flow, problems: [], disabled: [] });
+  assert.equal(calls[0].url, "/api/v2/workflows/preview");
+  assert.equal(calls[0].init.method, "POST");
+  assert.deepEqual(JSON.parse(String(calls[0].init.body)), { answers: { quality: 4 } });
 });
 
 test("the list, duplicate and delete use the routes the server has", async () => {
