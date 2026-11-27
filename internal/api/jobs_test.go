@@ -22,6 +22,7 @@ import (
 // the newest still waiting. Their files sit in one library that runs the Shrink workflow.
 type jobsFixture struct {
 	e       *env
+	videos  string // the library folder; a golden shows it as /videos
 	cookie  *http.Cookie
 	done    int64 // the done job's id
 	failed  int64
@@ -59,10 +60,10 @@ func newJobsFixture(t *testing.T) *jobsFixture {
 	if err != nil {
 		t.Fatalf("save workflow: %v", err)
 	}
-	q := jobs.New(jobs.Options{DB: e.db, Bus: e.bus})
+	q := jobs.New(jobs.Options{DB: e.db, Bus: e.bus, Clock: e.clock.Now})
 	e.srv.Jobs(q, library.NewCatalog(e.db), flows, e.bus)
 
-	f := &jobsFixture{e: e, cookie: cookie}
+	f := &jobsFixture{e: e, cookie: cookie, videos: videos}
 	var ids []int64
 	for i, name := range []string{"one.mkv", "two.mkv", "three.mkv"} {
 		id, _, err := q.Enqueue(ctx, fileIDs[i], lib.ID, wf, filepath.Join(videos, name), "test")

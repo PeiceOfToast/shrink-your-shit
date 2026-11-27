@@ -131,7 +131,7 @@ func newEnv(t *testing.T, ready bool) *env {
 		t: t, srv: New("test-version"), db: db, scans: newScanRecorder(),
 		clock: &clock{now: time.Date(2026, 11, 27, 4, 0, 0, 0, time.UTC)}, dir: dir, stderr: &bytes.Buffer{},
 	}
-	e.bus, err = events.New(events.Options{DataDir: dir, DB: db, Stderr: e.stderr})
+	e.bus, err = events.New(events.Options{DataDir: dir, DB: db, Stderr: e.stderr, Clock: e.clock.Now})
 	if err != nil {
 		t.Fatal(err)
 	}
