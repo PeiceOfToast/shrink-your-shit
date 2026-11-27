@@ -288,7 +288,7 @@ function Editor({ id, initial }: { id: string; initial: Loaded }) {
         >
           <LanguageChips label="Languages" value={(audio.languages as string[] | undefined) ?? []} onChange={(languages) => set("audio", { languages })} />
         </Row>
-        <Advanced summary="Advanced" description="Codec, bitrate, downmix, loudness, commentary, original track">
+        <Advanced summary="Advanced" description="Codec, bitrate, sample rate, stereo from surround, loudness, commentary, default track, original track">
           <AudioAdvanced s={audio} set={(patch) => set("audio", patch)} greyed={(field) => greyed("audio", field)} />
         </Advanced>
         <Choose
@@ -638,7 +638,7 @@ function AudioAdvanced({ s, set, greyed }: { s: Record<string, unknown>; set: (p
         <input className="inp narrow" aria-label="Bitrate (kb/s)" type="number" min={8} max={1536} value={String(s.bitrateKbps ?? "")} onChange={(e) => set({ bitrateKbps: e.target.value ? Number(e.target.value) : null })} />
       </Row>
       {s.bitrateKbps != null && <Choose label="Bitrate is for" choices={choicesOf(A, "bitratePer")} value={valueOf(A, s, "bitratePer")} off={greyed("bitratePer")} onChange={(v) => set({ bitratePer: v })} />}
-      <Row label="Sample rate">
+      <Row label="Sample rate" hint="Left empty, each file keeps its own sample rate.">
         <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <input className="inp narrow" aria-label="Sample rate" type="number" min={8000} max={192000} value={String(s.sampleRate ?? "")} onChange={(e) => set({ sampleRate: e.target.value ? Number(e.target.value) : null })} /> Hz
         </span>
@@ -658,7 +658,7 @@ function AudioAdvanced({ s, set, greyed }: { s: Record<string, unknown>; set: (p
           value={s.defaultTrack == null ? "none" : String(s.defaultTrack)}
           onChange={(e) => set({ defaultTrack: e.target.value === "none" ? null : e.target.value })}
         >
-          <option value="none">Not set</option>
+          <option value="none">As in the file</option>
           {SPECIAL_TRACKS.map((o) => (
             <option key={o.code} value={o.code}>
               {o.name}
