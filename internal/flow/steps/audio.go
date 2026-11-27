@@ -207,8 +207,10 @@ func trackPlan(set AudioSettings, codec string, t media.AudioTrack) (encode.Audi
 		entry.BitratePer = set.BitratePer
 	}
 	note := ""
-	// L-AUD-6: a surround codec holds at most 5.1, and the log says the 7.1 track became 5.1.
-	if outChannels == 6 && t.Channels > 6 {
+	// L-AUD-6: AC-3 and E-AC-3 hold at most 5.1, and the log says the 7.1 track became 5.1. The
+	// sentence names those two codecs, so it is written only when it is one of them that folds;
+	// another codec reaching six channels is the person's own choice and needs no note.
+	if outChannels == 6 && t.Channels > 6 && (codec == "ac3" || codec == "eac3") {
 		note = foldedNote
 	}
 	return entry, note, true

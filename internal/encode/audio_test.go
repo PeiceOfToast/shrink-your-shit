@@ -267,6 +267,89 @@ func TestAudioConvertedCodecTheContainerCannotHoldFallsBack(t *testing.T) {
 	}
 }
 
+// TestAudioFallbackKeepsTheChosenDefaultOnCopy is review2-850 F1 on the reachable branch: the
+// file type MP4 and "Same as the source" with an Opus track, so the copy entry becomes a conversion
+// at Build time. The plan's default choice still reaches the output; without it ffmpeg would keep
+// the source's dispositions and play a different track.
+func TestAudioFallbackKeepsTheChosenDefaultOnCopy(t *testing.T) {
+	yes, no := true, false
+	info := audioInfo(media.AudioTrack{Index: 1, Codec: "opus", Channels: 2}, media.AudioTrack{Index: 4, Codec: "aac", Channels: 2})
+	plan := basePlan(CodecHEVC)
+	plan.Audio = []AudioPlan{{Index: 1, Default: &yes}, {Index: 4, Default: &no}}
+	plan.Container = ContainerMP4
+	plan.Output = "out.mp4"
+
+	res := buildOK(t, plan, info, cpuRung(CodecHEVC))
+	if v, _ := flagValue(res.Argv, "-c:a:0"); v != "eac3" {
+		t.Errorf("first codec = %q, want the fallback eac3", v)
+	}
+	if v, _ := flagValue(res.Argv, "-disposition:a:0"); v != "default" {
+		t.Errorf("first disposition = %q, want default", v)
+	}
+	if v, _ := flagValue(res.Argv, "-disposition:a:1"); v != "0" {
+		t.Errorf("second disposition = %q, want 0", v)
+	}
+}
+
+// TestAudioFallbackKeepsTheChosenDefaultWhenConverting is the same rule on a convert entry whose
+// codec the container cannot hold: the fallback keeps the default flag and every other choice the
+// plan made about the track (sample rate, down-mix, measured loudness).
+func TestAudioFallbackKeepsTheChosenDefaultWhenConverting(t *testing.T) {
+	yes, no := true, false
+	info := audioInfo(
+		media.AudioTrack{Index: 1, Codec: "aac", Channels: 8, SampleRate: 48000},
+		media.AudioTrack{Index: 4, Codec: "aac", Channels: 2, SampleRate: 48000},
+	)
+	plan := basePlan(CodecHEVC)
+	plan.Audio = []AudioPlan{
+		{Index: 1, Action: StreamConvert, Codec: "opus", SampleRate: 44100, Downmix: "dpl2",
+			Loudnorm: true, Loudness: &Loudness{I: -23.45, TP: -2.1, LRA: 7.3, Threshold: -33.46, Offset: 0.02},
+			Default: &yes},
+		{Index: 4, Default: &no},
+	}
+	plan.Container = ContainerMP4
+	plan.Output = "out.mp4"
+
+	res := buildOK(t, plan, info, cpuRung(CodecHEVC))
+	if v, _ := flagValue(res.Argv, "-c:a:0"); v != "eac3" {
+		t.Errorf("first codec = %q, want the fallback eac3", v)
+	}
+	if v, _ := flagValue(res.Argv, "-disposition:a:0"); v != "default" {
+		t.Errorf("first disposition = %q, want default", v)
+	}
+	if v, _ := flagValue(res.Argv, "-disposition:a:1"); v != "0" {
+		t.Errorf("second disposition = %q, want 0", v)
+	}
+	filter, _ := flagValue(res.Argv, "-filter:a:0")
+	for _, part := range []string{"matrix_encoding=dplii", "measured_I=-23.45", "linear=true", "aresample=44100"} {
+		if !strings.Contains(filter, part) {
+			t.Errorf("fallback filter = %q, want %q", filter, part)
+		}
+	}
+}
+
+// TestAudioFallbackNeverUpmix is F1's last case: the container fallback never grows the source, so a
+// mono track the file type cannot hold is written mono with no -ac.
+func TestAudioFallbackNeverUpmix(t *testing.T) {
+	info := audioInfo(media.AudioTrack{Index: 1, Codec: "aac", Channels: 1})
+	plan := basePlan(CodecAV1)
+	plan.Audio = []AudioPlan{{Index: 1, Action: StreamConvert, Codec: "ac3", Channels: 2}}
+	plan.Container = ContainerWebM
+	plan.Output = "out.webm"
+
+	streams, _, err := AudioOutputs(plan, info)
+	if err != nil {
+		t.Fatalf("outputs: %v", err)
+	}
+	if len(streams) != 1 || streams[0].Channels != 1 || streams[0].Codec != "opus" {
+		t.Fatalf("streams = %+v, want one mono Opus track", streams)
+	}
+	res := buildOK(t, plan, info, cpuRung(CodecAV1))
+	if hasFlag(res.Argv, "-ac:a:0") {
+		t.Errorf("argv = %v, want no -ac when the fallback keeps the mono track", res.Argv)
+	}
+}
+
 // TestAudioCopyEntriesWriteNothing: a plan that names every stream as a copy writes exactly the
 // command the audio step wrote before conversion existed (the golden table's rows).
 func TestAudioCopyEntriesWriteNothing(t *testing.T) {

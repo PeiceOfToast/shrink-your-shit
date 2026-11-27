@@ -311,6 +311,21 @@ func TestAudioLosslessConverts(t *testing.T) {
 	}
 }
 
+// TestAudioSevenOneToAACHasNoFoldNote: AAC at 5.1 is not the AC-3 family's cap, so the sentence
+// naming E-AC-3 and AC-3 must not appear when the person asked for 5.1 AAC.
+func TestAudioSevenOneToAACHasNoFoldNote(t *testing.T) {
+	set := audioDefaults()
+	set.Format, set.Channels = "aac", "5.1"
+	d, p := planAudio(t, set, audioTrack(1, "truehd", 8, "eng", ""))
+	entry := audioEntry(t, p, 1)
+	if entry.Action != encode.StreamConvert || entry.Codec != "aac" || entry.Channels != 6 {
+		t.Errorf("entry = %+v, want a 5.1 AAC conversion", entry)
+	}
+	if contains(d.Notes, foldedNote) {
+		t.Errorf("notes = %v, want no E-AC-3/AC-3 sentence for AAC", d.Notes)
+	}
+}
+
 // TestAudioFoldsSevenOne is L-AUD-6: an E-AC-3 7.1 track becomes 5.1 and the log says so.
 func TestAudioFoldsSevenOne(t *testing.T) {
 	set := audioDefaults()

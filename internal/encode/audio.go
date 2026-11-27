@@ -190,7 +190,7 @@ func audioOutputs(plan Plan, info media.Info) ([]audioOut, []string, error) {
 		if p.Action == StreamConvert {
 			o := convertOut(p, t)
 			if why := audioFits(plan.Container, o.codec); why != "" {
-				fallback := fallbackOut(t, plan.Container)
+				fallback := fallbackOut(p, t, plan.Container)
 				notes = append(notes, fmt.Sprintf("audio stream #%d (%s) is written as %s: %s", t.Index, o.codec, fallback.codec, why))
 				o = fallback
 			}
@@ -198,7 +198,7 @@ func audioOutputs(plan Plan, info media.Info) ([]audioOut, []string, error) {
 			continue
 		}
 		if why := audioFits(plan.Container, t.Codec); why != "" {
-			o := fallbackOut(t, plan.Container)
+			o := fallbackOut(p, t, plan.Container)
 			notes = append(notes, fmt.Sprintf("audio stream #%d (%s) is converted to %s: %s", t.Index, t.Codec, o.codec, why))
 			outs = append(outs, o)
 			continue
@@ -226,9 +226,11 @@ func convertOut(p AudioPlan, t media.AudioTrack) audioOut {
 
 // fallbackOut is what a codec the container cannot hold becomes (L-AUD-8): WebM gets Opus, stereo
 // at 128 kbps; MP4 gets E-AC-3 with the source's channels and the automatic rate. Neither grows
-// the source.
-func fallbackOut(t media.AudioTrack, container Container) audioOut {
-	o := audioOut{track: t, action: StreamConvert}
+// the source. Everything else the plan chose about the track still holds: a converted fallback
+// keeps the chosen default flag, sample rate, down-mix and measured loudness, so a container rule
+// never silently undoes a setting the person made.
+func fallbackOut(p AudioPlan, t media.AudioTrack, container Container) audioOut {
+	o := audioOut{track: t, action: StreamConvert, defaultFlag: p.Default, sampleRate: p.SampleRate}
 	switch container {
 	case ContainerWebM:
 		o.codec = "opus"
@@ -241,6 +243,12 @@ func fallbackOut(t media.AudioTrack, container Container) audioOut {
 	default:
 		// Audio fits every other container, so this is unreachable for a valid plan.
 		o.action = StreamCopy
+	}
+	if o.action == StreamConvert {
+		o.downmix = downmixMode(t.Channels, o.channels, p.Downmix)
+		if p.Loudnorm && p.Loudness != nil && p.Loudness.finite() {
+			o.loudness = p.Loudness
+		}
 	}
 	return o
 }
