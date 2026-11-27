@@ -488,10 +488,10 @@ function VideoAdvanced({ s, format, set, disabledRate }: { s: Record<string, unk
               </p>
             )}
           </Row>
-          <Row label="Average Mb/s">
+          <Row label={rate === "cbr" ? "Bitrate Mb/s" : "Average Mb/s"}>
             <input
               className="inp narrow"
-              aria-label="Average Mb/s"
+              aria-label={rate === "cbr" ? "Bitrate Mb/s" : "Average Mb/s"}
               type="number"
               step="0.1"
               value={String(avgShown)}
@@ -499,22 +499,32 @@ function VideoAdvanced({ s, format, set, disabledRate }: { s: Record<string, unk
             />
           </Row>
           {rate === "vbr" && (
-            <Row label="Maximum Mb/s">
-              <input className="inp narrow" aria-label="Maximum Mb/s" type="number" step="0.1" value={String(s.maxMbps ?? "")} onChange={(e) => set({ maxMbps: e.target.value ? Number(e.target.value) : null })} />
+            <Row label="At most Mb/s">
+              <input className="inp narrow" aria-label="At most Mb/s" type="number" step="0.1" value={String(s.maxMbps ?? "")} onChange={(e) => set({ maxMbps: e.target.value ? Number(e.target.value) : null })} />
             </Row>
           )}
         </>
       )}
       <Row label="Speed">
         <select className="sel" aria-label="Speed" value={String(s.preset ?? "")} onChange={(e) => set({ preset: e.target.value || null })}>
-          <option value="">Default</option>
+          <option value="">Balanced (medium)</option>
           <option value="slow">Slower, smaller</option>
-          <option value="medium">Medium</option>
           <option value="fast">Faster, larger</option>
         </select>
       </Row>
-      <Row label="Frame rate" hint="Empty keeps the source frame rate.">
-        <input className="inp narrow" aria-label="Frame rate" type="number" value={String(s.fps ?? "")} onChange={(e) => set({ fps: e.target.value ? Number(e.target.value) : null })} />
+      <Row label="Frame rate">
+        <Seg
+          label="Frame rate"
+          value={s.fps == null ? "keep" : String(s.fps)}
+          options={[
+            { value: "keep", label: "Same as the source" },
+            { value: "24", label: "24" },
+            { value: "25", label: "25" },
+            { value: "30", label: "30" },
+            { value: "60", label: "60" },
+          ]}
+          onChange={(v) => set({ fps: v === "keep" ? null : Number(v) })}
+        />
       </Row>
       <Row label="Colour depth">
         <select className="sel" aria-label="Colour depth" value={String(s.bitDepth ?? "")} onChange={(e) => set({ bitDepth: e.target.value ? Number(e.target.value) : null })}>

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { navigate } from "../router.tsx";
 import { api, type Answers, type GuideDoc, type GuideField, type GuidePart, type GuidePreview, type TryLine } from "../api/index.ts";
+import { LANGUAGE_NAME } from "../api/mockFlow.ts";
 import { useApi } from "../api/useApi.ts";
 import { ChoiceField, QUALITY_NAMES, Row, qualityMeaning, toErr, type Err } from "./flowParts.tsx";
 
@@ -31,7 +32,6 @@ function partValue(part: GuidePart, answers: Answers): string {
     .join(" · ");
 }
 
-const LANGUAGE_NAME: Record<string, string> = { en: "English", de: "German", fr: "French", es: "Spanish", it: "Italian" };
 
 interface Loaded {
   guide: GuideDoc;
@@ -349,7 +349,7 @@ function FieldRow({ field, value, answers, languages, onChange }: { field: Guide
   if (field.type === "choice" && field.choices) {
     return (
       <>
-        <ChoiceField label={field.label} value={String(value ?? "")} choices={field.choices} onChange={onChange} />
+        <ChoiceField label={field.label} value={String(value ?? "")} choices={field.choices} onChange={onChange} full={field.key === "subtitles" || field.key === "original"} />
         {field.key === "original" && value === "replace" && <p className="hint wf-full">The original goes to the trash and is kept 7 days.</p>}
       </>
     );

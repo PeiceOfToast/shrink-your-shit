@@ -27,7 +27,8 @@ export const DEFAULT_ANSWERS: Answers = {
 };
 
 const FORMAT_LABEL: Record<string, string> = { hevc: "HEVC", h264: "H.264", av1: "AV1" };
-const CODEC_LABEL: Record<string, string> = { aac: "AAC", opus: "Opus", ac3: "AC-3", eac3: "E-AC-3", flac: "FLAC", copy: "Same as the source" };
+export const LANGUAGE_NAME: Record<string, string> = { en: "English", de: "German", fr: "French", es: "Spanish", it: "Italian" };
+const CODEC_LABEL: Record<string, string> ={ aac: "AAC", opus: "Opus", ac3: "AC-3", eac3: "E-AC-3", flac: "FLAC", copy: "Same as the source" };
 const CHANNEL_LABEL: Record<string, string> = { stereo: "stereo", source: "same channels as the source", mono: "mono", "5.1": "5.1" };
 
 // The Quality slider (page 07, rev 4): the processor's CRF at 1080p, by position. Offsets are the app's own.
@@ -325,7 +326,7 @@ export function checkFlow(flow: Flow): FlowCheck {
   const videoSummary = v.rateControl
     ? `${FORMAT_LABEL[String(v.format)]} · ${v.rateControl === "vbr" ? "variable" : "constant"} bitrate about ${bitrateFor(v)} Mb/s`
     : `${FORMAT_LABEL[String(v.format)]} · quality ${v.quality} · graphics card ${v.useGpu ? "automatic" : "off"}`;
-  const langs = Array.isArray(au.languages) && au.languages.length ? (au.languages as string[]).join(" and ") : "my languages";
+  const langs = Array.isArray(au.languages) && au.languages.length ? (au.languages as string[]).map((c) => LANGUAGE_NAME[c] ?? c).join(" and ") : "my languages";
   const audioSummary = `${CODEC_LABEL[String(au.codec ?? au.format)]} · ${CHANNEL_LABEL[String(au.channels)]} · ${langs}`;
   const where = String(sv.where);
   const saveSummary = where === "replace"
