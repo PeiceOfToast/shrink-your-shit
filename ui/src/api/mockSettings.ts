@@ -11,7 +11,6 @@ import type {
   NotifyTarget,
   SettingsData,
   SettingsPatch,
-  WorkflowVariable,
 } from "./types.ts";
 import { ApiError } from "./errors.ts";
 import { getForcedState, noLibrariesYet, respond } from "./mockState.ts";
@@ -37,6 +36,7 @@ let settings: SettingsData = {
     theme: "system",
     checkForUpdates: true,
     updateAvailable: null,
+    languages: ["eng", "ger"],
   },
   processing: {
     parallelJobs: 1,
@@ -55,7 +55,7 @@ let settings: SettingsData = {
 };
 
 const KNOWN: Record<string, string[]> = {
-  general: ["serverName", "language", "timeFormat", "dateFormat", "theme", "checkForUpdates"],
+  general: ["serverName", "language", "timeFormat", "dateFormat", "theme", "checkForUpdates", "languages"],
   processing: ["parallelJobs", "gpuJobsSeparate", "scanSchedule", "queueOrder", "lowPriority", "keepOriginalsDays", "lowSpaceGB", "languages", "workflowsMayRunCommands"],
   logs: ["jobDays", "systemDays", "rawDays"],
 };
@@ -67,6 +67,7 @@ const inRange = (v: unknown, min: number, max: number) => typeof v === "number" 
 function validate(next: SettingsData) {
   const g = next.general;
   if (!g.serverName.trim()) throw bad("general.serverName", "Give the server a name.");
+  if (!g.languages.every((l) => /^[a-z]{3}$/.test(l))) throw bad("general.languages", "Use three-letter codes like eng, ger, fra.");
   const p = next.processing;
   if (!inRange(p.parallelJobs, 1, 8)) throw bad("processing.parallelJobs", "Pick from 1 to 8 files at once.");
   if (p.scanSchedule !== "" && !/^([01]\d|2[0-3]):[0-5]\d$/.test(p.scanSchedule)) throw bad("processing.scanSchedule", "Use a time like 02:00, or leave it empty for no daily scan.");
@@ -318,41 +319,6 @@ export function testTarget(input: { id?: string; kind?: string; url?: string }):
     }
     if (input.url !== undefined && !URL_RE.test(input.url)) throw new ApiError("invalid_url", "Start the address with http:// or https://.", "url");
     return input.url?.includes("down") ? { ok: false, message: "Didn't answer. Check the address." } : { ok: true, message: "Message delivered." };
-  });
-}
-
-// ---- Variables
-
-let variables: WorkflowVariable[] = [
-  { name: "my_languages", type: "string", value: "eng, ger", description: "The languages to keep", usedBy: [{ type: "workflow", id: "keep-surround", name: "Keep surround" }] },
-  { name: "max_height", type: "number", value: 1080, description: "The tallest picture height", usedBy: [{ type: "workflow", id: "shrink-videos", name: "Shrink videos" }, { type: "library", id: "movies", name: "Movies" }] },
-  { name: "quality", type: "enum", value: "balanced", options: ["smaller", "balanced", "sharper"], usedBy: [] },
-  { name: "scratch_folder", type: "path", value: "/media/scratch", usedBy: [{ type: "workflow", id: "shrink-old-tv", name: "Shrink old TV" }] },
-  { name: "keep_subtitles", type: "boolean", value: true, usedBy: [] },
-];
-
-const NAME_RE = /^[a-z][a-z0-9_]*$/;
-
-export function getVariables(): Promise<{ items: WorkflowVariable[]; total: number }> {
-  return respond(() => ({ items: clone(variables), total: variables.length }));
-}
-
-// PUT replaces the whole list. usedBy is kept for names that stay.
-export function putVariables(input: WorkflowVariable[]): Promise<{ variables: WorkflowVariable[]; total: number; saved: boolean; affects: { workflows: string[]; libraries: number } }> {
-  return respond(() => {
-    const issues: { code: string; message: string }[] = [];
-    const seen = new Set<string>();
-    for (const v of input) {
-      if (!NAME_RE.test(v.name)) issues.push({ code: "invalid_variable_name", message: `"${v.name}" isn't a name. Use lowercase letters, numbers and _, starting with a letter.` });
-      else if (seen.has(v.name)) issues.push({ code: "duplicate_variable", message: `There are two variables called "${v.name}".` });
-      seen.add(v.name);
-    }
-    if (issues.length) {
-      throw Object.assign(new ApiError(issues[0].code, issues[0].message), { issues });
-    }
-    const usage = new Map(variables.map((v) => [v.name, v.usedBy]));
-    variables = input.map((v) => ({ ...v, usedBy: usage.get(v.name) ?? [] }));
-    return { variables: clone(variables), total: variables.length, saved: true, affects: { workflows: ["keep-surround"], libraries: 1 } };
   });
 }
 

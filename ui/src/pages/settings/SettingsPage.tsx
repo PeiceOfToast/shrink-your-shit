@@ -10,14 +10,12 @@ import { General } from "./General.tsx";
 import { Health } from "./Health.tsx";
 import { Notifications } from "./Notifications.tsx";
 import { Processing } from "./Processing.tsx";
-import { Variables } from "./Variables.tsx";
 
 const SECTIONS: { key: SettingsSection; label: string }[] = [
   { key: "general", label: "General" },
   { key: "processing", label: "Processing" },
   { key: "connections", label: "Connections" },
   { key: "notifications", label: "Notifications" },
-  { key: "variables", label: "Variables" },
   { key: "backup", label: "Backup" },
   { key: "health", label: "Health check" },
   { key: "access", label: "Access" },
@@ -29,7 +27,6 @@ function Body({ section }: { section: SettingsSection }) {
     case "processing": return <Processing />;
     case "connections": return <Connections />;
     case "notifications": return <Notifications />;
-    case "variables": return <Variables />;
     case "backup": return <Backup />;
     case "health": return <Health />;
     case "access": return <Access />;

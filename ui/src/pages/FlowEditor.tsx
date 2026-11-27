@@ -168,7 +168,7 @@ function Editor({ id, initial }: { id: string; initial: Loaded }) {
     setFlow((f) => ({ ...f, steps: f.steps.map((s: FlowStep) => (s.id === stepId ? { ...s, settings: { ...s.settings, ...patch } } : s)) }));
     setDirty(true);
   };
-  const setMeta = (patch: Partial<Pick<Flow, "name" | "description" | "ifStepFails">>) => {
+  const setMeta = (patch: Partial<Pick<Flow, "name" | "description">>) => {
     setFlow((f) => ({ ...f, ...patch }));
     setDirty(true);
   };
@@ -414,19 +414,12 @@ function Editor({ id, initial }: { id: string; initial: Loaded }) {
       {err && <p className="bad" role="alert">{err.message}</p>}
 
       <details className="wf-settings">
-        <summary>Flow settings <span className="hint">Name · if a step fails · variables</span></summary>
+        <summary>Flow settings</summary>
         <Row label="Name">
           <input className="inp" aria-label="Name" value={flow.name} onChange={(e) => setMeta({ name: e.target.value })} />
         </Row>
         <Row label="Description">
           <input className="inp" aria-label="Description" value={flow.description} onChange={(e) => setMeta({ description: e.target.value })} />
-        </Row>
-        <Row label="If a step fails">
-          <select className="sel" aria-label="If a step fails" value={flow.ifStepFails} onChange={(e) => setMeta({ ifStepFails: e.target.value as Flow["ifStepFails"] })}>
-            <option value="tell">Tell me</option>
-            <option value="move_aside">Move the file aside</option>
-            <option value="leave">Leave the file alone</option>
-          </select>
         </Row>
       </details>
 

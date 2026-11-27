@@ -1,6 +1,6 @@
 // Workflow flow calls for the mock (pages 06 and 07): the guide, the answers, the three-step flow, the check,
 // the recommended bitrates, saves, publish and the try. A session's edits live in memory, as the app's do.
-import type { Answers, BitrateLadder, Flow, FlowCheck, FlowProblem, FlowStep, GuideDoc, GuidePreview, IfStepFails, StepId, TryLine } from "./flowTypes.ts";
+import type { Answers, BitrateLadder, Flow, FlowCheck, FlowProblem, FlowStep, GuideDoc, GuidePreview, StepId, TryLine } from "./flowTypes.ts";
 import { ApiError } from "./errors.ts";
 import { respond } from "./mockState.ts";
 import { createWorkflowRow, peekWorkflowRow, updateWorkflowRow } from "./mockWorkflows.ts";
@@ -24,7 +24,6 @@ export const DEFAULT_ANSWERS: Answers = {
   includeDolbyVision: false,
   original: "replace",
   folder: "",
-  ifStepFails: "tell",
 };
 
 const FORMAT_LABEL: Record<string, string> = { hevc: "HEVC", h264: "H.264", av1: "AV1" };
@@ -202,22 +201,6 @@ const GUIDE: GuideDoc = {
         { key: "folder", label: "Folder", type: "folder" },
       ],
     },
-    {
-      id: "if_fails",
-      label: "If it fails",
-      fields: [
-        {
-          key: "ifStepFails",
-          label: "If a step fails",
-          type: "choice",
-          choices: [
-            { value: "tell", label: "Tell me", available: true },
-            { value: "move_aside", label: "Move the file aside", available: true },
-            { value: "leave", label: "Leave the file as it was", available: true },
-          ],
-        },
-      ],
-    },
   ],
   defaults: DEFAULT_ANSWERS,
   languages: ["eng", "ger"],
@@ -245,8 +228,6 @@ export function answersToFlow(a: Answers, meta: { name: string; description: str
   return {
     name: meta.name,
     description: meta.description,
-    ifStepFails: (a.ifStepFails as IfStepFails) ?? "tell",
-    variables: [],
     steps: [
       step("video", "video.convert", {
         format: a.format ?? "hevc",
@@ -355,7 +336,6 @@ function sentencesFor(flow: Flow, a: Answers): string[] {
   if (sv.where === "replace") out.push("Replaces the original. The old file goes to the trash and is kept 7 days.");
   else if (sv.where === "folder") out.push(`Puts the new file in ${sv.folder ? String(sv.folder) : "the folder you pick"}; the original stays where it is.`);
   else out.push("Puts the new file next to the original; the original stays where it is.");
-  out.push(`If a step fails: ${{ tell: "tell me", move_aside: "the file is moved aside", leave: "the file is left as it was" }[flow.ifStepFails]}.`);
   return out;
 }
 

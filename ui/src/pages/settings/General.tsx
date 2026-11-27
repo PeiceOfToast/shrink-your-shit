@@ -1,5 +1,5 @@
 import { type GeneralSettings } from "../../api/index.ts";
-import { LoadState, Row, SaveBar, Seg, Switch } from "./parts.tsx";
+import { ListInput, LoadState, Row, SaveBar, Seg, Switch } from "./parts.tsx";
 import { useSettingsForm } from "./useSettingsForm.ts";
 
 export function General() {
@@ -18,6 +18,9 @@ export function General() {
         <select id="g-lang" className="sel" value={g.language} onChange={(e) => set({ language: e.target.value as "en" })}>
           <option value="en">English</option>
         </select>
+      </Row>
+      <Row id="g-langs" label="My languages" hint="Three-letter codes, for example eng, ger. Kept in the workflows that keep only some tracks." field="general.languages" problem={f.problem}>
+        <ListInput id="g-langs" label="My languages" value={g.languages} onChange={(languages) => set({ languages })} />
       </Row>
       <Row label="Time format" hint="How times look, for example 14:05 or 2:05 pm.">
         <Seg

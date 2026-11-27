@@ -159,8 +159,3 @@ table.tbl.wkr td.wk-sub{display:none}
 @media (max-width:900px){.ticks{grid-template-columns:repeat(2,minmax(0,1fr))}.pagehead-desk{display:none}}
 .seg button{white-space:nowrap}
 .hc .set-row{border-bottom:0}
-table.vars td.num{text-align:right;white-space:nowrap}
-
-/* Variables: the name is a link-style button; the underline shows on hover only, so underscores stay readable. */
-table.tbl.vars .linklike.mono{text-decoration:none}
-table.tbl.vars .linklike.mono:hover{text-decoration:underline}
