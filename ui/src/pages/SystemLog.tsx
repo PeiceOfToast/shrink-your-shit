@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { api, type LogEvent, type LogParams } from "../api/index.ts";
 import { useApi } from "../api/useApi.ts";
-import { clockPrecise } from "../format/time.ts";
+import { clock, clockPrecise } from "../format/time.ts";
 import { Link, navigate, useLocation } from "../router.tsx";
+import { Icon } from "../ui/Icon.tsx";
 import { LEVEL_LABEL, copyText, saveText, type LogLevelName } from "./logParts.ts";
 
 // The System log (page 12): every app-wide event, newest last. Filters live in the URL, so a link can open a filtered log.
@@ -100,6 +101,10 @@ function Line({ e }: { e: LogEvent }) {
     setCopied(ok);
     setTimeout(() => setCopied(false), 1500);
   };
+  const links: { to: string; text: string }[] = [];
+  if (e.jobId) links.push({ to: `/jobs/${e.jobId}/log`, text: "Open job" });
+  if (e.libraryId) links.push({ to: `/libraries/${e.libraryId}`, text: "Open library" });
+  if (e.workerId) links.push({ to: `/workers/${e.workerId}`, text: "Open worker" });
   return (
     <div className={`ln ${lvl}`}>
       <span className="t">{clockPrecise(e.ts)}</span>
@@ -108,29 +113,17 @@ function Line({ e }: { e: LogEvent }) {
       <span className="msg">
         {e.message}
         {e.nextAction && <span className="next"> {e.nextAction}</span>}
-        {e.jobId && (
-          <>
-            {" "}
-            <Link to={`/jobs/${e.jobId}/log`}>Open job</Link>
-          </>
-        )}
-        {e.libraryId && (
-          <>
-            {" "}
-            <Link to={`/libraries/${e.libraryId}`}>Open library</Link>
-          </>
-        )}
-        {e.workerId && (
-          <>
-            {" "}
-            <Link to={`/workers/${e.workerId}`}>Open worker</Link>
-          </>
-        )}
+        {links.map((l, i) => (
+          <span key={l.to}>
+            {i === 0 ? " " : " · "}
+            <Link to={l.to}>{l.text}</Link>
+          </span>
+        ))}
         <Repeat e={e} />
-        <button type="button" className="btn ghost sm copy" onClick={copy}>
-          {copied ? "Copied" : "Copy line"}
-        </button>
       </span>
+      <button type="button" className="btn ghost sm copy" onClick={copy} aria-label={copied ? "Copied" : "Copy line"} title="Copy line">
+        <Icon name="copy" />
+      </button>
     </div>
   );
 }
@@ -146,6 +139,8 @@ export function SystemLog() {
   const to = query.get("to") ?? "";
   const q = query.get("q") ?? "";
   const since = query.get("since") ?? "";
+  // The time of the last line the person saw, for the "New errors since" hint.
+  const sinceAt = since ? api.getLogLineTime(Number(since)) : null;
   const detail = query.get("detail") === "1";
   const paramKey = query.toString();
 
@@ -354,8 +349,9 @@ export function SystemLog() {
       )}
 
       {since && (
-        <p className="syslog-since">
-          Showing only the lines after the ones you last saw. <button type="button" className="btn ghost sm" onClick={() => writeQuery({ since: "" })}>Show all lines</button>
+        <p className="syslog-since hint">
+          {sinceAt ? `New errors since ${clock(sinceAt)}` : "New errors"}{" "}
+          <button type="button" className="btn ghost sm" onClick={() => writeQuery({ since: "" })}>Show all lines</button>
         </p>
       )}
       {log.data && items.length === 0 && !hasFilters && <p className="muted">Nothing logged yet.</p>}

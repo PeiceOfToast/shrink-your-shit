@@ -77,7 +77,7 @@ const DRAFTS: Draft[] = [
     jobId: "j11",
     nextAction: "The original is kept. Retry it from Jobs.",
   }),
-  d(10, "info", "note", "Health check", "Health check passed."),
+  d(10, "error", "error", "Health check", "Health check failed: NAS box shares. The NAS box has been unreachable since 22:10."),
   d(5, "info", "note", "Web", "Signed in from 10.10.2.52."),
   d(2, "info", "queued", "Scanner", "Queued 3 files from Movies.", { libraryId: "movies" }),
 ];
@@ -102,7 +102,7 @@ const BASE: LogEvent[] = DRAFTS.map((x, i) => toEvent(x, i + 1));
 // Lines that arrive while the page follows the log.
 const LIVE: Draft[] = [
   d(0, "info", "note", "Scanner", "Scan finished: TV Shows. 0 new files.", { libraryId: "tv" }),
-  d(0, "info", "note", "Health check", "Health check passed."),
+  d(0, "error", "error", "Health check", "Health check failed: NAS box shares. The NAS box has been unreachable since 22:10."),
   d(0, "info", "note", "This computer", "Converting started.", { workerId: "this-computer" }),
 ];
 let streamed: LogEvent[] = [];
@@ -173,6 +173,11 @@ export function markLogSeen(seq: number): Promise<{ ok: true }> {
     notifySummaryChanged();
     return { ok: true as const };
   });
+}
+
+// The time of one line, for "New errors since HH:MM". Null when no line has that seq.
+export function getLogLineTime(seq: number): string | null {
+  return all().find((e) => e.seq === seq)?.ts ?? null;
 }
 
 // The status line's "N new errors": error lines after the last seen seq.

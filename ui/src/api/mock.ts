@@ -12,6 +12,7 @@ import { getSeenSeq, newErrorCount } from "./mockLog.ts";
 // Mock implementation of the API. Route-named functions; shapes come from the page specs.
 // The dev state switcher sets a forced state (mockState.ts); pages see it only through these calls.
 export { setForcedState, getForcedState, onForcedStateChange } from "./mockState.ts";
+export { getLogLineTime } from "./mockLog.ts";
 export type { ForcedState } from "./mockState.ts";
 export * from "./mockLibraries.ts";
 export * from "./mockWorkflows.ts";

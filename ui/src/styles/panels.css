@@ -768,8 +768,8 @@
   padding: 8px 12px;
 }
 .syslog .ln {
-  grid-template-columns: 110px 58px 120px minmax(0, 1fr);
-  align-items: baseline;
+  grid-template-columns: 110px 58px 120px minmax(0, 1fr) auto;
+  align-items: start;
 }
 .syslog .src {
   overflow: hidden;
@@ -780,18 +780,33 @@
 .syslog .msg {
   display: block;
   overflow-wrap: anywhere;
+  grid-column: 4;
+  grid-row: 1;
+}
+.syslog .msg a {
+  white-space: nowrap;
 }
 .syslog .rep,
 .syslog .rep-span {
   color: var(--text2);
 }
-.syslog .copy {
+/* Copy is an icon at the row's right end, on the time line. Hover or focus shows it on desktop; touch shows it always. */
+.syslog .btn.copy {
   opacity: 0;
-  margin-left: 8px;
-  vertical-align: baseline;
+  grid-column: 5;
+  grid-row: 1;
+  min-width: 32px;
+  min-height: 32px;
+  width: auto;
+  flex: none;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text2);
 }
-.syslog .ln:hover .copy,
-.syslog .copy:focus-visible {
+.syslog .ln:hover .btn.copy,
+.syslog .btn.copy:focus-visible {
   opacity: 1;
 }
 .syslog-filters-toggle {
@@ -814,10 +829,12 @@
     flex: 1 1 0;
     min-width: 0;
   }
-  .syslog .ln > :last-child {
+  /* Time, level, source and copy share the first line; the message wraps below. */
+  .syslog .ln > .msg {
     flex-basis: 100%;
+    order: 1;
   }
-  .syslog .copy {
+  .syslog .btn.copy {
     opacity: 1;
   }
   .syslog-list {
