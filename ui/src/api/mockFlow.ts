@@ -460,8 +460,10 @@ export function guidePreview(answers: Answers): Promise<GuidePreview> {
   });
 }
 
-// Save as a draft from the guided page: stores the answers and writes the flow into the draft.
-export function putAnswers(id: string, answers: Answers): Promise<{ flow: Flow; rev: number }> {
+// Save as a draft from the guided page: stores the answers and writes the flow into the draft. The
+// page sends the revision it read as baseRev; the server refuses a stale one (changed_since).
+// ui-shop makes the mock check it in their post-#840 row, so it is taken and ignored here.
+export function putAnswers(id: string, answers: Answers, _baseRev: number): Promise<{ flow: Flow; rev: number }> {
   return respond(() => {
     checkQuality(answers);
     const d = docFor(id);

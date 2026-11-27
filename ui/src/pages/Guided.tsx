@@ -39,6 +39,9 @@ interface Loaded {
   guide: GuideDoc;
   answers: Answers;
   fitsGuided: boolean;
+  // The draft revision the page read. Every save sends it back as baseRev, so an editor save since
+  // the page opened is refused instead of silently overwritten.
+  rev: number;
   name: string;
 }
 
@@ -47,7 +50,7 @@ export function Guided({ id }: { id: string }) {
     async () => {
       const [guide, a, rows] = await Promise.all([api.getGuide(), api.getGuideAnswers(id), api.listWorkflows()]);
       const row = rows.find((r) => r.id === id);
-      return { guide, answers: a.answers, fitsGuided: a.fitsGuided, name: row?.name ?? "New workflow" };
+      return { guide, answers: a.answers, fitsGuided: a.fitsGuided, rev: a.rev, name: row?.name ?? "New workflow" };
     },
     [id],
   );
@@ -72,6 +75,7 @@ function GuidedForm({ id, initial }: { id: string; initial: Loaded }) {
   const [tryLines, setTryLines] = useState<TryLine[] | null>(null);
   const [tryErr, setTryErr] = useState<Err | null>(null);
   const [draftId, setDraftId] = useState(id);
+  const [rev, setRev] = useState(initial.rev);
   const seq = useRef(0);
 
   const dirty = JSON.stringify(answers) !== baseline;
@@ -108,10 +112,14 @@ function GuidedForm({ id, initial }: { id: string; initial: Loaded }) {
     if (isNew) {
       const created = await api.createDraft({ name: initial.name, answers });
       setDraftId(created.id);
+      setRev(created.rev);
       setBaseline(JSON.stringify(answers));
       return created.id;
     }
-    await api.putAnswers(draftId, answers);
+    // The revision this page read goes back with the answers. If the editor saved the draft since,
+    // the server refuses with changed_since and the page shows that message (as the editor does).
+    const saved = await api.putAnswers(draftId, answers, rev);
+    setRev(saved.rev);
     setBaseline(JSON.stringify(answers));
     return draftId;
   };

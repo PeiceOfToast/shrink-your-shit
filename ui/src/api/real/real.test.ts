@@ -129,10 +129,10 @@ test("the guided builder's answers and preview use the routes the server has", a
   assert.equal(calls[0].url, "/api/v2/workflows/7/answers");
 
   calls = stub(200, JSON.stringify({ flow, rev: 2 }));
-  assert.deepEqual(await putAnswers("7", { quality: 4 }), { flow, rev: 2 });
+  assert.deepEqual(await putAnswers("7", { quality: 4 }, 1), { flow, rev: 2 });
   assert.equal(calls[0].url, "/api/v2/workflows/7/answers");
   assert.equal(calls[0].init.method, "PUT");
-  assert.deepEqual(JSON.parse(String(calls[0].init.body)), { answers: { quality: 4 } });
+  assert.deepEqual(JSON.parse(String(calls[0].init.body)), { answers: { quality: 4 }, baseRev: 1 });
 
   // The preview is pure and saves nothing, so any workflow may ask it.
   calls = stub(200, JSON.stringify({ sentences: ["Converts video."], flow, problems: [], disabled: [] }));

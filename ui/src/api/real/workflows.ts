@@ -28,8 +28,8 @@ export const getStepDefinitions: typeof mock.getStepDefinitions = () =>
 // turns them into the draft, and "What this does", which saves nothing.
 export const getGuideAnswers: typeof mock.getGuideAnswers = (id) =>
   request<Out<typeof mock.getGuideAnswers>>("GET", `/workflows/${encodeURIComponent(id)}/answers`);
-export const putAnswers: typeof mock.putAnswers = (id, answers) =>
-  request<Out<typeof mock.putAnswers>>("PUT", `/workflows/${encodeURIComponent(id)}/answers`, { answers });
+export const putAnswers: typeof mock.putAnswers = (id, answers, baseRev) =>
+  request<Out<typeof mock.putAnswers>>("PUT", `/workflows/${encodeURIComponent(id)}/answers`, { answers, baseRev });
 export const guidePreview: typeof mock.guidePreview = (answers) =>
   request<Out<typeof mock.guidePreview>>("POST", "/workflows/preview", { answers });
 // The editor's live check (S2-2's route). The check is pure: the body's flow is the whole input and
