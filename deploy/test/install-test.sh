@@ -15,7 +15,8 @@
 # that folder served over the container's loopback instead (for a build not published yet, and for the
 # wrong-checksum check).
 # Every check prints PASS or FAIL; the container is destroyed at the end unless KEEP=1. The run's log is written,
-# with tokens redacted, to slices/15-rebuild/install-test-<template>-<UTC stamp>.log (SYP_SLICES overrides).
+# with tokens redacted, to slices/15-rebuild/install-test-<template>-<vmid>-<UTC stamp>.log (SYP_SLICES
+# overrides). The vmid keeps two runs started in the same second from writing over each other's log.
 #
 # Needs: ssh, curl, tar, sha256sum, python3 and the pve-api5 wrapper that holds the Host05 token. The published
 # path also needs the container to reach github.com. The token itself is never printed.
@@ -54,7 +55,7 @@ esac
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 SAFE_TPL=$(printf '%s' "$TEMPLATE" | tr -c 'A-Za-z0-9._-' '-')
 LOG_TMP=$(mktemp /tmp/syp-install-test.XXXXXX)
-LOG="$SLICES/install-test-$SAFE_TPL-$STAMP.log"
+LOG="$SLICES/install-test-$SAFE_TPL-$VMID-$STAMP.log"
 WORK=$(mktemp -d /tmp/syp-install-test-work.XXXXXX)
 IP="10.10.1.$((200 + VMID - 500))"
 BASE=http://$IP:8484
