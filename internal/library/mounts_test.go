@@ -104,6 +104,24 @@ func TestShareComparesMountSourceAndPath(t *testing.T) {
 			a: "/mnt/a", b: "/mnt/b", want: "same",
 		},
 		{
+			name: "a folder under a share mounted inside another share sits on the inner share (longest mount point wins)",
+			table: []string{
+				"36 25 0:32 / /mnt/outer rw - nfs4 server:/outer rw",
+				"37 25 0:33 / /mnt/outer/inner rw - nfs4 server:/inner rw",
+				"38 25 0:34 / /mnt/b rw - nfs4 server:/inner rw",
+			},
+			a: "/mnt/outer/inner/x", b: "/mnt/b/x", want: "same",
+		},
+		{
+			name: "the same folder through the outer share is a different share from the inner one",
+			table: []string{
+				"36 25 0:32 / /mnt/outer rw - nfs4 server:/outer rw",
+				"37 25 0:33 / /mnt/outer/inner rw - nfs4 server:/inner rw",
+				"38 25 0:34 / /mnt/b rw - nfs4 server:/inner rw",
+			},
+			a: "/mnt/outer/x", b: "/mnt/b/x", want: "none",
+		},
+		{
 			name: "local disks are unaffected: two mounts of one disk are not compared by source",
 			table: []string{
 				"36 25 8:17 / /mnt/a rw - ext4 /dev/sdb1 rw",

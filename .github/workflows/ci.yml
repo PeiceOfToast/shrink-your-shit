@@ -75,17 +75,18 @@ jobs:
       - name: Test
         run: go test -race ./...
 
-      # The bind-mount test makes a real mount, which needs a user and mount namespace (S2-10a). Run it there and
-      # require PASS, not SKIP. Where unshare is not allowed, the test keeps its own skip.
+      # The bind-mount test makes a real mount, which needs a user and mount namespace (S2-10a). Ubuntu 24.04 restricts
+      # unprivileged user namespaces through AppArmor, so the runner lifts that restriction first. In CI the test must
+      # PASS: no silent fallback. A local run without the namespace keeps the test's own skip.
       - name: Bind-mount test in a user and mount namespace
         run: |
           set -o pipefail
-          if unshare -rm true 2>/dev/null; then
-            unshare -rm go test -count=1 -v -run '^TestNestedThroughASecondMountIsRefused$' ./internal/library | tee bindmount.log
-            grep -q -- '--- PASS: TestNestedThroughASecondMountIsRefused' bindmount.log
-          else
-            echo "unshare is not allowed on this runner; the bind-mount test keeps its skip"
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          if sudo sysctl -n kernel.unprivileged_userns_clone >/dev/null 2>&1; then
+            sudo sysctl -w kernel.unprivileged_userns_clone=1
           fi
+          unshare -rm go test -count=1 -v -run '^TestNestedThroughASecondMountIsRefused$' ./internal/library | tee bindmount.log
+          grep -q -- '--- PASS: TestNestedThroughASecondMountIsRefused' bindmount.log
 
       - name: Format
         run: test -z "$(gofmt -l .)"
