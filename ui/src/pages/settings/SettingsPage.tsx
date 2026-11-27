@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, type SettingsSection } from "../../api/index.ts";
 import { useApi } from "../../api/useApi.ts";
-import { Link } from "../../router.tsx";
+import { Link, navigate } from "../../router.tsx";
 import { hasChanges, setAsker } from "../../settings/leaveGuard.ts";
 import { Access } from "./Access.tsx";
 import { Backup } from "./Backup.tsx";
@@ -62,6 +62,14 @@ export function SettingsPage({ section }: { section: SettingsSection | null }) {
       </div>
       <div className={`set${section ? " open" : ""}`}>
         <nav className="set-nav" aria-label="Settings sections">
+          {/* At 390 the top bar has no Account menu, so the account actions sit at the top of this list. */}
+          <section className="set-account" aria-label="Account">
+            <p className="set-account-who">Signed in on this browser</p>
+            <div className="set-account-acts">
+              <Link to="/settings/access">Your access tokens</Link>
+              <button type="button" className="btn sm" onClick={() => api.signOut().finally(() => navigate("/signin"))}>Sign out</button>
+            </div>
+          </section>
           {SECTIONS.map((s) => (
             <Link key={s.key} to={`/settings/${s.key}`} aria-current={s.key === section ? "page" : undefined}>
               {s.label}
