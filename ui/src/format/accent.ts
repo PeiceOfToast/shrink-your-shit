@@ -61,7 +61,7 @@ export function readableAccent(hex: string, theme: "dark" | "light"): { color: s
 
 // The CSS variables for a chosen accent, or null for the default green (the stylesheet's own values).
 export function accentVars(hex: string | null): { vars: Record<string, string>; movedDark: boolean; movedLight: boolean } | null {
-  if (!hex) return null;
+  if (!hex || !isHex(hex)) return null;
   const dark = readableAccent(hex, "dark");
   const light = readableAccent(hex, "light");
   return {

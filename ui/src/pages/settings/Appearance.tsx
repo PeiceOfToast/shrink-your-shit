@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { type AppearanceSettings } from "../../api/index.ts";
-import { PRESETS, accentVars, isHex, readableAccent } from "../../format/accent.ts";
+import { PRESETS, accentVars } from "../../format/accent.ts";
 import { applyAppearance } from "../../shell/theme.ts";
 import { LoadState, Row, SaveBar, Seg } from "./parts.tsx";
 import { useSettingsForm } from "./useSettingsForm.ts";
@@ -35,9 +35,9 @@ export function Appearance() {
   const previewLight = custom?.vars["--acc-light"] ?? "#15803D";
   const onDark = custom?.vars["--on-dark"] ?? "#06130B";
   const onLight = custom?.vars["--on-light"] ?? "#FFFFFF";
-  const movedDark = a.accent ? readableAccent(a.accent, "dark").moved : false;
-  const movedLight = a.accent ? readableAccent(a.accent, "light").moved : false;
-  const ownValue = a.accent && isHex(a.accent) ? a.accent : "#3b82f6";
+  const movedDark = custom?.movedDark ?? false;
+  const movedLight = custom?.movedLight ?? false;
+  const current = a.accent ?? DEFAULT_ACCENT;
   return (
     <>
       <h2 className="set-title">Appearance</h2>
@@ -71,13 +71,12 @@ export function Appearance() {
         <div className="set-own">
           <label>
             Your own
-            <input type="color" aria-label="Your own colour" value={ownValue} onChange={(e) => set({ accent: e.target.value })} />
+            <input type="color" aria-label="Your own colour" value={current} onChange={(e) => set({ accent: e.target.value })} />
           </label>
           <input
             className="inp"
             aria-label="Hex colour"
-            value={a.accent ?? ""}
-            placeholder="#3b82f6"
+            value={current}
             onChange={(e) => set({ accent: e.target.value.trim() === "" ? null : e.target.value.trim() })}
           />
         </div>

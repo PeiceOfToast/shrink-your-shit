@@ -4,7 +4,7 @@
 export type JobState = "waiting" | "running" | "done" | "failed" | "skipped";
 
 export interface Series {
-  c: "ok" | "accent" | "text2" | "bad";
+  c: "ok" | "accent" | "text2" | "bad" | "trash";
   v: (number | null)[];
 }
 

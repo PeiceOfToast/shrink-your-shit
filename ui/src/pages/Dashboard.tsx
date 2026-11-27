@@ -20,7 +20,7 @@ function paceLabel(secPerGB: number): string {
 // The charts draw GB and job counts; the day records are bytes and counts.
 const savedBars = (days: DaySeries[]): Series[] => [
   { c: "ok", v: days.map((d) => (d.freedBytes == null ? null : d.freedBytes / 1e9)) },
-  { c: "accent", v: days.map((d) => (d.trashBytes == null ? null : d.trashBytes / 1e9)) },
+  { c: "trash", v: days.map((d) => (d.trashBytes == null ? null : d.trashBytes / 1e9)) },
 ];
 const filesBars = (days: DaySeries[]): Series[] => [
   { c: "ok", v: days.map((d) => d.done) },
@@ -271,7 +271,7 @@ export function Dashboard() {
                   <i style={{ background: "var(--ok)" }}></i>Freed
                 </li>
                 <li>
-                  <i style={{ background: "var(--accent)" }}></i>In the trash
+                  <i style={{ background: "var(--trash)" }}></i>In the trash
                 </li>
               </ul>
               <Bars series={savedBars(o.series.days)} />
