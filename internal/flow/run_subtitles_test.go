@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,9 +26,13 @@ type fakeJournal struct {
 	added    []safety.Sidecar
 	finished []int64
 	dropped  []string
+	addErr   error // when set, AddSidecars records nothing and answers this
 }
 
 func (f *fakeJournal) AddSidecars(list []safety.Sidecar) error {
+	if f.addErr != nil {
+		return f.addErr
+	}
 	f.recs = append(f.recs, list...)
 	f.added = append(f.added, list...)
 	return nil
@@ -360,6 +365,79 @@ func TestRunSRTLateNameRaceWarnsAndKeepsTheSubtitlesOnTheChosenName(t *testing.T
 	}
 	if len(journal.finished) != 1 || len(journal.dropped) != 0 {
 		t.Errorf("finished = %v dropped = %v, want the names kept", journal.finished, journal.dropped)
+	}
+}
+
+// TestRunSRTRecordFailureLeadsWithTheOutcome pins the sentence a failed subtitle record gives
+// (ui-shop's follow-up on #854): the outcome and the promise that nothing changed come first, and
+// the raw error is last. The record is written before any file is placed, so the promise holds.
+func TestRunSRTRecordFailureLeadsWithTheOutcome(t *testing.T) {
+	root, src, info, rev := srtRun(t)
+	m := &srtWriting{Media: &fake.Media{Probes: map[string]media.Info{src: info}}}
+	sf := &fakeSafety{verify: safety.Verdict{OK: true}}
+	journal := &fakeJournal{addErr: errors.New("the database is locked")}
+	env := newEnv(m, sf, &recorder{}, rev, nil)
+	env.Sidecars = journal
+	res := flow.Run(context.Background(), runInput(t, root, src), env)
+
+	want := "The subtitle files could not be recorded, so nothing was changed. Press Retry. (the database is locked)"
+	if res.Outcome != flow.OutcomeFatal || res.Reason != "subtitle.record_failed" || res.Message != want {
+		t.Fatalf("result = %+v, want the record failure with %q", res, want)
+	}
+	if res.NextAction != "retry" {
+		t.Errorf("next action = %q, want retry: the sentence says Press Retry", res.NextAction)
+	}
+	if sf.placedTo != "" {
+		t.Errorf("placed %q; the sentence says nothing was changed", sf.placedTo)
+	}
+	for _, name := range []string{"clip-shrunk.mkv", "clip-shrunk.eng.srt", "clip-shrunk.eng.2.srt"} {
+		if _, err := os.Stat(filepath.Join(root, name)); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("%s exists after a record failure; the sentence says nothing was changed: %v", name, err)
+		}
+	}
+}
+
+// TestRunSRTNameFailureLeadsWithTheOutcome pins the sentence a run gives when no free name can be
+// found for a file that has subtitles to write (ui-shop's follow-up on #854): what happened to the
+// original and the new file first, the raw error last.
+func TestRunSRTNameFailureLeadsWithTheOutcome(t *testing.T) {
+	root, src, info, rev := srtRun(t)
+	before, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(root, "clip-shrunk.mkv")
+	stem := strings.TrimSuffix(out, ".mkv")
+	taken := []string{out}
+	for n := 2; n <= 1000; n++ {
+		taken = append(taken, fmt.Sprintf("%s (%d).mkv", stem, n))
+	}
+	for _, name := range taken {
+		if err := os.WriteFile(name, []byte("taken"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	m := &srtWriting{Media: &fake.Media{Probes: map[string]media.Info{src: info}}}
+	sf := &fakeSafety{verify: safety.Verdict{OK: true}}
+	env := newEnv(m, sf, &recorder{}, rev, nil)
+	env.Sidecars = &fakeJournal{}
+	res := flow.Run(context.Background(), runInput(t, root, src), env)
+
+	want := "The original was left as it is and no new file was made, because no free name for it could be found. " +
+		"(no free name for " + out + " in 1000 tries)"
+	if res.Outcome != flow.OutcomeFatal || res.Reason != "save.name_failed" || res.Message != want {
+		t.Fatalf("result = %+v, want the name failure with %q", res, want)
+	}
+	if sf.placedTo != "" {
+		t.Errorf("placed %q; the sentence says no new file was made", sf.placedTo)
+	}
+	after, err := os.ReadFile(src)
+	if err != nil || string(after) != string(before) {
+		t.Errorf("the original changed: %v", err)
+	}
+	if matches, _ := filepath.Glob(filepath.Join(root, "*.srt")); len(matches) != 0 {
+		t.Errorf("subtitle files were written beside the original: %v", matches)
 	}
 }
 
