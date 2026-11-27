@@ -199,3 +199,7 @@ table.tbl.wkr td.wk-sub{display:none}
 .ap-chips .ok{color:#4ADE80}.ap-chips .warn{color:#FBBF24}.ap-chips .bad{color:#F87171}
 .ap-light .ap-chips .ok{color:#166534}.ap-light .ap-chips .warn{color:#854D0E}.ap-light .ap-chips .bad{color:#991B1B}
 @media (max-width:900px){.ap-preview{grid-template-columns:1fr}}
+
+/* The Unsaved changes bar sits above the phone's tab bar on every settings page: fixed, not sticky, because a sticky
+   bar can't leave its section, so on a short page it covered the tab bar. The section keeps room under its last row. */
+@media (max-width:900px){.savebar{position:fixed;left:12px;right:12px;bottom:64px;margin-top:0;z-index:4}.set-main{padding-bottom:140px}}
