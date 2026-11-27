@@ -184,3 +184,26 @@ test("each try line starts with its step name", async () => {
   const name: Record<string, string> = { video: "Video:", audio: "Audio:", save: "Save:" };
   for (const l of lines) assert.ok(l.text.startsWith(name[l.stepId]), `${l.stepId}: ${l.text}`);
 });
+
+// Ten-bit H.264 is refused (the server's video.bitdepth_h264): greyed and a problem. HEVC is not greyed.
+const videoWith = (format: string, bitDepth: number) => {
+  const flow = answersToFlow(DEFAULT_ANSWERS, META);
+  flow.steps[0].settings = { ...flow.steps[0].settings, format, bitDepth };
+  return flow;
+};
+test("ten-bit H.264 is greyed and a problem, with the server's sentence", () => {
+  const check = checkFlow(videoWith("h264", 10));
+  const why = "10-bit H.264 plays on few devices, so it isn't offered. Pick HEVC or AV1 for 10-bit.";
+  const p = check.problems.find((x) => x.code === "video.bitdepth_h264");
+  assert.equal(p?.stepId, "video");
+  assert.equal(p?.field, "bitDepth");
+  assert.equal(p?.message, why);
+  const d = check.disabled.find((x) => x.field === "bitDepth" && x.value === "10");
+  assert.equal(d?.stepId, "video");
+  assert.equal(d?.why, why);
+});
+test("with HEVC, ten-bit is not greyed and not a problem", () => {
+  const check = checkFlow(videoWith("hevc", 10));
+  assert.equal(check.problems.find((x) => x.code === "video.bitdepth_h264"), undefined);
+  assert.equal(check.disabled.find((x) => x.field === "bitDepth"), undefined);
+});
