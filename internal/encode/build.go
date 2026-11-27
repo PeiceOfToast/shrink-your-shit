@@ -472,7 +472,13 @@ func evenRound(f float64) int {
 // mapped with Hable, and written as BT.709 video range in the output's pixel format. The linear step
 // is float, so the tone curve does not band.
 func tonemapChain(transfer, primaries, colorspace, pixelFormat string) string {
-	return "zscale=tin=" + transfer + ":pin=" + primaries + ":min=" + colorspace + ":t=linear:npl=100" +
+	// The source's HDR side data is deleted before anything else: libx265 writes frame mastering-display and
+	// content-light side data into the stream's codec header, so left in place it would describe an SDR picture as
+	// HDR (#855). A stream-level bitstream filter cannot reach that header; the frame filter can.
+	return "sidedata=mode=delete:type=MASTERING_DISPLAY_METADATA" +
+		",sidedata=mode=delete:type=CONTENT_LIGHT_LEVEL" +
+		",sidedata=mode=delete:type=DYNAMIC_HDR_PLUS" +
+		",zscale=tin=" + transfer + ":pin=" + primaries + ":min=" + colorspace + ":t=linear:npl=100" +
 		",format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0" +
 		",zscale=t=bt709:m=bt709:r=tv,format=" + pixelFormat
 }

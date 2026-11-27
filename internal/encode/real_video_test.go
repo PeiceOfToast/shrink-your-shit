@@ -139,12 +139,10 @@ func TestRealTonemapIsSDRBT709(t *testing.T) {
 	if v.ColorPrimaries != "bt709" || v.ColorTransfer != "bt709" || v.ColorSpace != "bt709" {
 		t.Errorf("colour = %s/%s/%s, want bt709 on all three", v.ColorPrimaries, v.ColorTransfer, v.ColorSpace)
 	}
-	// Known residue, not asserted: the source's mastering display and content light metadata still
-	// sit in the output's codec header, where a stream filter cannot reach them (filter_units leaves
-	// them). The colour tags above are the picture's description; this metadata is advisory. Logged
-	// so it stays visible until it is stripped.
+	// The output must not describe an SDR picture as HDR: the source's mastering display and content light
+	// metadata are deleted from the frames before the encoder sees them (#855).
 	if hdr, _ := media.ProbeFrameHDR(context.Background(), out); hdr.MasteringDisplay || hdr.ContentLight {
-		t.Logf("known residue: tone-mapped output still carries HDR side data %+v in its codec header", hdr)
+		t.Errorf("tone-mapped file still carries HDR side data %+v", hdr)
 	}
 
 	ref := filepath.Join(dir, "ref.mkv")

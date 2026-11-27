@@ -51,6 +51,12 @@ func TestBuildTonemapIsSDRBT709(t *testing.T) {
 	if hasFlag(res.Argv, "-x265-params:v:0") {
 		t.Error("a tone-mapped encode carries HDR10 x265 parameters")
 	}
+	// The frame side data the encoder would write into the header is deleted before the chain (#855).
+	for _, del := range []string{"type=MASTERING_DISPLAY_METADATA", "type=CONTENT_LIGHT_LEVEL"} {
+		if !strings.Contains(vf, "sidedata=mode=delete:"+del) {
+			t.Errorf("filter %q does not delete %s", vf, del)
+		}
+	}
 	if hasFlag(res.Argv, "-profile:v:0") {
 		t.Error("an 8-bit tone-mapped encode asks for main10")
 	}
