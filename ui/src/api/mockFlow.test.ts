@@ -48,10 +48,12 @@ test("MP4 is greyed for Opus audio, with its reason", () => {
   assert.equal(disabledFor({ audio: "stereo_aac" }, "mp4"), undefined);
 });
 
-test("WebM needs AV1 video and Opus audio; with either missing it is greyed", () => {
-  const why = "WebM needs AV1 video and Opus audio.";
-  assert.equal(disabledFor({ format: "hevc", audio: "stereo_opus" }, "webm")?.why, why);
-  assert.equal(disabledFor({ format: "av1", audio: "stereo_aac" }, "webm")?.why, why);
+test("WebM needs AV1 video and Opus audio; the reason names the missing one", () => {
+  // Video first: any video that isn't AV1 gets the video sentence, whatever the audio is.
+  assert.equal(disabledFor({ format: "hevc", audio: "stereo_opus" }, "webm")?.why, "WebM needs AV1 video. Pick AV1 in Video to use it.");
+  assert.equal(disabledFor({ format: "hevc", audio: "stereo_aac" }, "webm")?.why, "WebM needs AV1 video. Pick AV1 in Video to use it.");
+  // AV1 video with audio that is not Opus (AAC here) gets the audio sentence.
+  assert.equal(disabledFor({ format: "av1", audio: "stereo_aac" }, "webm")?.why, "WebM needs Opus audio. Pick Opus in Audio to use it.");
   assert.equal(disabledFor({ format: "av1", audio: "stereo_opus" }, "webm"), undefined);
 });
 
