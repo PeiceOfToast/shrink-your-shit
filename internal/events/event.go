@@ -48,6 +48,11 @@ const (
 	KindWarning   Kind = "warning"
 	KindError     Kind = "error"
 	KindNote      Kind = "note"
+	// The app-wide events the pages read: a scan's start, its periodic progress, its end with the
+	// counts. They carry no job id and are kept in the log, not a job's record.
+	KindScanStart    Kind = "scan.start"
+	KindScanProgress Kind = "scan.progress"
+	KindScanEnd      Kind = "scan.end"
 )
 
 var knownKinds = map[Kind]bool{
@@ -55,6 +60,7 @@ var knownKinds = map[Kind]bool{
 	KindDecision: true, KindCommand: true, KindProbe: true, KindProgress: true,
 	KindSize: true, KindVariable: true, KindMove: true, KindWarning: true,
 	KindError: true, KindNote: true,
+	KindScanStart: true, KindScanProgress: true, KindScanEnd: true,
 }
 
 // jobKinds are kept in the job's own record (keep "job") rather than only in the log.
