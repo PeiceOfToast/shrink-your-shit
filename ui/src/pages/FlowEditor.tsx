@@ -7,8 +7,8 @@ import { languageName, normalizeLanguage } from "../format/language.ts";
 
 // The two choices the list from the API doesn't include. Their codes are final: orig and und.
 const SPECIAL_LANGUAGES = [
-  { code: "orig", name: "Original language" },
-  { code: "und", name: "Unknown" },
+  { code: "orig", name: "Original language", note: "the film's own" },
+  { code: "und", name: "Unknown", note: "tracks with no language set" },
 ];
 
 // Languages as chips: a picked one is removed by its chip; "+ Add" opens a search over the rest. No free text.
@@ -17,7 +17,7 @@ function LanguageChips({ label, value, onChange }: { label: string; value: strin
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const picked = value.map(normalizeLanguage);
-  const options = [...SPECIAL_LANGUAGES, ...(all.data ?? [])].filter((l) => !picked.includes(l.code));
+  const options: { code: string; name: string; note?: string }[] = [...SPECIAL_LANGUAGES, ...(all.data ?? [])].filter((l) => !picked.includes(l.code));
   const needle = query.trim().toLowerCase();
   const shown = needle ? options.filter((l) => l.name.toLowerCase().includes(needle)) : options;
   const close = () => {
@@ -61,6 +61,7 @@ function LanguageChips({ label, value, onChange }: { label: string; value: strin
                     }}
                   >
                     {l.name}
+                    {l.note && <i>{l.note}</i>}
                   </button>
                 </li>
               ))}

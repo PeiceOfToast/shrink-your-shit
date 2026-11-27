@@ -103,6 +103,7 @@
   .wf-index { position: static; flex-direction: row; overflow-x: auto; }
   .wf-index button { width: auto; white-space: nowrap; }
   .wf-side { position: static; }
+  .wf-seg { justify-self: stretch; }
 }
 @media (max-width: 600px) {
   .wf-dlg { position: fixed; inset: 0; transform: none; width: 100%; height: 100%; max-height: none; border-radius: 0; overflow-y: auto; }
@@ -114,6 +115,12 @@
   .wf-head h1 { font-size: 19px; }
   .wf-actions .btn, .wf-step-nav .btn { flex: 1; justify-content: center; }
   .wf-part { padding: 14px; }
+  .wf-back, .wf-settings > summary, .wf-advbox > summary, .wf-close {
+    display: inline-flex;
+    align-items: center;
+    min-height: 32px;
+    min-width: 32px;
+  }
 }
 .wf-step-right { display: flex; align-items: center; gap: 10px; }
 
@@ -123,3 +130,4 @@
 .wf-lang-list { list-style: none; margin: 0; padding: 0; max-height: 240px; overflow: auto; }
 .wf-lang-list button { width: 100%; text-align: left; background: none; border: 0; color: var(--text); padding: 6px 8px; border-radius: var(--radius); font: inherit; cursor: pointer; }
 .wf-lang-list button:hover, .wf-lang-list button:focus-visible { background: var(--raised); }
+.wf-lang-list button i { font-style: normal; color: var(--text2); font-size: 12.5px; margin-left: 6px; }
