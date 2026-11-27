@@ -92,6 +92,27 @@ func TestStageIsPrivateAndInvisibleAtTheFinalName(t *testing.T) {
 	}
 }
 
+// TestStageInMakesTheFolderInTheBase: a try's staging goes in the app's temp folder, not in the
+// folder the output would be placed in.
+func TestStageInMakesTheFolderInTheBase(t *testing.T) {
+	base := t.TempDir()
+	dst := filepath.Join(t.TempDir(), "clip-shrunk.mkv")
+	st, err := StageIn(base, dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(st.Folder)
+	if parent := filepath.Dir(st.Folder); parent != base {
+		t.Errorf("folder %q is in %q, want the base %q", st.Folder, parent, base)
+	}
+	if filepath.Base(st.Path) != "out.mkv" {
+		t.Errorf("staged file = %q, want out.mkv", st.Path)
+	}
+	if _, err := os.Stat(dst); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("nothing may appear at the final name before Place: %v", err)
+	}
+}
+
 func TestVerifyTooShortStopsBeforeStreams(t *testing.T) {
 	st, _ := stagedWith(t, "x")
 	src := goodInfo(100 * time.Second)

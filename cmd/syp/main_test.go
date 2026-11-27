@@ -6,8 +6,10 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/PeiceOfToast/shrink-your-shit/internal/flow"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/jobs"
@@ -200,4 +202,43 @@ func TestAnInstallAtSchemaSixUpgradesThroughSeven(t *testing.T) {
 	if work.In.Revision != 2 {
 		t.Errorf("the old job runs revision %d, want the current revision 2", work.In.Revision)
 	}
+}
+
+// TestTheStartupSweepClearsOlderTriesOnly: everything in the app's temp folder is ours, but an
+// entry newer than this start may be a try another process is running right now, so it stays.
+func TestTheStartupSweepClearsOlderTriesOnly(t *testing.T) {
+	dir := t.TempDir()
+	started := time.Now()
+	old := filepath.Join(dir, "try-1234", "sample.mkv")
+	newer := filepath.Join(dir, "try-5678", "sample.mkv")
+	for _, path := range []string{old, newer} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("sample"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	long := time.Hour
+	if err := os.Chtimes(filepath.Dir(old), started.Add(-long), started.Add(-long)); err != nil {
+		t.Fatal(err)
+	}
+
+	var warned []string
+	sweepTryFolder(context.Background(), dir, started, func(message string) { warned = append(warned, message) })
+
+	if _, err := os.Stat(old); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("an old try's folder is still there: %v", err)
+	}
+	if _, err := os.Stat(newer); err != nil {
+		t.Errorf("a newer try's folder was removed: %v", err)
+	}
+	if len(warned) != 0 {
+		t.Errorf("warnings = %q, want none", warned)
+	}
+
+	// A fresh install has no temp folder yet, and that is not a problem to report.
+	sweepTryFolder(context.Background(), filepath.Join(dir, "not-yet"), started, func(message string) {
+		t.Errorf("a missing temp folder was reported: %s", message)
+	})
 }

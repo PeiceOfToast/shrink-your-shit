@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"net"
 	"net/http"
 	"os"
@@ -64,6 +65,7 @@ func main() {
 // ready, jobs left running by a previous stop are recovered, then the worker starts. It stops on Ctrl-C or
 // SIGTERM: the worker finishes or requeues its job before the store closes.
 func run(dataDir, listen string) error {
+	started := time.Now()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -99,6 +101,13 @@ func run(dataDir, listen string) error {
 		return err
 	}
 	flows := flow.Open(db)
+	// Anything left in the app's temp folder came from a process that stopped without tidying
+	// up: a try's sample and staging both live there. Only entries older than this start are
+	// removed, so a try already running in another process is left alone.
+	sweepTryFolder(ctx, filepath.Join(dataDir, "tmp"), started, func(message string) {
+		_ = bus.Emit(events.Event{Level: events.LevelWarn, Kind: events.KindWarning,
+			Source: "safety", Code: "sweep.try_left", Message: message})
+	})
 	q := jobs.New(jobs.Options{DB: db, Bus: bus})
 	srv.Jobs(q, library.NewCatalog(db), flows, bus)
 	if err := q.Recover(ctx, sweepLeftovers(bus)); err != nil {
@@ -131,6 +140,20 @@ func run(dataDir, listen string) error {
 		Scanner:   newScanner(catalog, flows, q, bus, wk.Wake),
 		Wake:      wk.Wake,
 		DiskFree:  fsx.FreeBytes,
+		// Try on one file (S2-5): the same engine as a job, with its own events that answer the
+		// page rather than going to the log.
+		Try: func(ctx context.Context, f flow.Flow, file string) (flow.TryResult, error) {
+			// A sample is a real copy of the video (a 4K minute can be hundreds of MB), so it goes
+			// in the app's own data folder rather than the system temp, which is often a small
+			// memory-backed one. The engine's staging goes there too, so a try never writes in the
+			// library. Each folder is removed when the try ends, and whatever a killed process
+			// leaves is swept at the next start.
+			scratch := filepath.Join(dataDir, "tmp")
+			if err := os.MkdirAll(scratch, 0o700); err != nil {
+				return flow.TryResult{}, fmt.Errorf("make the try folder: %w", err)
+			}
+			return flow.Try(ctx, f, file, engineEnv(), scratch)
+		},
 	})
 	fmt.Fprintln(os.Stderr, "syp serving on", ln.Addr())
 
@@ -176,18 +199,56 @@ func sweepLeftovers(bus *events.Bus) func(context.Context, jobs.Job) error {
 	}
 }
 
+// sweepTryFolder clears the app's temp folder at startup. Everything in it is ours (a try's sample
+// and its staging folder), but only what is older than a second before this start is removed: a
+// newer entry may belong to a try another process is running. (The second leaves room for the file
+// system's coarse timestamps.) What it cannot clear is passed to warn, and start-up carries on.
+func sweepTryFolder(ctx context.Context, dir string, started time.Time, warn func(string)) {
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return
+	}
+	if err != nil {
+		warn("The app's temp folder could not be read: " + err.Error())
+		return
+	}
+	cutoff := started.Add(-time.Second)
+	for _, e := range entries {
+		if ctx.Err() != nil {
+			return
+		}
+		info, err := e.Info()
+		if err != nil || !info.ModTime().Before(cutoff) {
+			continue
+		}
+		path := filepath.Join(dir, e.Name())
+		if err := os.RemoveAll(path); err != nil {
+			warn(path + ": " + err.Error())
+		}
+	}
+}
+
 // workerEnv is what a real job runs with: the real media tools, the real safety steps, the processor encoder
 // until stage 2 adds the hardware picker, and the job events on the bus.
-func workerEnv(flows *flow.Store, bus *events.Bus) flow.Env {
+// engineEnv is the world the flow engine runs in: the real media tools, the real safety check,
+// the processor picker and the clock. The worker adds its log and revision loader; a try adds
+// neither, so its events answer the page and nothing reaches a job's log.
+func engineEnv() flow.Env {
 	return flow.Env{
 		Media:  media.MediaFuncs{ProbeFunc: media.Probe, RunFunc: media.Run},
 		Safety: flow.RealSafety{}, Pick: flow.ProcessorPick,
-		LoadRevision: func(ctx context.Context, id int64, rev int) (flow.Flow, error) {
-			r, err := flows.Revision(ctx, id, rev)
-			return r.Flow, err
-		},
-		Bus: bus, Now: time.Now, Sleep: time.Sleep, AppVersion: version,
+		Now: time.Now, Sleep: time.Sleep, AppVersion: version,
 	}
+}
+
+func workerEnv(flows *flow.Store, bus *events.Bus) flow.Env {
+	env := engineEnv()
+	env.LoadRevision = func(ctx context.Context, id int64, rev int) (flow.Flow, error) {
+		r, err := flows.Revision(ctx, id, rev)
+		return r.Flow, err
+	}
+	env.Bus = bus
+	return env
 }
 
 // newScanner is the library scanner wired to the real world: ffprobe for the probe, the library's

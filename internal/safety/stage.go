@@ -22,7 +22,13 @@ type Staged struct {
 // Stage makes a private folder next to dst and creates the output file in it, exclusively, mode 0600. Nothing
 // appears at dst until Place. The folder name is unpredictable (MkdirTemp), so another program cannot guess it.
 func Stage(dst string) (Staged, error) {
-	dir := filepath.Dir(dst)
+	return StageIn(filepath.Dir(dst), dst)
+}
+
+// StageIn is Stage with the private folder made in base instead of next to dst. A try uses it so a
+// killed process leaves nothing in the original's folder.
+func StageIn(base, dst string) (Staged, error) {
+	dir := base
 	name := filepath.Base(dst)
 	ext := filepath.Ext(name)
 	// MkdirTemp replaces the first "*" in the pattern, so a stray "*" in the name must not take its place.

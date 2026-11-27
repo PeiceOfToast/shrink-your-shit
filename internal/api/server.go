@@ -48,6 +48,9 @@ type Deps struct {
 	Wake func()
 	// DiskFree reads the free space of the volume that holds a folder. nil reports 0.
 	DiskFree func(path string) (uint64, error)
+	// Try is flow.Try with the real media and safety behind it (S2-5): the flow run on one file,
+	// bounded, with nothing kept. A test swaps in a double.
+	Try func(ctx context.Context, f flow.Flow, file string) (flow.TryResult, error)
 }
 
 // Workflows is flow.Store as the api uses it.
@@ -115,6 +118,8 @@ func New(version string) *Server {
 	// The guided builder's "What this does" (S2-4). Literal, so it wins over the {rest...} subtree;
 	// the answers themselves are below the subtree, beside the draft they save.
 	s.mux.HandleFunc("POST /api/v2/workflows/preview", s.previewWorkflow)
+	// Trying a flow on one file (S2-5). Literal beside the preview, for the same reason.
+	s.mux.HandleFunc("POST /api/v2/workflows/try", s.tryWorkflow)
 	// Everything below /workflows/ is the {id} subtree. It is one handler per method because Go's
 	// mux cannot rank "{id}/revisions" against the starters' literal "/workflows/starters/{id}"
 	// (both match "/workflows/starters/revisions"), and neither is more specific. The trailing

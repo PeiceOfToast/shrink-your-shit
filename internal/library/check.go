@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/PeiceOfToast/shrink-your-shit/internal/fsx"
 )
 
 // FolderCheck is what "Check this folder" answers (page 09): how many videos it holds, their total
@@ -34,6 +36,23 @@ const (
 	// ProblemUnwritable is a folder the app cannot write in, so converted videos could not be saved.
 	ProblemUnwritable = "unwritable"
 )
+
+// FileInLibrary reports whether the file sits in a folder a library watches, judged by the real
+// path: the folder's existing part is resolved through symlinks, so a link inside a library that
+// points outside it is not inside the library. A path that does not exist yet still compares by
+// where it would be, so the caller's own "could not read" refusal stays the one a person sees.
+func (c *Catalog) FileInLibrary(ctx context.Context, path string) (bool, error) {
+	libs, err := c.ListLibraries(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, lib := range libs {
+		if fsx.Inside(path, lib.Path) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
 
 // checkWritable proves the app can write in the folder by creating and removing a temp file. A folder
 // it can read but not write is refused up front rather than at the first conversion.

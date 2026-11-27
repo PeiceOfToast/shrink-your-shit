@@ -70,6 +70,16 @@ type RunInput struct {
 	Size   int64
 	MTime  time.Time
 	FileID string
+
+	// Try is one page's try on one file: Run uses Flow (the flow as the page holds it, no saved
+	// revision) and stops after the result check. Nothing is placed, and the staging goes with the
+	// run.
+	Try  bool
+	Flow *Flow
+	// StageBase is where the private staging folder is made; empty means beside the destination,
+	// which is what a job wants. A try sets it to the app's temp folder, so a killed process
+	// leaves nothing in the original's folder.
+	StageBase string
 }
 
 // Want is the codec the runner must be able to encode.
@@ -166,12 +176,13 @@ func (e *engine) run(ctx context.Context) (res Result) {
 	}
 	argv := append([]string{"ffmpeg"}, built.Argv...)
 
-	// 5. Stage the output beside its destination. The encoder writes the staged file, not the
-	// destination, so nothing appears there until Place has checked the result.
+	// 5. Stage the output beside its destination (a try stages in the app's temp folder instead).
+	// The encoder writes the staged file, not the destination, so nothing appears there until
+	// Place has checked the result.
 	if res = ctxStop(ctx); res.Outcome != "" {
 		return res
 	}
-	staged, err := e.env.Safety.Stage(plan.Output)
+	staged, err := e.env.Safety.Stage(e.in.StageBase, plan.Output)
 	if err != nil {
 		return fatal("save.stage_failed", err.Error(), "save", "Check the destination folder's permissions.")
 	}
@@ -231,6 +242,11 @@ func (e *engine) run(ctx context.Context) (res Result) {
 	}
 	after := st.Size()
 	e.size(e.in.Size, after)
+	// A try stops here: its result has been checked and measured. Nothing is placed, and the
+	// staging is removed by the deferred cleanup (placed stays false).
+	if e.in.Try {
+		return Result{Outcome: OutcomeSmaller, SizeBefore: e.in.Size, SizeAfter: after}
+	}
 	if after >= e.in.Size {
 		return Result{
 			Outcome: OutcomeBiggerKept, SizeBefore: e.in.Size, SizeAfter: after,
@@ -361,8 +377,11 @@ func (e *engine) probeSource(ctx context.Context) (media.Info, Result) {
 	return info, Result{}
 }
 
-// revision loads the saved flow the job names.
+// revision loads the saved flow the job names. A try brings its own flow, which has no revision.
 func (e *engine) revision(ctx context.Context) (Revision, error) {
+	if e.in.Flow != nil {
+		return Revision{Flow: *e.in.Flow}, nil
+	}
 	if e.env.LoadRevision == nil {
 		return Revision{}, errors.New("no revision loader")
 	}
