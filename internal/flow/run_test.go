@@ -53,6 +53,12 @@ type fakeSafety struct {
 	// placeLeftBehind makes Place behave like the link fallback: the final name exists (a hard link),
 	// the staged copy stays, and the error is ErrSourceLeftBehind.
 	placeLeftBehind bool
+	// placeAs is the name Place used instead of the one it was given, the way the real Place bumps
+	// to "name (2).ext" when that name was taken between FreeName and the placement.
+	placeAs string
+	// beforePlace runs at the start of Place, so a test can change the world in the instant between
+	// the sidecar files going in and the new file: a file appearing, another seat replacing one.
+	beforePlace func()
 
 	gotWant     safety.Want
 	gotRecorder safety.Recorder
@@ -89,12 +95,22 @@ func (f *fakeSafety) Verify(ctx context.Context, p media.Prober, rec safety.Reco
 }
 
 func (f *fakeSafety) Place(ctx context.Context, st safety.Staged, final string) (string, error) {
+	if f.beforePlace != nil {
+		f.beforePlace()
+	}
 	if f.placeLeftBehind {
 		if err := os.Link(st.Path, final); err != nil {
 			return "", err
 		}
 		f.placedTo = final
 		return final, safety.ErrSourceLeftBehind
+	}
+	if f.placeAs != "" {
+		if err := os.WriteFile(f.placeAs, []byte("encoded"), 0o600); err != nil {
+			return "", err
+		}
+		f.placedTo = f.placeAs
+		return f.placeAs, os.RemoveAll(st.Folder)
 	}
 	if f.placeE != nil {
 		return "", f.placeE

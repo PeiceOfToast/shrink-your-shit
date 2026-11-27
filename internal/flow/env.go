@@ -31,6 +31,9 @@ type Env struct {
 	Media media.Media
 	// Safety stages, checks and places the output. Tests swap in a fake.
 	Safety Safety
+	// Sidecars records the .srt files a run writes before they are placed, and keeps their names
+	// on the job (L-AUD-25). nil runs without records, which is what a try wants.
+	Sidecars safety.SidecarStore
 	// Pick chooses the encoder for one attempt (hw.Pick in stage 2). Stage 1 passes a picker that
 	// answers with the processor only.
 	Pick func(Want) (encode.Rung, error)

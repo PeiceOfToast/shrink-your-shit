@@ -10,8 +10,36 @@ import (
 
 // Migration 5 creates the job head row and one row per attempt (backend-plan §4). The lease, workflow revision,
 // steps and media columns are here though stage 1 does not fill them, so later stages need no migration.
+//
+// Migration 9 records the .srt files a job writes beside its new file before they are placed
+// (L-AUD-25), and keeps their names on the job once the new file is in place.
 func init() {
 	store.Register(store.Migration{Version: 5, Name: "jobs", Up: createJobs})
+	store.Register(store.Migration{Version: 9, Name: "sidecars", Up: createSidecars})
+}
+
+func createSidecars(tx *sql.Tx) error {
+	stmts := []string{
+		`CREATE TABLE sidecars (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			job_id INTEGER NOT NULL REFERENCES jobs(id),
+			path TEXT NOT NULL,
+			bytes INTEGER NOT NULL,
+			mtime INTEGER NOT NULL,
+			hash TEXT NOT NULL,
+			video_path TEXT NOT NULL,
+			video_bytes INTEGER NOT NULL,
+			video_hash TEXT NOT NULL
+		)`,
+		`CREATE INDEX sidecars_job ON sidecars(job_id)`,
+		`ALTER TABLE jobs ADD COLUMN subtitle_files TEXT`,
+	}
+	for _, s := range stmts {
+		if _, err := tx.Exec(s); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func createJobs(tx *sql.Tx) error {

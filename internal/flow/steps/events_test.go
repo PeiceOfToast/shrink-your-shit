@@ -56,6 +56,8 @@ func codeCases() []codeCase {
 			info: probeInfo("h264", 1920, 1080), want: "audio.default_track"},
 		{name: "audio no audio", step: AudioStep{}, set: AudioSettings{Format: "copy"},
 			info: media.Info{Path: "/library/a.mkv"}, want: "audio.no_audio"},
+		{name: "audio subtitles", step: AudioStep{}, set: AudioSettings{Format: "copy", Subtitles: "text_only"},
+			info: subtitleInfo(media.SubtitleTrack{Index: 3, Codec: "hdmv_pgs_subtitle"}), want: "audio.subtitles"},
 		{name: "save next to", step: SaveStep{}, set: saveSettings("mkv", "next_to", "shrunk"), info: mp4Info(), plan: working, want: "save.next_to"},
 		{name: "save nothing", step: SaveStep{}, set: saveSettings("mkv", "next_to", "shrunk"), info: mp4Info(), want: "save.nothing"},
 		{name: "save lands on source", step: SaveStep{}, set: saveSettings("keep", "next_to", ""),

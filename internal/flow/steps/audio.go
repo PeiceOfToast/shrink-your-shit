@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/PeiceOfToast/shrink-your-shit/internal/encode"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/events"
@@ -15,8 +16,7 @@ import (
 
 // AudioSettings is page 07's Audio card: the format, the channels and the languages to keep,
 // then Advanced's codec, bitrate, sample rate, downmix, loudness, commentary and default track,
-// then the subtitles. Every field's tags are the page's form. Subtitles are item 7's second half
-// (S2-7b), so choosing them still answers "not yet".
+// then the subtitles. Every field's tags are the page's form.
 type AudioSettings struct {
 	Format    string   `set:"format" label:"Format" choices:"aac=AAC,opus=Opus,copy=Same as the source" default:"copy"`
 	Channels  string   `set:"channels" label:"Channels" choices:"stereo=Stereo,source=Same as the source,mono=Mono,5.1=5.1" default:"source" help:"A most, never an upmix: a stereo file stays stereo wherever 5.1 is asked for."`
@@ -75,6 +75,8 @@ func (AudioStep) Def() flow.Definition {
 				Fields: []string{"audioTracks", "defaultTrack"}, Keep: events.KeepLog},
 			{Code: "audio.no_audio", Level: events.LevelInfo, Text: "The file has no audio",
 				Fields: []string{"audioTracks", "subtitleTracks"}, Keep: events.KeepLog},
+			{Code: "audio.subtitles", Level: events.LevelInfo, Text: "Choosing subtitles",
+				Fields: []string{"subtitles", "subtitleTracks", "subtitlesKept", "subtitlesDropped", "subtitlesExtracted"}, Keep: events.KeepLog},
 		},
 	}
 }
@@ -97,19 +99,30 @@ const (
 )
 
 // Plan keeps the tracks the language and commentary choices leave, writes each the way the format
-// and channels ask, and names every dropped track so Build does not copy it. A file with no audio
-// is not an error (K2).
+// and channels ask, and names every dropped track so Build does not copy it. It also applies the
+// subtitle choice: which subtitle tracks are dropped, and which become their own .srt files. A
+// file with no audio is not an error (K2); its subtitles are still planned.
 func (AudioStep) Plan(s flow.Settings, in flow.PlanInput, p *encode.Plan) (flow.Decision, error) {
 	set := s.(AudioSettings)
 	tracks := in.Info.Audio
+	subs := planSubtitles(set, in.Info, p)
 	if len(tracks) == 0 {
-		return flow.Decision{
-			Work: false, Label: "The file has no audio", Reason: "audio.no_audio",
-			Detail: flow.F{"format": set.AudioCodec(), "audioTracks": 0, "subtitleTracks": len(in.Info.Subtitles)},
-		}, nil
+		detail := flow.F{
+			"format": set.AudioCodec(), "audioTracks": 0, "subtitleTracks": len(in.Info.Subtitles),
+			"subtitles": set.Subtitles, "subtitlesKept": subs.kept,
+			"subtitlesDropped": subs.dropped, "subtitlesExtracted": subs.extracted,
+		}
+		if subs.work() {
+			return flow.Decision{
+				Work: true, Label: "The file has no audio; " + lowerFirst(subtitleWords(subs, len(in.Info.Subtitles))),
+				Reason: "audio.subtitles", Notes: subs.notes, Detail: detail,
+			}, nil
+		}
+		return flow.Decision{Work: false, Label: "The file has no audio", Reason: "audio.no_audio", Detail: detail}, nil
 	}
 
 	kept, notes := chooseTracks(set, tracks)
+	notes = append(notes, subs.notes...)
 	keptSet := make(map[int]bool, len(kept))
 	for _, t := range kept {
 		keptSet[t.Index] = true
@@ -156,20 +169,37 @@ func (AudioStep) Plan(s flow.Settings, in flow.PlanInput, p *encode.Plan) (flow.
 
 	p.Audio = append(p.Audio, entries...)
 
-	label, reason := audioDecisionLabel(set, len(tracks), len(keptTracks), converted, dropped, defaultChanged)
+	label, reason := audioDecisionLabel(set, len(tracks), len(keptTracks), converted, dropped, defaultChanged, subs)
 	return flow.Decision{
-		Work: converted > 0 || dropped > 0 || defaultChanged,
+		Work: converted > 0 || dropped > 0 || defaultChanged || subs.work(),
 		// Reason is the code the log types this decision with; Label is its sentence.
 		Reason: reason, Label: label, Notes: notes,
 		Detail: flow.F{
 			"format": set.AudioCodec(), "audioTracks": len(tracks), "kept": len(keptTracks),
 			"converted": converted, "dropped": dropped, "subtitleTracks": len(in.Info.Subtitles),
+			"subtitles": set.Subtitles, "subtitlesKept": subs.kept,
+			"subtitlesDropped": subs.dropped, "subtitlesExtracted": subs.extracted,
 		},
 	}, nil
 }
 
-// audioDecisionLabel is the decision's sentence and code, from what the plan does.
-func audioDecisionLabel(set AudioSettings, total, kept, converted, dropped int, defaultChanged bool) (label, reason string) {
+// audioDecisionLabel is the decision's sentence and code, from what the plan does. The subtitle
+// choice gets its own code when the audio itself is left as it is; beside an audio change the
+// audio's own code stays the headline, and the sentence says what happened to the subtitles.
+func audioDecisionLabel(set AudioSettings, total, kept, converted, dropped int, defaultChanged bool, subs subtitlePlan) (label, reason string) {
+	audioWork := converted > 0 || dropped > 0 || defaultChanged
+	if !audioWork && subs.work() {
+		return subtitleWords(subs, total), "audio.subtitles"
+	}
+	label, reason = audioLabel(set, total, kept, converted, dropped, defaultChanged)
+	if subs.work() {
+		label += "; " + lowerFirst(subtitleWords(subs, total))
+	}
+	return label, reason
+}
+
+// audioLabel is the sentence for the audio choices alone.
+func audioLabel(set AudioSettings, total, kept, converted, dropped int, defaultChanged bool) (label, reason string) {
 	switch {
 	case converted > 0:
 		label = fmt.Sprintf("Converting %d of %d audio tracks to %s", converted, total, codecLabel(set.AudioCodec()))
@@ -183,6 +213,163 @@ func audioDecisionLabel(set AudioSettings, total, kept, converted, dropped int, 
 		return "Setting the default audio track", "audio.default_track"
 	}
 	return "Audio copied as is", "audio.as_is"
+}
+
+// subtitlePlan is what the subtitle choice did to the file's subtitles.
+type subtitlePlan struct {
+	kept      int // still inside the new file
+	dropped   int
+	extracted int
+	notes     []string
+}
+
+// work reports whether the subtitle choice changes the file at all.
+func (s subtitlePlan) work() bool { return s.dropped > 0 || s.extracted > 0 }
+
+// subtitleWords is the sentence for the subtitle choice alone.
+func subtitleWords(subs subtitlePlan, total int) string {
+	if subs.extracted > 0 {
+		if subs.extracted == 1 {
+			return "Saving 1 subtitle as an SRT file"
+		}
+		return fmt.Sprintf("Saving %d subtitles as SRT files", subs.extracted)
+	}
+	if subs.dropped == 1 {
+		return "Dropping 1 of " + strconv.Itoa(total) + " subtitles"
+	}
+	return fmt.Sprintf("Dropping %d of %d subtitles", subs.dropped, total)
+}
+
+// lowerFirst turns the first capital of a sentence into a clause ("Saving" -> "saving").
+func lowerFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToLower(s[:1]) + s[1:]
+}
+
+// planSubtitles applies page 07's Subtitles choice:
+//
+//   - keep_all leaves every subtitle where it is (the file type's own conversion still applies).
+//   - my_languages drops the subtitles in a language the person does not keep; a subtitle with no
+//     language stays, and with no language list nothing is dropped (L-AUD-20).
+//   - text_only drops picture subtitles only; a kind this program does not know stays (L-AUD-21).
+//   - srt writes the text subtitles in the person's languages (or with no language) to their own
+//     files and leaves the others inside the new file (L-AUD-22's trap).
+//
+// The language list is Subtitle languages, or the audio languages when that is empty (L-AUD-20).
+func planSubtitles(set AudioSettings, info media.Info, p *encode.Plan) subtitlePlan {
+	var subs subtitlePlan
+	subs.kept = len(info.Subtitles)
+	switch set.Subtitles {
+	case "my_languages":
+		codes, active, note := subtitleLanguages(set, info.Audio)
+		if note != "" {
+			subs.notes = append(subs.notes, note)
+		}
+		if !active {
+			return subs
+		}
+		for _, s := range info.Subtitles {
+			if l := flow.CanonLang(s.Language); l != "" && !codes[l] {
+				p.Subtitles = append(p.Subtitles, encode.StreamPlan{Index: s.Index, Action: encode.StreamDrop})
+				subs.dropped++
+			}
+		}
+	case "text_only":
+		for _, s := range info.Subtitles {
+			if s.Kind() == media.SubtitleBitmap {
+				p.Subtitles = append(p.Subtitles, encode.StreamPlan{Index: s.Index, Action: encode.StreamDrop})
+				subs.dropped++
+			}
+		}
+		if subs.dropped > 0 {
+			subs.notes = append(subs.notes, pictureLeftOutNote(subs.dropped))
+		}
+	case "srt":
+		codes, _, note := subtitleLanguages(set, info.Audio)
+		if note != "" {
+			subs.notes = append(subs.notes, note)
+		}
+		if codes == nil {
+			// With no languages chosen, "yours" is the main audio's language (L-AUD-22).
+			if len(info.Audio) > 0 {
+				codes = map[string]bool{flow.CanonLang(mainTrack(info.Audio).Language): true}
+			} else {
+				codes = map[string]bool{}
+			}
+		}
+		used := map[string]int{}
+		for _, s := range info.Subtitles {
+			l := flow.CanonLang(s.Language)
+			if s.Kind() != media.SubtitleText || l != "" && !codes[l] {
+				continue
+			}
+			part := srtPart(l, s, used)
+			p.Subtitles = append(p.Subtitles, encode.StreamPlan{Index: s.Index, Action: encode.StreamExtract, Part: part})
+			subs.extracted++
+		}
+	}
+	subs.kept -= subs.dropped + subs.extracted
+	return subs
+}
+
+// srtPart is L-AUD-22's name part: lang[.forced|.sdh][.N], where a repeated name is numbered
+// ("eng", "eng.2"), an untagged subtitle has no language part, and forced beats SDH.
+func srtPart(lang string, s media.SubtitleTrack, used map[string]int) string {
+	parts := []string{}
+	if lang != "" {
+		parts = append(parts, lang)
+	}
+	switch {
+	case s.Forced:
+		parts = append(parts, "forced")
+	case isSDH(s):
+		parts = append(parts, "sdh")
+	}
+	name := strings.Join(parts, ".")
+	used[name]++
+	if n := used[name]; n > 1 {
+		// The old app's wording: "eng" then "eng.2"; an untagged "2" rather than ".2".
+		name = strings.TrimPrefix(name+"."+strconv.Itoa(n), ".")
+	}
+	return name
+}
+
+// isSDH is L-AUD-23: a subtitle for the hearing impaired by its disposition, or a title that says
+// SDH or CC, or names hearing.
+func isSDH(s media.SubtitleTrack) bool {
+	if s.HearingImpaired {
+		return true
+	}
+	t := strings.ToLower(s.Title)
+	for _, w := range strings.FieldsFunc(t, func(r rune) bool { return !unicode.IsLetter(r) }) {
+		if w == "sdh" || w == "cc" {
+			return true
+		}
+	}
+	return strings.Contains(t, "hearing")
+}
+
+// subtitleLanguages is the subtitle language filter: Subtitle languages when set, else the audio
+// languages. active is false when neither is set, which keeps every subtitle.
+func subtitleLanguages(set AudioSettings, tracks []media.AudioTrack) (codes map[string]bool, active bool, note string) {
+	list := set.SubtitleLanguages
+	if len(list) == 0 {
+		list = set.Languages
+	}
+	if len(list) == 0 {
+		return nil, false, ""
+	}
+	return wantedLanguages(list, tracks)
+}
+
+// pictureLeftOutNote says how many picture subtitles the Text only choice dropped.
+func pictureLeftOutNote(n int) string {
+	if n == 1 {
+		return "1 picture subtitle was left out: you chose text only."
+	}
+	return fmt.Sprintf("%d picture subtitles were left out: you chose text only.", n)
 }
 
 // trackPlan is one kept track's entry: copied when re-encoding would not make it smaller
@@ -445,7 +632,7 @@ var losslessAudio = map[string]bool{
 }
 
 // Validate refuses what the engine cannot do yet and what the settings contradict, with a problem
-// on each field, so page 07 marks them. Subtitles stay "not yet" until S2-7b.
+// on each field, so page 07 marks them.
 func (AudioStep) Validate(s flow.Settings, vc flow.ValidateContext) flow.Check {
 	set := s.(AudioSettings)
 	var c flow.Check
@@ -489,7 +676,8 @@ func audioInert(set AudioSettings) []flow.Disabled {
 	return out
 }
 
-// audioNotYet is every setting the engine cannot act on yet: the subtitles, which are S2-7b.
+// audioNotYet is every setting the engine cannot act on yet. Keeping the original track as well
+// is the one left; the subtitles are built.
 func audioNotYet(set AudioSettings) []flow.Problem {
 	var out []flow.Problem
 	add := func(field, message string) {
@@ -497,12 +685,6 @@ func audioNotYet(set AudioSettings) []flow.Problem {
 	}
 	if set.KeepOriginal {
 		add("keepOriginal", "Keeping the original track as well is not built yet.") // item 7's second half
-	}
-	if set.Subtitles != "" && set.Subtitles != "keep_all" {
-		add("subtitles", "Choosing which subtitles to keep is not built yet; every subtitle is kept.") // S2-7b
-	}
-	if len(set.SubtitleLanguages) > 0 {
-		add("subtitleLanguages", "Keeping only some subtitle languages is not built yet; every subtitle is kept.") // S2-7b
 	}
 	return out
 }

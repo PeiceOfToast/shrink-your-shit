@@ -583,6 +583,19 @@ export const STEP_DEFINITIONS: StepDefinition[] = [
         "keep": "log",
         "level": "info",
         "text": "The file has no audio"
+      },
+      {
+        "code": "audio.subtitles",
+        "fields": [
+          "subtitles",
+          "subtitleTracks",
+          "subtitlesKept",
+          "subtitlesDropped",
+          "subtitlesExtracted"
+        ],
+        "keep": "log",
+        "level": "info",
+        "text": "Choosing subtitles"
       }
     ],
     "form": {
