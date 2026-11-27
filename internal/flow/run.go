@@ -117,6 +117,8 @@ type engine struct {
 	in      RunInput
 	env     Env
 	started time.Time
+	// replace is true when the flow's save step replaces the original (S2-10b).
+	replace bool
 }
 
 func (e *engine) run(ctx context.Context) (res Result) {
@@ -309,6 +311,9 @@ func (e *engine) run(ctx context.Context) (res Result) {
 	if res.Outcome != "" {
 		return res
 	}
+	if e.replace {
+		return e.replaceOriginal(ctx, staged, plan.Output, after, &placed, sidecars)
+	}
 	final, err := e.env.Safety.Place(ctx, staged, plan.Output)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -461,6 +466,7 @@ func (e *engine) plan(ctx context.Context, rev Revision, info media.Info) (Decis
 	if problems := shapeProblems(rev.Flow); len(problems) > 0 {
 		return d, plan, fatal("invalid_flow", strings.Join(problems, " "), "", "")
 	}
+	e.replace = saveReplaces(rev.Flow)
 	for i, ref := range rev.Flow.Steps {
 		if res := ctxStop(ctx); res.Outcome != "" {
 			return d, plan, res

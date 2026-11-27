@@ -117,13 +117,14 @@ func TestAnInstallAtSchemaSixUpgradesThroughSeven(t *testing.T) {
 		t.Fatalf("queue the old job: %v", err)
 	}
 
-	// Take the schema back to 6: remove what migrations 7, 8 and 9 add, and say the database is at
+	// Take the schema back to 6: remove what migrations 7, 8, 9 and 10 add, and say the database is at
 	// 6. All the data above stays, as it would on a real stage 1 install.
 	if err := db.Tx(ctx, func(tx *sql.Tx) error {
 		for _, s := range []string{
 			`DROP TABLE IF EXISTS encoder_state`,
 			`ALTER TABLE workflows DROP COLUMN draft_rev`,
 			`DROP TABLE IF EXISTS sidecars`,
+			`DROP TABLE IF EXISTS replace_journal`,
 			`ALTER TABLE jobs DROP COLUMN subtitle_files`,
 			`PRAGMA user_version = 6`,
 		} {
@@ -154,8 +155,9 @@ func TestAnInstallAtSchemaSixUpgradesThroughSeven(t *testing.T) {
 	if err := db.Read().QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 9 {
-		t.Errorf("schema version after the upgrade = %d, want 9", version)
+	// The newest migration is 10 (the replace journal); 9 is the subtitles change (#854).
+	if version != 10 {
+		t.Errorf("schema version after the upgrade = %d, want 10", version)
 	}
 	if err := db.Read().QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'encoder_state'`).
 		Scan(&encoderState); err != nil {

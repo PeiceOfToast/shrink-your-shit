@@ -34,6 +34,8 @@ type Env struct {
 	// Sidecars records the .srt files a run writes before they are placed, and keeps their names
 	// on the job (L-AUD-25). nil runs without records, which is what a try wants.
 	Sidecars safety.SidecarStore
+	// Replacer swaps the original for the new file when the save step replaces (S2-10b). nil in a try.
+	Replacer Replacer
 	// Pick chooses the encoder for one attempt (hw.Pick in stage 2). Stage 1 passes a picker that
 	// answers with the processor only.
 	Pick func(Want) (encode.Rung, error)

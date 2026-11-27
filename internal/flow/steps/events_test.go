@@ -59,6 +59,7 @@ func codeCases() []codeCase {
 		{name: "audio subtitles", step: AudioStep{}, set: AudioSettings{Format: "copy", Subtitles: "text_only"},
 			info: subtitleInfo(media.SubtitleTrack{Index: 3, Codec: "hdmv_pgs_subtitle"}), want: "audio.subtitles"},
 		{name: "save next to", step: SaveStep{}, set: saveSettings("mkv", "next_to", "shrunk"), info: mp4Info(), plan: working, want: "save.next_to"},
+		{name: "save replace", step: SaveStep{}, set: saveSettings("mkv", "replace", ""), info: mp4Info(), plan: working, want: "save.replace"},
 		{name: "save nothing", step: SaveStep{}, set: saveSettings("mkv", "next_to", "shrunk"), info: mp4Info(), want: "save.nothing"},
 		{name: "save lands on source", step: SaveStep{}, set: saveSettings("keep", "next_to", ""),
 			info: media.Info{Path: "/library/a.mkv", Format: media.Format{Names: []string{"matroska"}}},

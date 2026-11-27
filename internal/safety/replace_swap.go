@@ -101,13 +101,13 @@ func Swap(ctx context.Context, j *Journal, p SwapPlan) (SwapResult, error) {
 
 	// Step 6: the new file into the name, after its own check. A failure puts the original back.
 	if err := unchanged(p.Staged, newID); err != nil {
-		return SwapResult{}, putBack(ctx, j, id, row, false, err)
+		return SwapResult{}, restoreOriginal(ctx, j, id, row, false, err)
 	}
 	if err := fsx.RenameNoReplace(p.Staged, p.Final); err != nil {
-		return SwapResult{}, putBack(ctx, j, id, row, false, fmt.Errorf("%w: %v", ErrSwapFailed, err))
+		return SwapResult{}, restoreOriginal(ctx, j, id, row, false, fmt.Errorf("%w: %v", ErrSwapFailed, err))
 	}
 	if !matches(p.Final, newID) {
-		return SwapResult{}, putBack(ctx, j, id, row, true, ErrSwapFailed)
+		return SwapResult{}, restoreOriginal(ctx, j, id, row, true, ErrSwapFailed)
 	}
 	crashPoint(6)
 
@@ -130,10 +130,10 @@ func Swap(ctx context.Context, j *Journal, p SwapPlan) (SwapResult, error) {
 	return res, nil
 }
 
-// putBack undoes a failed placement: the new file goes back to its staged name when it was placed, and the original
+// restoreOriginal undoes a failed placement: the new file goes back to its staged name when it was placed, and the original
 // returns from the trash to its name. A put-back that fails is "attention" with the original still in the trash,
 // and the error says so; it is never reported as done.
-func putBack(ctx context.Context, j *Journal, id int64, row Row, newPlaced bool, cause error) error {
+func restoreOriginal(ctx context.Context, j *Journal, id int64, row Row, newPlaced bool, cause error) error {
 	if newPlaced {
 		if err := fsx.RenameNoReplace(row.Final, row.Staged); err != nil {
 			_ = j.SetState(ctx, id, StateAttention)
