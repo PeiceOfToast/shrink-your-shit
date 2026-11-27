@@ -26,11 +26,17 @@ type codeCase struct {
 
 func codeCases() []codeCase {
 	working := encode.Plan{Video: encode.VideoPlan{Codec: encode.CodecHEVC}}
+	// Custom with no typed average: the one bitrate plan the engine cannot fill in.
+	noAverage := videoSettings("hevc", 3)
+	noAverage.RateControl = ptr("cbr")
+	noAverage.BitrateLevel = "custom"
 	return []codeCase{
 		{name: "video convert", step: VideoStep{}, set: videoSettings("hevc", 3), info: probeInfo("h264", 1920, 1080), want: "video.convert"},
 		{name: "video already target", step: VideoStep{}, set: videoSettings("hevc", 3), info: probeInfo("hevc", 1920, 1080), want: "video.already_target"},
 		{name: "video no picture", step: VideoStep{}, set: videoSettings("hevc", 3),
 			info: media.Info{Path: "/library/a.mkv"}, want: "video.no_video", isErr: true},
+		{name: "video bitrate missing", step: VideoStep{}, set: noAverage,
+			info: probeInfo("h264", 1920, 1080), want: "video.no_bitrate", isErr: true},
 		{name: "audio as is", step: AudioStep{}, set: AudioSettings{Format: "copy"}, info: probeInfo("h264", 1920, 1080), want: "audio.as_is"},
 		{name: "save next to", step: SaveStep{}, set: saveSettings("mkv", "next_to", "shrunk"), info: mp4Info(), plan: working, want: "save.next_to"},
 		{name: "save nothing", step: SaveStep{}, set: saveSettings("mkv", "next_to", "shrunk"), info: mp4Info(), want: "save.nothing"},

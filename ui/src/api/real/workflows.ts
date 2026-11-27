@@ -1,7 +1,7 @@
 // Real client, workflows group (contract section 1): the list, create, the editor's draft, publish,
 // the check, the revisions and restore, duplicate and delete, the guided builder's answers and
-// preview, and trying the flow on one file. The bitrate table, export and import are not part of
-// S2-3 and say so with a not-yet the page shows.
+// preview, trying the flow on one file, and the bitrate ladder. Export and import are not built
+// and say so with a not-yet the page shows.
 import type * as mock from "../mock.ts";
 import { request, type Out } from "../http.ts";
 import { ApiError } from "../errors.ts";
@@ -41,7 +41,10 @@ export const validateFlow: typeof mock.validateFlow = (flow) =>
 // request's signal, so the run stops with it.
 export const tryFlow: typeof mock.tryFlow = (flow, file, signal) =>
   request<Out<typeof mock.tryFlow>>("POST", "/workflows/try", { flow, file }, { signal });
-export const getBitrateLadder: typeof mock.getBitrateLadder = () => notYet("The bitrate table is not built yet.");
+// The bitrate ladder (S2-6): page 07's recommended numbers, served once and read by the editor and
+// the engine alike.
+export const getBitrateLadder: typeof mock.getBitrateLadder = () =>
+  request<Out<typeof mock.getBitrateLadder>>("GET", "/bitrate-ladder");
 // Out of scope for S2-3 (the brief says so): export and import.
 export const exportWorkflow: typeof mock.exportWorkflow = () => notYet("Exporting a workflow is not built yet.");
 export const importWorkflow: typeof mock.importWorkflow = () => notYet("Importing a workflow is not built yet.");

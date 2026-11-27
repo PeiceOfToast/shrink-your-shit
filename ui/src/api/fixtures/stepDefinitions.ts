@@ -30,6 +30,12 @@ export const STEP_DEFINITIONS: StepDefinition[] = [
         "keep": "log",
         "level": "error",
         "text": "The file has no picture to convert"
+      },
+      {
+        "code": "video.no_bitrate",
+        "keep": "log",
+        "level": "error",
+        "text": "The bitrate is missing"
       }
     ],
     "form": {

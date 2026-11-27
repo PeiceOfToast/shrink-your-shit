@@ -93,8 +93,8 @@ type StreamPlan struct {
 // VideoPlan is the video stream part of the plan.
 type VideoPlan struct {
 	Codec Codec
-	// CRF is the quality number the flow computed. It is required when the video is encoded and
-	// ignored when it is copied.
+	// CRF is the quality number the flow computed. It is required when the video is encoded at a
+	// quality (Plan.RateControl unset) and ignored when it is copied.
 	CRF *int
 	// Preset is the named choice "faster", "normal" or "slower"; empty means normal. Build maps
 	// it per encoder (L-HW-13).
@@ -106,8 +106,10 @@ type VideoPlan struct {
 	HDR      HDRMode
 }
 
-// RateControl is page 07's VBR/CBR choice. The flow fills these in stage 2; Build refuses a plan
-// that carries one rather than encode a number it would ignore.
+// RateControl is page 07's VBR/CBR choice: a bitrate in place of a CRF. The flow fills in the
+// numbers from the ladder (or from the person's own typing); Build turns them into the encoder's
+// rate-control arguments. TwoPass is not built yet, so Build refuses it rather than encode half
+// of what the plan asked for.
 type RateControl struct {
 	Mode             string // "vbr" or "cbr"
 	AvgMbps, MaxMbps float64
@@ -126,7 +128,7 @@ type Plan struct {
 	MetadataClear []string
 	Container     Container
 	Output        string
-	// RateControl is a later stage's field: Build refuses a plan that sets it.
+	// RateControl replaces the CRF when it is set; Video.CRF is then nil and ignored.
 	RateControl *RateControl
 }
 

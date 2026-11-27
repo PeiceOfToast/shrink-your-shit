@@ -111,6 +111,9 @@ func TestContractGoldens(t *testing.T) {
 	// The steps' cards (S2-1): page 07's form, from the registry.
 	writeGolden(t, "step-definitions", "StepDefinition[]", http.MethodGet, "/api/v2/step-definitions",
 		e.do(http.MethodGet, "/api/v2/step-definitions", "", withSession(cookie), false))
+	// The bitrate ladder (S2-6): the numbers the editor and the engine both read.
+	writeGolden(t, "bitrate-ladder", "BitrateLadder", http.MethodGet, "/api/v2/bitrate-ladder",
+		e.do(http.MethodGet, "/api/v2/bitrate-ladder", "", withSession(cookie), false))
 
 	// The flow editor's check (S2-2): the starter's flow as page 07 sends it.
 	starter, ok := flow.StarterByID("shrink-videos")

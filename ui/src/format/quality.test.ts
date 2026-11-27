@@ -1,9 +1,20 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { getBitrateLadder } from "../api/mockFlow.ts";
 import { cardFamilies, qualityCrf, qualityMeaning } from "./quality.ts";
 
 const ladder = await getBitrateLadder();
+
+// The server's contract golden is what the real client now serves in place of this mock (S2-6).
+// Comparing the two means a number changed on either side fails here, not only in the Go table.
+test("the served ladder is the numbers the editor was built against", () => {
+  const golden = JSON.parse(
+    readFileSync(new URL("../../../internal/api/testdata/contract/bitrate-ladder.json", import.meta.url), "utf8"),
+  );
+  assert.equal(golden.type, "BitrateLadder");
+  assert.deepEqual(golden.body, ladder);
+});
 
 test("processor CRF at 1080p is the slider number, plus the format offset", () => {
   assert.equal(qualityCrf(ladder, 3, "hevc", null, "1080"), 23);

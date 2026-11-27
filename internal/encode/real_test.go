@@ -195,3 +195,61 @@ func TestRealScaleKeepsARotatedClipUpright(t *testing.T) {
 		t.Errorf("output rotation = %d, want 0 (the turn is applied by the filter)", v.Rotation)
 	}
 }
+
+// TestRealCBRHitsItsTarget is the bitrate's own end-to-end proof: the built CBR arguments make the
+// encoder spend the ladder's rate instead of the quality rate it would pick alone. Measured on the
+// static ffmpeg 7.0.2 build, a 1 Mb/s target lands around 1.17 Mb/s; the band is generous so a
+// different x264 build's rate-control details do not make it flaky, while a CRF encode of the same
+// clip (around 1.8 Mb/s) still fails it.
+func TestRealCBRHitsItsTarget(t *testing.T) {
+	requireRealTools(t)
+	if !listedEncoders(t)["libx264"] {
+		if os.Getenv("SYP_REQUIRE_FFMPEG") != "" {
+			t.Fatal("this ffmpeg build has no libx264 and SYP_REQUIRE_FFMPEG is set")
+		}
+		t.Skip("this ffmpeg build has no libx264")
+	}
+	dir := t.TempDir()
+
+	source := filepath.Join(dir, "source.mp4")
+	make := exec.Command("ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
+		"-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30:duration=4",
+		"-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", source)
+	if out, err := make.CombinedOutput(); err != nil {
+		t.Fatalf("make the clip: %v\n%s", err, out)
+	}
+	info, err := media.Probe(context.Background(), source)
+	if err != nil {
+		t.Fatalf("probe the source: %v", err)
+	}
+
+	const target = 1.0 // Mb/s
+	out := filepath.Join(dir, "out.mp4")
+	plan := Plan{
+		Video:       VideoPlan{Codec: CodecH264, Preset: "faster"},
+		RateControl: &RateControl{Mode: "cbr", AvgMbps: target},
+		Container:   ContainerMP4,
+		Output:      out,
+	}
+	res, err := Build(plan, info, cpuRung(CodecH264))
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	run, err := media.Run(context.Background(), append([]string{"ffmpeg"}, res.Argv...), nil)
+	if err != nil {
+		t.Fatalf("ffmpeg: %v (exit %d)\n%s", err, run.ExitCode, strings.Join(run.KeyLines, "\n"))
+	}
+
+	got, err := media.Probe(context.Background(), out)
+	if err != nil {
+		t.Fatalf("probe the output: %v", err)
+	}
+	mbps := float64(got.Video[0].BitRate) / 1e6
+	if got.Video[0].BitRate <= 0 {
+		mbps = float64(got.Format.BitRate) / 1e6 // the container carries the rate when the stream omits it
+	}
+	t.Logf("output rate = %.3f Mb/s against the %.1f Mb/s target", mbps, target)
+	if mbps < target*0.6 || mbps > target*1.5 {
+		t.Errorf("output rate = %.3f Mb/s, want near the %.1f Mb/s target", mbps, target)
+	}
+}

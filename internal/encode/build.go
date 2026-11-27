@@ -39,8 +39,8 @@ func Build(plan Plan, info media.Info, rung Rung) (Result, error) {
 	default:
 		return res, fmt.Errorf("%w: container %q is not mkv, mp4 or webm", ErrInvalidPlan, plan.Container)
 	}
-	if plan.RateControl != nil {
-		return res, fmt.Errorf("%w: rate control (%s)", ErrNotBuiltYet, plan.RateControl.Mode)
+	if plan.RateControl != nil && plan.RateControl.TwoPass {
+		return res, fmt.Errorf("%w: two passes", ErrNotBuiltYet)
 	}
 	if plan.Video.HDR == HDRTonemap {
 		return res, fmt.Errorf("%w: tone-mapping", ErrNotBuiltYet)
@@ -72,7 +72,7 @@ func Build(plan Plan, info media.Info, rung Rung) (Result, error) {
 		encoder = want
 	} else {
 		if plan.Video.CRF != nil || plan.Video.Preset != "" || plan.Video.Scale != (Scale{}) ||
-			plan.Video.FPS != 0 || plan.Video.BitDepth != DepthSource {
+			plan.Video.FPS != 0 || plan.Video.BitDepth != DepthSource || plan.RateControl != nil {
 			return res, fmt.Errorf("%w: the video is copied, so its size, rate and depth cannot change", ErrInvalidPlan)
 		}
 	}
@@ -193,12 +193,18 @@ func KeptStreams(plan Plan, info media.Info) (audio, subtitles []int, err error)
 // videoOptions is the video encoder's part of the table. It also appends any HDR note and the
 // copy- untouched case is handled by Build.
 func videoOptions(plan Plan, main media.VideoTrack, encoder string, res *Result) ([]string, error) {
-	if plan.Video.CRF == nil {
-		return nil, fmt.Errorf("%w: the video has no CRF", ErrInvalidPlan)
+	var crf int
+	if plan.RateControl != nil && plan.Video.CRF != nil {
+		return nil, fmt.Errorf("%w: a bitrate replaces the CRF", ErrInvalidPlan)
 	}
-	crf := *plan.Video.CRF
-	if crf < 0 || crf > 63 {
-		return nil, fmt.Errorf("%w: CRF %d is outside 0..63", ErrInvalidPlan, crf)
+	if plan.RateControl == nil {
+		if plan.Video.CRF == nil {
+			return nil, fmt.Errorf("%w: the video has no CRF", ErrInvalidPlan)
+		}
+		crf = *plan.Video.CRF
+		if crf < 0 || crf > 63 {
+			return nil, fmt.Errorf("%w: CRF %d is outside 0..63", ErrInvalidPlan, crf)
+		}
 	}
 	preset, err := presetName(plan.Video.Codec, plan.Video.Preset)
 	if err != nil {
@@ -266,9 +272,17 @@ func videoOptions(plan Plan, main media.VideoTrack, encoder string, res *Result)
 	argv := []string{
 		"-c:v:0", encoder,
 		"-preset:v:0", preset,
-		"-crf:v:0", strconv.Itoa(crf),
-		"-pix_fmt:v:0", pixelFormat,
 	}
+	if plan.RateControl != nil {
+		rate, err := rateArgs(plan.Video.Codec, *plan.RateControl)
+		if err != nil {
+			return nil, err
+		}
+		argv = append(argv, rate...)
+	} else {
+		argv = append(argv, "-crf:v:0", strconv.Itoa(crf))
+	}
+	argv = append(argv, "-pix_fmt:v:0", pixelFormat)
 	if depth == 10 && plan.Video.Codec == CodecHEVC {
 		argv = append(argv, "-profile:v:0", "main10")
 	}
@@ -306,6 +320,68 @@ func videoOptions(plan Plan, main media.VideoTrack, encoder string, res *Result)
 		argv = append(argv, "-metadata:s:v:0", key+"=")
 	}
 	return argv, nil
+}
+
+// rateArgs is page 07's bitrate part of the table. The average is the encoder's target; the
+// at-most bounds it, with a two-second buffer so a hard scene can spend and the next easy one pays
+// it back. CBR keeps the at-most equal to the average (a constant rate as near as the encoder can
+// keep it); VBR lets the picture rise to the plan's at-most.
+func rateArgs(codec Codec, rc RateControl) ([]string, error) {
+	switch rc.Mode {
+	case "vbr":
+		// A format the ladder leaves out of vbrFormats takes constant bitrate or a CRF instead.
+		if codec != CodecHEVC && codec != CodecH264 {
+			return nil, fmt.Errorf("%w: variable bitrate is not offered for %s", ErrInvalidPlan, codec)
+		}
+		if rc.MaxMbps <= 0 {
+			return nil, fmt.Errorf("%w: variable bitrate needs an at-most", ErrInvalidPlan)
+		}
+		if rc.MaxMbps < rc.AvgMbps {
+			return nil, fmt.Errorf("%w: the at-most %v Mb/s is below the average %v Mb/s", ErrInvalidPlan, rc.MaxMbps, rc.AvgMbps)
+		}
+	case "cbr":
+	default:
+		return nil, fmt.Errorf("%w: rate control %q is not vbr or cbr", ErrInvalidPlan, rc.Mode)
+	}
+	if rc.AvgMbps <= 0 || math.IsNaN(rc.AvgMbps) || math.IsInf(rc.AvgMbps, 0) ||
+		math.IsNaN(rc.MaxMbps) || math.IsInf(rc.MaxMbps, 0) {
+		return nil, fmt.Errorf("%w: the bitrate is %v Mb/s", ErrInvalidPlan, rc.AvgMbps)
+	}
+	avg := kbpsArg(rc.AvgMbps)
+	if rc.Mode == "cbr" {
+		return []string{
+			"-b:v:0", avg,
+			"-minrate:v:0", avg,
+			"-maxrate:v:0", avg,
+			"-bufsize:v:0", kbpsArg(rc.AvgMbps * 2),
+		}, nil
+	}
+	return []string{
+		"-b:v:0", avg,
+		"-maxrate:v:0", kbpsArg(rc.MaxMbps),
+		"-bufsize:v:0", kbpsArg(rc.MaxMbps * 2),
+	}, nil
+}
+
+// kbpsArg writes a bitrate in the units ffmpeg takes: whole kbps, e.g. 3600k.
+func kbpsArg(mbps float64) string {
+	return strconv.FormatInt(int64(math.Round(mbps*1000)), 10) + "k"
+}
+
+// OutputHeight is the upright height of the picture the plan writes: the source's own when the
+// box is empty or would not shrink it, else the height scaleTo fits inside the box. The flow uses
+// it to pick the ladder row the output belongs to, so a 4K source scaled to 1080 reads the 1080
+// numbers. Build checks the box itself, in scaleTo.
+func OutputHeight(v media.VideoTrack, box Scale) int {
+	if box.Width > 0 || box.Height > 0 {
+		if _, h, err := scaleTo(v, box); err == nil && h > 0 {
+			return h
+		}
+	}
+	if v.Rotation%180 != 0 {
+		return v.Width
+	}
+	return v.Height
 }
 
 // metadataKeys is the video tags to clear: the plan's own, then the statistics tags ffmpeg would

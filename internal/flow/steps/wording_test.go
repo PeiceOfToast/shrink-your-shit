@@ -43,16 +43,15 @@ func TestEverySentenceIsPinned(t *testing.T) {
 		{name: "video height", video: video(`,"height":720`),
 			problems: []string{`height|video.not_yet|Choosing the picture height is not built yet; each file keeps its own size.`}},
 		{name: "video bitrate", video: video(`,"rateControl":"vbr"`),
-			problems: []string{`rateControl|video.not_yet|Setting a bitrate is not built yet; the Quality slider decides for now.`},
 			disabled: []string{`video|quality||Not used: Advanced sets a bitrate instead.`}},
-		{name: "video average", video: video(`,"avgMbps":5`),
-			problems: []string{`avgMbps|video.not_yet|Setting a bitrate is not built yet; the Quality slider decides for now.`}},
-		{name: "video at most", video: video(`,"maxMbps":8`),
-			problems: []string{`maxMbps|video.not_yet|Setting a bitrate is not built yet; the Quality slider decides for now.`}},
+		{name: "video VBR needs a format that offers it",
+			video:    video(`,"format":"av1","rateControl":"vbr"`),
+			disabled: []string{`video|rateControl|vbr|Variable bitrate doesn't work with AV1 yet. Pick Constant bitrate or Quality, or another format.`}},
+		{name: "video custom with no average",
+			video:    video(`,"rateControl":"cbr","bitrateLevel":"custom"`),
+			problems: []string{`avgMbps|video.no_bitrate|Type an average bitrate for Custom, or pick Low, Medium or High.`}},
 		{name: "video two passes", video: video(`,"twoPass":true`),
-			problems: []string{`twoPass|video.not_yet|Setting a bitrate is not built yet; the Quality slider decides for now.`}},
-		{name: "video level", video: video(`,"bitrateLevel":"high"`),
-			problems: []string{`bitrateLevel|video.not_yet|Picking a bitrate level is not built yet; the Quality slider decides for now.`}},
+			problems: []string{`twoPass|video.not_yet|Two passes are not built yet; the encode makes one pass.`}},
 		{name: "video speed", video: video(`,"preset":"slower"`),
 			problems: []string{`preset|video.not_yet|Choosing the encoder speed is not built yet; the processor picks its own speed.`}},
 		{name: "video frame rate", video: video(`,"fps":30`),
@@ -137,10 +136,11 @@ func TestEverySentenceIsPinned(t *testing.T) {
 
 	// Every problem code and every greyed sentence the check can carry, so a new one cannot arrive
 	// without its row here.
-	wantCodes := []string{"video.not_yet", "audio.not_yet", "save.not_yet", "save.folder_missing",
+	wantCodes := []string{"video.not_yet", "video.no_bitrate", "audio.not_yet", "save.not_yet", "save.folder_missing",
 		"save.empty_suffix", "container_unsupported", "setting.invalid"}
 	wantWhys := []string{
 		"Not used: Advanced sets a bitrate instead.",
+		"Variable bitrate doesn't work with AV1 yet. Pick Constant bitrate or Quality, or another format.",
 		"Only with HEVC.",
 		"The graphics card is not used.",
 		"No worker has a graphics card.",

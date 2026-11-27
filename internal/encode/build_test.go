@@ -304,9 +304,10 @@ func TestBuildRefusesAGPURung(t *testing.T) {
 
 func TestBuildRefusesLaterStageFields(t *testing.T) {
 	plan := basePlan(CodecHEVC)
-	plan.RateControl = &RateControl{Mode: "vbr", AvgMbps: 5}
+	plan.Video.CRF = nil
+	plan.RateControl = &RateControl{Mode: "vbr", AvgMbps: 5, MaxMbps: 7, TwoPass: true}
 	if _, err := Build(plan, baseInfo(), cpuRung(CodecHEVC)); !errors.Is(err, ErrNotBuiltYet) {
-		t.Errorf("rate control: error = %v, want ErrNotBuiltYet", err)
+		t.Errorf("two passes: error = %v, want ErrNotBuiltYet", err)
 	}
 
 	plan = basePlan(CodecHEVC)
@@ -521,6 +522,74 @@ func TestBuildRefusesInvalidPlans(t *testing.T) {
 		if _, err := Build(plan, info, rung); !errors.Is(err, c.want) {
 			t.Errorf("%s: error = %v, want %v", c.name, err, c.want)
 		}
+	}
+}
+
+// TestBuildRateControl is page 07's bitrate part of the table: a bitrate in place of the CRF, with
+// CBR pinning the at-most to the average and VBR letting it rise to the plan's number.
+func TestBuildRateControl(t *testing.T) {
+	cases := []struct {
+		name  string
+		codec Codec
+		rc    RateControl
+		want  string
+	}{
+		{"cbr", CodecH264, RateControl{Mode: "cbr", AvgMbps: 6},
+			"-b:v:0 6000k -minrate:v:0 6000k -maxrate:v:0 6000k -bufsize:v:0 12000k"},
+		{"vbr", CodecH264, RateControl{Mode: "vbr", AvgMbps: 6, MaxMbps: 9},
+			"-b:v:0 6000k -maxrate:v:0 9000k -bufsize:v:0 18000k"},
+	}
+	for _, c := range cases {
+		plan := basePlan(c.codec)
+		plan.Video.CRF = nil
+		plan.RateControl = &c.rc
+		res := buildOK(t, plan, baseInfo(), cpuRung(c.codec))
+		line := strings.Join(res.Argv, " ")
+		if !strings.Contains(line, c.want) {
+			t.Errorf("%s: argv = %s\nwant %s", c.name, line, c.want)
+		}
+		if strings.Contains(line, "-crf") {
+			t.Errorf("%s: argv = %s, want no CRF", c.name, line)
+		}
+	}
+}
+
+// TestBuildRefusesBadRateControl is the plan's own guard: a mode the table does not have, VBR for a
+// format the ladder does not offer it for, and a plan that carries both a CRF and a bitrate.
+func TestBuildRefusesBadRateControl(t *testing.T) {
+	cases := []struct {
+		name  string
+		codec Codec
+		rc    RateControl
+	}{
+		{"VBR for AV1", CodecAV1, RateControl{Mode: "vbr", AvgMbps: 3, MaxMbps: 4.5}},
+		{"VBR without an at-most", CodecHEVC, RateControl{Mode: "vbr", AvgMbps: 3.6}},
+		{"VBR at-most below the average", CodecHEVC, RateControl{Mode: "vbr", AvgMbps: 5, MaxMbps: 4}},
+		{"unknown mode", CodecHEVC, RateControl{Mode: "abr", AvgMbps: 5}},
+		{"no average", CodecHEVC, RateControl{Mode: "cbr"}},
+	}
+	for _, c := range cases {
+		plan := basePlan(c.codec)
+		plan.Video.CRF = nil
+		plan.RateControl = &c.rc
+		if _, err := Build(plan, baseInfo(), cpuRung(c.codec)); !errors.Is(err, ErrInvalidPlan) {
+			t.Errorf("%s: error = %v, want ErrInvalidPlan", c.name, err)
+		}
+	}
+
+	// Both a CRF and a bitrate would leave one of them silent.
+	plan := basePlan(CodecHEVC)
+	plan.RateControl = &RateControl{Mode: "cbr", AvgMbps: 5}
+	if _, err := Build(plan, baseInfo(), cpuRung(CodecHEVC)); !errors.Is(err, ErrInvalidPlan) {
+		t.Errorf("CRF and a bitrate: error = %v, want ErrInvalidPlan", err)
+	}
+
+	// A copied picture cannot change its rate.
+	plan = basePlan(CodecHEVC)
+	plan.Video = VideoPlan{Codec: CodecCopy}
+	plan.RateControl = &RateControl{Mode: "cbr", AvgMbps: 5}
+	if _, err := Build(plan, baseInfo(), cpuRung(CodecHEVC)); !errors.Is(err, ErrInvalidPlan) {
+		t.Errorf("copy with a bitrate: error = %v, want ErrInvalidPlan", err)
 	}
 }
 

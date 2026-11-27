@@ -138,6 +138,8 @@ func New(version string) *Server {
 	s.mux.HandleFunc("POST /api/v2/libraries/scan", s.scanAllLibraries)
 	// The steps' cards (S2-1): the flow editor's form, from the step registry.
 	s.mux.HandleFunc("GET /api/v2/step-definitions", s.getStepDefinitions)
+	// The bitrate ladder (S2-6): page 07's recommended numbers and the Quality slider's table.
+	s.mux.HandleFunc("GET /api/v2/bitrate-ladder", s.getBitrateLadder)
 	// Summary and attention (R1-9a).
 	s.mux.HandleFunc("GET /api/v2/summary", s.getSummary)
 	s.mux.HandleFunc("GET /api/v2/attention", s.getAttention)

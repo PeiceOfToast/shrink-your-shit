@@ -1,0 +1,177 @@
+{
+  "body": {
+    "cardOffsets": {
+      "qsv": {
+        "1": -2,
+        "2": -2,
+        "3": -1,
+        "4": -1,
+        "5": -1
+      }
+    },
+    "crfOffset": {
+      "av1": 9,
+      "h264": -5,
+      "hevc": 0
+    },
+    "factors": {
+      "fps60": 1.4,
+      "hdr": 1.25
+    },
+    "formats": {
+      "av1": {
+        "1080": {
+          "high": 4.5,
+          "low": 1.5,
+          "medium": 3
+        },
+        "1440": {
+          "high": 6.5,
+          "low": 3,
+          "medium": 4.5
+        },
+        "2160": {
+          "high": 15,
+          "low": 6.5,
+          "medium": 10
+        },
+        "720": {
+          "high": 3,
+          "low": 1.25,
+          "medium": 2
+        },
+        "sd": {
+          "high": 1.25,
+          "low": 0.5,
+          "medium": 0.75
+        }
+      },
+      "h264": {
+        "1080": {
+          "high": 9,
+          "low": 3,
+          "medium": 6
+        },
+        "1440": {
+          "high": 13,
+          "low": 6,
+          "medium": 9
+        },
+        "2160": {
+          "high": 30,
+          "low": 13,
+          "medium": 20
+        },
+        "720": {
+          "high": 6,
+          "low": 2.5,
+          "medium": 4
+        },
+        "sd": {
+          "high": 2.5,
+          "low": 1,
+          "medium": 1.5
+        }
+      },
+      "hevc": {
+        "1080": {
+          "high": 5.4,
+          "low": 1.8,
+          "medium": 3.6
+        },
+        "1440": {
+          "high": 7.8,
+          "low": 3.6,
+          "medium": 5.4
+        },
+        "2160": {
+          "high": 18,
+          "low": 7.8,
+          "medium": 12
+        },
+        "720": {
+          "high": 3.6,
+          "low": 1.5,
+          "medium": 2.4
+        },
+        "sd": {
+          "high": 1.5,
+          "low": 0.6,
+          "medium": 0.9
+        }
+      }
+    },
+    "resolutionRow": {
+      "1080": "1080",
+      "2160": "2160",
+      "480": "sd",
+      "720": "720"
+    },
+    "rowCrfShift": {
+      "1080": 0,
+      "1440": 0,
+      "2160": 1,
+      "720": -1,
+      "sd": -1
+    },
+    "rows": [
+      {
+        "label": "2160p",
+        "row": "2160"
+      },
+      {
+        "label": "1440p",
+        "row": "1440"
+      },
+      {
+        "label": "1080p",
+        "row": "1080"
+      },
+      {
+        "label": "720p",
+        "row": "720"
+      },
+      {
+        "label": "480p (SD)",
+        "row": "sd"
+      }
+    ],
+    "slider": [
+      {
+        "crf": 27,
+        "name": "Smallest file",
+        "position": 1
+      },
+      {
+        "crf": 25,
+        "name": "Smaller",
+        "position": 2
+      },
+      {
+        "crf": 23,
+        "name": "Balanced",
+        "position": 3
+      },
+      {
+        "crf": 21,
+        "name": "Better quality",
+        "position": 4
+      },
+      {
+        "crf": 19,
+        "name": "Best quality",
+        "position": 5
+      }
+    ],
+    "unit": "Mbps",
+    "vbrFormats": [
+      "hevc",
+      "h264"
+    ],
+    "vbrMaxFactor": 1.5
+  },
+  "method": "GET",
+  "path": "/api/v2/bitrate-ladder",
+  "status": 200,
+  "type": "BitrateLadder"
+}
