@@ -21,14 +21,15 @@ FFMPEG_ARM64_SHA256="1ccfba1f73a498694f32fa834c21bd74ba29cdb108265b886c651302074
 
 # libva 2.22, shipped beside ffmpeg (S3-1c). The pinned static ffmpeg 8 needs libva 2.22 at run time; Ubuntu 24.04
 # ships 2.20, which aborts every VAAPI and QSV encoder. These are Debian trixie's libva2 and libva-drm2 2.22.0-3
-# packages (the .deb is the file that is checked; its libraries are extracted, not installed).
-LIBVA2_AMD64_URL="https://deb.debian.org/debian/pool/main/libv/libva/libva2_2.22.0-3_amd64.deb"
+# packages, from snapshot.debian.org by content hash (the live pool can move; the bytes cannot). The .deb is checked;
+# its libraries are extracted, not installed.
+LIBVA2_AMD64_URL="https://snapshot.debian.org/file/c5b976a61cf1857d1fde4c8efbf67e9fd7e2aed4"
 LIBVA2_AMD64_SHA256="b76bdd330de47a826698aaed10f53435b703e9a7d4415dd68269c97709f46a9b"
-LIBVADRM_AMD64_URL="https://deb.debian.org/debian/pool/main/libv/libva/libva-drm2_2.22.0-3_amd64.deb"
+LIBVADRM_AMD64_URL="https://snapshot.debian.org/file/2a6e89bd7812649824f83a53385a3dbeb0ff54f1"
 LIBVADRM_AMD64_SHA256="5dce5007ddc0ce87a61db4d71476ce1a5a135737b5185ce2e8b7067342fcafc6"
-LIBVA2_ARM64_URL="https://deb.debian.org/debian/pool/main/libv/libva/libva2_2.22.0-3_arm64.deb"
+LIBVA2_ARM64_URL="https://snapshot.debian.org/file/8632b4e2968a41f0891e9b8f4e45917f19c9aff1"
 LIBVA2_ARM64_SHA256="7a5e7cbaaddf1f39973c10f9daae6769b704e0d6d72fe752d64003929272cbcf"
-LIBVADRM_ARM64_URL="https://deb.debian.org/debian/pool/main/libv/libva/libva-drm2_2.22.0-3_arm64.deb"
+LIBVADRM_ARM64_URL="https://snapshot.debian.org/file/232c0c99171658ed064bb3fa8704ff5b1a4c7f18"
 LIBVADRM_ARM64_SHA256="18e556968a0f4bffd321d67b01fa5e445177c0849bef96a741aa7ed3a11dcc8b"
 
 MAX_BYTES=536870912 # 512 MiB: no download may be larger
