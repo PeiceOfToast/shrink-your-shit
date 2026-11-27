@@ -1,6 +1,7 @@
 // Workflow flow calls for the mock (pages 06 and 07): the guide, the answers, the three-step flow, the check,
 // the recommended bitrates, saves, publish and the try. A session's edits live in memory, as the app's do.
-import type { Answers, BitrateLadder, Flow, FlowCheck, FlowProblem, FlowStep, GuideDoc, GuidePreview, StepId, TryLine } from "./flowTypes.ts";
+import type { Answers, BitrateLadder, Flow, FlowCheck, FlowProblem, FlowStep, GuideDoc, GuidePreview, StepDefinition, StepId, TryLine } from "./flowTypes.ts";
+import { STEP_DEFINITIONS } from "./fixtures/stepDefinitions.ts";
 import { ApiError } from "./errors.ts";
 import { respond } from "./mockState.ts";
 import { createWorkflowRow, peekWorkflowRow, updateWorkflowRow } from "./mockWorkflows.ts";
@@ -257,10 +258,11 @@ export function answersToFlow(a: Answers, meta: { name: string; description: str
         avgMbps: null,
         maxMbps: null,
         twoPass: false,
-        preset: null,
+        preset: "normal",
         fps: null,
         bitDepth: null,
-        hdr: null,
+        hdr: "keep",
+        keepDolbyVision: false,
       }),
       step("audio", "audio.tracks", {
         format: audio.format,
@@ -411,6 +413,11 @@ function docFor(id: string): Doc {
 function checkQuality(a: Answers): void {
   const q = Number(a.quality);
   if (!Number.isInteger(q) || q < 1 || q > 5) throw new ApiError("invalid_answer", "Quality is 1 to 5.", "quality");
+}
+
+// The cards' settings: the step definitions, a copy of the golden (the server's GET /api/v2/step-definitions).
+export function getStepDefinitions(): Promise<StepDefinition[]> {
+  return Promise.resolve(STEP_DEFINITIONS);
 }
 
 export function getGuide(): Promise<GuideDoc> {
