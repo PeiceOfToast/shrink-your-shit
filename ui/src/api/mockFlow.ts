@@ -7,7 +7,8 @@ import { respond } from "./mockState.ts";
 import { createWorkflowRow, peekWorkflowRow, updateWorkflowRow } from "./mockWorkflows.ts";
 import { languageName } from "../format/language.ts";
 
-// The answers a new workflow starts from (page 06 "New": sensible defaults ticked).
+// The answers a new workflow starts from: the guide's defaults. They match internal/api/testdata/contract/guide.json
+// (body.defaults); guideDefaults.test.ts fails when they differ.
 export const DEFAULT_ANSWERS: Answers = {
   quality: 3,
   slower: false,
@@ -15,17 +16,21 @@ export const DEFAULT_ANSWERS: Answers = {
   resolution: "keep",
   useGpu: true,
   ifGpuFails: "cpu",
-  audio: "stereo_aac",
-  allLanguages: false,
-  languages: ["eng", "ger"],
+  audio: "as_is",
+  allLanguages: true,
+  languages: [],
   languagesEverywhere: false,
   subtitles: "keep_all",
-  subtitleLanguages: ["eng", "ger"],
+  subtitleLanguages: [],
   fileType: "mkv",
   includeDolbyVision: false,
   original: "next_to_original",
   folder: "",
 };
+
+// The server's changed_since text (internal/api/workflows.go writeChangedSince), for a save from a stale revision.
+const CHANGED_SINCE = "This workflow was saved somewhere else since you opened it. Reload to see the newer version.";
+const changedSince = () => new ApiError("changed_since", CHANGED_SINCE);
 
 // Why the guide and the editor grey replacing the original and saving to a chosen folder until item
 // 10. The server says the same sentences (internal/flow/answers.go); design's wording is "new file".
@@ -461,12 +466,12 @@ export function guidePreview(answers: Answers): Promise<GuidePreview> {
 }
 
 // Save as a draft from the guided page: stores the answers and writes the flow into the draft. The
-// page sends the revision it read as baseRev; the server refuses a stale one (changed_since).
-// ui-shop makes the mock check it in their post-#840 row, so it is taken and ignored here.
-export function putAnswers(id: string, answers: Answers, _baseRev: number): Promise<{ flow: Flow; rev: number }> {
+// page sends the revision it read as baseRev; a stale one is refused with changed_since.
+export function putAnswers(id: string, answers: Answers, baseRev: number): Promise<{ flow: Flow; rev: number }> {
   return respond(() => {
-    checkQuality(answers);
     const d = docFor(id);
+    if (baseRev !== d.rev) throw changedSince();
+    checkQuality(answers);
     d.answers = { ...answers };
     d.flow = answersToFlow(answers, { name: d.flow.name, description: d.flow.description });
     d.rev += 1;
@@ -488,9 +493,7 @@ export function getFlow(id: string): Promise<{ flow: Flow; rev: number; fitsGuid
 export function putDraft(id: string, flow: Flow, baseRev: number): Promise<{ rev: number }> {
   return respond(() => {
     const d = docFor(id);
-    if (baseRev !== d.rev) {
-      throw new ApiError("changed_since", "This workflow was saved somewhere else since you opened it. Reload to see the newer version.");
-    }
+    if (baseRev !== d.rev) throw changedSince();
     checkFlow(flow);
     d.flow = flow;
     d.fitsGuided = false;
