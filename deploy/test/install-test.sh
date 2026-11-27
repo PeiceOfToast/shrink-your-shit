@@ -104,16 +104,17 @@ finish() {
       fi
     fi
   fi
-  # The log must never carry a sign-in token or a session cookie.
-  if [ -d "$SLICES" ]; then
-    sed -E -e 's/([?&]token=)[^"& ]+/\1REDACTED/g' -e 's/(syp_session=)[^; ]+/\1REDACTED/g' "$LOG_TMP" >"$LOG"
-  else
-    echo "note: $SLICES is not a folder; the log stayed at $LOG_TMP" >&2
-    LOG=$LOG_TMP
-  fi
-  say "log: $LOG"
+  if [ -d "$SLICES" ]; then LOGDEST=$LOG; else LOGDEST=$LOG_TMP; fi
   [ "$rc" -ne 0 ] && FAILURES=$((FAILURES + 1))
+  say "log: $LOGDEST"
   say "$FAILURES check(s) failed"
+  # The log must never carry a sign-in token or a session cookie. It is written last, so the saved copy
+  # carries the verdict printed just above.
+  if [ "$LOGDEST" = "$LOG_TMP" ]; then
+    echo "note: $SLICES is not a folder; the log is $LOG_TMP (not redacted, so do not share it)" >&2
+  else
+    sed -E -e 's/([?&]token=)[^"& ]+/\1REDACTED/g' -e 's/(syp_session=)[^; ]+/\1REDACTED/g' "$LOG_TMP" >"$LOGDEST"
+  fi
   [ "$FAILURES" -eq 0 ]
 }
 trap finish EXIT
@@ -221,15 +222,22 @@ install_once() {
   fi
 }
 
+# run_installer prints the install's output and sets INSTALL_RC to its real status. A plain
+# `install_once | tee` would report tee's status (dash has no pipefail), so a failing installer would look like
+# a success and the checks after it would pass on whatever the previous install left behind.
+run_installer() {
+  INSTALL_RC=0
+  install_once >"$WORK/install.out" 2>&1 || INSTALL_RC=$?
+  tee -a "$LOG_TMP" <"$WORK/install.out"
+}
+
 # --- the one-line install ---------------------------------------------------------------------------
 step "The one-line install"
-INSTALL_RC=0
-install_once 2>&1 | tee -a "$LOG_TMP" || INSTALL_RC=$?
+run_installer
 if [ "$INSTALL_RC" -eq 0 ] && ct 'test -x /usr/local/bin/syp && test -f /etc/systemd/system/syp.service'; then
   pass "the one-line install exited 0 and put syp in place"
 else
-  fail "the one-line install exited $INSTALL_RC without putting syp in place"
-  say "wget or sh stopped early: the pipeline's status is sh's status, so the install's own output above is the record"
+  fail "the one-line install exited $INSTALL_RC without putting syp in place (its output above is the record)"
   exit 1
 fi
 if curl -fsS -o /dev/null "$BASE/api/v2/health"; then
@@ -379,12 +387,11 @@ esac
 
 # --- a re-run keeps the account and the library ------------------------------------------------------
 step "Running the one-liner again"
-RERUN_RC=0
-install_once 2>&1 | tee -a "$LOG_TMP" || RERUN_RC=$?
-if [ "$RERUN_RC" -eq 0 ] && ct 'test -x /usr/local/bin/syp && test -d /var/lib/syp'; then
+run_installer
+if [ "$INSTALL_RC" -eq 0 ] && ct 'test -x /usr/local/bin/syp && test -d /var/lib/syp'; then
   pass "the re-run exited 0 and kept the data folder"
 else
-  fail "the re-run exited $RERUN_RC"
+  fail "the re-run exited $INSTALL_RC (its output above is the record)"
 fi
 signin_code=$(curl -sS -o "$WORK/signin.json" -w '%{http_code}' -c "$JAR" -b "$JAR" \
   -H 'X-SYP: 1' -H 'Content-Type: application/json' -d "{\"password\":\"$PASSWORD\"}" "$BASE/api/v2/signin")
