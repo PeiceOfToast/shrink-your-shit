@@ -282,6 +282,15 @@ func videoOptions(plan Plan, main media.VideoTrack, encoder string, res *Result)
 	} else {
 		argv = append(argv, "-crf:v:0", strconv.Itoa(crf))
 	}
+	// x265 takes its own options through one -x265-params flag, so HDR's color description and
+	// strict CBR share it rather than one silently replacing the other. libx265's minrate/maxrate
+	// alone let a simple picture undershoot far below the average (a static clip encoded at 13
+	// kbps against a 1 Mb/s target); hrd and strict-cbr make it pad to the rate. The option is not
+	// named nal-hrd=cbr: this libx265 rejects that name.
+	var x265 []string
+	if plan.RateControl != nil && plan.RateControl.Mode == "cbr" && plan.Video.Codec == CodecHEVC {
+		x265 = append(x265, "hrd=1:strict-cbr=1")
+	}
 	argv = append(argv, "-pix_fmt:v:0", pixelFormat)
 	if depth == 10 && plan.Video.Codec == CodecHEVC {
 		argv = append(argv, "-profile:v:0", "main10")
@@ -312,9 +321,12 @@ func videoOptions(plan Plan, main media.VideoTrack, encoder string, res *Result)
 		)
 		if plan.Video.Codec == CodecHEVC && transfer == "smpte2084" {
 			// HDR10 static metadata; HDR10+ dynamic metadata is not carried and becomes HDR10.
-			argv = append(argv, "-x265-params:v:0",
+			x265 = append(x265,
 				"colorprim="+primaries+":transfer=smpte2084:colormatrix="+colorspace+":hdr10=1:hdr10-opt=1")
 		}
+	}
+	if len(x265) > 0 {
+		argv = append(argv, "-x265-params:v:0", strings.Join(x265, ":"))
 	}
 	for _, key := range metadataKeys(plan.MetadataClear) {
 		argv = append(argv, "-metadata:s:v:0", key+"=")

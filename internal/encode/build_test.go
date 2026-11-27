@@ -552,6 +552,47 @@ func TestBuildRateControl(t *testing.T) {
 			t.Errorf("%s: argv = %s, want no CRF", c.name, line)
 		}
 	}
+
+	// HEVC's CBR is strict: without the HRD filler a simple picture encodes at a fraction of the
+	// rate. H.264 and AV1 take no x265 options.
+	hevc := basePlan(CodecHEVC)
+	hevc.Video.CRF = nil
+	hevc.RateControl = &RateControl{Mode: "cbr", AvgMbps: 6}
+	params, ok := flagValue(buildOK(t, hevc, baseInfo(), cpuRung(CodecHEVC)).Argv, "-x265-params:v:0")
+	if !ok || params != "hrd=1:strict-cbr=1" {
+		t.Errorf("hevc CBR params = %q, %v; want hrd=1:strict-cbr=1", params, ok)
+	}
+	for _, codec := range []Codec{CodecH264, CodecAV1} {
+		plan := basePlan(codec)
+		plan.Video.CRF = nil
+		plan.RateControl = &RateControl{Mode: "cbr", AvgMbps: 6}
+		if hasFlag(buildOK(t, plan, baseInfo(), cpuRung(codec)).Argv, "-x265-params:v:0") {
+			t.Errorf("%s CBR: argv has -x265-params, want none", codec)
+		}
+	}
+
+	// An HDR10 HEVC CBR file carries the color description and strict CBR in one flag: a second
+	// -x265-params would replace the first, silently dropping one of them.
+	hdr := baseInfo()
+	hdr.Video[0].BitDepth = 10
+	hdr.Video[0].ColorPrimaries, hdr.Video[0].ColorTransfer, hdr.Video[0].ColorSpace = "bt2020", "smpte2084", "bt2020nc"
+	hdrPlan := basePlan(CodecHEVC)
+	hdrPlan.Video.CRF = nil
+	hdrPlan.RateControl = &RateControl{Mode: "cbr", AvgMbps: 6}
+	hdrArgv := buildOK(t, hdrPlan, hdr, cpuRung(CodecHEVC)).Argv
+	params, ok = flagValue(hdrArgv, "-x265-params:v:0")
+	if !ok || !strings.Contains(params, "hdr10=1") || !strings.Contains(params, "hrd=1:strict-cbr=1") {
+		t.Errorf("HDR CBR params = %q, want the color description and strict CBR together", params)
+	}
+	flags := 0
+	for _, arg := range hdrArgv {
+		if arg == "-x265-params:v:0" {
+			flags++
+		}
+	}
+	if flags != 1 {
+		t.Errorf("x265 params flags = %d, want 1 (a second would replace the first)", flags)
+	}
 }
 
 // TestBuildRefusesBadRateControl is the plan's own guard: a mode the table does not have, VBR for a

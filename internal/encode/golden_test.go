@@ -125,6 +125,20 @@ func goldenCases() []goldenCase {
 			rung: cpuRung(c.codec),
 		})
 	}
+	// Strict CBR on an HDR10 file: the color description and the HRD filler share one -x265-params
+	// flag. Two flags would let the second replace the first.
+	cases = append(cases, goldenCase{
+		name:    "hevc-hdr10-cbr",
+		summary: "hevc hdr10 cbr rate control",
+		plan: Plan{
+			Video:       VideoPlan{Codec: CodecHEVC, Preset: "normal"},
+			RateControl: &RateControl{Mode: "cbr", AvgMbps: 12},
+			Container:   ContainerMKV,
+			Output:      "out.mkv",
+		},
+		info: goldenInfo(10, "smpte2084"),
+		rung: cpuRung(CodecHEVC),
+	})
 	return cases
 }
 

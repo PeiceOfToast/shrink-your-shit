@@ -4,9 +4,12 @@ package encode
 
 import (
 	"context"
+	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -196,11 +199,63 @@ func TestRealScaleKeepsARotatedClipUpright(t *testing.T) {
 	}
 }
 
-// TestRealCBRHitsItsTarget is the bitrate's own end-to-end proof: the built CBR arguments make the
-// encoder spend the ladder's rate instead of the quality rate it would pick alone. Measured on the
-// static ffmpeg 7.0.2 build, a 1 Mb/s target lands around 1.17 Mb/s; the band is generous so a
-// different x264 build's rate-control details do not make it flaky, while a CRF encode of the same
-// clip (around 1.8 Mb/s) still fails it.
+// cbrSegments is the video's bitrate in each whole second, from the packet sizes ffprobe reports,
+// so a test can see whether rate control keeps the rate second by second or only averages to it.
+// The last, partial second is not trimmed here; the caller picks the whole seconds it measured.
+func cbrSegments(t *testing.T, path string) []float64 {
+	t.Helper()
+	out, err := exec.Command("ffprobe", "-v", "error", "-select_streams", "v:0",
+		"-show_entries", "packet=pts_time,size", "-of", "csv=p=0", path).Output()
+	if err != nil {
+		t.Fatalf("ffprobe packets: %v", err)
+	}
+	bytes := map[int]int64{}
+	last := -1
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		fields := strings.Split(line, ",")
+		if len(fields) < 2 || fields[0] == "" || fields[0] == "N/A" {
+			continue
+		}
+		pts, err := strconv.ParseFloat(fields[0], 64)
+		if err != nil {
+			t.Fatalf("packet pts %q: %v", fields[0], err)
+		}
+		size, err := strconv.ParseInt(fields[1], 10, 64)
+		if err != nil {
+			t.Fatalf("packet size %q: %v", fields[1], err)
+		}
+		second := int(math.Floor(pts))
+		bytes[second] += size
+		if second > last {
+			last = second
+		}
+	}
+	if last < 0 {
+		t.Fatal("ffprobe found no video packets")
+	}
+	segs := make([]float64, last+1)
+	for second, size := range bytes {
+		segs[second] = float64(size) * 8 / 1000 // kbps
+	}
+	return segs
+}
+
+// wholeSeconds is the number of complete seconds of video to check: the clip's duration rounded
+// down, and never more buckets than were measured.
+func wholeSeconds(duration time.Duration, segs []float64) int {
+	n := int(duration / time.Second)
+	if n > len(segs) {
+		n = len(segs)
+	}
+	return n
+}
+
+// TestRealCBRHitsItsTarget is the bitrate's own end-to-end proof: CBR holds every second near the
+// ladder's rate, which a plain average does not. The second half of the clip is a fractal, far
+// harder than the graphics before it, so an encoder that only averages spends its bits there.
+// Measured on the static ffmpeg 7.0.2 build: CBR stays between 0.89 and 1.26 of the target every
+// second, while the same plan without minrate/maxrate/bufsize runs from 0.80 to 1.68. The band is
+// 0.7 to 1.4: generous for another x264 build, still failing a plain average.
 func TestRealCBRHitsItsTarget(t *testing.T) {
 	requireRealTools(t)
 	if !listedEncoders(t)["libx264"] {
@@ -212,10 +267,13 @@ func TestRealCBRHitsItsTarget(t *testing.T) {
 	dir := t.TempDir()
 
 	source := filepath.Join(dir, "source.mp4")
-	make := exec.Command("ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
-		"-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30:duration=4",
-		"-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", source)
-	if out, err := make.CombinedOutput(); err != nil {
+	mk := exec.Command("ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
+		"-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30:duration=5",
+		"-f", "lavfi", "-i", "mandelbrot=size=640x360:rate=30",
+		"-filter_complex",
+		"[1:v]trim=duration=5,setpts=PTS-STARTPTS[b];[0:v][b]concat=n=2:v=1:a=0",
+		"-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-crf", "18", source)
+	if out, err := mk.CombinedOutput(); err != nil {
 		t.Fatalf("make the clip: %v\n%s", err, out)
 	}
 	info, err := media.Probe(context.Background(), source)
@@ -244,12 +302,96 @@ func TestRealCBRHitsItsTarget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("probe the output: %v", err)
 	}
-	mbps := float64(got.Video[0].BitRate) / 1e6
-	if got.Video[0].BitRate <= 0 {
-		mbps = float64(got.Format.BitRate) / 1e6 // the container carries the rate when the stream omits it
+	segs := cbrSegments(t, out)
+	seconds := wholeSeconds(got.Format.Duration, segs)
+	if seconds < 8 {
+		t.Fatalf("only %d whole seconds measured, want a clip long enough to show a swing", seconds)
 	}
-	t.Logf("output rate = %.3f Mb/s against the %.1f Mb/s target", mbps, target)
-	if mbps < target*0.6 || mbps > target*1.5 {
-		t.Errorf("output rate = %.3f Mb/s, want near the %.1f Mb/s target", mbps, target)
+	segs = segs[:seconds]
+
+	rates := make([]string, len(segs))
+	var bad []string
+	for i, kbps := range segs {
+		ratio := kbps / 1000 / target
+		if ratio < 0.7 || ratio > 1.4 {
+			bad = append(bad, fmt.Sprintf("second %d = %.2f Mb/s (%.2fx)", i, kbps/1000, ratio))
+		}
+		rates[i] = fmt.Sprintf("%.0f", kbps)
+	}
+	t.Logf("CBR second bitrates (kbps): %s against the %.1f Mb/s target", strings.Join(rates, " "), target)
+	if len(bad) > 0 {
+		t.Errorf("CBR left its band: %s; every second should stay within 0.7-1.4 of %.1f Mb/s",
+			strings.Join(bad, ", "), target)
+	}
+}
+
+// TestRealHEVCCBRIsStrict is why HEVC's CBR carries hrd and strict-cbr: a nearly static picture
+// needs almost no bits, and libx265 without them encodes at a fraction of the rate (measured 13
+// kbps against a 1 Mb/s target) instead of padding to it. The first second is left out because the
+// encoder is still priming its buffer (measured 504 kbps there, 1004 after).
+func TestRealHEVCCBRIsStrict(t *testing.T) {
+	requireRealTools(t)
+	if !listedEncoders(t)["libx265"] {
+		if os.Getenv("SYP_REQUIRE_FFMPEG") != "" {
+			t.Fatal("this ffmpeg build has no libx265 and SYP_REQUIRE_FFMPEG is set")
+		}
+		t.Skip("this ffmpeg build has no libx265")
+	}
+	dir := t.TempDir()
+
+	source := filepath.Join(dir, "still.mp4")
+	mk := exec.Command("ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
+		"-f", "lavfi", "-i", "color=c=gray:size=640x360:rate=30:duration=5",
+		"-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-crf", "18", source)
+	if out, err := mk.CombinedOutput(); err != nil {
+		t.Fatalf("make the clip: %v\n%s", err, out)
+	}
+	info, err := media.Probe(context.Background(), source)
+	if err != nil {
+		t.Fatalf("probe the source: %v", err)
+	}
+
+	const target = 1.0 // Mb/s
+	out := filepath.Join(dir, "out.mp4")
+	plan := Plan{
+		Video:       VideoPlan{Codec: CodecHEVC, Preset: "faster"},
+		RateControl: &RateControl{Mode: "cbr", AvgMbps: target},
+		Container:   ContainerMP4,
+		Output:      out,
+	}
+	res, err := Build(plan, info, cpuRung(CodecHEVC))
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	run, err := media.Run(context.Background(), append([]string{"ffmpeg"}, res.Argv...), nil)
+	if err != nil {
+		t.Fatalf("ffmpeg: %v (exit %d)\n%s", err, run.ExitCode, strings.Join(run.KeyLines, "\n"))
+	}
+
+	got, err := media.Probe(context.Background(), out)
+	if err != nil {
+		t.Fatalf("probe the output: %v", err)
+	}
+	segs := cbrSegments(t, out)
+	seconds := wholeSeconds(got.Format.Duration, segs)
+	if seconds < 4 {
+		t.Fatalf("only %d whole seconds measured", seconds)
+	}
+
+	rates := make([]string, len(segs[:seconds]))
+	var bad []string
+	for i := 1; i < seconds; i++ { // second 0 is the encoder priming its buffer
+		ratio := segs[i] / 1000 / target
+		if ratio < 0.7 || ratio > 1.3 {
+			bad = append(bad, fmt.Sprintf("second %d = %.2f Mb/s (%.2fx)", i, segs[i]/1000, ratio))
+		}
+	}
+	for i := range rates {
+		rates[i] = fmt.Sprintf("%.0f", segs[i])
+	}
+	t.Logf("strict CBR second bitrates (kbps): %s against the %.1f Mb/s target", strings.Join(rates, " "), target)
+	if len(bad) > 0 {
+		t.Errorf("strict CBR did not hold the rate: %s; a static picture should be padded up to %.1f Mb/s",
+			strings.Join(bad, ", "), target)
 	}
 }
