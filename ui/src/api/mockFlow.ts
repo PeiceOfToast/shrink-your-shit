@@ -195,7 +195,7 @@ const GUIDE: GuideDoc = {
           label: "Where the new file goes",
           type: "choice",
           choices: [
-            { value: "replace", label: "Replace the original", available: true },
+            { value: "replace", label: "Replace the original", available: false, why: "Replacing the original comes in a later update; for now the converted file is saved next to it." },
             { value: "next_to_original", label: "Next to the original", available: true },
             { value: "one_folder", label: "A different folder", available: true },
           ],
