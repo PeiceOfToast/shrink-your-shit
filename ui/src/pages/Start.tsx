@@ -1,9 +1,9 @@
 import { useState, type ReactNode } from "react";
-import { api, ApiError } from "../api/index.ts";
+import { api } from "../api/index.ts";
 import { useApi } from "../api/useApi.ts";
 import { navigate } from "../router.tsx";
 import { Icon } from "../ui/Icon.tsx";
-import { FolderBrowser } from "./FolderBrowser.tsx";
+import { LibrarySource, NO_SOURCE, baseName, toProblem, type Problem, type Source } from "./LibrarySource.tsx";
 import "../styles/start.css";
 
 // First run (page 13, drafts B). One card on the background, the app mark above it, no top bar or status line.
@@ -33,33 +33,29 @@ export function Starting() {
 
 type Starter = Awaited<ReturnType<typeof api.getStarters>>[number];
 
-function baseName(p: string): string {
-  return p.replace(/\/+$/, "").split("/").pop() ?? "";
-}
-
-type Problem = { field?: string; message: string };
-
 export function FirstRun() {
   const starters = useApi(() => api.getStarters(), []);
   const [password, setPassword] = useState("");
-  const [path, setPath] = useState("");
+  const [src, setSrc] = useState<Source>(NO_SOURCE);
   const [name, setName] = useState("");
   const [nameTouched, setNameTouched] = useState(false);
-  const [browsing, setBrowsing] = useState(false);
   const [starter, setStarter] = useState<string | null>(null);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<Problem | null>(null);
 
-  // Choosing a folder fills the name from it, unless the person has typed one.
-  const pick = (p: string) => {
-    setPath(p);
-    if (!nameTouched) setName(baseName(p));
-    setProblem(null);
+  // Changing the folder fills the name from it, unless the person has typed one.
+  const change = (patch: Partial<Source>) => {
+    setSrc((s) => ({ ...s, ...patch }));
+    if (patch.path !== undefined) {
+      if (!nameTouched) setName(baseName(patch.path));
+      setProblem(null);
+    }
   };
 
   const guided: Starter[] = (starters.data ?? []).filter((s) => s.guided);
-  const canFinish = password.length > 0 && starter !== null && path.trim() !== "";
+  const hasSource = src.where === "local" ? src.path.trim() !== "" : src.shareId !== null;
+  const canFinish = password.length > 0 && starter !== null && hasSource;
   const canSkip = password.length > 0 && starter !== null;
 
   // One call, all or nothing. A refused folder keeps everything typed (the form stays as it is).
@@ -67,14 +63,19 @@ export function FirstRun() {
     setBusy(true);
     setProblem(null);
     try {
+      const library = !withLibrary
+        ? null
+        : src.where === "local"
+          ? { name: name.trim(), path: src.path.trim() }
+          : { name: name.trim(), shareId: src.shareId! };
       await api.postSetup({
         account: { password },
-        library: withLibrary ? { name: name.trim(), path: path.trim() } : null,
+        library,
         starter: starter ? { id: starter, answers } : null,
       });
       navigate("/");
     } catch (e) {
-      setProblem(e instanceof ApiError ? { field: e.field, message: e.message } : { message: e instanceof Error ? e.message : String(e) });
+      setProblem(toProblem(e));
     } finally {
       setBusy(false);
     }
@@ -114,33 +115,8 @@ export function FirstRun() {
 
       <section className="start-step" aria-labelledby="st-lib">
         <h2 id="st-lib"><span className="start-num">2</span> First library</h2>
-        <div className="field">
-          <span className="lbl">Folder</span>
-          <div className="row">
-            <input
-              className="inp mono"
-              value={path}
-              onChange={(e) => {
-                setPath(e.target.value);
-                setProblem(null);
-              }}
-              aria-label="Folder"
-              aria-invalid={folderProblem ? true : undefined}
-              aria-describedby={folderProblem ? "st-path-err" : undefined}
-            />
-            <button type="button" className="btn sm" onClick={() => setBrowsing((b) => !b)}>Change</button>
-          </div>
-          {folderProblem && <p id="st-path-err" className="err" role="alert">{folderProblem}</p>}
-          {browsing && (
-            <FolderBrowser
-              start={path}
-              onPick={(p) => {
-                pick(p);
-                setBrowsing(false);
-              }}
-            />
-          )}
-        </div>
+        <LibrarySource value={src} onChange={change} onProblem={setProblem} onBusy={setBusy} />
+        {folderProblem && <p id="st-path-err" className="err" role="alert">{folderProblem}</p>}
         <div className="field">
           <label className="lbl" htmlFor="st-name">Name</label>
           <input

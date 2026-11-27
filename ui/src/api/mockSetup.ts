@@ -1,7 +1,7 @@
 // First run and sign in (page 13). Shapes come from page 13 and page 05 (starters). The guide's chips (page 06) are not mocked yet,
 // so a starter's answers are empty here (a gap in the handback).
 import { ApiError } from "./errors.ts";
-import { getForcedState, onForcedStateChange, respond, setFreshInstall } from "./mockState.ts";
+import { DELAY_MS, getForcedState, onForcedStateChange, respond, setFreshInstall } from "./mockState.ts";
 import { currentToken } from "./mockSettings.ts";
 
 export type Setup = { needsAccount: boolean; starting: boolean };
@@ -12,7 +12,7 @@ export type StarterDetail = Starter & { answers: Record<string, string> };
 
 export type SetupInput = {
   account: { password: string };
-  library: { name: string; path: string } | null;
+  library: { name: string; path: string } | { name: string; shareId: string } | null;
   starter: { id: string; answers: Record<string, unknown> } | null;
 };
 
@@ -59,7 +59,7 @@ function checkPassword(password: string): void {
 export function postSetup(input: SetupInput): Promise<{ ok: true; scanStarted: boolean }> {
   return respond(() => {
     checkPassword(input.account.password);
-    if (input.library && input.library.path.endsWith("/refused")) {
+    if (input.library && "path" in input.library && input.library.path.endsWith("/refused")) {
       throw new ApiError("overlaps", "That folder is already in another library. Pick a different folder.", "library.path");
     }
     setFreshInstall(input.library === null);
@@ -83,9 +83,18 @@ function recordFailure(now: number): void {
   if (failures.length >= 5) lockedUntil = now + WINDOW_MS;
 }
 
+// Page 13: each failed sign-in waits about a second before it answers, so the form's waiting state is real.
+const FAILURE_MS = 1000;
+function slowFailure<T>(p: Promise<T>): Promise<T> {
+  return p.catch(async (e: unknown) => {
+    await new Promise((r) => setTimeout(r, FAILURE_MS - DELAY_MS));
+    throw e;
+  });
+}
+
 // POST /api/v2/signin {password}. A wrong password says so in one line and gives no hint which part was wrong.
 export function signIn(password: string): Promise<{ ok: true }> {
-  return respond(() => {
+  return slowFailure(respond(() => {
     const now = Date.now();
     checkLock(now);
     if (password !== "correct") {
@@ -94,12 +103,12 @@ export function signIn(password: string): Promise<{ ok: true }> {
     }
     failures = [];
     return { ok: true as const };
-  });
+  }));
 }
 
 // POST /api/v2/signin {token}: the sign-in link. The bad_token text is a placeholder (a gap in the handback).
 export function signInWithToken(token: string): Promise<{ ok: true }> {
-  return respond(() => {
+  return slowFailure(respond(() => {
     const now = Date.now();
     checkLock(now);
     if (token !== currentToken()) {
@@ -108,7 +117,7 @@ export function signInWithToken(token: string): Promise<{ ok: true }> {
     }
     failures = [];
     return { ok: true as const };
-  });
+  }));
 }
 
 // POST /api/v2/signout.

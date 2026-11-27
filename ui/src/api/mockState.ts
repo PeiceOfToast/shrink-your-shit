@@ -29,7 +29,7 @@ export function onForcedStateChange(cb: () => void): () => void {
   return () => listeners.delete(cb);
 }
 
-const DELAY_MS = 300;
+export const DELAY_MS = 300;
 
 // Resolves with value() after a short delay. In the forced error state it throws (a page's own call fails);
 // loading never resolves. Pass failInError: false for calls the status line makes, so it can still show counts.
