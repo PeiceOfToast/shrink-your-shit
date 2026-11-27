@@ -184,9 +184,10 @@ fi
 
 # GPU helpers: only packages the enabled sources already offer. Each is installed in its own call, so one that cannot
 # install (a conflict, a missing source) is a note and never takes the others with it. The free and the non-free Intel
-# iHD drivers conflict, so the free one is left out when the non-free one is offered.
+# iHD drivers conflict, so the free one is left out when the non-free one is offered. QSV on Ubuntu needs libmfx1 with
+# the non-free driver (L-HW-21); Debian 13 does not offer it, so it is skipped there.
 gpu_pkgs=""
-for p in intel-media-va-driver intel-media-va-driver-non-free mesa-va-drivers vainfo; do
+for p in intel-media-va-driver intel-media-va-driver-non-free libmfx1 mesa-va-drivers vainfo; do
   if apt-cache policy "$p" 2>/dev/null | grep -q 'Candidate: [^ (]'; then
     gpu_pkgs="$gpu_pkgs $p"
   fi
