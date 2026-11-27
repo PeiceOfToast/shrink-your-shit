@@ -157,18 +157,18 @@ func TestContainerRulesAreTheFlows(t *testing.T) {
 // step's id, which is what lets the page mark the right card.
 func TestValidateAttachesStepIDs(t *testing.T) {
 	f := flowWith(t,
-		`{"format":"hevc","quality":3,"useGpu":false,"ifGpuFails":"cpu","rateControl":"vbr"}`,
+		`{"format":"hevc","quality":3,"useGpu":false,"ifGpuFails":"cpu","rateControl":"vbr","bitrateLevel":"custom"}`,
 		`{"format":"copy"}`, `{"container":"mkv"}`)
 	rep := flow.Validate(f, flow.ValidateContext{})
 
 	found := false
 	for _, p := range rep.Problems {
-		if p.Field == "rateControl" {
+		if p.Field == "avgMbps" {
 			found = p.StepID == "video"
 		}
 	}
 	if !found {
-		t.Errorf("problems = %+v, want the rateControl problem on the video step", rep.Problems)
+		t.Errorf("problems = %+v, want the avgMbps problem on the video step", rep.Problems)
 	}
 	found = false
 	for _, d := range rep.Disabled {

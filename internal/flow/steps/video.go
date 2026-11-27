@@ -15,7 +15,8 @@ import (
 
 // VideoSettings is page 07's Video card: the simple fields, then Advanced's picture size,
 // bitrate, speed, frame rate, bit depth and HDR. Every field's tags are the page's form; the
-// engine acts on the simple ones until items 6 and 8 build the rest, which Validate reports.
+// engine acts on the simple fields and the bitrate, until item 8 builds the rest, which Validate
+// reports.
 type VideoSettings struct {
 	Format  string `set:"format" label:"Format" choices:"hevc=HEVC,h264=H.264,av1=AV1" default:"hevc" help:"HEVC makes the smallest files. H.264 plays everywhere. AV1 is smallest but slow to encode."`
 	Quality int    `set:"quality" label:"Quality" min:"1" max:"5" default:"3" widget:"slider" sliderLabels:"Smallest file,Smaller,Balanced,Better quality,Best quality" help:"Lower means a better picture and a bigger file."`
@@ -68,12 +69,15 @@ func (VideoStep) Def() flow.Definition {
 				Fields: []string{"format"}, Keep: events.KeepLog},
 			{Code: "video.no_video", Level: events.LevelError, Text: "The file has no picture to convert",
 				Keep: events.KeepLog},
+			{Code: "video.no_bitrate", Level: events.LevelError, Text: "The bitrate is missing",
+				Keep: events.KeepLog},
 		},
 	}
 }
 
-// Plan decides whether the picture changes and fills the video part of the plan. The CRF is the
-// one page 07's slider table gives for this format, position and picture size, on the processor.
+// Plan decides whether the picture changes and fills the video part of the plan. A quality plan
+// takes the CRF page 07's slider table gives for this format, position and picture size; a bitrate
+// plan takes the ladder's numbers instead and has no CRF.
 func (VideoStep) Plan(s flow.Settings, in flow.PlanInput, p *encode.Plan) (flow.Decision, error) {
 	set := s.(VideoSettings)
 	main, ok := mainVideo(in.Info)
@@ -88,26 +92,108 @@ func (VideoStep) Plan(s flow.Settings, in flow.PlanInput, p *encode.Plan) (flow.
 		}, nil
 	}
 
-	row := resolutionRow(main)
-	crf := videoCRF(set.Format, set.Quality, row)
 	p.Video.Codec = want
-	p.Video.CRF = &crf
 	p.Video.Preset = "normal"
 	p.Video.BitDepth = encode.DepthSource
 	p.Video.HDR = encode.HDRKeep
+	detail := flow.F{
+		"format": string(want), "from": main.Codec,
+		"useGpu": set.UseGpu, "ifGpuFails": set.IfGpuFails,
+	}
+	if set.RateControl != nil {
+		// The ladder row is the output picture's: a 4K source scaled to 1080 is a 1080 file.
+		// p.Video.Scale is what the flow will write (the picture-size setting fills it).
+		row := ladderRow(main, p.Video.Scale)
+		rate, err := rateControl(set, in.Info, main, row)
+		if err != nil {
+			return flow.Decision{}, err
+		}
+		p.RateControl = &rate
+		detail["row"] = row
+		detail["rateControl"] = rate.Mode
+		detail["avgMbps"] = rate.AvgMbps
+		if rate.Mode == "vbr" {
+			detail["maxMbps"] = rate.MaxMbps
+		}
+	} else {
+		row := resolutionRow(main)
+		crf := videoCRF(set.Format, set.Quality, row)
+		p.Video.CRF = &crf
+		detail["crf"] = crf
+		detail["quality"] = set.Quality
+		detail["row"] = row
+	}
 
 	label := "Converting to " + codecName(want)
 	if set.UseGpu {
 		label += " on the graphics card"
 	}
-	return flow.Decision{
-		Work: true, Label: label, Reason: "video.convert",
-		Detail: flow.F{
-			"format": string(want), "from": main.Codec, "crf": crf,
-			"quality": set.Quality, "row": row,
-			"useGpu": set.UseGpu, "ifGpuFails": set.IfGpuFails,
-		},
-	}, nil
+	return flow.Decision{Work: true, Label: label, Reason: "video.convert", Detail: detail}, nil
+}
+
+// rateControl turns the Advanced card's bitrate choice into the encoder's numbers. Low, Medium and
+// High take the ladder's number for the output row and format, raised for HDR and 48 fps+ files,
+// and never above the source's own rate; a VBR level's at-most is the ladder's factor times the
+// average. Custom uses the numbers the person typed.
+func rateControl(set VideoSettings, info media.Info, main media.VideoTrack, row string) (encode.RateControl, error) {
+	ladder := flow.Ladder()
+	mode := *set.RateControl
+	level := set.BitrateLevel
+	if level == "" {
+		level = "medium"
+	}
+	rc := encode.RateControl{Mode: mode}
+	if level == "custom" {
+		if set.AvgMbps == nil {
+			return rc, &flow.PlanError{Code: "video.no_bitrate", Message: "Type an average bitrate for Custom."}
+		}
+		rc.AvgMbps = *set.AvgMbps
+		if mode == "vbr" && set.MaxMbps != nil {
+			rc.MaxMbps = *set.MaxMbps
+		}
+	} else {
+		mbps, ok := ladder.LevelFor(set.Format, row, level)
+		if !ok {
+			return rc, &flow.PlanError{Code: "video.no_bitrate",
+				Message: "The recommended bitrates have no number for this format and picture size."}
+		}
+		if main.FrameRate.Float() >= 48 {
+			mbps *= ladder.Factors.FPS60
+		}
+		if main.HDRKind() != "SDR" {
+			mbps *= ladder.Factors.HDR
+		}
+		// The source's own rate is the ceiling: asking for more would spend space for nothing.
+		source := sourceMbps(info, main)
+		if source > 0 && mbps > source {
+			mbps = source
+		}
+		rc.AvgMbps = mbps
+		if mode == "vbr" {
+			rc.MaxMbps = mbps * ladder.VBRMaxFactor
+			if source > 0 && rc.MaxMbps > source {
+				rc.MaxMbps = source
+			}
+		}
+	}
+	if mode == "vbr" && rc.MaxMbps == 0 {
+		// Custom did not type an at-most: the ladder's factor is the default.
+		rc.MaxMbps = rc.AvgMbps * ladder.VBRMaxFactor
+	}
+	return rc, nil
+}
+
+// sourceMbps is the source video's own rate, from its stream or, when the container does not say
+// (Matroska often does not), the file's overall rate. Zero when neither is known.
+func sourceMbps(info media.Info, main media.VideoTrack) float64 {
+	bps := main.BitRate
+	if bps <= 0 {
+		bps = info.Format.BitRate
+	}
+	if bps <= 0 {
+		return 0
+	}
+	return float64(bps) / 1e6
 }
 
 // Validate checks what the tags cannot: an encoder no worker has, and the two card fields when
@@ -130,6 +216,19 @@ func (VideoStep) Validate(s flow.Settings, vc flow.ValidateContext) flow.Check {
 	} else if vc.Env.CardFamily == "" {
 		c.Disabled = append(c.Disabled, flow.Disabled{Field: "useGpu", Why: "No worker has a graphics card."})
 	}
+	if set.RateControl != nil {
+		// The page reads vbrFormats and names no format itself; this is the same answer for a flow
+		// that already has VBR and publishes before the page is opened.
+		if *set.RateControl == "vbr" && !flow.Ladder().VBR(set.Format) {
+			c.Disabled = append(c.Disabled, flow.Disabled{Field: "rateControl", Value: "vbr",
+				Why: fmt.Sprintf("Variable bitrate doesn't work with %s yet. Pick Constant bitrate or Quality, or another format.",
+					codecName(encode.Codec(set.Format)))})
+		}
+		if set.BitrateLevel == "custom" && set.AvgMbps == nil {
+			c.Problems = append(c.Problems, flow.Problem{Field: "avgMbps", Code: "video.no_bitrate",
+				Message: "Type an average bitrate for Custom, or pick Low, Medium or High."})
+		}
+	}
 	c.Problems = append(c.Problems, videoNotYet(set)...)
 	c.Summary = videoSummary(set)
 	return c
@@ -151,7 +250,8 @@ func videoSummary(set VideoSettings) string {
 	if *set.RateControl == "cbr" {
 		rate = "constant"
 	}
-	// A level's number comes from the ladder (item 6); a typed average is named now.
+	// A level's number depends on each file's size, so the line names the rate only; Custom's typed
+	// average is named now.
 	if set.BitrateLevel == "custom" && set.AvgMbps != nil {
 		return fmt.Sprintf("%s · %s bitrate about %s Mb/s", name, rate, strconv.FormatFloat(*set.AvgMbps, 'f', -1, 64))
 	}
@@ -171,8 +271,8 @@ func tagDisabled(set VideoSettings) []flow.Disabled {
 	return out
 }
 
-// videoNotYet is every Advanced setting the engine cannot act on yet. Items 6 and 8 delete these
-// lines as they build the setting.
+// videoNotYet is every Advanced setting the engine cannot act on yet. Item 8 deletes these lines as
+// it builds the setting; two passes belong to item 6 but are not built, so they still report.
 func videoNotYet(set VideoSettings) []flow.Problem {
 	var out []flow.Problem
 	add := func(field, message string) {
@@ -185,28 +285,8 @@ func videoNotYet(set VideoSettings) []flow.Problem {
 	} else if set.Height != nil {
 		add("height", "Choosing the picture height is not built yet; each file keeps its own size.") // item 8
 	}
-	if set.RateControl != nil {
-		add("rateControl", "Setting a bitrate is not built yet; the Quality slider decides for now.") // item 6
-	} else {
-		for _, field := range []string{"avgMbps", "maxMbps", "twoPass"} {
-			switch field {
-			case "avgMbps":
-				if set.AvgMbps != nil {
-					add(field, "Setting a bitrate is not built yet; the Quality slider decides for now.") // item 6
-				}
-			case "maxMbps":
-				if set.MaxMbps != nil {
-					add(field, "Setting a bitrate is not built yet; the Quality slider decides for now.") // item 6
-				}
-			case "twoPass":
-				if set.TwoPass {
-					add(field, "Setting a bitrate is not built yet; the Quality slider decides for now.") // item 6
-				}
-			}
-		}
-	}
-	if set.BitrateLevel != "" && set.BitrateLevel != "medium" {
-		add("bitrateLevel", "Picking a bitrate level is not built yet; the Quality slider decides for now.") // item 6
+	if set.TwoPass {
+		add("twoPass", "Two passes are not built yet; the encode makes one pass.")
 	}
 	if set.Preset != nil && *set.Preset != "" && *set.Preset != "normal" {
 		add("preset", "Choosing the encoder speed is not built yet; the processor picks its own speed.") // item 8
@@ -270,13 +350,24 @@ func videoCRF(format string, quality int, row string) int {
 	return videoSlider[pos-1].CRF + videoCRFOffset[format] + videoRowShift[row]
 }
 
-// resolutionRow is the ladder row nearest the upright picture height, so a 2160p file gets the
-// 2160 row and a 480p or smaller file the sd row. A tie goes to the higher row.
+// resolutionRow is the ladder row nearest the source's upright picture height.
 func resolutionRow(v media.VideoTrack) string {
 	h := v.Height
 	if v.Rotation%180 != 0 {
 		h = v.Width // a quarter turn makes the coded width the upright height
 	}
+	return resolutionRowHeight(h)
+}
+
+// ladderRow is the ladder row nearest the output picture's height: the source's when nothing is
+// scaled, or the height the plan's scale box fits.
+func ladderRow(main media.VideoTrack, scale encode.Scale) string {
+	return resolutionRowHeight(encode.OutputHeight(main, scale))
+}
+
+// resolutionRowHeight is the ladder row nearest a height, so a 2160p picture gets the 2160 row and
+// a 480p or smaller one the sd row. A tie goes to the higher row.
+func resolutionRowHeight(h int) string {
 	best := videoRows[0]
 	for _, row := range videoRows[1:] {
 		if abs(row.Height-h) < abs(best.Height-h) {

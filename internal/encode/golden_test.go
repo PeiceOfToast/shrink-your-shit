@@ -99,6 +99,46 @@ func goldenCases() []goldenCase {
 		info: rotated,
 		rung: cpuRung(CodecHEVC),
 	})
+	// Rate control (page 07's Advanced bitrate): a bitrate replaces the CRF for each processor
+	// encoder. VBR rows exist only for the ladder's vbrFormats (HEVC and H.264).
+	for _, c := range []struct {
+		name  string
+		codec Codec
+		rc    RateControl
+	}{
+		{"hevc-cbr", CodecHEVC, RateControl{Mode: "cbr", AvgMbps: 3.6}},
+		{"h264-cbr", CodecH264, RateControl{Mode: "cbr", AvgMbps: 6}},
+		{"av1-cbr", CodecAV1, RateControl{Mode: "cbr", AvgMbps: 3}},
+		{"hevc-vbr", CodecHEVC, RateControl{Mode: "vbr", AvgMbps: 3.6, MaxMbps: 5.4}},
+		{"h264-vbr", CodecH264, RateControl{Mode: "vbr", AvgMbps: 6, MaxMbps: 9}},
+	} {
+		cases = append(cases, goldenCase{
+			name:    c.name,
+			summary: strings.ReplaceAll(c.name, "-", " ") + " rate control",
+			plan: Plan{
+				Video:       VideoPlan{Codec: c.codec, Preset: "normal"},
+				RateControl: &c.rc,
+				Container:   ContainerMKV,
+				Output:      "out.mkv",
+			},
+			info: goldenInfo(8, "bt709"),
+			rung: cpuRung(c.codec),
+		})
+	}
+	// Strict CBR on an HDR10 file: the color description and the HRD filler share one -x265-params
+	// flag. Two flags would let the second replace the first.
+	cases = append(cases, goldenCase{
+		name:    "hevc-hdr10-cbr",
+		summary: "hevc hdr10 cbr rate control",
+		plan: Plan{
+			Video:       VideoPlan{Codec: CodecHEVC, Preset: "normal"},
+			RateControl: &RateControl{Mode: "cbr", AvgMbps: 12},
+			Container:   ContainerMKV,
+			Output:      "out.mkv",
+		},
+		info: goldenInfo(10, "smpte2084"),
+		rung: cpuRung(CodecHEVC),
+	})
 	return cases
 }
 

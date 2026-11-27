@@ -304,9 +304,10 @@ func TestBuildRefusesAGPURung(t *testing.T) {
 
 func TestBuildRefusesLaterStageFields(t *testing.T) {
 	plan := basePlan(CodecHEVC)
-	plan.RateControl = &RateControl{Mode: "vbr", AvgMbps: 5}
+	plan.Video.CRF = nil
+	plan.RateControl = &RateControl{Mode: "vbr", AvgMbps: 5, MaxMbps: 7, TwoPass: true}
 	if _, err := Build(plan, baseInfo(), cpuRung(CodecHEVC)); !errors.Is(err, ErrNotBuiltYet) {
-		t.Errorf("rate control: error = %v, want ErrNotBuiltYet", err)
+		t.Errorf("two passes: error = %v, want ErrNotBuiltYet", err)
 	}
 
 	plan = basePlan(CodecHEVC)
@@ -521,6 +522,115 @@ func TestBuildRefusesInvalidPlans(t *testing.T) {
 		if _, err := Build(plan, info, rung); !errors.Is(err, c.want) {
 			t.Errorf("%s: error = %v, want %v", c.name, err, c.want)
 		}
+	}
+}
+
+// TestBuildRateControl is page 07's bitrate part of the table: a bitrate in place of the CRF, with
+// CBR pinning the at-most to the average and VBR letting it rise to the plan's number.
+func TestBuildRateControl(t *testing.T) {
+	cases := []struct {
+		name  string
+		codec Codec
+		rc    RateControl
+		want  string
+	}{
+		{"cbr", CodecH264, RateControl{Mode: "cbr", AvgMbps: 6},
+			"-b:v:0 6000k -minrate:v:0 6000k -maxrate:v:0 6000k -bufsize:v:0 12000k"},
+		{"vbr", CodecH264, RateControl{Mode: "vbr", AvgMbps: 6, MaxMbps: 9},
+			"-b:v:0 6000k -maxrate:v:0 9000k -bufsize:v:0 18000k"},
+	}
+	for _, c := range cases {
+		plan := basePlan(c.codec)
+		plan.Video.CRF = nil
+		plan.RateControl = &c.rc
+		res := buildOK(t, plan, baseInfo(), cpuRung(c.codec))
+		line := strings.Join(res.Argv, " ")
+		if !strings.Contains(line, c.want) {
+			t.Errorf("%s: argv = %s\nwant %s", c.name, line, c.want)
+		}
+		if strings.Contains(line, "-crf") {
+			t.Errorf("%s: argv = %s, want no CRF", c.name, line)
+		}
+	}
+
+	// HEVC's CBR is strict: without the HRD filler a simple picture encodes at a fraction of the
+	// rate. H.264 and AV1 take no x265 options.
+	hevc := basePlan(CodecHEVC)
+	hevc.Video.CRF = nil
+	hevc.RateControl = &RateControl{Mode: "cbr", AvgMbps: 6}
+	params, ok := flagValue(buildOK(t, hevc, baseInfo(), cpuRung(CodecHEVC)).Argv, "-x265-params:v:0")
+	if !ok || params != "hrd=1:strict-cbr=1" {
+		t.Errorf("hevc CBR params = %q, %v; want hrd=1:strict-cbr=1", params, ok)
+	}
+	for _, codec := range []Codec{CodecH264, CodecAV1} {
+		plan := basePlan(codec)
+		plan.Video.CRF = nil
+		plan.RateControl = &RateControl{Mode: "cbr", AvgMbps: 6}
+		if hasFlag(buildOK(t, plan, baseInfo(), cpuRung(codec)).Argv, "-x265-params:v:0") {
+			t.Errorf("%s CBR: argv has -x265-params, want none", codec)
+		}
+	}
+
+	// An HDR10 HEVC CBR file carries the color description and strict CBR in one flag: a second
+	// -x265-params would replace the first, silently dropping one of them.
+	hdr := baseInfo()
+	hdr.Video[0].BitDepth = 10
+	hdr.Video[0].ColorPrimaries, hdr.Video[0].ColorTransfer, hdr.Video[0].ColorSpace = "bt2020", "smpte2084", "bt2020nc"
+	hdrPlan := basePlan(CodecHEVC)
+	hdrPlan.Video.CRF = nil
+	hdrPlan.RateControl = &RateControl{Mode: "cbr", AvgMbps: 6}
+	hdrArgv := buildOK(t, hdrPlan, hdr, cpuRung(CodecHEVC)).Argv
+	params, ok = flagValue(hdrArgv, "-x265-params:v:0")
+	if !ok || !strings.Contains(params, "hdr10=1") || !strings.Contains(params, "hrd=1:strict-cbr=1") {
+		t.Errorf("HDR CBR params = %q, want the color description and strict CBR together", params)
+	}
+	flags := 0
+	for _, arg := range hdrArgv {
+		if arg == "-x265-params:v:0" {
+			flags++
+		}
+	}
+	if flags != 1 {
+		t.Errorf("x265 params flags = %d, want 1 (a second would replace the first)", flags)
+	}
+}
+
+// TestBuildRefusesBadRateControl is the plan's own guard: a mode the table does not have, VBR for a
+// format the ladder does not offer it for, and a plan that carries both a CRF and a bitrate.
+func TestBuildRefusesBadRateControl(t *testing.T) {
+	cases := []struct {
+		name  string
+		codec Codec
+		rc    RateControl
+	}{
+		{"VBR for AV1", CodecAV1, RateControl{Mode: "vbr", AvgMbps: 3, MaxMbps: 4.5}},
+		{"VBR without an at-most", CodecHEVC, RateControl{Mode: "vbr", AvgMbps: 3.6}},
+		{"VBR at-most below the average", CodecHEVC, RateControl{Mode: "vbr", AvgMbps: 5, MaxMbps: 4}},
+		{"unknown mode", CodecHEVC, RateControl{Mode: "abr", AvgMbps: 5}},
+		{"no average", CodecHEVC, RateControl{Mode: "cbr"}},
+	}
+	for _, c := range cases {
+		plan := basePlan(c.codec)
+		plan.Video.CRF = nil
+		plan.RateControl = &c.rc
+		if _, err := Build(plan, baseInfo(), cpuRung(c.codec)); !errors.Is(err, ErrInvalidPlan) {
+			t.Errorf("%s: error = %v, want ErrInvalidPlan", c.name, err)
+		}
+	}
+
+	// Both a CRF and a bitrate would leave one of them silent.
+	plan := basePlan(CodecHEVC)
+	plan.RateControl = &RateControl{Mode: "cbr", AvgMbps: 5}
+	if _, err := Build(plan, baseInfo(), cpuRung(CodecHEVC)); !errors.Is(err, ErrInvalidPlan) {
+		t.Errorf("CRF and a bitrate: error = %v, want ErrInvalidPlan", err)
+	}
+
+	// A copied picture cannot change its rate.
+	plan = basePlan(CodecHEVC)
+	plan.Video = VideoPlan{Codec: CodecCopy}
+	plan.RateControl = &RateControl{Mode: "cbr", AvgMbps: 5}
+	if _, err := Build(plan, baseInfo(), cpuRung(CodecHEVC)); !errors.Is(err, ErrInvalidPlan) {
+		t.Errorf("copy with a bitrate: error = %v, want ErrInvalidPlan", err)
 	}
 }
 
