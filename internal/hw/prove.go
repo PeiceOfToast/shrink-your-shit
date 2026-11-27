@@ -64,7 +64,7 @@ func Prove(ctx context.Context, m media.Media, dir string, c Candidate) Verdict 
 		if errors.Is(tctx.Err(), context.DeadlineExceeded) {
 			return no(c, fmt.Sprintf("the test encode did not finish in %d s", int(TestTimeout.Seconds())))
 		}
-		return no(c, plainReason(err))
+		return no(c, plainReason(c, err))
 	}
 	info, err := m.Probe(ctx, out)
 	if err != nil {
@@ -111,13 +111,22 @@ func testArgs(c Candidate, out string) []string {
 	return append([]string{"-y"}, append(src, "-c:v", c.Encoder, out)...)
 }
 
-// plainReason turns a failed test encode into words a person can act on. It is capped at 300 characters.
-func plainReason(err error) string {
+// plainReason turns a failed test encode into words a person can act on, for the card it was run on. The raw text
+// comes from ffmpeg as it fails on real hardware (the proofs in slices/15-rebuild/s3-1b-hw-proofs.md). Anything not
+// recognised keeps its own words, capped at 300 characters.
+func plainReason(c Candidate, err error) string {
 	msg := err.Error()
 	low := strings.ToLower(msg)
 	switch {
-	case strings.Contains(low, "error creating a mfx session"):
+	case strings.Contains(low, "error creating a mfx session"),
+		strings.Contains(low, "error parsing global options") && c.Family == encode.FamilyQSV:
 		return "no QSV runtime for this chip on this system"
+	case strings.Contains(low, "conversion failed") && c.Codec == "av1":
+		return "this card has no AV1 encoder"
+	case strings.Contains(low, "no usable encoding entrypoint"):
+		return fmt.Sprintf("this card's VA-API driver has no %s encoder", codecName(c.Codec))
+	case strings.Contains(low, "_tramp_resolve"), strings.Contains(low, ".init.c:") && strings.Contains(low, "assertion"):
+		return "the VA-API library on this system is too old for this ffmpeg"
 	case strings.Contains(low, "vainitialize failed"), strings.Contains(low, "no va display"),
 		strings.Contains(low, "failed to initialise vaapi"), strings.Contains(low, "failed to initialize vaapi"):
 		return "the driver refused"
@@ -130,6 +139,19 @@ func plainReason(err error) string {
 		reason = reason[:300]
 	}
 	return reason
+}
+
+// codecName is the name a person knows a codec by.
+func codecName(codec string) string {
+	switch codec {
+	case "hevc":
+		return "HEVC"
+	case "h264":
+		return "H.264"
+	case "av1":
+		return "AV1"
+	}
+	return strings.ToUpper(codec)
 }
 
 // namedBy reports whether an ENCODER tag names encoder. Real encoders write "Lavc<version> <encoder>" (for example

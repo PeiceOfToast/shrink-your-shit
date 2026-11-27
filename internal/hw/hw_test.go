@@ -103,7 +103,11 @@ func TestVAAPIRenderNodeChoice(t *testing.T) {
 // Render nodes come from a sysfs folder with the vendor of each card; NVIDIA nodes get no VAAPI candidate.
 func TestReadRenderNodesAndCandidates(t *testing.T) {
 	sys := t.TempDir()
+	devDri := t.TempDir()
 	for name, vendor := range map[string]string{"renderD128": "0x8086\n", "renderD129": "0x10de\n"} {
+		if err := os.WriteFile(filepath.Join(devDri, name), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
 		dev := filepath.Join(sys, name, "device")
 		if err := os.MkdirAll(dev, 0o755); err != nil {
 			t.Fatal(err)
@@ -112,7 +116,7 @@ func TestReadRenderNodesAndCandidates(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	nodes := ReadRenderNodes(sys)
+	nodes := ReadRenderNodes(sys, devDri)
 	if len(nodes) != 2 || nodes[0].Path != "/dev/dri/renderD128" || nodes[0].Vendor != vendorIntel {
 		t.Fatalf("nodes = %+v", nodes)
 	}
@@ -320,5 +324,27 @@ func waitInventory(t *testing.T, d *Detector) Inventory {
 			t.Fatal("no pass finished")
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// N1: a render node that is in sysfs but has no device node here is left out: the existence check is what decides.
+func TestRenderNodeWithoutADeviceNodeIsLeftOut(t *testing.T) {
+	sys := t.TempDir()
+	devDri := t.TempDir()
+	for _, name := range []string{"renderD128", "renderD130"} {
+		dev := filepath.Join(sys, name, "device")
+		if err := os.MkdirAll(dev, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dev, "vendor"), []byte("0x8086\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(devDri, "renderD128"), nil, 0o644); err != nil { // renderD130 has no device node
+		t.Fatal(err)
+	}
+	nodes := ReadRenderNodes(sys, devDri)
+	if len(nodes) != 1 || nodes[0].Path != "/dev/dri/renderD128" {
+		t.Fatalf("nodes = %+v; want only renderD128, the one with a device node", nodes)
 	}
 }
