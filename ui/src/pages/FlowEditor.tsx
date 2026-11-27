@@ -353,12 +353,13 @@ function Editor({ id, initial }: { id: string; initial: Loaded }) {
       {tryOpen && (
         <section className="card" style={{ marginBottom: 14 }} aria-label="Try on one file">
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <input className="inp" aria-label="File to try" placeholder="File name" value={tryFile} onChange={(e) => setTryFile(e.target.value)} style={{ flex: "1 1 220px", minWidth: 0 }} />
+            <input className="inp" aria-label="File to try" placeholder="Full path" aria-describedby="try-file-hint" value={tryFile} onChange={(e) => setTryFile(e.target.value)} style={{ flex: "1 1 220px", minWidth: 0 }} />
             <button ref={tryRun.button} type="button" className="btn sm" onClick={onTry} disabled={!check || tryRun.trying}>
               {tryRun.trying ? "Trying… about a minute" : "Try"}
             </button>
             {tryRun.trying && <button type="button" className="btn sm" onClick={tryRun.stop}>Stop</button>}
           </div>
+          <p id="try-file-hint" className="muted sm">For example /media/Movies/film.mkv</p>
           {tryRun.err && <p className="bad">{tryRun.err.message}</p>}
           {tryRun.stopped && <p className="muted sm">Stopped. Nothing was kept.</p>}
           {tryRun.lines && (
