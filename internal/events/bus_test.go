@@ -44,6 +44,14 @@ func (r *recorder) events() []Event {
 	return append([]Event(nil), r.got...)
 }
 
+// warnings records only warning events. The blocked-sink test uses it as the second sink, so a burst of notes
+// never fills its channel and the drop report is not lost to it.
+type warnings struct {
+	recorder
+}
+
+func (w *warnings) accepts(e Event) bool { return e.Kind == KindWarning }
+
 // blocked is a sink whose write waits until release is closed.
 type blocked struct {
 	release chan struct{}
@@ -73,7 +81,7 @@ func drain(ch <-chan Event) []Event {
 func TestBlockedSinkNeverBlocksEmit(t *testing.T) {
 	release := make(chan struct{})
 	blk := &blocked{release: release}
-	rec := &recorder{}
+	rec := &warnings{}
 	b, err := New(Options{Clock: clockFn(), Buffer: 4, sinks: []sink{blk, rec}})
 	if err != nil {
 		t.Fatal(err)
@@ -90,8 +98,8 @@ func TestBlockedSinkNeverBlocksEmit(t *testing.T) {
 		t.Fatalf("1000 emits against a blocked sink took %v; Emit must not wait", elapsed)
 	}
 
-	// Free the sink, then emit until a later accepted event reports the drops. The recorder shares the same
-	// buffer size, so it may also drop during the burst and report its own drops; only the blocked sink's count is checked.
+	// Free the sink, then emit until a later accepted event reports the drops. The recorder takes only warnings,
+	// so it cannot fill up and drop the blocked sink's report.
 	// The released sink drains on its own goroutine, so poll for the report against a deadline, not a fixed count.
 	close(release)
 	for deadline := time.Now().Add(5 * time.Second); len(blockedReports(rec.events())) == 0 && time.Now().Before(deadline); {
