@@ -74,7 +74,10 @@ func (db *DB) Migrate() error {
 		return fmt.Errorf("read the schema version: %w", err)
 	}
 	newest := newestVersion(db.migrations)
-	if current >= newest {
+	if current > newest { // someone wrote the database from outside while we held the lock
+		return fmt.Errorf("This database is from a newer syp (schema %d, this program knows %d). Install the newer version, or restore a backup.", current, newest)
+	}
+	if current == newest {
 		return nil
 	}
 	var pending []Migration
@@ -116,7 +119,10 @@ func (db *DB) Migrate() error {
 		return fmt.Errorf("save the upgraded schema (last step %d, %s): %v%s", last.Version, last.Name, err, where)
 	}
 
-	return pruneBackups(db.dir, 3)
+	if err := pruneBackups(db.dir, 3); err != nil {
+		return fmt.Errorf("upgrade done; old backups not removed: %w", err)
+	}
+	return nil
 }
 
 // upgradeError names the step that failed and the backup the person can go back to.

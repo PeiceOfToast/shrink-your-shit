@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -90,7 +91,7 @@ func TestSecondOpenOfTheSameFolderIsRefused(t *testing.T) {
 	}
 	if fi, err := os.Stat(filepath.Join(dir, "syp.lock")); err != nil {
 		t.Errorf("no lock file: %v", err)
-	} else if fi.Mode().Perm() != 0o600 {
+	} else if fi.Mode().Perm() != 0o600 && runtime.GOOS != "windows" { // Windows has no Unix mode bits
 		t.Errorf("the lock file is %v, want 0600", fi.Mode().Perm())
 	}
 	if err := db.Close(); err != nil {
@@ -216,6 +217,119 @@ func TestANewerWalDatabaseIsRefusedBeforeAnyWrite(t *testing.T) {
 	}
 	if _, shmErr := os.Stat(path + "-shm"); shmErr == nil {
 		t.Log("after Open: a -shm file remains (an index, not data)")
+	}
+}
+
+// A data folder whose name holds a URI character keeps its database inside it. Unescaped, SQLite
+// reads # as a fragment and ? as a query, and puts syp.db in the parent under a truncated name.
+func TestFoldersWithUriCharactersKeepTheirDatabaseInside(t *testing.T) {
+	for _, name := range []string{"Movies #2", "What?", "100%"} {
+		t.Run(name, func(t *testing.T) {
+			if runtime.GOOS == "windows" && strings.ContainsAny(name, `<>:"|?*`) {
+				t.Skip("not a legal Windows folder name")
+			}
+			parent := t.TempDir()
+			dir := filepath.Join(parent, name)
+			if err := os.Mkdir(dir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			db, err := Open(dir)
+			if err != nil {
+				t.Fatalf("Open: %v", err)
+			}
+			if err := db.Migrate(); err != nil {
+				db.Close()
+				t.Fatalf("Migrate: %v", err)
+			}
+			if err := db.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Stat(filepath.Join(dir, "syp.db")); err != nil {
+				t.Errorf("no syp.db inside %s: %v", dir, err)
+			}
+			entries, err := os.ReadDir(parent)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var names []string
+			for _, e := range entries {
+				names = append(names, e.Name())
+			}
+			if len(names) != 1 || names[0] != name {
+				t.Errorf("the parent holds %v, want only the folder %q", names, name)
+			}
+		})
+	}
+}
+
+// The writer's settings live in its DSN, so every connection the pool hands out has them: WAL,
+// busy_timeout 5000, foreign keys on, synchronous NORMAL.
+func TestTheWriterConnectionHasItsSettings(t *testing.T) {
+	dir := t.TempDir()
+	db, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	var mode string
+	var busy, foreignKeys, synchronous int
+	for _, c := range []struct {
+		pragma string
+		dst    any
+	}{
+		{"PRAGMA journal_mode", &mode},
+		{"PRAGMA busy_timeout", &busy},
+		{"PRAGMA foreign_keys", &foreignKeys},
+		{"PRAGMA synchronous", &synchronous},
+	} {
+		if err := db.write.QueryRow(c.pragma).Scan(c.dst); err != nil {
+			t.Fatalf("%s: %v", c.pragma, err)
+		}
+	}
+	if mode != "wal" || busy != 5000 || foreignKeys != 1 || synchronous != 1 {
+		t.Errorf("writer settings: journal_mode %q, busy_timeout %d, foreign_keys %d, synchronous %d; want wal, 5000, 1, 1",
+			mode, busy, foreignKeys, synchronous)
+	}
+}
+
+// Migrate refuses a database that became newer after Open (an out-of-band writer), with the same
+// sentence as Open, and leaves the version alone (L-SAFE-18).
+func TestMigrateRefusesADatabaseThatBecameNewer(t *testing.T) {
+	dir := t.TempDir()
+	db, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := db.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	newest := newestVersion(registered())
+	future := newest + 9
+
+	raw, err := sql.Open("sqlite", dbURI(filepath.Join(dir, "syp.db"), ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(fmt.Sprintf("PRAGMA user_version = %d", future)); err != nil {
+		t.Fatal(err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	err = db.Migrate()
+	if err == nil {
+		t.Fatal("Migrate accepted a database from a newer program")
+	}
+	for _, want := range []string{"from a newer syp", fmt.Sprintf("schema %d", future)} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not say %q: %v", want, err)
+		}
+	}
+	if got := userVersion(t, db); got != future {
+		t.Errorf("user_version is %d, want %d (left alone)", got, future)
 	}
 }
 

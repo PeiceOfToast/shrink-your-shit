@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/PeiceOfToast/shrink-your-shit/internal/fsx"
@@ -42,6 +43,8 @@ func open(dir string, migrations []Migration) (*DB, error) {
 	ms := append([]Migration(nil), migrations...)
 	sort.Slice(ms, func(i, j int) bool { return ms[i].Version < ms[j].Version })
 
+	// Made before IsNetwork, because finding out which file system a folder is on needs the folder
+	// to exist, and on a first run the data folder does not.
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("make the data folder %s: %w", dir, err)
 	}
@@ -68,39 +71,37 @@ func open(dir string, migrations []Migration) (*DB, error) {
 	return db, nil
 }
 
-// openDB opens the database once the data folder is ours. The schema version is read before any
-// pragma runs, so a database from a newer program is refused with its file untouched (L-SAFE-18).
+// openDB opens the database once the data folder is ours. The schema version is read on a
+// connection with no pragma set at all, because journal_mode = WAL itself writes to the file: a
+// database from a newer program is refused with its file untouched (L-SAFE-18).
 func openDB(dir string, ms []Migration, unlock func() error) (*DB, error) {
 	path := filepath.Join(dir, "syp.db")
-	write, err := sql.Open("sqlite", "file:"+path)
+
+	probe, err := sql.Open("sqlite", dbURI(path, ""))
+	if err != nil {
+		return nil, fmt.Errorf("open %s: %w", path, err)
+	}
+	var version int
+	if err := probe.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
+		probe.Close()
+		return nil, fmt.Errorf("read the schema version of %s: %w", path, err)
+	}
+	if err := probe.Close(); err != nil {
+		return nil, fmt.Errorf("close %s: %w", path, err)
+	}
+	if newest := newestVersion(ms); version > newest {
+		return nil, fmt.Errorf("This database is from a newer syp (schema %d, this program knows %d). Install the newer version, or restore a backup.", version, newest)
+	}
+
+	// The settings live in the DSN, so every connection the pool opens or replaces has them; a
+	// replacement connection that quietly lost foreign_keys would break tables behind our back.
+	write, err := sql.Open("sqlite", dbURI(path, "_journal_mode=WAL&_busy_timeout=5000&_foreign_keys=1&_synchronous=NORMAL"))
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
 	write.SetMaxOpenConns(1) // one writer connection (backend-plan §13)
 
-	var version int
-	if err := write.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
-		write.Close()
-		return nil, fmt.Errorf("read the schema version of %s: %w", path, err)
-	}
-	if newest := newestVersion(ms); version > newest {
-		write.Close()
-		return nil, fmt.Errorf("This database is from a newer syp (schema %d, this program knows %d). Install the newer version, or restore a backup.", version, newest)
-	}
-
-	for _, pragma := range []string{
-		"PRAGMA journal_mode = WAL",
-		"PRAGMA busy_timeout = 5000",
-		"PRAGMA foreign_keys = ON",
-		"PRAGMA synchronous = NORMAL",
-	} {
-		if _, err := write.Exec(pragma); err != nil {
-			write.Close()
-			return nil, fmt.Errorf("%s: %w", pragma, err)
-		}
-	}
-
-	read, err := sql.Open("sqlite", "file:"+path+"?mode=ro&_pragma=busy_timeout(5000)&_pragma=query_only(1)")
+	read, err := sql.Open("sqlite", dbURI(path, "mode=ro&_busy_timeout=5000&_query_only=1"))
 	if err != nil {
 		write.Close()
 		return nil, fmt.Errorf("open %s for reading: %w", path, err)
@@ -108,6 +109,17 @@ func openDB(dir string, ms []Migration, unlock func() error) (*DB, error) {
 	read.SetMaxOpenConns(4) // a small read pool beside the writer (backend-plan §13)
 
 	return &DB{dir: dir, write: write, read: read, unlock: unlock, migrations: ms}, nil
+}
+
+// dbURI is the SQLite URI for path, with the three characters its URI parser treats specially
+// escaped: a data folder named "Movies #2" or "What?" would otherwise put the database in the
+// parent folder under a truncated name. The slashes stay, and a query, when there is one, follows.
+func dbURI(path, query string) string {
+	escaped := strings.NewReplacer("%", "%25", "?", "%3F", "#", "%23").Replace(filepath.ToSlash(path))
+	if query == "" {
+		return "file:" + escaped
+	}
+	return "file:" + escaped + "?" + query
 }
 
 // Read is the read pool: queries only, up to four at a time, beside the writer.
