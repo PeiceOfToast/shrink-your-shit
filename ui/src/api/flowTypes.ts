@@ -5,7 +5,6 @@
 export type Answers = Record<string, unknown>;
 
 export type StepId = "video" | "audio" | "save";
-export type IfStepFails = "tell" | "move_aside" | "leave";
 
 export interface FlowStep {
   id: StepId;
@@ -17,8 +16,6 @@ export interface FlowStep {
 export interface Flow {
   name: string;
   description: string;
-  ifStepFails: IfStepFails;
-  variables: { name: string; type: string; value: string | number | boolean }[];
   steps: FlowStep[];
 }
 
@@ -59,7 +56,7 @@ export interface GuideField {
 }
 
 export interface GuidePart {
-  id: "video" | "audio" | "subtitles" | "file_type" | "original" | "if_fails";
+  id: "video" | "audio" | "subtitles" | "file_type" | "original";
   label: string;
   fields: GuideField[];
 }

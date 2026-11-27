@@ -48,7 +48,7 @@ export interface LibraryDetail extends Library {
 }
 
 // Page 04 "Data and API": one row per workflow on the list. Only the video kind is built so far (decisions.md:57).
-export type WorkflowKind = "video" | "audio" | "other" | "failure" | "part";
+export type WorkflowKind = "video" | "audio" | "other" | "part";
 export type WorkflowState = "published" | "draft" | "problems";
 
 // Who uses a workflow: a library today, and a workflow once workflows can nest (page 04 "Data and API").
@@ -387,7 +387,7 @@ export interface JoinRequest {
 
 // ---- Settings (page 11). Shapes are the ones in pages/11-settings.md "Data and API".
 
-export type SettingsSection = "general" | "processing" | "connections" | "notifications" | "variables" | "backup" | "health" | "access";
+export type SettingsSection = "general" | "processing" | "connections" | "notifications" | "backup" | "health" | "access";
 
 export interface GeneralSettings {
   serverName: string;
@@ -397,6 +397,8 @@ export interface GeneralSettings {
   theme: "system" | "light" | "dark";
   checkForUpdates: boolean;
   updateAvailable: string | null;
+  // My languages: three-letter codes, kept for the workflows that keep only some tracks.
+  languages: string[];
 }
 
 export interface ProcessingSettings {
@@ -407,7 +409,6 @@ export interface ProcessingSettings {
   lowPriority: boolean;
   keepOriginalsDays: number;
   lowSpaceGB: number;
-  languages: string[];
   workflowsMayRunCommands: boolean;
   trashPath: string;
 }
@@ -496,17 +497,6 @@ export interface Notifications {
   targets: NotifyTarget[];
   summary: { mode: NotifyMode; at: string };
   linkBase: string | null;
-}
-
-export type VariableType = "string" | "number" | "boolean" | "enum" | "path";
-
-export interface WorkflowVariable {
-  name: string;
-  type: VariableType;
-  value?: string | number | boolean;
-  options?: string[];
-  description?: string;
-  usedBy: { type: "workflow" | "library"; id: string; name: string }[];
 }
 
 export interface BackupItem {

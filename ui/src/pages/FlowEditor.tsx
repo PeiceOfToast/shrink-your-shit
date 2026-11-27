@@ -3,75 +3,7 @@ import { navigate, useLocation } from "../router.tsx";
 import { api, type Flow, type FlowCheck, type FlowStep, type StepId, type TryLine } from "../api/index.ts";
 import { useApi } from "../api/useApi.ts";
 import { ChoiceField, QUALITY_NAMES, Row, Seg, qualityMeaning, toErr, useBitrateLadder, type Err } from "./flowParts.tsx";
-import { languageName, normalizeLanguage } from "../format/language.ts";
-
-// The two choices the list from the API doesn't include. Their codes are final: orig and und.
-const SPECIAL_LANGUAGES = [
-  { code: "orig", name: "Original language", note: "the film's own" },
-  { code: "und", name: "Unknown", note: "tracks with no language set" },
-];
-
-// Languages as chips: a picked one is removed by its chip; "+ Add" opens a search over the rest. No free text.
-function LanguageChips({ label, value, onChange }: { label: string; value: string[]; onChange: (v: string[]) => void }) {
-  const all = useApi(() => api.getLanguages(), []);
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const picked = value.map(normalizeLanguage);
-  const options: { code: string; name: string; note?: string }[] = [...SPECIAL_LANGUAGES, ...(all.data ?? [])].filter((l) => !picked.includes(l.code));
-  const needle = query.trim().toLowerCase();
-  const shown = needle ? options.filter((l) => l.name.toLowerCase().includes(needle)) : options;
-  const close = () => {
-    setOpen(false);
-    setQuery("");
-  };
-  return (
-    <Row
-      label={label}
-      full
-      hint={
-        picked.length === 0
-          ? "None picked keeps every language."
-          : "Other tracks are removed; if none match, the main track stays. Original language keeps the film's own language, whatever it is."
-      }
-    >
-      <div className="wf-togs" role="group" aria-label={label}>
-        {picked.map((code) => (
-          <button key={code} type="button" aria-label={`Remove ${languageName(code)}`} onClick={() => onChange(picked.filter((c) => c !== code))}>
-            {languageName(code)} ×
-          </button>
-        ))}
-        <button type="button" className="btn sm" aria-expanded={open} onClick={() => (open ? close() : setOpen(true))}>
-          + Add
-        </button>
-      </div>
-      {open && (
-        <div className="wf-lang-search" onKeyDown={(e) => e.key === "Escape" && close()}>
-          <input className="inp" type="search" aria-label="Search languages" placeholder="Search languages" autoFocus value={query} onChange={(e) => setQuery(e.target.value)} />
-          {shown.length === 0 ? (
-            <p className="hint">No language matches “{query.trim()}”.</p>
-          ) : (
-            <ul className="wf-lang-list">
-              {shown.map((l) => (
-                <li key={l.code}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onChange([...picked, l.code]);
-                      close();
-                    }}
-                  >
-                    {l.name}
-                    {l.note && <i>{l.note}</i>}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-    </Row>
-  );
-}
+import { LanguageChips } from "./LanguageChips.tsx";
 
 // Flow editor (07): the fixed walk Video → Audio → Save the result. Nothing is added or reordered.
 // The Advanced parts replace the simple choices for the things the guided page doesn't cover.
@@ -168,7 +100,7 @@ function Editor({ id, initial }: { id: string; initial: Loaded }) {
     setFlow((f) => ({ ...f, steps: f.steps.map((s: FlowStep) => (s.id === stepId ? { ...s, settings: { ...s.settings, ...patch } } : s)) }));
     setDirty(true);
   };
-  const setMeta = (patch: Partial<Pick<Flow, "name" | "description" | "ifStepFails">>) => {
+  const setMeta = (patch: Partial<Pick<Flow, "name" | "description">>) => {
     setFlow((f) => ({ ...f, ...patch }));
     setDirty(true);
   };
@@ -312,7 +244,17 @@ function Editor({ id, initial }: { id: string; initial: Loaded }) {
             </p>
           </div>
         )}
-        <LanguageChips label="Languages" value={(audio.languages as string[] | undefined) ?? []} onChange={(languages) => set("audio", { languages })} />
+        <Row
+          label="Languages"
+          full
+          hint={
+            ((audio.languages as string[] | undefined) ?? []).length === 0
+              ? "None picked keeps every language."
+              : "Other tracks are removed; if none match, the main track stays. Original language keeps the film's own language, whatever it is."
+          }
+        >
+          <LanguageChips label="Languages" value={(audio.languages as string[] | undefined) ?? []} onChange={(languages) => set("audio", { languages })} />
+        </Row>
         <Advanced summary="Advanced" description="Codec, bitrate, downmix, loudness, commentary, original track">
           <AudioAdvanced s={audio} set={(patch) => set("audio", patch)} />
         </Advanced>
@@ -414,19 +356,12 @@ function Editor({ id, initial }: { id: string; initial: Loaded }) {
       {err && <p className="bad" role="alert">{err.message}</p>}
 
       <details className="wf-settings">
-        <summary>Flow settings <span className="hint">Name · if a step fails · variables</span></summary>
+        <summary>Flow settings</summary>
         <Row label="Name">
           <input className="inp" aria-label="Name" value={flow.name} onChange={(e) => setMeta({ name: e.target.value })} />
         </Row>
         <Row label="Description">
           <input className="inp" aria-label="Description" value={flow.description} onChange={(e) => setMeta({ description: e.target.value })} />
-        </Row>
-        <Row label="If a step fails">
-          <select className="sel" aria-label="If a step fails" value={flow.ifStepFails} onChange={(e) => setMeta({ ifStepFails: e.target.value as Flow["ifStepFails"] })}>
-            <option value="tell">Tell me</option>
-            <option value="move_aside">Move the file aside</option>
-            <option value="leave">Leave the file alone</option>
-          </select>
         </Row>
       </details>
 

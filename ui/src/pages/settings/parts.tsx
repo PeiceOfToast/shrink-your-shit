@@ -95,41 +95,6 @@ export function Seg<T extends string | number>({
   );
 }
 
-// A comma-separated list. Typing a comma keeps the comma; the list only changes when the words change.
-export function ListInput({
-  id,
-  label,
-  value,
-  onChange,
-  placeholder,
-}: {
-  id?: string;
-  label: string;
-  value: string[];
-  onChange: (v: string[]) => void;
-  placeholder?: string;
-}) {
-  const parse = (s: string) => s.split(",").map((x) => x.trim()).filter((x) => x !== "");
-  const [text, setText] = useState(value.join(", "));
-  useEffect(() => {
-    setText((t) => (JSON.stringify(parse(t)) === JSON.stringify(value) ? t : value.join(", ")));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value]);
-  return (
-    <input
-      id={id}
-      aria-label={label}
-      className="inp"
-      value={text}
-      placeholder={placeholder}
-      onChange={(e) => {
-        setText(e.target.value);
-        onChange(parse(e.target.value));
-      }}
-    />
-  );
-}
-
 export function SaveBar({
   dirty,
   busy,
