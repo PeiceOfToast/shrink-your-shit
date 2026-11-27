@@ -393,7 +393,16 @@ export interface JoinRequest {
 
 // ---- Settings (page 11). Shapes are the ones in pages/11-settings.md "Data and API".
 
-export type SettingsSection = "general" | "appearance" | "processing" | "connections" | "notifications" | "backup" | "health" | "access";
+export type SettingsSection = "general" | "appearance" | "processing" | "trash" | "connections" | "notifications" | "backup" | "health" | "access";
+
+// Settings > Trash: an original kept after a conversion.
+export interface TrashItem {
+  id: string;
+  file: string;
+  library: string;
+  trashedAt: string;
+  daysLeft: number;
+}
 
 // One setting for the install, applied in every browser that signs in. accent null = the default green.
 export interface AppearanceSettings {
