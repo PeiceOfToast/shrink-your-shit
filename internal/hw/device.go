@@ -27,10 +27,11 @@ var DecodeTimeout = 30 * time.Second
 // passed; Reasons says why a step did not, in plain words.
 type DeviceRecord struct {
 	Candidate
-	Decode   bool // hardware decode of the test clip
-	Scale    bool // the card scales to 240p
-	Encode10 bool // a 10-bit encode, recorded apart from the 8-bit ones
-	Decode10 bool // a 10-bit decode, recorded apart from the 8-bit one
+	Decode   bool   // hardware decode of the test clip
+	Scale    bool   // the scale to 240p passed
+	ScaleOn  string // "card" for QSV and VAAPI, "processor" for NVENC (its scale is a CPU filter), "" when not scaled
+	Encode10 bool   // a 10-bit encode, recorded apart from the 8-bit ones
+	Decode10 bool   // a 10-bit decode, recorded apart from the 8-bit one
 	// HDRSurvives: the card's own 10-bit encode of an HDR10 source keeps both the mastering display and the content light
 	// side data (L-HW-2). A card that drops them does not carry HDR.
 	HDRSurvives bool
@@ -46,7 +47,7 @@ func Probe(ctx context.Context, m media.Media, dir string, c Candidate) DeviceRe
 
 	clip := filepath.Join(dir, "probe-clip.mkv")
 	if err := makeClip(pctx, m, clip, 8); err != nil {
-		rec.Reasons["clip"] = "the test clip could not be made"
+		rec.Reasons["clip"] = stepFailure(pctx, c, err, "the test clip could not be made: ")
 		return rec
 	}
 	defer os.Remove(clip)
@@ -75,6 +76,7 @@ func Probe(ctx context.Context, m media.Media, dir string, c Candidate) DeviceRe
 			rec.Reasons["scale"] = "can't scale on this card: the output is not 240p"
 		} else {
 			rec.Scale = true
+			rec.ScaleOn = scaledOn(c)
 		}
 	} else {
 		rec.Reasons["scale"] = "not tried: decode did not pass"
@@ -94,7 +96,7 @@ func Probe(ctx context.Context, m media.Media, dir string, c Candidate) DeviceRe
 		rec.Reasons["encode10"] = "not tried: decode did not pass"
 	}
 	if rec.Encode10 {
-		if _, err := m.Run(pctx, append([]string{"ffmpeg"}, decode10Args(c, tenBit)...), nil); err != nil {
+		if _, err := m.Run(pctx, append([]string{"ffmpeg"}, decodeArgs(c, tenBit)...), nil); err != nil {
 			rec.Reasons["decode10"] = stepFailure(pctx, c, err, "")
 		} else {
 			rec.Decode10 = true
@@ -110,11 +112,11 @@ func Probe(ctx context.Context, m media.Media, dir string, c Candidate) DeviceRe
 		hdrOut := filepath.Join(dir, c.Encoder+".hdr.mkv")
 		defer os.Remove(hdrOut)
 		if err := makeHDRClip(pctx, m, hdrSrc); err != nil {
-			rec.Reasons["hdr"] = "the HDR test source could not be made"
+			rec.Reasons["hdr"] = stepFailure(pctx, c, err, "the HDR test source could not be made: ")
 		} else if _, err := m.Run(pctx, append([]string{"ffmpeg"}, hdrEncodeArgs(c, hdrSrc, hdrOut)...), nil); err != nil {
 			rec.Reasons["hdr"] = stepFailure(pctx, c, err, "")
 		} else if h, err := frameHDR(pctx, hdrOut); err != nil {
-			rec.Reasons["hdr"] = "the HDR output could not be read"
+			rec.Reasons["hdr"] = stepFailure(pctx, c, err, "the HDR output could not be read: ")
 		} else if !h.MasteringDisplay || !h.ContentLight {
 			rec.Reasons["hdr"] = "the HDR metadata did not survive the card's encode"
 		} else {
@@ -201,11 +203,6 @@ func encode10Args(c Candidate, clip, out string) []string {
 	return append(deviceSetup(c), "-i", clip, "-vf", uploadFilter(c, "p010"), "-c:v", c.Encoder, "-profile:v", "main10", "-y", out)
 }
 
-func decode10Args(c Candidate, clip string) []string {
-	args := decodeArgs(c, clip)
-	return args
-}
-
 // deviceSetup is the device arguments a family needs before its input.
 func deviceSetup(c Candidate) []string {
 	switch c.Family {
@@ -247,4 +244,12 @@ func stepFailure(pctx context.Context, c Candidate, err error, prefix string) st
 		return fmt.Sprintf("the device probe ran out of its %d s at this step", int(ProbeBudget.Seconds()))
 	}
 	return prefix + plainReason(c, err)
+}
+
+// scaledOn says where a family's scale to 240p runs. NVENC's filter is the processor's, so its record says so.
+func scaledOn(c Candidate) string {
+	if c.Family == encode.FamilyNVENC {
+		return "processor"
+	}
+	return "card"
 }

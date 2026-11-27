@@ -108,3 +108,52 @@ func TestEveryProbeStepSaysItRanOutOfBudget(t *testing.T) {
 		})
 	}
 }
+
+// The clip and the HDR steps also say the budget ended them, not the driver (the same helper as every other step).
+func TestClipAndHDRStepsSayTheBudgetEndedThem(t *testing.T) {
+	defer func(d time.Duration) { ProbeBudget = d }(ProbeBudget)
+	defer func(d time.Duration) { DecodeTimeout = d }(DecodeTimeout)
+	ProbeBudget = 80 * time.Millisecond
+	DecodeTimeout = 10 * time.Second
+	cases := []struct {
+		name string
+		hang int
+		key  string
+	}{
+		{"test clip", runClip, "clip"},
+		{"HDR source", runHDRSource, "hdr"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			answerHDR(t, media.HDR{MasteringDisplay: true, ContentLight: true})
+			dir := t.TempDir()
+			c := Candidate{Encoder: "hevc_vaapi", Family: encode.FamilyVAAPI, Codec: "hevc", Device: "/dev/dri/renderD128"}
+			m := probeMedia(dir, c, 240, "Lavc61.3.100 hevc_vaapi")
+			runs := make([]fake.RunScript, 7)
+			runs[tc.hang] = fake.RunScript{Hang: true}
+			m.Runs = runs
+			rec := Probe(context.Background(), m, dir, c)
+			if got := rec.Reasons[tc.key]; !strings.Contains(got, "ran out of its") {
+				t.Errorf("%s reason = %q; want the budget", tc.key, got)
+			}
+		})
+	}
+}
+
+// The HDR read stops with the budget too: the reader gives up when the probe's context ends.
+func TestHDRReadSaysTheBudgetEndedIt(t *testing.T) {
+	defer func(d time.Duration) { ProbeBudget = d }(ProbeBudget)
+	ProbeBudget = 80 * time.Millisecond
+	old := frameHDR
+	frameHDR = func(ctx context.Context, _ string) (media.HDR, error) {
+		<-ctx.Done()
+		return media.HDR{}, ctx.Err()
+	}
+	defer func() { frameHDR = old }()
+	dir := t.TempDir()
+	c := Candidate{Encoder: "hevc_vaapi", Family: encode.FamilyVAAPI, Codec: "hevc", Device: "/dev/dri/renderD128"}
+	rec := Probe(context.Background(), probeMedia(dir, c, 240, "Lavc61.3.100 hevc_vaapi"), dir, c)
+	if got := rec.Reasons["hdr"]; !strings.Contains(got, "ran out of its") {
+		t.Errorf("hdr reason = %q; want the budget", got)
+	}
+}

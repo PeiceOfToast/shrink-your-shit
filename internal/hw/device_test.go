@@ -169,3 +169,21 @@ func TestProbeHDRMetadataLostIsNotCarried(t *testing.T) {
 		t.Errorf("hdr = %v, reason %q; want the lost metadata refused", rec.HDRSurvives, rec.Reasons["hdr"])
 	}
 }
+
+// N2: NVENC's scale runs on the processor and the record says so; QSV and VAAPI scale on the card.
+func TestScaleRecordSaysWhereItRan(t *testing.T) {
+	for _, tc := range []struct {
+		c    Candidate
+		want string
+	}{
+		{Candidate{Encoder: "hevc_nvenc", Family: encode.FamilyNVENC, Codec: "hevc"}, "processor"},
+		{Candidate{Encoder: "hevc_vaapi", Family: encode.FamilyVAAPI, Codec: "hevc", Device: "/dev/dri/renderD128"}, "card"},
+	} {
+		dir := t.TempDir()
+		answerHDR(t, media.HDR{MasteringDisplay: true, ContentLight: true})
+		rec := Probe(context.Background(), probeMedia(dir, tc.c, 240, "Lavc61.3.100 "+tc.c.Encoder), dir, tc.c)
+		if !rec.Scale || rec.ScaleOn != tc.want {
+			t.Errorf("%s: scale = %v on %q; want scaled on %q", tc.c.Encoder, rec.Scale, rec.ScaleOn, tc.want)
+		}
+	}
+}
