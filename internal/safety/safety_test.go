@@ -22,6 +22,17 @@ type stubProber struct {
 	err   error
 	hang  bool
 	calls int
+	// capture is what the checks' ffmpeg runs answer: nothing, by default, which plays cleanly and
+	// matches perfectly.
+	capture    media.Output
+	captureErr error
+	captures   [][]string
+}
+
+// Capture answers like a clean ffmpeg run unless the test scripted one.
+func (p *stubProber) Capture(ctx context.Context, argv []string) (media.Output, error) {
+	p.captures = append(p.captures, argv)
+	return p.capture, p.captureErr
 }
 
 func (p *stubProber) Probe(ctx context.Context, path string) (media.Info, error) {
@@ -174,6 +185,41 @@ func TestVerifyStreamChecks(t *testing.T) {
 				t.Fatalf("verdict = %+v, %v; want %s", v, err, c.code)
 			}
 		})
+	}
+}
+
+// TestVerifyBoundsAudioWhenTheSourceCountIsUnknown is check 3's #850 rule: a planned track whose
+// source never reported a channel count is bounded (1..8), not left unchecked; a known count is
+// still matched exactly.
+func TestVerifyBoundsAudioWhenTheSourceCountIsUnknown(t *testing.T) {
+	st, _ := stagedWith(t, "x")
+	unknown := Want{
+		Audio:             []WantedAudio{{Language: "eng", Channels: 0}, {Language: "jpn", Channels: 2}},
+		SubtitleLanguages: []string{"eng"},
+	}
+	v, err := Verify(context.Background(), &stubProber{info: goodInfo(100 * time.Second)},
+		Recorder{}, st, goodInfo(100*time.Second), unknown, time.Minute)
+	if err != nil || !v.OK {
+		t.Fatalf("6 channels where the source count was unknown: %+v, %v; want OK", v, err)
+	}
+
+	tooMany := goodInfo(100 * time.Second)
+	tooMany.Audio[0].Channels = MaxAudioChannels + 1
+	v, err = Verify(context.Background(), &stubProber{info: tooMany},
+		Recorder{}, st, goodInfo(100*time.Second), unknown, time.Minute)
+	if err != nil || v.OK || v.Code != CodeAudioChannels {
+		t.Fatalf("%d channels: %+v, %v; want a %s no", MaxAudioChannels+1, v, err, CodeAudioChannels)
+	}
+	if !strings.Contains(v.Message, "1 to 8") {
+		t.Errorf("message = %q; want the 1-to-8 bound said plainly", v.Message)
+	}
+
+	wrongKnown := goodInfo(100 * time.Second)
+	wrongKnown.Audio[1].Channels = 6
+	v, err = Verify(context.Background(), &stubProber{info: wrongKnown},
+		Recorder{}, st, goodInfo(100*time.Second), unknown, time.Minute)
+	if err != nil || v.OK || v.Code != CodeAudioChannels {
+		t.Fatalf("the known track's count changed: %+v, %v; want a %s no", v, err, CodeAudioChannels)
 	}
 }
 

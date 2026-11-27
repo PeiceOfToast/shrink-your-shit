@@ -49,7 +49,7 @@ func TestRealStoreBackedJobEndToEnd(t *testing.T) {
 
 	s := newStoredJobFor(t, root, fid, st.Size(), st.ModTime().UnixNano(), src)
 	env := flow.Env{
-		Media:  media.MediaFuncs{ProbeFunc: media.Probe, RunFunc: media.Run},
+		Media:  media.MediaFuncs{ProbeFunc: media.Probe, RunFunc: media.Run, CaptureFunc: media.Capture},
 		Safety: flow.RealSafety{}, Pick: flow.ProcessorPick,
 		LoadRevision: func(ctx context.Context, id int64, r int) (flow.Flow, error) {
 			rev, err := s.flows.Revision(ctx, id, r)

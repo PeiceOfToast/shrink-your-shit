@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/PeiceOfToast/shrink-your-shit/internal/events"
+	"github.com/PeiceOfToast/shrink-your-shit/internal/media/fake"
 )
 
 // Each check that runs writes one job-log decision line, Source "safety", so a job's history shows why it kept the
@@ -52,6 +53,40 @@ func TestVerifyLogsEachCheckAsASafetyDecision(t *testing.T) {
 		if e.Source != "safety" || e.Kind != events.KindDecision || e.JobID != 7 {
 			t.Errorf("line %+v; want Source safety, kind decision, job 7", e)
 		}
+	}
+}
+
+// TestSourceCheckLogsItsVerdict: the original's check writes one decision line too, so the job log
+// shows the damaged source the run kept.
+func TestSourceCheckLogsItsVerdict(t *testing.T) {
+	bus, err := events.New(events.Options{Stderr: io.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { bus.Close(context.Background()) })
+	ch, unsub := bus.Subscribe(events.Filter{Kind: events.KindDecision, JobID: 7})
+	defer unsub()
+
+	stderr := "[h264 @ 0x2] [error] error while decoding MB 27 15\n" +
+		"[verbose]   Input stream #0:0 (video): 500 packets read (1000 bytes); 470 frames decoded; 0 decode errors;\n"
+	m := &fake.Media{Captures: []fake.CaptureScript{{Stderr: []byte(stderr)}}}
+	v, err := SourceCheck(context.Background(), m, Recorder{Bus: bus, JobID: 7}, "/original.mkv", sourceInfo(20*time.Second), time.Minute)
+	if err != nil || v.OK || v.Code != CodeOriginalDamaged {
+		t.Fatalf("verdict = %+v, %v; want the damaged original kept", v, err)
+	}
+	select {
+	case e := <-ch:
+		if e.Source != "safety" || e.Code != CodeOriginalDamaged || e.Level != events.LevelWarn || e.NextAction != NextKeepOriginal {
+			t.Errorf("line = %+v; want the source check's no at warn with keep_original", e)
+		}
+		if want := "original: " + v.Message; e.Message != want {
+			t.Errorf("message = %q, want %q", e.Message, want)
+		}
+		if e.Data["detail"] == nil {
+			t.Errorf("line = %+v; want the detail for the drawer", e)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no decision line for the source check")
 	}
 }
 

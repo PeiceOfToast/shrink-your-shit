@@ -254,7 +254,7 @@ func sweepTryFolder(ctx context.Context, dir string, started time.Time, warn fun
 // neither, so its events answer the page and nothing reaches a job's log.
 func engineEnv() flow.Env {
 	return flow.Env{
-		Media:  media.MediaFuncs{ProbeFunc: media.Probe, RunFunc: media.Run},
+		Media:  media.MediaFuncs{ProbeFunc: media.Probe, RunFunc: media.Run, CaptureFunc: media.Capture},
 		Safety: flow.RealSafety{}, Pick: flow.ProcessorPick,
 		Now: time.Now, Sleep: time.Sleep, AppVersion: version,
 	}

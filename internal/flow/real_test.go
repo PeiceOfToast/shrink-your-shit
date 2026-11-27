@@ -94,7 +94,7 @@ func TestRealRunShrinksAClip(t *testing.T) {
 		Size: st.Size(), MTime: st.ModTime(), FileID: id,
 	}
 	env := flow.Env{
-		Media:        media.MediaFuncs{ProbeFunc: media.Probe, RunFunc: media.Run},
+		Media:        media.MediaFuncs{ProbeFunc: media.Probe, RunFunc: media.Run, CaptureFunc: media.Capture},
 		Safety:       flow.RealSafety{},
 		Pick:         flow.ProcessorPick,
 		LoadRevision: func(ctx context.Context, id int64, r int) (flow.Flow, error) { return starterFlow(t), nil },
@@ -174,7 +174,7 @@ func runRealFlow(t *testing.T, src, audio string) flow.Result {
 		Size: st.Size(), MTime: st.ModTime(), FileID: id,
 	}
 	env := flow.Env{
-		Media:        media.MediaFuncs{ProbeFunc: media.Probe, RunFunc: media.Run},
+		Media:        media.MediaFuncs{ProbeFunc: media.Probe, RunFunc: media.Run, CaptureFunc: media.Capture},
 		Safety:       flow.RealSafety{},
 		Pick:         flow.ProcessorPick,
 		LoadRevision: func(ctx context.Context, id int64, r int) (flow.Flow, error) { return rev, nil },

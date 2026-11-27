@@ -392,6 +392,18 @@ func OutputHeight(v media.VideoTrack, box Scale) int {
 	return v.Height
 }
 
+// OutputSize is the picture the plan writes, in the terms the probe reports it: the even size
+// scaleTo fits inside the box when the plan scales (ffmpeg turns the picture upright before the
+// filter, so the literal is the upright size and the output carries no matrix), else the source's
+// own coded size, which an unscaled output keeps along with its rotation. The result check compares
+// the new file's probe with it, allowing an encoder's alignment padding.
+func OutputSize(v media.VideoTrack, box Scale) (int, int) {
+	if w, h, err := scaleTo(v, box); err == nil && w > 0 && h > 0 {
+		return w, h
+	}
+	return v.Width, v.Height
+}
+
 // metadataKeys is the video tags to clear: the plan's own, then the statistics tags ffmpeg would
 // otherwise carry over from the source, each also in its "-eng" form.
 func metadataKeys(planned []string) []string {

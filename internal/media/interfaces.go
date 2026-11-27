@@ -17,19 +17,26 @@ type Runner interface {
 	Run(ctx context.Context, argv []string, onProgress func(Progress)) (Result, error)
 }
 
-// Media is the pair the packages above take, so the real implementation and media/fake are
+// Capturer is what the result check needs from Capture: one ffmpeg run's whole stdout and stderr.
+type Capturer interface {
+	Capture(ctx context.Context, argv []string) (Output, error)
+}
+
+// Media is the trio the packages above take, so the real implementation and media/fake are
 // interchangeable in unit tests.
 type Media interface {
 	Prober
 	Runner
+	Capturer
 }
 
 var _ Media = MediaFuncs{}
 
-// MediaFuncs turns two functions into a Media, for a test that needs only one of them.
+// MediaFuncs turns three functions into a Media, for a test that needs only one of them.
 type MediaFuncs struct {
-	ProbeFunc func(ctx context.Context, path string) (Info, error)
-	RunFunc   func(ctx context.Context, argv []string, onProgress func(Progress)) (Result, error)
+	ProbeFunc   func(ctx context.Context, path string) (Info, error)
+	RunFunc     func(ctx context.Context, argv []string, onProgress func(Progress)) (Result, error)
+	CaptureFunc func(ctx context.Context, argv []string) (Output, error)
 }
 
 func (m MediaFuncs) Probe(ctx context.Context, path string) (Info, error) {
@@ -45,4 +52,11 @@ func (m MediaFuncs) Run(ctx context.Context, argv []string, onProgress func(Prog
 		return Result{}, errors.New("media: no Run function")
 	}
 	return m.RunFunc(ctx, argv, onProgress)
+}
+
+func (m MediaFuncs) Capture(ctx context.Context, argv []string) (Output, error) {
+	if m.CaptureFunc == nil {
+		return Output{}, errors.New("media: no Capture function")
+	}
+	return m.CaptureFunc(ctx, argv)
 }
