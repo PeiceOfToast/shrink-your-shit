@@ -160,4 +160,6 @@ table.tbl.wkr td.wk-sub{display:none}
 .ticks{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px 16px;padding-top:4px}
 @media (max-width:900px){.ticks{grid-template-columns:repeat(2,minmax(0,1fr))}.pagehead-desk{display:none}}
 .seg button{white-space:nowrap}
+/* A greyed segment or radio row is disabled the same way as a button: the page's background, muted text and border. */
+.seg button:disabled{cursor:not-allowed;background:var(--bg);color:var(--strong);border-color:var(--border)}
 .hc .set-row{border-bottom:0}

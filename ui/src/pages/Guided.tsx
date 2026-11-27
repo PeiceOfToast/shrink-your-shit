@@ -5,6 +5,7 @@ import { languageName } from "../format/language.ts";
 import { useApi } from "../api/useApi.ts";
 import { ChoiceField, QUALITY_NAMES, Row, toErr, useBitrateLadder, useCardFamilies, type Err } from "./flowParts.tsx";
 import { qualityMeaning } from "../format/quality.ts";
+import { fileTypeHint } from "../format/fileType.ts";
 
 // Guided builder (06): a short set of questions that build the flow. Nothing reaches the library until
 // "Save and use it". The three panels are the parts index, the part cards and "What this does".
@@ -358,9 +359,12 @@ function FieldRow({ field, value, answers, languages, disabled, onChange }: { fi
   const ladder = useBitrateLadder();
   const families = useCardFamilies(answers.useGpu !== false);
   if (field.type === "choice" && field.choices) {
+    const isFileType = field.key === "fileType";
+    const choices = isFileType ? greyFileTypes(field.choices, disabled) : field.choices;
+    const reasons = choices.filter((c) => !c.available && c.why).map((c) => c.why ?? "");
     return (
       <>
-        <ChoiceField label={field.label} value={String(value ?? "")} choices={field.key === "fileType" ? greyFileTypes(field.choices, disabled) : field.choices} onChange={onChange} full={field.key === "subtitles" || field.key === "original"} />
+        <ChoiceField label={field.label} value={String(value ?? "")} choices={choices} onChange={onChange} full={field.key === "subtitles" || field.key === "original"} hint={isFileType ? fileTypeHint(reasons) : undefined} />
         {field.key === "original" && value === "replace" && <p className="hint wf-full">The original goes to the trash and is kept 7 days.</p>}
       </>
     );

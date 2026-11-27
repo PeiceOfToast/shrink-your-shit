@@ -62,10 +62,11 @@ export function Seg<T extends string>({ label, value, options, onChange }: { lab
 
 // A choice from the guide or the step definitions: a segmented control for up to four, a list beyond that.
 // A choice that can't work here is greyed with the server's reason.
-export function ChoiceField({ label, value, choices, onChange, id, full }: { label: string; value: string; choices: GuideChoice[]; onChange: (v: string) => void; id?: string; full?: boolean }) {
+// `hint` replaces the default line, which names each greyed choice's reason.
+export function ChoiceField({ label, value, choices, onChange, id, full, hint }: { label: string; value: string; choices: GuideChoice[]; onChange: (v: string) => void; id?: string; full?: boolean; hint?: string }) {
   const why = choices.filter((c) => !c.available && c.why).map((c) => `${c.label}: ${c.why}`);
   return (
-    <Row label={label} hint={why.length ? why.join(" · ") : undefined} id={id} full={full}>
+    <Row label={label} hint={hint ?? (why.length ? why.join(" · ") : undefined)} id={id} full={full}>
       {choices.length <= 4 ? (
         <Seg
           label={label}

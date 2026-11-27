@@ -66,3 +66,23 @@ test("the guided preview greys the file types the answers rule out, with the edi
   assert.equal(mp4?.why, "MP4 can't hold Opus audio.");
   assert.equal(p.disabled.find((d) => d.field === "container" && d.value === "mkv"), undefined);
 });
+
+test("the closed Audio card names the subtitles choice", () => {
+  assert.match(checkFlow(withAnswers({ subtitles: "keep_all" })).summaries.audio ?? "", / · subtitles: keep all$/);
+  assert.match(checkFlow(withAnswers({ subtitles: "my_languages", subtitleLanguages: ["eng", "ger"] })).summaries.audio ?? "", / · subtitles: English and German$/);
+  assert.match(checkFlow(withAnswers({ subtitles: "text_only" })).summaries.audio ?? "", / · text only$/);
+  assert.match(checkFlow(withAnswers({ subtitles: "srt" })).summaries.audio ?? "", / · SRT files$/);
+});
+
+test("the closed Save card names the file type and where the result goes", () => {
+  assert.equal(checkFlow(withAnswers({ fileType: "mkv", original: "replace" })).summaries.save, "MKV · replace the original · old file in the trash 7 days");
+  assert.equal(checkFlow(withAnswers({ fileType: "mkv", original: "next_to" })).summaries.save, "MKV · next to the original");
+  const folder = checkFlow(withAnswers({ fileType: "mp4", original: "one_folder", folder: "/media/out" })).summaries.save ?? "";
+  assert.match(folder, /^MP4 · a different folder/);
+  assert.equal(folder.includes("trash"), false);
+});
+
+test("with AAC audio, MP4 is not greyed; with Opus it is", () => {
+  assert.equal(disabledFor({ audio: "stereo_aac" }, "mp4"), undefined);
+  assert.ok(disabledFor({ audio: "stereo_opus" }, "mp4"));
+});

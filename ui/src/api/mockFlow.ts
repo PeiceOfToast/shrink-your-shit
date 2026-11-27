@@ -28,7 +28,8 @@ export const DEFAULT_ANSWERS: Answers = {
 
 const FORMAT_LABEL: Record<string, string> = { hevc: "HEVC", h264: "H.264", av1: "AV1" };
 const CODEC_LABEL: Record<string, string> ={ aac: "AAC", opus: "Opus", ac3: "AC-3", eac3: "E-AC-3", flac: "FLAC", copy: "Same as the source" };
-const CHANNEL_LABEL: Record<string, string> = { stereo: "stereo", source: "same channels as the source", mono: "mono", "5.1": "5.1" };
+const CONTAINER_LABEL: Record<string, string> = { mkv: "MKV", mp4: "MP4", webm: "WebM", keep: "Keep the same" };
+const CHANNEL_LABEL: Record<string, string> ={ stereo: "stereo", source: "same channels as the source", mono: "mono", "5.1": "5.1" };
 
 
 const LADDER: BitrateLadder = {
@@ -334,13 +335,21 @@ export function checkFlow(flow: Flow): FlowCheck {
     ? `${FORMAT_LABEL[String(v.format)]} · ${v.rateControl === "vbr" ? "variable" : "constant"} bitrate about ${bitrateFor(v)} Mb/s`
     : `${FORMAT_LABEL[String(v.format)]} · quality ${v.quality} · graphics card ${v.useGpu ? "automatic" : "off"}`;
   const langs = Array.isArray(au.languages) && au.languages.length ? (au.languages as string[]).map(languageName).join(" and ") : "my languages";
-  const audioSummary = `${CODEC_LABEL[String(au.codec ?? au.format)]} · ${CHANNEL_LABEL[String(au.channels)]} · ${langs}`;
+  // The subtitles part follows the Subtitles choice; with no subtitle languages picked, they are the audio's.
+  const subLangs = Array.isArray(au.subtitleLanguages) && au.subtitleLanguages.length ? (au.subtitleLanguages as string[]).map(languageName).join(" and ") : langs;
+  const subPart = au.subtitles === "srt" ? "SRT files"
+    : au.subtitles === "text_only" ? "text only"
+    : au.subtitles === "my_languages" ? `subtitles: ${subLangs}`
+    : "subtitles: keep all";
+  const audioSummary = `${CODEC_LABEL[String(au.codec ?? au.format)]} · ${CHANNEL_LABEL[String(au.channels)]} · ${langs} · ${subPart}`;
+  // The file type, then where the result goes. The trash line is only for replacing the original.
   const where = String(sv.where);
-  const saveSummary = where === "replace"
-    ? "Replace the original · old file in the trash 7 days"
+  const placed = where === "replace"
+    ? "replace the original · old file in the trash 7 days"
     : where === "folder"
-      ? `A different folder${sv.folder ? `: ${String(sv.folder)}` : ""}`
-      : "Next to the original";
+      ? `a different folder${sv.folder ? `: ${String(sv.folder)}` : ""}`
+      : "next to the original";
+  const saveSummary = `${CONTAINER_LABEL[String(sv.container ?? "mkv")] ?? "MKV"} · ${placed}`;
 
   return { problems, disabled, summaries: { video: videoSummary, audio: audioSummary, save: saveSummary } };
 }

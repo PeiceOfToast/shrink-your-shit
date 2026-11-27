@@ -4,6 +4,7 @@ import { api, type Flow, type FlowCheck, type FlowStep, type StepId, type TryLin
 import { useApi } from "../api/useApi.ts";
 import { ChoiceField, QUALITY_NAMES, Row, Seg, toErr, useBitrateLadder, useCardFamilies, type Err } from "./flowParts.tsx";
 import { qualityMeaning } from "../format/quality.ts";
+import { fileTypeHint } from "../format/fileType.ts";
 import { LanguageChips } from "./LanguageChips.tsx";
 
 // Flow editor (07): the fixed walk Video → Audio → Save the result. Nothing is added or reordered.
@@ -25,12 +26,6 @@ const SUBTITLE_HINT: Record<string, string> = {
   text_only: "Only text subtitles are kept; picture subtitles are dropped.",
   srt: "Subtitles are made into SRT files.",
 };
-// The File type hint: what each file type keeps, then why a greyed type is ruled out.
-const FILE_TYPE_HINT = "MKV holds every track and subtitle. MP4 plays on more devices but drops some subtitles.";
-function fileTypeHint(whyValue: (stepId: StepId, field: string, value: string) => string | undefined): string {
-  const reasons = CONTAINERS.map((o) => whyValue("save", "container", o.value)).filter((w): w is string => Boolean(w));
-  return [FILE_TYPE_HINT, ...reasons].join(" ");
-}
 // The name example follows the file type: Keep the same keeps the source's own extension.
 function nameExample(container: string, suffix: string): string {
   const after = suffix || "…";
@@ -311,7 +306,7 @@ function Editor({ id, initial }: { id: string; initial: Loaded }) {
     save: (
       <>
         <p className="hint" style={{ marginTop: 0 }}>Every result is checked first: it must play and not be broken. A broken result is never saved, and the original stays as it was.</p>
-        <Row label="File type" full hint={fileTypeHint(whyValue)}>
+        <Row label="File type" full hint={fileTypeHint(CONTAINERS.map((o) => whyValue("save", "container", o.value)).filter((w): w is string => Boolean(w)))}>
           <Seg
             label="File type"
             value={String(save_.container ?? "mkv")}
