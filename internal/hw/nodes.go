@@ -4,6 +4,7 @@ package hw
 
 import (
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -53,7 +54,7 @@ func ReadRenderNodes(sysDrm string) []RenderNode {
 		name := filepath.Base(m)
 		vendor, _ := os.ReadFile(filepath.Join(m, "device", "vendor"))
 		out = append(out, RenderNode{
-			Path:   filepath.Join("/dev/dri", name),
+			Path:   path.Join("/dev/dri", name), // a Linux device path, whatever OS runs the check
 			Vendor: strings.TrimSpace(string(vendor)),
 		})
 	}

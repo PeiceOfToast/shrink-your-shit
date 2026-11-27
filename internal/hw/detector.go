@@ -25,7 +25,12 @@ func Detect(ctx context.Context, m media.Media, dir string, cands []Candidate) I
 		if ctx.Err() != nil {
 			break
 		}
-		inv.Verdicts = append(inv.Verdicts, Prove(ctx, m, dir, c))
+		v := Prove(ctx, m, dir, c)
+		if ctx.Err() != nil {
+			// The pass was cancelled during this test: its answer is not a finding. Drop it, and the pass.
+			break
+		}
+		inv.Verdicts = append(inv.Verdicts, v)
 	}
 	return inv
 }
@@ -60,6 +65,13 @@ func (d *Detector) Start(ctx context.Context) {
 	d.mu.Unlock()
 	go func() {
 		inv := Detect(ctx, d.m, d.dir, d.cands)
+		if ctx.Err() != nil {
+			// A cancelled pass is incomplete: the last finished pass stays.
+			d.mu.Lock()
+			d.running = false
+			d.mu.Unlock()
+			return
+		}
 		d.mu.Lock()
 		d.cur, d.has, d.running = inv, true, false
 		d.mu.Unlock()

@@ -57,6 +57,10 @@ func Prove(ctx context.Context, m media.Media, dir string, c Candidate) Verdict 
 	defer cancel()
 	_, err := m.Run(tctx, append([]string{"ffmpeg"}, testArgs(c, out)...), nil)
 	if err != nil {
+		if ctx.Err() != nil {
+			// The whole pass was cancelled: this is not the encode's own limit, and the caller drops the answer.
+			return no(c, "the test was cancelled")
+		}
 		if errors.Is(tctx.Err(), context.DeadlineExceeded) {
 			return no(c, fmt.Sprintf("the test encode did not finish in %d s", int(TestTimeout.Seconds())))
 		}

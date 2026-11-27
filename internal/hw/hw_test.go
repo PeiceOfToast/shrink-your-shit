@@ -150,17 +150,20 @@ func TestDetectionDoesNotBlock(t *testing.T) {
 	cancel()
 	deadline := time.Now().Add(3 * time.Second)
 	for {
-		inv, ok := d.Current()
-		if ok {
-			if len(inv.Verdicts) != 0 {
-				t.Errorf("a cancelled pass kept verdicts: %+v", inv.Verdicts)
-			}
-			return
+		d.mu.Lock()
+		running := d.running
+		d.mu.Unlock()
+		if !running {
+			break
 		}
 		if time.Now().After(deadline) {
 			t.Fatal("the pass did not finish after its context ended")
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+	// A cancelled pass is incomplete: with no finished pass before it, nothing is served.
+	if inv, ok := d.Current(); ok {
+		t.Errorf("a cancelled pass was served as an answer: %+v", inv)
 	}
 }
 
@@ -227,5 +230,95 @@ func TestPauseAfterThreeFailuresResetsOnSuccessAndSurvivesRestart(t *testing.T) 
 	p3 := NewPauses(db2, func() time.Time { return later }, nil)
 	if _, paused, _ := p3.Paused(ctx, "local", encode.FamilyQSV); paused {
 		t.Error("the pause still holds after its hour")
+	}
+}
+
+// A pass cancelled during a test encode drops that encode's answer and keeps no partial pass: the last finished pass
+// stays what Current serves.
+func TestCancelledPassKeepsTheLastFinishedPass(t *testing.T) {
+	dir := t.TempDir()
+	cands := []Candidate{
+		{Encoder: "h264_qsv", Family: encode.FamilyQSV, Codec: "h264"},
+		{Encoder: "hevc_qsv", Family: encode.FamilyQSV, Codec: "hevc"},
+	}
+	m := &fake.Media{
+		// Calls 0 and 1 are the first pass's two encodes, which pass; call 2 onward hangs until cancelled.
+		Runs: []fake.RunScript{{}, {}, {Hang: true}},
+		Probes: map[string]media.Info{
+			outFor(dir, cands[0]): {Video: []media.VideoTrack{{Codec: "h264", Encoder: "Lavc61 h264_qsv"}}},
+			outFor(dir, cands[1]): {Video: []media.VideoTrack{{Codec: "hevc", Encoder: "Lavc61 hevc_qsv"}}},
+		},
+	}
+	d := NewDetector(m, dir, cands, nil)
+	d.Start(context.Background())
+	first := waitInventory(t, d)
+	if len(first.Verdicts) != 2 || !first.Verdicts[0].Available || !first.Verdicts[1].Available {
+		t.Fatalf("first pass = %+v; want two available", first.Verdicts)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	d.Start(ctx)
+	time.Sleep(30 * time.Millisecond) // the second pass is now in its hung encode
+	cancel()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		d.mu.Lock()
+		running := d.running
+		d.mu.Unlock()
+		if !running {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the cancelled pass did not end")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	got, ok := d.Current()
+	if !ok || !got.At.Equal(first.At) || len(got.Verdicts) != 2 {
+		t.Fatalf("after a cancelled pass Current = %+v (ok %v); want the first finished pass", got, ok)
+	}
+}
+
+// Detect drops only the test that was in flight when the pass was cancelled; the finished tests before it are kept.
+func TestDetectDropsTheEncodeInFlightWhenCancelled(t *testing.T) {
+	dir := t.TempDir()
+	cands := []Candidate{
+		{Encoder: "h264_qsv", Family: encode.FamilyQSV, Codec: "h264"},
+		{Encoder: "hevc_qsv", Family: encode.FamilyQSV, Codec: "hevc"},
+	}
+	m := &fake.Media{
+		Runs:   []fake.RunScript{{}, {Hang: true}},
+		Probes: map[string]media.Info{outFor(dir, cands[0]): {Video: []media.VideoTrack{{Codec: "h264", Encoder: "Lavc61 h264_qsv"}}}},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Millisecond)
+	defer cancel()
+	inv := Detect(ctx, m, dir, cands)
+	if len(inv.Verdicts) != 1 || inv.Verdicts[0].Encoder != "h264_qsv" {
+		t.Fatalf("verdicts = %+v; want only the finished h264_qsv test", inv.Verdicts)
+	}
+}
+
+// A multi-word tag must start with a Lavc version, so another program's words never pass as an encoder name.
+func TestMultiWordTagMustStartWithLavc(t *testing.T) {
+	if namedBy("x264 hevc_qsv", "hevc_qsv") {
+		t.Error("a multi-word tag without a Lavc version was accepted")
+	}
+	if !namedBy("Lavc61.3.100 hevc_qsv", "hevc_qsv") {
+		t.Error("the real Lavc form was refused")
+	}
+}
+
+// waitInventory waits for a finished pass and returns it.
+func waitInventory(t *testing.T, d *Detector) Inventory {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		if inv, ok := d.Current(); ok {
+			return inv
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("no pass finished")
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
