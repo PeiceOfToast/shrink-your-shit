@@ -182,16 +182,28 @@ else
   printf '%s\n' "$LIBSET" > "$LIBMARK"
 fi
 
-# GPU helpers: only packages the enabled sources already offer. A missing one is a note, not a failure.
+# GPU helpers: only packages the enabled sources already offer. Each is installed in its own call, so one that cannot
+# install (a conflict, a missing source) is a note and never takes the others with it. The free and the non-free Intel
+# iHD drivers conflict, so the free one is left out when the non-free one is offered.
 gpu_pkgs=""
 for p in intel-media-va-driver intel-media-va-driver-non-free mesa-va-drivers vainfo; do
   if apt-cache policy "$p" 2>/dev/null | grep -q 'Candidate: [^ (]'; then
     gpu_pkgs="$gpu_pkgs $p"
   fi
 done
+case "$gpu_pkgs" in
+  *intel-media-va-driver-non-free*)
+    kept=""
+    # shellcheck disable=SC2086
+    for p in $gpu_pkgs; do
+      [ "$p" = intel-media-va-driver ] || kept="$kept $p"
+    done
+    gpu_pkgs="$kept" ;;
+esac
 if [ -n "$gpu_pkgs" ]; then
-  # shellcheck disable=SC2086
-  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq $gpu_pkgs || say "note: GPU helper packages did not install; syp will use the processor."
+  for p in $gpu_pkgs; do
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$p" >/dev/null 2>&1 || say "note: $p did not install; syp will use the processor for that card."
+  done
 else
   say "note: no GPU helper packages are offered by this system's enabled sources; syp will use the processor."
 fi
