@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/PeiceOfToast/shrink-your-shit/internal/events"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/flow"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/jobs"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/library"
@@ -337,5 +338,42 @@ func TestJobLogIsOldestFirstAndHistoryKeepsLifecycle(t *testing.T) {
 	}
 	if rec := f.e.do(http.MethodGet, fmt.Sprintf("/api/v2/jobs/%d/events", f.done), "", nil, false); rec.Code != http.StatusUnauthorized {
 		t.Errorf("log without a session: %d, want 401", rec.Code)
+	}
+}
+
+// A step's duration is its end time minus its start time, and the worker is the one that ran the job's attempt.
+func TestJobDetailHasStepDurationsAndWorker(t *testing.T) {
+	f := newJobsFixture(t)
+	bus := f.e.bus
+	if err := bus.Emit(events.Event{JobID: f.done, Attempt: 1, Kind: events.KindStepStart, Level: events.LevelInfo,
+		StepIndex: 1, StepName: "Video", Message: "1. Video"}); err != nil {
+		t.Fatal(err)
+	}
+	f.e.clock.Advance(2 * time.Second)
+	if err := bus.Emit(events.Event{JobID: f.done, Attempt: 1, Kind: events.KindStepEnd, Level: events.LevelInfo,
+		StepIndex: 1, StepName: "Video"}); err != nil {
+		t.Fatal(err)
+	}
+	var d struct {
+		Job    struct{ Worker string } `json:"job"`
+		Worker string                  `json:"worker"`
+		Steps  []struct {
+			Name       string `json:"name"`
+			DurationMs *int64 `json:"durationMs"`
+		} `json:"steps"`
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		decodeInto(t, f.get(fmt.Sprintf("/api/v2/jobs/%d", f.done)), &d)
+		if len(d.Steps) > 0 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if len(d.Steps) != 1 || d.Steps[0].DurationMs == nil || *d.Steps[0].DurationMs != 2000 {
+		t.Fatalf("steps = %+v; want one step of 2000 ms", d.Steps)
+	}
+	if d.Worker != "local" || d.Job.Worker != "local" {
+		t.Errorf("worker = %q (job %q); want local", d.Worker, d.Job.Worker)
 	}
 }

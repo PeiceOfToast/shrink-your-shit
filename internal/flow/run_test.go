@@ -207,6 +207,23 @@ func TestRunGoodRunEventFrame(t *testing.T) {
 	if got := frameKinds(bus.all()); strings.Join(got, ",") != strings.Join(expected, ",") {
 		t.Errorf("event frame =\n%v\nwant\n%v", got, expected)
 	}
+	// Every event the log shows has a sentence: the step, probe, command and size lines are never empty.
+	for _, e := range bus.all() {
+		switch e.Kind {
+		case events.KindStepStart, events.KindProbe, events.KindCommand, events.KindSize:
+			if e.Message == "" {
+				t.Errorf("%s event has no message", e.Kind)
+			}
+		}
+		switch {
+		case e.Kind == events.KindStepStart && e.StepIndex == 1 && !strings.HasPrefix(e.Message, "1. "):
+			t.Errorf("first step line = %q, want it numbered 1.", e.Message)
+		case e.Kind == events.KindProbe && !strings.Contains(e.Message, "H.264"):
+			t.Errorf("probe line = %q, want the codec", e.Message)
+		case e.Kind == events.KindSize && !strings.Contains(e.Message, "→"):
+			t.Errorf("size line = %q, want before → after", e.Message)
+		}
+	}
 	if sf.gotRecorder.JobID != 42 {
 		t.Errorf("check recorder = %+v, want the job's", sf.gotRecorder)
 	}

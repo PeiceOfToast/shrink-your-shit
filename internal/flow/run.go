@@ -383,7 +383,7 @@ func (e *engine) plan(ctx context.Context, rev Revision, info media.Info) (Decis
 			name = st.Def().Name
 		}
 		started := e.env.now()
-		e.stepEvent(events.KindStepStart, ref, name, i+1, events.LevelInfo, "", "", 0, nil)
+		e.stepEvent(events.KindStepStart, ref, name, i+1, events.LevelInfo, "", stepSentence(i+1, name), 0, nil)
 
 		step, settings, err := decodeStep(ref)
 		if err != nil {
@@ -516,7 +516,7 @@ func (e *engine) runEnd(res Result) {
 }
 
 func (e *engine) probeEvent(side string, info media.Info) {
-	e.emit(events.Event{Kind: events.KindProbe, Level: events.LevelInfo,
+	e.emit(events.Event{Kind: events.KindProbe, Level: events.LevelInfo, Message: probeSentence(info),
 		Data: map[string]any{"side": side, "tracks": media.Summarize(info)}})
 }
 
@@ -553,12 +553,14 @@ func (e *engine) decisionEvent(sd StepDecision) {
 }
 
 func (e *engine) command(argv []string) {
-	e.emit(events.Event{Kind: events.KindCommand, Level: events.LevelInfo,
-		Command: &events.Command{Argv: argv, Line: commandLine(argv)}})
+	line := commandLine(argv)
+	e.emit(events.Event{Kind: events.KindCommand, Level: events.LevelInfo, Message: line,
+		Command: &events.Command{Argv: argv, Line: line}})
 }
 
 func (e *engine) size(before, after int64) {
-	e.emit(events.Event{Kind: events.KindSize, Level: events.LevelInfo, SizeBefore: before, SizeAfter: after})
+	e.emit(events.Event{Kind: events.KindSize, Level: events.LevelInfo, Message: sizeSentence(before, after),
+		SizeBefore: before, SizeAfter: after})
 }
 
 func (e *engine) move(from, to string) {
