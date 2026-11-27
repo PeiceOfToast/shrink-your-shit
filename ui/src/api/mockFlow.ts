@@ -23,7 +23,7 @@ export const DEFAULT_ANSWERS: Answers = {
   subtitleLanguages: ["eng", "ger"],
   fileType: "mkv",
   includeDolbyVision: false,
-  original: "replace",
+  original: "next_to_original",
   folder: "",
 };
 
