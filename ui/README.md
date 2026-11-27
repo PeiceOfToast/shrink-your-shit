@@ -9,7 +9,12 @@ React + TypeScript + Vite. Every screen gets its data through one module, `src/a
     npm run dev          # http://localhost:5173, with the dev state switcher (?states=1)
     npm run typecheck
     npm test
-    npm run build        # output in ui/dist (gitignored)
+    npm run build        # output in ../internal/ui/dist (gitignored except .gitkeep)
+
+The build writes into the Go package that embeds it (`internal/ui/dist`), so build before
+`go build`: a binary built without it serves the "not built" page from `internal/ui/notbuilt/` instead.
+Run `npm run build` before committing anything under `internal/ui/`, and commit named files, never
+`git add -A`: the build output is not tracked.
 
 To look at a built copy on the server:
 

@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"net"
 	"net/http"
 	"strconv"
@@ -64,6 +65,7 @@ type Scanner interface {
 type Server struct {
 	version string
 	ready   atomic.Pointer[Deps]
+	ui      fs.FS // the built web interface; nil answers every page with the JSON 404
 	csrf    http.CrossOriginProtection
 	mux     *http.ServeMux
 	jobs    atomic.Pointer[jobDeps]
@@ -103,7 +105,7 @@ func New(version string) *Server {
 	// Summary and attention (R1-9a).
 	s.mux.HandleFunc("GET /api/v2/summary", s.getSummary)
 	s.mux.HandleFunc("GET /api/v2/attention", s.getAttention)
-	s.mux.HandleFunc("/", notFound)
+	s.mux.HandleFunc("/", s.static)
 	return s
 }
 
@@ -130,13 +132,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if needs {
-		// Before setup only the allow-list answers: /setup and /health, plus the ones that answer
-		// without a session once setup is done (backend-plan §12).
+		// Before setup the pages themselves answer (the first-run page is one of them) and so does the
+		// allow-list; every other API route says set up first (backend-plan §12).
 		if unsafe && !s.csrfOK(r) {
 			writeError(w, http.StatusForbidden, "csrf", "That request came from another site, or is missing its header.", "", 0)
 			return
 		}
-		if setupRouteIsAllowed(r.Method, r.URL.Path) {
+		if !apiPath || setupRouteIsAllowed(r.Method, r.URL.Path) {
 			s.mux.ServeHTTP(w, r)
 			return
 		}
@@ -178,7 +180,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			authed = live
 		}
 	}
-	if !authed && !publicRoute(r.URL.Path) {
+	if !authed && apiPath && !publicRoute(r.URL.Path) {
 		writeError(w, http.StatusUnauthorized, "signed_out", "Sign in first.", "", 0)
 		return
 	}
@@ -194,6 +196,7 @@ func isAuthed(r *http.Request) bool {
 }
 
 // publicRoute is what answers without a session once setup is done: health, setup, sign-in, sign-out.
+// The pages (everything outside /api) answer too; the data behind them does not.
 func publicRoute(path string) bool {
 	switch path {
 	case "/api/v2/health", "/api/v2/setup", "/api/v2/signin", "/api/v2/signout":
