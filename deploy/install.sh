@@ -163,7 +163,7 @@ fi
 LIBDIR="$FFMPEG_DIR/lib"
 LIBMARK="$LIBDIR/.libva-sha256"
 LIBSET="$L2_SHA $LD_SHA"
-if [ -f "$LIBMARK" ] && [ "$(cat "$LIBMARK")" = "$LIBSET" ] && [ -e "$LIBDIR/libva.so.2" ]; then
+if [ -f "$LIBMARK" ] && [ "$(cat "$LIBMARK")" = "$LIBSET" ] && [ -e "$LIBDIR/libva.so.2" ] && [ -e "$LIBDIR/libva-drm.so.2" ]; then
   say "libva 2.22 is already at the pinned build; leaving it alone."
 else
   say "Fetching libva 2.22 (pinned Debian packages)"
@@ -176,7 +176,9 @@ else
   dpkg-deb -x "$WORK/libva-drm2.deb" "$WORK/libva"
   install -d -m 0755 "$LIBDIR"
   find "$WORK/libva/usr/lib" -name 'libva*.so*' -exec cp -P {} "$LIBDIR/" \;
-  [ -e "$LIBDIR/libva.so.2" ] || die "the libva packages have no libva.so.2"
+  if [ ! -e "$LIBDIR/libva.so.2" ] || [ ! -e "$LIBDIR/libva-drm.so.2" ]; then
+    die "the libva packages have no libva.so.2 and libva-drm.so.2"
+  fi
   if [ -f "$WORK/libva/usr/share/doc/libva2/copyright" ]; then
     cp "$WORK/libva/usr/share/doc/libva2/copyright" "$LIBDIR/LICENSE-libva"
   fi
@@ -204,7 +206,15 @@ case "$gpu_pkgs" in
 esac
 if [ -n "$gpu_pkgs" ]; then
   for p in $gpu_pkgs; do
-    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$p" >/dev/null 2>&1 || say "note: $p did not install; syp will use the processor for that card."
+    if DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$p" >/dev/null 2>&1; then
+      continue
+    fi
+    say "note: $p did not install; syp will use the processor for that card."
+    # The free Intel driver was left out for the non-free one. When that fails, the free one is the fallback, so a
+    # failure never leaves the Intel chip with no VA-API driver at all.
+    if [ "$p" = intel-media-va-driver-non-free ] && apt-cache policy intel-media-va-driver 2>/dev/null | grep -q 'Candidate: [^ (]'; then
+      DEBIAN_FRONTEND=noninteractive apt-get install -y -qq intel-media-va-driver >/dev/null 2>&1 || say "note: intel-media-va-driver did not install either; syp will use the processor for Intel."
+    fi
   done
 else
   say "note: no GPU helper packages are offered by this system's enabled sources; syp will use the processor."
