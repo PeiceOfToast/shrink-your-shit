@@ -32,6 +32,8 @@ type Work struct {
 	Job jobs.Job
 	In  flow.RunInput
 	Err error
+	// Transient is true when Err is a database read that may work on a later try. The job retries; it does not fail.
+	Transient bool
 }
 
 // Source is where the worker gets and reports jobs. The built-in source is a thin adapter over jobs; the remote
@@ -149,6 +151,13 @@ func (w *Worker) execute(ctx context.Context, work Work) {
 	wctx := context.WithoutCancel(ctx)
 
 	if work.Err != nil {
+		if work.Transient {
+			w.finish(wctx, j, jobs.Result{
+				Verdict: jobs.VerdictRetry, Reason: "could not read the library right now: " + work.Err.Error(),
+				FailedStep: "worker", NextAction: "retry",
+			})
+			return
+		}
 		w.finish(wctx, j, jobs.Result{
 			Verdict: jobs.VerdictFail, Reason: "could not build the run: " + work.Err.Error(),
 			FailedStep: "worker", NextAction: "fix_and_retry",

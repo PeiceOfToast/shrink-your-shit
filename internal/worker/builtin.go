@@ -30,8 +30,15 @@ func (b Builtin) Claim(ctx context.Context, workerID string) (*Work, error) {
 		return nil, err
 	}
 	in, err := b.input(ctx, *j, workerID)
-	return &Work{Job: *j, In: in, Err: err}, nil
+	var tr *transientError
+	return &Work{Job: *j, In: in, Err: err, Transient: errors.As(err, &tr)}, nil
 }
+
+// transientError marks a database read in input that failed for now. The job retries instead of failing.
+type transientError struct{ err error }
+
+func (e *transientError) Error() string { return e.err.Error() }
+func (e *transientError) Unwrap() error { return e.err }
 
 func (b Builtin) input(ctx context.Context, j jobs.Job, workerID string) (flow.RunInput, error) {
 	var root, rel, fileID string
@@ -44,11 +51,14 @@ func (b Builtin) input(ctx context.Context, j jobs.Job, workerID string) (flow.R
 		if errors.Is(err, sql.ErrNoRows) {
 			return flow.RunInput{}, errors.New("the file is no longer in its library")
 		}
-		return flow.RunInput{}, err
+		return flow.RunInput{}, &transientError{err}
 	}
 	wf, err := b.Flows.Get(ctx, j.WorkflowID)
+	if errors.Is(err, flow.ErrNotFound) {
+		return flow.RunInput{}, errors.New("the workflow is no longer there")
+	}
 	if err != nil {
-		return flow.RunInput{}, err
+		return flow.RunInput{}, &transientError{err}
 	}
 	if wf.CurrentRev == 0 {
 		return flow.RunInput{}, errors.New("the workflow has no published revision")

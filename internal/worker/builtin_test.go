@@ -18,9 +18,31 @@ import (
 	"github.com/PeiceOfToast/shrink-your-shit/internal/store"
 )
 
-// TestBuiltinClaimBuildsTheRunFromTheStore takes a job through the real store: a library, a scanned file row, a
-// workflow saved from the starter, and a queued job. Claim builds the flow input from those rows, not from memory.
-func TestBuiltinClaimBuildsTheRunFromTheStore(t *testing.T) {
+// storedJob is a job in a real store: a migrated database, a library over root with one file row, the shrink-videos
+// workflow saved, and one queued job for that file.
+type storedJob struct {
+	ctx   context.Context
+	db    *store.DB
+	q     *jobs.Queue
+	flows *flow.Store
+	root  string
+	libID int64
+	wfID  int64
+	jobID int64
+	mtime int64
+	bus   *events.Bus
+}
+
+func newStoredJob(t *testing.T, mtime int64) storedJob {
+	t.Helper()
+	root := t.TempDir()
+	return newStoredJobFor(t, root, "fid-1", 4321, mtime, filepath.Join(root, "holiday.mkv"))
+}
+
+// newStoredJobFor is newStoredJob over a file the caller made: its file row carries fid, size and mtime, and the job
+// is queued for src.
+func newStoredJobFor(t *testing.T, root, fid string, size, mtime int64, src string) storedJob {
+	t.Helper()
 	ctx := context.Background()
 	db, err := store.Open(t.TempDir())
 	if err != nil {
@@ -36,16 +58,14 @@ func TestBuiltinClaimBuildsTheRunFromTheStore(t *testing.T) {
 	}
 	t.Cleanup(func() { bus.Close(context.Background()) })
 
-	root := t.TempDir()
 	lib, err := library.NewCatalog(db).AddLibrary(ctx, library.NewLibrary{Path: root})
 	if err != nil {
 		t.Fatalf("add library: %v", err)
 	}
-	const mtime = int64(1_700_000_000_123_456_789)
 	var fileID int64
 	if err := db.Tx(ctx, func(tx *sql.Tx) error {
 		res, err := tx.Exec(`INSERT INTO files(library_id, rel_path, size, mtime, file_id)
-			VALUES(?, 'holiday.mkv', 4321, ?, 'fid-1')`, lib.ID, mtime)
+			VALUES(?, ?, ?, ?, ?)`, lib.ID, filepath.Base(src), size, mtime, fid)
 		if err != nil {
 			return err
 		}
@@ -54,20 +74,26 @@ func TestBuiltinClaimBuildsTheRunFromTheStore(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("insert file row: %v", err)
 	}
-
 	flows := flow.Open(db)
 	wfID, _, err := flows.CreateFromStarter(ctx, "shrink-videos", "Shrink")
 	if err != nil {
 		t.Fatalf("save workflow: %v", err)
 	}
 	q := jobs.New(jobs.Options{DB: db, Bus: bus})
-	jobID, _, err := q.Enqueue(ctx, fileID, lib.ID, wfID, filepath.Join(root, "holiday.mkv"), "test")
+	jobID, _, err := q.Enqueue(ctx, fileID, lib.ID, wfID, src, "test")
 	if err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
+	return storedJob{ctx: ctx, db: db, q: q, flows: flows, root: root, libID: lib.ID, wfID: wfID, jobID: jobID, mtime: mtime, bus: bus}
+}
 
-	b := Builtin{Queue: q, DB: db, Flows: flows}
-	w, err := b.Claim(ctx, "local")
+// TestBuiltinClaimBuildsTheRunFromTheStore takes a job through the real store and checks the run input Claim builds
+// from the rows, not from memory.
+func TestBuiltinClaimBuildsTheRunFromTheStore(t *testing.T) {
+	const mtime = int64(1_700_000_000_123_456_789)
+	s := newStoredJob(t, mtime)
+	b := Builtin{Queue: s.q, DB: s.db, Flows: s.flows}
+	w, err := b.Claim(s.ctx, "local")
 	if err != nil {
 		t.Fatalf("claim: %v", err)
 	}
@@ -77,14 +103,14 @@ func TestBuiltinClaimBuildsTheRunFromTheStore(t *testing.T) {
 	if w.Err != nil {
 		t.Fatalf("claim could not build the run: %v", w.Err)
 	}
-	if w.Job.ID != jobID {
-		t.Errorf("job id = %d, want %d", w.Job.ID, jobID)
+	if w.Job.ID != s.jobID {
+		t.Errorf("job id = %d, want %d", w.Job.ID, s.jobID)
 	}
 	in := w.In
 	want := flow.RunInput{
-		JobID: jobID, Attempt: w.Job.Attempt, LibraryID: strconv.FormatInt(lib.ID, 10), WorkerID: "local",
-		WorkflowID: wfID, Revision: 1,
-		LibraryRoot: root, Source: filepath.Join(root, "holiday.mkv"),
+		JobID: s.jobID, Attempt: w.Job.Attempt, LibraryID: strconv.FormatInt(s.libID, 10), WorkerID: "local",
+		WorkflowID: s.wfID, Revision: 1,
+		LibraryRoot: s.root, Source: filepath.Join(s.root, "holiday.mkv"),
 		Size: 4321, FileID: "fid-1",
 	}
 	if in.JobID != want.JobID || in.LibraryID != want.LibraryID || in.WorkerID != want.WorkerID ||
@@ -94,5 +120,45 @@ func TestBuiltinClaimBuildsTheRunFromTheStore(t *testing.T) {
 	}
 	if !in.MTime.Equal(time.Unix(0, mtime)) {
 		t.Errorf("mtime = %v, want %v", in.MTime, time.Unix(0, mtime))
+	}
+}
+
+// A database read that fails for now is transient: the run input is not built, and the job is marked to retry.
+// A file that is gone is not transient.
+func TestBuiltinMarksADatabaseReadErrorTransient(t *testing.T) {
+	s := newStoredJob(t, 1)
+	// Break the workflow read: Claim does not read workflows, but the run input does, so only input fails.
+	if err := s.db.Tx(s.ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(s.ctx, `ALTER TABLE workflows RENAME TO workflows_gone`)
+		return err
+	}); err != nil {
+		t.Fatalf("break the read: %v", err)
+	}
+	b := Builtin{Queue: s.q, DB: s.db, Flows: s.flows}
+	w, err := b.Claim(s.ctx, "local")
+	if err != nil || w == nil {
+		t.Fatalf("claim = %v, %v; want the job with a read error", w, err)
+	}
+	if w.Err == nil || !w.Transient {
+		t.Fatalf("work = err %v transient %v; want a transient read error", w.Err, w.Transient)
+	}
+}
+
+// A file that is no longer in its library is permanent: the job fails, it is not retried.
+func TestBuiltinFileGoneIsNotTransient(t *testing.T) {
+	s := newStoredJob(t, 1)
+	if err := s.db.Tx(s.ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(s.ctx, `DELETE FROM files`)
+		return err
+	}); err != nil {
+		t.Fatalf("delete the file row: %v", err)
+	}
+	b := Builtin{Queue: s.q, DB: s.db, Flows: s.flows}
+	w, err := b.Claim(s.ctx, "local")
+	if err != nil || w == nil {
+		t.Fatalf("claim = %v, %v", w, err)
+	}
+	if w.Err == nil || w.Transient || w.Err.Error() != "the file is no longer in its library" {
+		t.Fatalf("work = err %v transient %v; want the permanent file-gone error", w.Err, w.Transient)
 	}
 }
