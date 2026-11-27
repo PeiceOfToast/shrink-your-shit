@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { navigate, useLocation } from "../router.tsx";
-import { api, type Flow, type FlowCheck, type FlowStep, type StepDefinition, type StepId, type TryLine } from "../api/index.ts";
+import { api, type Flow, type FlowCheck, type FlowStep, type StepDefinition, type StepId } from "../api/index.ts";
 import { useApi } from "../api/useApi.ts";
 import { QUALITY_NAMES, Row, Seg, toErr, useBitrateLadder, useCardFamilies, type Err } from "./flowParts.tsx";
 import { DRAWN, NO_LONGER_OFFERED, choiceKey, greyedChoices, offeredChoices, type Choice } from "./flowFields.ts";
@@ -8,6 +8,7 @@ import { qualityMeaning } from "../format/quality.ts";
 import { fileTypeHint } from "../format/fileType.ts";
 import { nameExample } from "../format/nameExample.ts";
 import { LanguageChips } from "./LanguageChips.tsx";
+import { useTryFile } from "./useTryFile.ts";
 
 // Flow editor (07): the fixed walk Video → Audio → Save the result. Nothing is added or reordered.
 // The Advanced parts replace the simple choices for the things the guided page doesn't cover.
@@ -98,8 +99,7 @@ function Editor({ id, initial }: { id: string; initial: Loaded }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<Err | null>(null);
   const [tryFile, setTryFile] = useState("");
-  const [tryLines, setTryLines] = useState<TryLine[] | null>(null);
-  const [tryErr, setTryErr] = useState<Err | null>(null);
+  const tryRun = useTryFile();
   const [draftId, setDraftId] = useState(id);
   const [tryOpen, setTryOpen] = useState(false);
   const seq = useRef(0);
@@ -179,14 +179,8 @@ function Editor({ id, initial }: { id: string; initial: Loaded }) {
     }
   };
 
-  const onTry = async () => {
-    setTryErr(null);
-    try {
-      setTryLines((await api.tryFlow(flow, tryFile)).lines);
-    } catch (e) {
-      setTryErr(toErr(e));
-      setTryLines(null);
-    }
+  const onTry = () => {
+    void tryRun.start((signal) => api.tryFlow(flow, tryFile, signal).then((r) => r.lines));
   };
 
   const video = settings("video");
@@ -360,12 +354,16 @@ function Editor({ id, initial }: { id: string; initial: Loaded }) {
         <section className="card" style={{ marginBottom: 14 }} aria-label="Try on one file">
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <input className="inp" aria-label="File to try" placeholder="File name" value={tryFile} onChange={(e) => setTryFile(e.target.value)} style={{ flex: "1 1 220px", minWidth: 0 }} />
-            <button type="button" className="btn sm" onClick={onTry} disabled={!check}>Try</button>
+            <button type="button" className="btn sm" onClick={onTry} disabled={!check || tryRun.trying}>
+              {tryRun.trying ? "Trying… about a minute" : "Try"}
+            </button>
+            {tryRun.trying && <button type="button" className="btn sm" onClick={tryRun.stop}>Stop</button>}
           </div>
-          {tryErr && <p className="bad">{tryErr.message}</p>}
-          {tryLines && (
+          {tryRun.err && <p className="bad">{tryRun.err.message}</p>}
+          {tryRun.stopped && <p className="muted sm">Stopped. Nothing was kept.</p>}
+          {tryRun.lines && (
             <ul className="wf-try-lines">
-              {tryLines.map((l) => (
+              {tryRun.lines.map((l) => (
                 <li key={l.stepId + l.text}>
                   {STEP_NAME[l.stepId]}: {l.text}
                 </li>

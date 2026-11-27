@@ -27,7 +27,12 @@ export function onRouteCode(status: number, code: string): void {
   }
 }
 
-export async function request<T>(method: Method, path: string, body?: unknown): Promise<T> {
+// opts.signal lets a page stop a request. A stopped request rejects with its AbortError, and the page decides what to show.
+export interface RequestOpts {
+  signal?: AbortSignal;
+}
+
+export async function request<T>(method: Method, path: string, body?: unknown, opts: RequestOpts = {}): Promise<T> {
   let res: Response;
   try {
     res = await fetch("/api/v2" + path, {
@@ -35,8 +40,10 @@ export async function request<T>(method: Method, path: string, body?: unknown): 
       credentials: "same-origin",
       headers: { "X-SYP": "1", ...(body !== undefined ? { "Content-Type": "application/json" } : {}) },
       body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal: opts.signal,
     });
-  } catch {
+  } catch (e) {
+    if (opts.signal?.aborted) throw e;
     setConnection(false);
     throw new ApiError("unreachable", "Can't reach the server.");
   }

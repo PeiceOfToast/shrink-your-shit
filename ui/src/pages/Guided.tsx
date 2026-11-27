@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { navigate } from "../router.tsx";
-import { api, type Answers, type FlowDisabled, type GuideChoice, type GuideDoc, type GuideField, type GuidePart, type GuidePreview, type TryLine } from "../api/index.ts";
+import { api, type Answers, type FlowDisabled, type GuideChoice, type GuideDoc, type GuideField, type GuidePart, type GuidePreview } from "../api/index.ts";
 import { languageName } from "../format/language.ts";
 import { useApi } from "../api/useApi.ts";
 import { ChoiceField, QUALITY_NAMES, Row, toErr, useBitrateLadder, useCardFamilies, type Err } from "./flowParts.tsx";
+import { useTryFile } from "./useTryFile.ts";
 import { qualityMeaning } from "../format/quality.ts";
 import { fileTypeHint } from "../format/fileType.ts";
 
@@ -69,8 +70,7 @@ function GuidedForm({ id, initial }: { id: string; initial: Loaded }) {
   const [err, setErr] = useState<Err | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [tryFile, setTryFile] = useState("");
-  const [tryLines, setTryLines] = useState<TryLine[] | null>(null);
-  const [tryErr, setTryErr] = useState<Err | null>(null);
+  const tryRun = useTryFile();
   const [draftId, setDraftId] = useState(id);
   const seq = useRef(0);
 
@@ -168,16 +168,9 @@ function GuidedForm({ id, initial }: { id: string; initial: Loaded }) {
     }
   };
 
-  const onTry = async () => {
+  const onTry = () => {
     if (!preview) return;
-    setTryErr(null);
-    try {
-      const r = await api.tryFlow(preview.flow, tryFile);
-      setTryLines(r.lines);
-    } catch (e) {
-      setTryErr(toErr(e));
-      setTryLines(null);
-    }
+    void tryRun.start((signal) => api.tryFlow(preview.flow, tryFile, signal).then((r) => r.lines));
   };
 
   const problemOpen = (field?: string) => {
@@ -280,12 +273,16 @@ function GuidedForm({ id, initial }: { id: string; initial: Loaded }) {
             <h3 style={{ margin: "0 0 6px", fontSize: 14 }}>Try on one file</h3>
             <div style={{ display: "flex", gap: 8 }}>
               <input className="inp" aria-label="File to try" placeholder="File name" value={tryFile} onChange={(e) => setTryFile(e.target.value)} style={{ flex: 1, minWidth: 0 }} />
-              <button type="button" className="btn sm" disabled={!preview} onClick={onTry}>Try</button>
+              <button type="button" className="btn sm" disabled={!preview || tryRun.trying} onClick={onTry}>
+                {tryRun.trying ? "Trying… about a minute" : "Try"}
+              </button>
+              {tryRun.trying && <button type="button" className="btn sm" onClick={tryRun.stop}>Stop</button>}
             </div>
-            {tryErr && <p className="bad">{tryErr.message}</p>}
-            {tryLines && (
+            {tryRun.err && <p className="bad">{tryRun.err.message}</p>}
+            {tryRun.stopped && <p className="muted sm">Stopped. Nothing was kept.</p>}
+            {tryRun.lines && (
               <ul className="wf-try-lines">
-                {tryLines.map((l) => (
+                {tryRun.lines.map((l) => (
                   <li key={l.stepId + l.text}>{l.text}</li>
                 ))}
               </ul>

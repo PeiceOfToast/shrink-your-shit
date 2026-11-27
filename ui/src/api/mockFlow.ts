@@ -518,7 +518,26 @@ export function createDraft(input: { name: string; description?: string; answers
 }
 
 // Try on one file: the mock returns the per-step lines at once (the app runs a preview job and follows its events).
-export function tryFlow(flow: Flow, file: string): Promise<{ lines: TryLine[] }> {
+// The real try takes about a minute (a 60 s sample encode); the mock waits a short time so Stop can be seen.
+const TRY_MS = 1500;
+function waitUnlessStopped(ms: number, signal?: AbortSignal): Promise<void> {
+  const stopped = () => new DOMException("The try was stopped.", "AbortError");
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(stopped());
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(stopped());
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+export async function tryFlow(flow: Flow, file: string, signal?: AbortSignal): Promise<{ lines: TryLine[] }> {
+  await waitUnlessStopped(TRY_MS, signal);
   return respond(() => {
     checkFlow(flow);
     if (!file.trim()) throw new ApiError("file_required", "Pick a file to try.", "file");
