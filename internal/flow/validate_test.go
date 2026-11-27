@@ -46,7 +46,7 @@ func TestValidateStarterHasNoProblems(t *testing.T) {
 	found := false
 	for _, d := range rep.Disabled {
 		if d.StepID == "save" && d.Field == "container" && d.Value == "webm" {
-			found = d.Why == "WebM needs AV1 video and Opus audio."
+			found = d.Why == "WebM needs AV1 video. Pick AV1 in Video to use it."
 		}
 	}
 	if !found {

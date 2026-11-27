@@ -360,7 +360,7 @@ export function checkFlow(flow: Flow): FlowCheck {
     const why = rule.why(String(v.format), audioCodec(au));
     disabled.push({ stepId: "save", field: "container", value, why });
     if (sv.container === value) {
-      problems.push({ stepId: "save", field: "container", code: "container_unsupported", message: `${why} Pick another file type.` });
+      problems.push({ stepId: "save", field: "container", code: "container_unsupported", message: `${why} Or pick another file type.` });
     }
   }
 

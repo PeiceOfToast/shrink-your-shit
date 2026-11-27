@@ -124,10 +124,13 @@ func TestEverySentenceIsPinned(t *testing.T) {
 		{name: "save file type is not a choice", save: `{"container":"avi","where":"next_to"}`,
 			problems: []string{`settings|setting.invalid|file.save settings: File type must be MKV, MP4, WebM or Keep the same.`}},
 		{name: "container WebM", save: `{"container":"webm","where":"next_to"}`,
-			problems: []string{`container|container_unsupported|WebM needs AV1 video and Opus audio. Pick another file type.`},
-			disabled: []string{`save|container|webm|WebM needs AV1 video and Opus audio.`}},
+			problems: []string{`container|container_unsupported|WebM needs AV1 video. Pick AV1 in Video to use it. Or pick another file type.`},
+			disabled: []string{`save|container|webm|WebM needs AV1 video. Pick AV1 in Video to use it.`}},
+		{name: "container WebM with AV1", video: `{"format":"av1"}`, save: `{"container":"webm","where":"next_to"}`,
+			problems: []string{`container|container_unsupported|WebM needs Opus audio. Pick Opus in Audio to use it. Or pick another file type.`},
+			disabled: []string{`save|container|webm|WebM needs Opus audio. Pick Opus in Audio to use it.`}},
 		{name: "container MP4", audio: `{"format":"opus"}`, save: `{"container":"mp4","where":"next_to"}`,
-			problems: []string{`container|container_unsupported|MP4 can't hold Opus audio. Pick another file type.`},
+			problems: []string{`container|container_unsupported|MP4 can't hold Opus audio. Or pick another file type.`},
 			disabled: []string{`save|container|mp4|MP4 can't hold Opus audio.`}},
 	}
 
@@ -148,7 +151,8 @@ func TestEverySentenceIsPinned(t *testing.T) {
 		"FLAC is lossless, so it has no bitrate to set.",
 		"Replacing the original comes in a later update; for now the new file is saved next to it.",
 		"Saving to a different folder comes in a later update; for now the new file is saved next to it.",
-		"WebM needs AV1 video and Opus audio.",
+		"WebM needs AV1 video. Pick AV1 in Video to use it.",
+		"WebM needs Opus audio. Pick Opus in Audio to use it.",
 		"MP4 can't hold Opus audio.",
 	}
 
