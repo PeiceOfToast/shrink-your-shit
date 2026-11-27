@@ -8,7 +8,7 @@
       "message": "queued",
       "seq": 1,
       "source": "jobs",
-      "ts": "2026-11-27T16:27:07.954Z",
+      "ts": "2026-11-27T04:00:00.000Z",
       "workerId": null
     },
     {
@@ -19,7 +19,7 @@
       "message": "picked",
       "seq": 2,
       "source": "jobs",
-      "ts": "2026-11-27T16:27:07.954Z",
+      "ts": "2026-11-27T04:00:00.000Z",
       "workerId": null
     },
     {
@@ -30,7 +30,7 @@
       "message": "smaller",
       "seq": 3,
       "source": "jobs",
-      "ts": "2026-11-27T16:27:07.954Z",
+      "ts": "2026-11-27T04:00:00.000Z",
       "workerId": null
     }
   ],
