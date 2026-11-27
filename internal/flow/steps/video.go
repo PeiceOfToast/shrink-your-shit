@@ -71,6 +71,8 @@ func (VideoStep) Def() flow.Definition {
 				Keep: events.KeepLog},
 			{Code: "video.no_bitrate", Level: events.LevelError, Text: "The bitrate is missing",
 				Keep: events.KeepLog},
+			{Code: "video.hdr_h264", Level: events.LevelError, Text: "H.264 cannot keep HDR on this encoder",
+				Keep: events.KeepLog},
 			{Code: "video.hdr_skipped", Level: events.LevelInfo, Text: "Left alone: {hdr} is not converted",
 				Fields: []string{"hdr"}, Keep: events.KeepLog},
 		},
@@ -116,6 +118,11 @@ func (VideoStep) Plan(s flow.Settings, in flow.PlanInput, p *encode.Plan) (flow.
 	p.Video.HDR = encode.HDRKeep
 	if hdr == "tonemap" && main.HDRKind() != "SDR" {
 		p.Video.HDR = encode.HDRTonemap
+	}
+	if want == encode.CodecH264 && p.Video.HDR == encode.HDRKeep && main.HDRKind() != "SDR" {
+		// H.264 cannot carry HDR on this encoder (#855): say so before the run, not as a failed job.
+		return flow.Decision{}, &flow.PlanError{Code: "video.hdr_h264",
+			Message: "H.264 cannot keep HDR on this encoder. Pick HEVC, or choose Convert to SDR."}
 	}
 	detail := flow.F{
 		"format": string(want), "from": main.Codec,
@@ -287,6 +294,11 @@ func (VideoStep) Validate(s flow.Settings, vc flow.ValidateContext) flow.Check {
 		})
 	}
 	c.Disabled = append(c.Disabled, tagDisabled(set)...)
+	if set.BitDepth != nil && *set.BitDepth == 10 && set.Format == "h264" {
+		// Greyed and a problem: a plan asking for ten-bit H.264 is refused rather than written as eight (#855).
+		c.Problems = append(c.Problems, flow.Problem{Field: "bitDepth", Code: "video.bitdepth_h264",
+			Message: "10-bit H.264 is not offered on this encoder. Pick 8-bit, or HEVC."})
+	}
 	if !set.UseGpu {
 		c.Disabled = append(c.Disabled, flow.Disabled{Field: "ifGpuFails", Why: "The graphics card is not used."})
 	} else if vc.Env.CardFamily == "" {

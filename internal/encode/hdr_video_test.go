@@ -3,6 +3,7 @@
 package encode
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -115,5 +116,52 @@ func TestBuildTenBitHDRIsHDR10(t *testing.T) {
 	params, _ := flagValue(res.Argv, "-x265-params:v:0")
 	if !strings.Contains(params, "transfer=smpte2084") {
 		t.Errorf("x265 params %q lack the HDR10 transfer", params)
+	}
+}
+
+// TestBuildH264IsEightBit: H.264 is 8-bit on this encoder (#855). A ten-bit SDR source is written as 8-bit with
+// the reason in the log; asking for ten-bit H.264, or keeping HDR in it, is refused.
+func TestBuildH264IsEightBit(t *testing.T) {
+	tenBitSDR := baseInfo()
+	tenBitSDR.Video[0].BitDepth = 10
+	res := buildOK(t, basePlan(CodecH264), tenBitSDR, cpuRung(CodecH264))
+	if v, _ := flagValue(res.Argv, "-pix_fmt:v:0"); v != "yuv420p" {
+		t.Errorf("pix_fmt = %q, want yuv420p for H.264", v)
+	}
+	if !strings.Contains(strings.Join(res.Notes, " "), "written as 8-bit") {
+		t.Errorf("notes = %q, want the 8-bit note", res.Notes)
+	}
+
+	plan := basePlan(CodecH264)
+	plan.Video.BitDepth = Depth10
+	if _, err := Build(plan, baseInfo(), cpuRung(CodecH264)); !errors.Is(err, ErrInvalidPlan) {
+		t.Errorf("ten-bit H.264: error = %v, want ErrInvalidPlan", err)
+	}
+
+	hdr := plan
+	hdr.Video.BitDepth = DepthSource
+	if _, err := Build(hdr, hdr10Info(), cpuRung(CodecH264)); !errors.Is(err, ErrInvalidPlan) {
+		t.Errorf("HDR kept in H.264: error = %v, want ErrInvalidPlan", err)
+	}
+}
+
+// TestH264HDRIsRefusedInEveryShape: HDR in H.264 is refused at every scale and container, so no argument row can
+// describe a ten-bit HDR H.264 file (#855).
+func TestH264HDRIsRefusedInEveryShape(t *testing.T) {
+	for _, scale := range []Scale{{}, {Height: 1080}, {Height: 720}} {
+		for _, container := range []Container{ContainerMKV, ContainerMP4} {
+			for _, info := range []media.Info{hdr10Info(), func() media.Info {
+				i := hdr10Info()
+				i.Video[0].ColorTransfer = "arib-std-b67"
+				return i
+			}()} {
+				plan := basePlan(CodecH264)
+				plan.Video.Scale = scale
+				plan.Container = container
+				if _, err := Build(plan, info, cpuRung(CodecH264)); !errors.Is(err, ErrInvalidPlan) {
+					t.Errorf("H.264 with %s, scale %+v, %s: error = %v, want ErrInvalidPlan", info.Video[0].ColorTransfer, scale, container, err)
+				}
+			}
+		}
 	}
 }

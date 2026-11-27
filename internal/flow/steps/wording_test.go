@@ -51,6 +51,7 @@ func TestEverySentenceIsPinned(t *testing.T) {
 			disabled: []string{`video|keepDolbyVision||Only with HEVC.`}},
 
 		{name: "video colour depth on H.264", video: video(`,"format":"h264","bitDepth":10`),
+			problems: []string{`bitDepth|video.bitdepth_h264|10-bit H.264 is not offered on this encoder. Pick 8-bit, or HEVC.`},
 			disabled: []string{`video|bitDepth|10|10-bit H.264 is not offered on this encoder. H.264 stays 8-bit.`}},
 		{name: "video Dolby Vision", video: video(`,"keepDolbyVision":true`),
 			disabled: []string{`video|keepDolbyVision||Keeping the Dolby Vision layer is not possible on the processor with this ffmpeg. Profiles 7 and 8 convert as their HDR10 base.`}},
@@ -122,7 +123,7 @@ func TestEverySentenceIsPinned(t *testing.T) {
 
 	// Every problem code and every greyed sentence the check can carry, so a new one cannot arrive
 	// without its row here.
-	wantCodes := []string{"video.not_yet", "video.no_bitrate", "audio.not_yet", "audio.copy_conflict",
+	wantCodes := []string{"video.not_yet", "video.no_bitrate", "video.bitdepth_h264", "audio.not_yet", "audio.copy_conflict",
 		"save.not_yet", "save.folder_missing", "save.empty_suffix", "container_unsupported", "setting.invalid"}
 	wantWhys := []string{
 		"Not used: Advanced sets a bitrate instead.",

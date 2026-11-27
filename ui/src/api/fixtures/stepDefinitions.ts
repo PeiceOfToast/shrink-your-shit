@@ -38,6 +38,12 @@ export const STEP_DEFINITIONS: StepDefinition[] = [
         "text": "The bitrate is missing"
       },
       {
+        "code": "video.hdr_h264",
+        "keep": "log",
+        "level": "error",
+        "text": "H.264 cannot keep HDR on this encoder"
+      },
+      {
         "code": "video.hdr_skipped",
         "fields": ["hdr"],
         "keep": "log",

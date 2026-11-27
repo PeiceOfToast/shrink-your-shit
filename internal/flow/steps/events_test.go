@@ -34,6 +34,9 @@ func codeCases() []codeCase {
 	hdrSkip.HDR = ptr("skip")
 	hdrInfo := probeInfo("h264", 1920, 1080)
 	hdrInfo.Video[0].ColorTransfer = "smpte2084"
+	// An HEVC HDR source: to H.264 it is a real conversion, not already-target.
+	hevcHDR := probeInfo("hevc", 1920, 1080)
+	hevcHDR.Video[0].ColorTransfer = "smpte2084"
 	loud := probeInfo("h264", 1920, 1080)
 	loud.Audio[0].BitRate = 640_000
 	return []codeCase{
@@ -41,6 +44,7 @@ func codeCases() []codeCase {
 		{name: "video already target", step: VideoStep{}, set: videoSettings("hevc", 3), info: probeInfo("hevc", 1920, 1080), want: "video.already_target"},
 		{name: "video no picture", step: VideoStep{}, set: videoSettings("hevc", 3),
 			info: media.Info{Path: "/library/a.mkv"}, want: "video.no_video", isErr: true},
+		{name: "video H.264 cannot keep HDR", step: VideoStep{}, set: videoSettings("h264", 3), info: hevcHDR, want: "video.hdr_h264", isErr: true},
 		{name: "video HDR left alone", step: VideoStep{}, set: hdrSkip, info: hdrInfo, want: "video.hdr_skipped"},
 		{name: "video bitrate missing", step: VideoStep{}, set: noAverage,
 			info: probeInfo("h264", 1920, 1080), want: "video.no_bitrate", isErr: true},
