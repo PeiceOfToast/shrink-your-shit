@@ -1,9 +1,8 @@
 name: rebuild publish
 
 # Publishes the rolling pre-release tagged "rebuild" on every push to the rebuild branch: install.sh, the two
-# binaries and checksums.txt. The tag and the pre-release are the only releases this workflow touches; it never
-# marks anything Latest, never touches main, and never creates any other tag. The tag is deleted at the first real
-# release, which is the user's call.
+# binaries and checksums.txt. It creates that release once, never marks anything Latest, never moves a tag, never
+# touches main, and never creates any other tag or release. The tag is deleted at the first real release (the user's call).
 
 on:
   push:
@@ -58,21 +57,18 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-
       - uses: actions/download-artifact@v4
         with:
           name: syp-rebuild
 
-      - name: Move the rebuild tag and update the pre-release
+      - name: Update the rebuild pre-release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -eu
           repo="$GITHUB_REPOSITORY"
-          # The tag follows the branch: it moves to this commit on every push.
-          git tag -f rebuild "$GITHUB_SHA"
-          git push -f origin refs/tags/rebuild
+          # The tag is created once, with the release, at the commit that first published it. It is never moved:
+          # later runs only edit the release and replace its assets.
           if ! gh release view rebuild --repo "$repo" >/dev/null 2>&1; then
             gh release create rebuild --repo "$repo" --target "$GITHUB_SHA" --prerelease --latest=false \
               --title "rebuild (rolling pre-release)" \
