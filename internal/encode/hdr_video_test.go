@@ -165,3 +165,32 @@ func TestH264HDRIsRefusedInEveryShape(t *testing.T) {
 		}
 	}
 }
+
+// TestScaleGivesEvenSidesFromOddSources: a picture with odd sides is scaled to even ones, the shape kept within a
+// pixel (4:2:0 needs even sides).
+func TestScaleGivesEvenSidesFromOddSources(t *testing.T) {
+	cases := []struct {
+		name         string
+		srcW, srcH   int
+		box          Scale
+		wantW, wantH int
+	}{
+		{"odd 1281x721 to height 360", 1281, 721, Scale{Height: 360}, 640, 360},
+		{"odd 1921x1081 to height 720", 1921, 1081, Scale{Height: 720}, 1278, 720},
+		{"odd 853x481 to width 426", 853, 481, Scale{Width: 426}, 426, 240},
+	}
+	for _, c := range cases {
+		info := baseInfo()
+		info.Video[0].Width, info.Video[0].Height = c.srcW, c.srcH
+		w, h, err := scaleTo(info.Video[0], c.box)
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if w%2 != 0 || h%2 != 0 {
+			t.Errorf("%s: %dx%d has an odd side", c.name, w, h)
+		}
+		if w != c.wantW || h != c.wantH {
+			t.Errorf("%s: %dx%d, want %dx%d", c.name, w, h, c.wantW, c.wantH)
+		}
+	}
+}

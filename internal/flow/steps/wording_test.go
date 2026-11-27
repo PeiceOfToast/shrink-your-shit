@@ -51,8 +51,8 @@ func TestEverySentenceIsPinned(t *testing.T) {
 			disabled: []string{`video|keepDolbyVision||Only with HEVC.`}},
 
 		{name: "video colour depth on H.264", video: video(`,"format":"h264","bitDepth":10`),
-			problems: []string{`bitDepth|video.bitdepth_h264|10-bit H.264 is not offered on this encoder. Pick 8-bit, or HEVC.`},
-			disabled: []string{`video|bitDepth|10|10-bit H.264 is not offered on this encoder. H.264 stays 8-bit.`}},
+			problems: []string{`bitDepth|video.bitdepth_h264|10-bit H.264 isn't offered. Pick 8-bit, or HEVC.`},
+			disabled: []string{`video|bitDepth|10|10-bit H.264 isn't offered. H.264 stays 8-bit.`}},
 		{name: "video Dolby Vision", video: video(`,"keepDolbyVision":true`),
 			disabled: []string{`video|keepDolbyVision||Keeping the Dolby Vision layer is not possible on the processor with this ffmpeg. Profiles 7 and 8 convert as their HDR10 base.`}},
 
@@ -129,7 +129,7 @@ func TestEverySentenceIsPinned(t *testing.T) {
 		"Not used: Advanced sets a bitrate instead.",
 		"Variable bitrate doesn't work with AV1 yet. Pick Constant bitrate or Quality, or another format.",
 		"Only with HEVC.",
-		"10-bit H.264 is not offered on this encoder. H.264 stays 8-bit.",
+		"10-bit H.264 isn't offered. H.264 stays 8-bit.",
 		"Keeping the Dolby Vision layer is not possible on the processor with this ffmpeg. Profiles 7 and 8 convert as their HDR10 base.",
 		"The graphics card is not used.",
 		"No worker has a graphics card.",

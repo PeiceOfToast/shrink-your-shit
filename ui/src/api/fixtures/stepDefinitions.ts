@@ -41,7 +41,7 @@ export const STEP_DEFINITIONS: StepDefinition[] = [
         "code": "video.hdr_h264",
         "keep": "log",
         "level": "error",
-        "text": "H.264 cannot keep HDR on this encoder"
+        "text": "H.264 can't keep HDR"
       },
       {
         "code": "video.hdr_skipped",

@@ -4,6 +4,7 @@ package encode
 
 import (
 	"context"
+	"encoding/json"
 	"math"
 	"os/exec"
 	"path/filepath"
@@ -175,4 +176,68 @@ func psnrOf(t *testing.T, a, b string) float64 {
 		t.Fatal(err)
 	}
 	return v
+}
+
+// streamShape is the first video stream's size and sample aspect ratio as ffprobe reports them.
+func streamShape(t *testing.T, path string) (w, h int, sar string) {
+	t.Helper()
+	out, err := exec.Command("ffprobe", "-v", "error", "-select_streams", "v:0",
+		"-show_entries", "stream=width,height,sample_aspect_ratio", "-of", "json", path).Output()
+	if err != nil {
+		t.Fatalf("ffprobe %s: %v", path, err)
+	}
+	var doc struct {
+		Streams []struct {
+			Width  int    `json:"width"`
+			Height int    `json:"height"`
+			SAR    string `json:"sample_aspect_ratio"`
+		} `json:"streams"`
+	}
+	if err := json.Unmarshal(out, &doc); err != nil || len(doc.Streams) == 0 {
+		t.Fatalf("ffprobe output for %s: %v %s", path, err, out)
+	}
+	s := doc.Streams[0]
+	return s.Width, s.Height, s.SAR
+}
+
+// TestRealOddSourceEncodesWithEvenSides: a 1281x721 source (odd sides) scaled to height 360 encodes as an even
+// picture; yuv420p would refuse an odd side, so the encode itself is the check.
+func TestRealOddSourceEncodesWithEvenSides(t *testing.T) {
+	requireRealTools(t)
+	dir := t.TempDir()
+	src := makeVideoSource(t, dir, "odd.mkv",
+		"-f", "lavfi", "-i", "testsrc2=size=1281x721:rate=24:duration=1",
+		"-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p")
+	_, out := convertReal(t, src, Plan{
+		Video: VideoPlan{Codec: CodecHEVC, CRF: intp(32), Preset: "faster", Scale: Scale{Height: 360}},
+	})
+	w, h, _ := streamShape(t, out)
+	if w%2 != 0 || h%2 != 0 || h != 360 {
+		t.Errorf("picture = %dx%d, want even sides with height 360", w, h)
+	}
+}
+
+// TestRealAnamorphicKeepsItsDisplayShape: a 4:3 picture made of non-square pixels (SAR 16:15) scaled to 288 keeps its
+// sample aspect ratio, so the display shape stays 4:3.
+func TestRealAnamorphicKeepsItsDisplayShape(t *testing.T) {
+	requireRealTools(t)
+	dir := t.TempDir()
+	src := makeVideoSource(t, dir, "anamorphic.mkv",
+		"-f", "lavfi", "-i", "testsrc2=size=720x576:rate=24:duration=1",
+		"-vf", "setsar=16/15",
+		"-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p")
+	_, out := convertReal(t, src, Plan{
+		Video: VideoPlan{Codec: CodecHEVC, CRF: intp(32), Preset: "faster", Scale: Scale{Height: 288}},
+	})
+	w, h, sar := streamShape(t, out)
+	if h != 288 || w != 360 {
+		t.Errorf("picture = %dx%d, want 360x288", w, h)
+	}
+	if sar != "16:15" {
+		t.Errorf("sample aspect ratio = %q, want 16:15 kept", sar)
+	}
+	dar := float64(w) * 16 / 15 / float64(h)
+	if math.Abs(dar-4.0/3.0) > 0.01 {
+		t.Errorf("display aspect = %.3f, want 4:3", dar)
+	}
 }
