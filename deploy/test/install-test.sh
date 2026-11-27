@@ -328,19 +328,25 @@ else
   exit 1
 fi
 
+# The detail wraps the job: outputPath is where its result went, file is the source's name.
 JOBFILE=$(curl -sS -b "$JAR" -c "$JAR" "$BASE/api/v2/jobs/$JOB" | python3 -c '
 import json, sys
 try:
-    print(json.load(sys.stdin).get("file") or "")
+    d = json.load(sys.stdin)
 except Exception:
-    print("")
+    sys.exit(0)
+job = d.get("job") or d
+print(d.get("outputPath") or "")
+print(job.get("file") or "")
 ')
-OUT="$LIBRARY/${JOBFILE%.*}-shrunk.mkv"
+OUT=$(printf '%s\n' "$JOBFILE" | head -n 1)
+NAME=$(printf '%s\n' "$JOBFILE" | sed -n 2p)
+[ -n "$OUT" ] || OUT="$LIBRARY/${NAME%.*}-shrunk.mkv"
 CODEC=$(ct "/opt/syp/ffmpeg/ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of csv=p=0 '$OUT'" 2>/dev/null || true)
-if [ -n "$JOBFILE" ] && [ "$CODEC" = hevc ]; then
+if [ -n "$NAME" ] && [ "$CODEC" = hevc ]; then
   pass "$OUT is next to its clip and probes as hevc"
 else
-  fail "$OUT does not exist next to $JOBFILE or is not hevc (got: ${CODEC:-missing})"
+  fail "$OUT does not exist next to ${NAME:-its clip} or is not hevc (got: ${CODEC:-missing})"
 fi
 if ct 'sha256sum -c /root/originals.sha256' >/dev/null 2>&1; then
   pass "the originals' sha256 is unchanged"

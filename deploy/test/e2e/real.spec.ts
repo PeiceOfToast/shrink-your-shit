@@ -9,9 +9,11 @@ const BASE_URL = env.BASE_URL ?? "http://127.0.0.1:8484";
 const LIBRARY = env.E2E_LIBRARY;
 const PASSWORD = env.E2E_PASSWORD ?? "e2e-password-1";
 const CONVERT = env.E2E_CONVERT === "1";
+// A red run can be bounded from outside; the default covers a slow real conversion.
+const TEST_TIMEOUT = Number(env.E2E_TIMEOUT_MS ?? 11 * 60_000);
 
 test.describe.configure({ mode: "serial" });
-test.setTimeout(11 * 60_000);
+test.setTimeout(TEST_TIMEOUT);
 
 test("first run: a password, a starter, then the Dashboard", async ({ page }) => {
   await page.goto(`${BASE_URL}/start?api=real`);
