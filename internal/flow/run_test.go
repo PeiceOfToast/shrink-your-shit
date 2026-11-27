@@ -50,6 +50,9 @@ type fakeSafety struct {
 	verifyE error
 	stageE  error
 	placeE  error
+	// placeLeftBehind makes Place behave like the link fallback: the final name exists (a hard link),
+	// the staged copy stays, and the error is ErrSourceLeftBehind.
+	placeLeftBehind bool
 
 	gotWant     safety.Want
 	gotRecorder safety.Recorder
@@ -82,6 +85,13 @@ func (f *fakeSafety) Verify(ctx context.Context, p media.Prober, rec safety.Reco
 }
 
 func (f *fakeSafety) Place(ctx context.Context, st safety.Staged, final string) (string, error) {
+	if f.placeLeftBehind {
+		if err := os.Link(st.Path, final); err != nil {
+			return "", err
+		}
+		f.placedTo = final
+		return final, safety.ErrSourceLeftBehind
+	}
 	if f.placeE != nil {
 		return "", f.placeE
 	}
@@ -453,6 +463,36 @@ func TestRunEncodeFailureIsFatalWithKeyLines(t *testing.T) {
 	}
 	if _, err := os.Stat(sf.staged[0].Folder); !os.IsNotExist(err) {
 		t.Errorf("staging folder still there after a failure")
+	}
+}
+
+// TestRunKeepsTheStagingFolderWhenTheSourceIsLeftBehind is the link fallback: the output is at its
+// final name, but the staged copy could not be removed. The run is a success with a warning, and the
+// folder is kept for the sweep rather than deleted under the caller.
+func TestRunKeepsTheStagingFolderWhenTheSourceIsLeftBehind(t *testing.T) {
+	root, src, info := libraryFile(t, "clip.mkv", "h264")
+	final := filepath.Join(root, "clip-shrunk.mkv")
+	m := &fake.Media{Probes: map[string]media.Info{src: info}}
+	sf := &fakeSafety{verify: safety.Verdict{OK: true}, placeLeftBehind: true}
+	res := flow.Run(context.Background(), runInput(t, root, src),
+		newEnv(m, sf, &recorder{}, starterFlow(t), nil))
+	if res.Outcome != flow.OutcomeSmaller || res.Reason != "source.not_removed" || res.OutputPath != final {
+		t.Fatalf("result = %+v, want smaller source.not_removed at %s", res, final)
+	}
+	if _, err := os.Stat(final); err != nil {
+		t.Errorf("the output is not at its final name: %v", err)
+	}
+	if len(sf.staged) != 1 {
+		t.Fatalf("staged %d times, want 1", len(sf.staged))
+	}
+	if _, err := os.Stat(sf.staged[0].Folder); err != nil {
+		t.Errorf("staging folder removed although the staged copy was left behind: %v", err)
+	}
+	if _, err := os.Stat(sf.staged[0].Path); err != nil {
+		t.Errorf("staged copy removed: %v", err)
+	}
+	if _, err := os.Stat(src); err != nil {
+		t.Errorf("the original is gone: %v", err)
 	}
 }
 
