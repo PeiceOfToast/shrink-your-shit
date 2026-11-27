@@ -12,9 +12,16 @@ const STATE: Record<WorkerState, { cls: string; label: (w: Worker) => string }> 
   offline: { cls: "bad", label: (w) => (w.since ? `Offline since ${clock(w.since)}` : "Offline") },
 };
 
+// While the all-workers switch is off, the pill says Paused and the line under it says why. The worker's own state is kept.
 export function StatePill({ w }: { w: Worker }) {
   const s = STATE[w.state];
-  return <span className={`pill ${s.cls}`}>{s.label(w)}</span>;
+  const paused = w.pausedGlobally && w.state !== "offline";
+  return (
+    <>
+      <span className={`pill ${paused ? STATE.paused.cls : s.cls}`}>{paused ? STATE.paused.label(w) : s.label(w)}</span>
+      {paused && <div className="muted sm">Paused for all workers</div>}
+    </>
+  );
 }
 
 // Pause asks whether the files it is on finish first (page 10, Actions).

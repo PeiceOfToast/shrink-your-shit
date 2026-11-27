@@ -89,4 +89,5 @@ export const SUMMARY: Summary = {
   seenSeq: 0,
   seenAt: null,
   healthFailing: false,
+  workers: { paused: false, finishing: 0 },
 };

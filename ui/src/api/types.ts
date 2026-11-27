@@ -177,6 +177,8 @@ export interface Summary {
   // RFC 3339 time of the line seenSeq names; null while seenSeq is 0 (and on a fresh install).
   seenAt: string | null;
   healthFailing: boolean;
+  // The all-workers switch. paused is true while it is off; finishing counts the files still running then (0 otherwise).
+  workers: { paused: boolean; finishing: number };
 }
 
 export interface Job {
@@ -342,6 +344,8 @@ export interface Worker {
   gpu: { name: string } | null;
   now: { jobId: string; file: string; step: JobStepRef } | null;
   doneToday: number;
+  // True while the all-workers switch is off. The worker's own state is kept, so it returns when the switch goes back on.
+  pausedGlobally: boolean;
 }
 
 export interface WorkerLibrary {

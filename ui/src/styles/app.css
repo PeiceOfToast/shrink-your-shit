@@ -1,10 +1,16 @@
-/* Parts the draft does not have: menus, search, dev switcher, placeholder notes. Tokens come from draft-b.css. */
+/* Parts the draft does not have: menus, the Workers switch, dev switcher, placeholder notes. Tokens come from draft-b.css. */
 .app{min-height:100vh}
 /* Paths, card names and file names. The class was used on several pages but never defined. */
 .mono{font-family:var(--mono)}
 .topbar .brand{text-decoration:none;color:var(--text)}
-button.search{background:none;border:1px solid var(--border);color:var(--text2);width:300px;font:inherit;font-size:13px;cursor:pointer;text-align:left}
-.topbar kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--border);border-radius:3px;padding:0 4px;margin-left:auto}
+/* The all-workers switch in the top bar: green word when on, amber when paused. The short word shows on a phone. */
+.gsw-wrap{display:inline-flex;align-items:center;gap:8px}
+.gsw{min-height:32px;height:32px;padding:0 10px;border:1px solid var(--border);border-radius:4px;font-size:13px;white-space:nowrap}
+.gsw.on b{color:var(--ok)}
+.gsw.paused b{color:var(--warn)}
+.gsw:disabled{cursor:progress}
+.gsw .short{display:none}
+.statusbar .warn-t{color:var(--warn);font-weight:500}
 .menu{position:relative;display:inline-flex}
 .menu-panel{position:absolute;top:calc(100% + 6px);right:0;min-width:220px;background:var(--raised);border:1px solid var(--border);border-radius:4px;padding:4px;z-index:5;display:flex;flex-direction:column}
 .menu-panel button{background:none;border:0;color:var(--text);text-align:left;padding:8px 10px;border-radius:4px;font:inherit;font-size:13.5px;cursor:pointer}
@@ -22,20 +28,16 @@ button.search{background:none;border:1px solid var(--border);color:var(--text2);
 @keyframes skel{50%{opacity:.45}}
 @media (prefers-reduced-motion:reduce){.skel{animation:none}}
 .scrim{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10;display:flex;align-items:flex-start;justify-content:center;padding-top:12vh}
-.palette{width:min(560px,92vw);padding:0;overflow:hidden}
-.palette-input{display:flex;align-items:center;gap:8px;padding:0 12px;height:44px;border-bottom:1px solid var(--border)}
-.palette-input input{flex:1;background:none;border:0;color:var(--text);font:inherit;font-size:14px;outline:none}
-.palette-list{list-style:none;margin:0;padding:6px;max-height:50vh;overflow:auto}
-.palette-list button{width:100%;display:flex;justify-content:space-between;background:none;border:0;color:var(--text);padding:8px 10px;border-radius:4px;font:inherit;font-size:13.5px;cursor:pointer;text-align:left}
-.palette-list button:hover,.palette-list button:focus-visible{background:var(--raised)}
-.dev-chip{position:fixed;left:12px;bottom:12px;z-index:20;background:var(--raised);border:1px solid var(--border);border-radius:4px;padding:4px 8px}
-.dev-states{position:fixed;left:12px;bottom:12px;max-width:calc(100vw - 24px);flex-wrap:wrap;z-index:20;display:flex;gap:4px;align-items:center;background:var(--raised);border:1px solid var(--border);border-radius:4px;padding:6px}
+/* Dev only (?states): sits in the status row's empty right end, under the top bar, so it covers no buttons. */
+.dev-chip{position:fixed;right:12px;top:52px;z-index:20;background:var(--raised);border:1px solid var(--border);border-radius:4px;padding:4px 8px}
+.dev-states{position:fixed;right:12px;top:52px;max-width:calc(100vw - 24px);flex-wrap:wrap;z-index:20;display:flex;gap:4px;align-items:center;background:var(--raised);border:1px solid var(--border);border-radius:4px;padding:6px}
 @media (max-width:900px){
-  /* One brand row on a phone: mark, Search (icon), + New and the theme button. The second menu (Account) is left off. */
-  .topbar .menu:nth-of-type(2){display:none}
-  .topbar .search{display:flex;width:32px;height:32px;padding:0;justify-content:center;font-size:0}
-  .topbar .search kbd{display:none}
-  .phonebar{display:none}
+  /* The bottom bar is fixed on a phone: keep the content and the settings save bar clear of it (about 64px). */
+  .main-col{padding-bottom:84px}
+  .savebar{bottom:64px}
+  .gsw .long{display:none}
+  .gsw .short{display:inline}
+  .topbar .menu{display:none}
   .kpis > .kpi:last-child{grid-column:1 / -1}
   .seg button:last-child{border-right:1px solid var(--border)}
   .statusbar .lg-only{display:none}

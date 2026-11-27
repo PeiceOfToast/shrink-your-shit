@@ -3,6 +3,7 @@ import type { JoinRequest, Pairing, Worker, WorkerDetail, WorkerLibrary, WorkerS
 import { ApiError } from "./errors.ts";
 import { getForcedState, respond } from "./mockState.ts";
 import { WORKERS } from "./fixtures/workers.ts";
+import { SUMMARY } from "./fixtures/index.ts";
 import { currentLibraries } from "./mockLibraries.ts";
 
 let rows: WorkerDetail[] = WORKERS.map(copy);
@@ -20,6 +21,7 @@ const JOINER: WorkerDetail = {
   gpu: null,
   now: null,
   doneToday: 0,
+  pausedGlobally: false,
   hours: null,
   primaryEncoder: null,
   encoders: [],
@@ -39,6 +41,7 @@ const summary = (w: WorkerDetail): Worker => ({
   gpu: w.gpu,
   now: w.now,
   doneToday: w.doneToday,
+  pausedGlobally: globalPaused,
 });
 
 function copy(w: WorkerDetail): WorkerDetail {
@@ -51,11 +54,37 @@ function find(id: string): WorkerDetail {
   return w;
 }
 
-// The all on/off switch: every worker that is not offline converts, or pauses.
-export function setAllWorkers(on: boolean): void {
-  rows = rows.map((w) =>
-    w.state === "offline" ? w : { ...w, state: on ? "converting" : "paused", since: on ? null : new Date().toISOString() },
-  );
+// The all-workers switch. Off starts no new jobs; the files already running finish (finishing counts them, then 0).
+// A worker keeps its own state, so when the switch goes back on each worker is as it was.
+const FINISH_MS = 8000;
+let globalPaused = false;
+let finishing = 0;
+let finishTimer: ReturnType<typeof setTimeout> | undefined;
+
+export function workersSwitch(): { paused: boolean; finishing: number } {
+  return { paused: globalPaused, finishing };
+}
+
+// Each route answers with the workers list.
+export function drainAllWorkers(): Promise<Worker[]> {
+  return respond(() => {
+    globalPaused = true;
+    finishing = SUMMARY.converting.running;
+    clearTimeout(finishTimer);
+    finishTimer = setTimeout(() => {
+      finishing = 0;
+    }, FINISH_MS);
+    return rows.map(summary);
+  });
+}
+
+export function startAllWorkers(): Promise<Worker[]> {
+  return respond(() => {
+    globalPaused = false;
+    finishing = 0;
+    clearTimeout(finishTimer);
+    return rows.map(summary);
+  });
 }
 
 export function workerName(id: string): string | undefined {
@@ -80,7 +109,7 @@ export function getWorkers(): Promise<Worker[]> {
 }
 
 export function getWorker(id: string): Promise<WorkerDetail> {
-  return respond(() => copy(find(id)));
+  return respond(() => ({ ...copy(find(id)), pausedGlobally: globalPaused }));
 }
 
 export type WorkerPatch = Partial<Pick<WorkerDetail, "slots" | "gpuSlots" | "hours" | "primaryEncoder">> & {

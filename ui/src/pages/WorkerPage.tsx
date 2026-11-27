@@ -164,7 +164,15 @@ export function WorkerPage({ id }: { id: string }) {
         <span className="sp"></span>
         <StatePill w={w} />
         {!offline && w.state !== "paused" && (
-          <button type="button" className="btn sm" onClick={() => setDialog("pause")} disabled={busy}>Pause</button>
+          <button
+            type="button"
+            className={`btn sm${w.pausedGlobally ? " dis" : ""}`}
+            onClick={() => setDialog("pause")}
+            disabled={busy || w.pausedGlobally}
+            title={w.pausedGlobally ? "Paused for all workers" : undefined}
+          >
+            Pause
+          </button>
         )}
         {w.state === "paused" && (
           <button type="button" className="btn sm" onClick={() => run(() => api.resumeWorker(id), reloadAll)} disabled={busy}>

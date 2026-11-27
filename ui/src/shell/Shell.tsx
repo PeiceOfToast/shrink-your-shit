@@ -6,7 +6,7 @@ import { useConnectionOk } from "../api/connection.ts";
 import { Icon } from "../ui/Icon.tsx";
 import type { IconName } from "../ui/icon-paths.ts";
 import { Link, navigate, useLocation } from "../router.tsx";
-import { Search } from "./Search.tsx";
+import { WorkersSwitch } from "./WorkersSwitch.tsx";
 import { applyTheme, nextTheme, readTheme, type ThemeMode } from "./theme.ts";
 
 // Main sections in the order decided 11-26 (Dashboard · Libraries · Workflows · Jobs · Workers · Settings).
@@ -86,6 +86,7 @@ function StatusLine({ summary, ok }: { summary?: Summary; ok: boolean }) {
   const s = summary;
   return (
     <div className={`statusbar ${open ? "open" : ""}`} role="status" onClick={() => setOpen((o) => !o)}>
+      {s?.workers.paused && <b className="warn-t">paused</b>}
       <Link to="/workers">
         <i></i>
         <b>converting</b> {s ? `${s.converting.running} of ${s.converting.workers} workers` : "—"}
@@ -116,7 +117,6 @@ export function Shell({ children }: { children: ReactNode }) {
   const summary = useApi(() => api.getSummary(), []);
   const ok = useConnectionOk();
   const [theme, setTheme] = useState<ThemeMode>(() => readTheme());
-  const [searching, setSearching] = useState(false);
   const active = activeKey(pathname);
 
   useEffect(() => {
@@ -135,16 +135,13 @@ export function Shell({ children }: { children: ReactNode }) {
     };
   }, [reloadSummary]);
 
+  // While files finish after the switch goes off, the count is read again so the label clears on its own.
+  const finishingNow = summary.data?.workers.finishing ?? 0;
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        setSearching((v) => !v);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
+    if (finishingNow === 0) return;
+    const t = setTimeout(reloadSummary, 1500);
+    return () => clearTimeout(t);
+  }, [finishingNow, summary.data, reloadSummary]);
 
   const failed = summary.data?.failed24h ?? 0;
   const offline = summary.data?.workersOffline ?? 0;
@@ -175,11 +172,7 @@ export function Shell({ children }: { children: ReactNode }) {
           ))}
         </nav>
         <span className="sp"></span>
-        <button type="button" className="search" onClick={() => setSearching(true)}>
-          <Icon name="search" />
-          Search
-          <kbd>Ctrl K</kbd>
-        </button>
+        <WorkersSwitch summary={summary.data} reload={summary.reload} />
         <Menu
           label="New"
           icon="plus"
@@ -237,7 +230,6 @@ export function Shell({ children }: { children: ReactNode }) {
           ))}
         </nav>
       </main>
-      {searching && <Search onClose={() => setSearching(false)} />}
     </div>
   );
 }

@@ -5,7 +5,7 @@ import { jobDetail } from "./fixtures/jobDetail.ts";
 import { ApiError } from "./errors.ts";
 import { getForcedState, noLibrariesYet, respond } from "./mockState.ts";
 import { currentLibraries, reconnectShare } from "./mockLibraries.ts";
-import { setAllWorkers, workerName } from "./mockWorkers.ts";
+import { workerName, workersSwitch } from "./mockWorkers.ts";
 import { healthFailing } from "./mockSettings.ts";
 import { getSeenAt, getSeenSeq, newErrorCount } from "./mockLog.ts";
 import { LANGUAGES } from "../format/languages.ts";
@@ -29,11 +29,17 @@ export function getLanguages(): Promise<{ code: string; name: string }[]> {
   return Promise.resolve(LANGUAGES);
 }
 
+// The all-workers switch as the summary reports it. While it is off, converting counts only the files still finishing.
+function withSwitch(s: Summary): Summary {
+  const sw = workersSwitch();
+  return { ...s, converting: { ...s.converting, running: sw.paused ? sw.finishing : s.converting.running }, workers: sw };
+}
+
 export function getSummary(): Promise<Summary> {
   return respond(
     () => {
       if (noLibrariesYet()) {
-        return {
+        return withSwitch({
           ...SUMMARY,
           converting: { running: 0, workers: SUMMARY.converting.workers },
           queue: 0,
@@ -45,9 +51,9 @@ export function getSummary(): Promise<Summary> {
           seenSeq: getSeenSeq(),
           seenAt: null,
           healthFailing: healthFailing(),
-        };
+        });
       }
-      return { ...SUMMARY, newErrors: newErrorCount(), seenSeq: getSeenSeq(), seenAt: getSeenAt(), healthFailing: healthFailing() };
+      return withSwitch({ ...SUMMARY, newErrors: newErrorCount(), seenSeq: getSeenSeq(), seenAt: getSeenAt(), healthFailing: healthFailing() });
     },
     { failInError: false },
   );
@@ -67,9 +73,10 @@ export function getOverview(): Promise<Overview> {
         failed24h: { ...OVERVIEW.failed24h, count: 0, pct: 0 },
         last24h: { done: 0, skipped: 0, failed: 0 },
         libraries: [],
+        workersOn: !workersSwitch().paused,
       };
     }
-    return { ...OVERVIEW, libraries: currentLibraries() };
+    return { ...OVERVIEW, libraries: currentLibraries(), workersOn: !workersSwitch().paused };
   });
 }
 
@@ -106,13 +113,6 @@ export function getJobs(params: JobsParams = {}): Promise<JobsPage> {
 
 export function runJobsAction(action: "retry" | "cancel" | "top", ids: string[]): Promise<{ ok: true; action: string; count: number }> {
   return respond(() => ({ ok: true as const, action, count: ids.length }));
-}
-
-export function runWorkersAction(action: "on" | "off"): Promise<{ ok: true; action: string }> {
-  return respond(() => {
-    setAllWorkers(action === "on");
-    return { ok: true as const, action: `workers ${action}` };
-  });
 }
 
 export function scanAllLibraries(): Promise<{ ok: true }> {

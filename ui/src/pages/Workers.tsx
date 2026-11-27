@@ -1,9 +1,8 @@
-import { useState } from "react";
 import { navigate, useLocation } from "../router.tsx";
 import { api, formatCount, type Worker } from "../api/index.ts";
 import { useApi } from "../api/useApi.ts";
 import { AddWorker } from "./AddWorker.tsx";
-import { StatePill, errorText } from "./workerParts.tsx";
+import { StatePill } from "./workerParts.tsx";
 
 // Built from pages/10-workers.md. A row click opens the worker's page; ?add=1 opens Add worker.
 // On a phone (see .wkr in app.css) each worker is two lines: name and state, then address · graphics card · Now.
@@ -55,15 +54,8 @@ export function Workers() {
   const adding = query.get("add") === "1";
   // Reload when Add worker opens or closes, so a joined worker shows at once.
   const list = useApi(() => api.getWorkers(), [adding]);
-  const [switchErr, setSwitchErr] = useState<string | null>(null);
   const data = list.data;
-  const anyOn = data?.some((w) => w.state === "converting" || w.state === "idle") ?? false;
   const addWorker = () => navigate("/workers?add=1");
-
-  const toggleAll = () => {
-    setSwitchErr(null);
-    api.runWorkersAction(anyOn ? "off" : "on").then(() => list.reload(), (e: unknown) => setSwitchErr(errorText(e)));
-  };
 
   return (
     <>
@@ -71,13 +63,8 @@ export function Workers() {
         <h1>Workers</h1>
         <span className="muted sm">The machines that convert files, and what each can do.</span>
         <span className="sp"></span>
-        <button type="button" className={`sw${data ? "" : " dis"}`} aria-pressed={anyOn} disabled={!data} onClick={toggleAll}>
-          <span className={`k ${anyOn ? "on" : ""}`}></span>
-          <b>{anyOn ? "Workers on" : "Workers off"}</b>
-        </button>
         <button type="button" className="btn primary sm" onClick={addWorker}>Add worker</button>
       </div>
-      {switchErr && <p className="err" role="alert">{switchErr}</p>}
 
       {data && data.length === 1 && data[0].local && (
         <div className="note">
