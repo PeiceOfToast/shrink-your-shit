@@ -58,6 +58,13 @@ func (e *engine) replaceOriginal(ctx context.Context, staged safety.Staged, fina
 	_, err := e.env.Replacer.Swap(ctx, safety.SwapPlan{
 		JobID: e.in.JobID, Original: e.in.Source, Staged: staged.Path, Final: final, KeepDays: replaceKeepDays,
 	})
+	// The swap happened but its record did not settle: the new file is in place, so its subtitle files belong with it
+	// and are kept, the same as a settled swap (review #865, B3).
+	if errors.Is(err, safety.ErrRecordNotSettled) {
+		*placed = true
+		e.finishSidecars()
+		return fatal("replace.record_unsettled", "The new file is in place and the original is in the library's trash folder, but the replace record could not be saved. The next start settles the record; check the file names.", "save", "retry")
+	}
 	if err == nil {
 		*placed = true
 		e.finishSidecars()
@@ -88,8 +95,6 @@ func (e *engine) replaceOriginal(ctx context.Context, staged safety.Staged, fina
 		return fatal("replace.put_back_failed", "The new file could not be placed, and the original could not be put back from the trash. The original is in the library's trash folder. Check that folder before retrying.", "save", "retry")
 	case errors.Is(err, safety.ErrStrangerInTrash):
 		return fatal("replace.stranger_in_trash", "A file that was not the original took the name and was moved to the trash folder, and it could not be put back. The name was not replaced; the file is in the library's trash folder. Check that folder before retrying.", "save", "retry")
-	case errors.Is(err, safety.ErrRecordNotSettled):
-		return fatal("replace.record_unsettled", "The new file is in place and the original is in the library's trash folder, but the replace record could not be saved. The next start settles the record; check the file names.", "save", "retry")
 	}
 	return fatal("replace.failed", err.Error(), "save", "retry")
 }

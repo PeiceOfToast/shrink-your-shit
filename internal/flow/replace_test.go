@@ -162,3 +162,32 @@ func TestRunReplaceWithSidecarsUsesTheOriginalName(t *testing.T) {
 		t.Errorf("a renamed copy clip (2).mkv was made")
 	}
 }
+
+// TestRunReplaceRecordUnsettledKeepsTheSubtitles (B3): the swap happened but its record did not settle. The new file is
+// in place, so its subtitle files stay with it, as a settled swap keeps them (review #865).
+func TestRunReplaceRecordUnsettledKeepsTheSubtitles(t *testing.T) {
+	root, src, info, rev := srtRun(t)
+	rev = setReplace(t, rev)
+	m := &srtWriting{Media: &fake.Media{Probes: map[string]media.Info{src: info}}}
+	sf := &fakeSafety{verify: safety.Verdict{OK: true}}
+	rp := &fakeReplacer{err: safety.ErrRecordNotSettled}
+	journal := &fakeJournal{}
+	env := newEnv(m, sf, &recorder{}, rev, nil)
+	env.Replacer = rp
+	env.Sidecars = journal
+	res := flow.Run(context.Background(), runInput(t, root, src), env)
+	if res.Outcome != flow.OutcomeFatal || res.Reason != "replace.record_unsettled" {
+		t.Fatalf("result = %+v, want fatal replace.record_unsettled", res)
+	}
+	for _, name := range []string{"clip.eng.srt", "clip.eng.2.srt"} {
+		if b, err := os.ReadFile(filepath.Join(root, name)); err != nil || len(b) == 0 {
+			t.Errorf("%s: %v, want the subtitle file kept with the new file", name, err)
+		}
+	}
+	if len(journal.dropped) != 0 {
+		t.Errorf("dropped = %v, want the subtitle records kept", journal.dropped)
+	}
+	if len(journal.finished) != 1 || journal.finished[0] != 42 {
+		t.Errorf("finished = %v, want the job finished", journal.finished)
+	}
+}
