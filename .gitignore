@@ -2,3 +2,8 @@
 *.db
 *.db-*
 /data/
+
+# The Vite build lands in the package that embeds it. Only the "not built" placeholder page is
+# committed; a local build's hashed assets are never.
+/internal/ui/dist/*
+!/internal/ui/dist/index.html

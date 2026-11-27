@@ -24,6 +24,7 @@ import (
 	"github.com/PeiceOfToast/shrink-your-shit/internal/safety"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/store"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/system"
+	"github.com/PeiceOfToast/shrink-your-shit/internal/ui"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/worker"
 )
 
@@ -56,6 +57,7 @@ func run(dataDir, listen string) error {
 	defer stop()
 
 	srv := api.New(version)
+	srv.SetUI(ui.Files()) // the built interface, embedded; a build without it serves the page that says so
 	ln, err := net.Listen("tcp", listen)
 	if err != nil {
 		return fmt.Errorf("listen on %s: %w", listen, err)
