@@ -112,7 +112,7 @@ func Build(plan Plan, info media.Info, rung Rung) (Result, error) {
 		"-map", "0:" + strconv.Itoa(main.Index),
 	}
 	for _, a := range audioKept {
-		argv = append(argv, "-map", "0:"+strconv.Itoa(a.Index))
+		argv = append(argv, "-map", "0:"+strconv.Itoa(a.track.Index))
 	}
 	for _, s := range subtitlesKept {
 		argv = append(argv, "-map", "0:"+strconv.Itoa(s.Index))
@@ -129,6 +129,9 @@ func Build(plan Plan, info media.Info, rung Rung) (Result, error) {
 	}
 
 	argv = append(argv, "-c:a", "copy", "-c:s", "copy")
+	for i, a := range audioKept {
+		argv = append(argv, audioArgs(i, a)...)
+	}
 	if plan.Container == ContainerMP4 {
 		// Faststart moves the index to the front so a player can start before the whole file is
 		// read; MKV and WebM have no such flag (L-HW-15).
@@ -142,24 +145,17 @@ func Build(plan Plan, info media.Info, rung Rung) (Result, error) {
 
 // keptTracks is the one rule for which input streams reach the output: the plan does not drop
 // them, and the container can hold them. Build maps exactly these, and KeptStreams reports them.
-func keptTracks(plan Plan, info media.Info) (audioKept []media.AudioTrack, subtitlesKept []media.SubtitleTrack, notes []string, err error) {
-	audioActions, err := namedActions(plan.Audio, audioIndexes(info.Audio))
+// Audio is never dropped for the container's sake (L-AUD-10): audioOutputs converts what it cannot
+// hold, and the note says so.
+func keptTracks(plan Plan, info media.Info) (audioKept []audioOut, subtitlesKept []media.SubtitleTrack, notes []string, err error) {
+	audioKept, audioNotes, err := audioOutputs(plan, info)
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	notes = append(notes, audioNotes...)
 	subtitleActions, err := namedActions(plan.Subtitles, subtitleIndexes(info.Subtitles))
 	if err != nil {
 		return nil, nil, nil, err
-	}
-	for _, a := range info.Audio {
-		if audioActions[a.Index] == StreamDrop {
-			continue
-		}
-		if why := audioFits(plan.Container, a.Codec); why != "" {
-			notes = append(notes, fmt.Sprintf("dropped audio stream #%d (%s): %s", a.Index, a.Codec, why))
-			continue
-		}
-		audioKept = append(audioKept, a)
 	}
 	for _, s := range info.Subtitles {
 		if subtitleActions[s.Index] == StreamDrop {
@@ -182,7 +178,7 @@ func KeptStreams(plan Plan, info media.Info) (audio, subtitles []int, err error)
 		return nil, nil, err
 	}
 	for _, t := range a {
-		audio = append(audio, t.Index)
+		audio = append(audio, t.track.Index)
 	}
 	for _, t := range s {
 		subtitles = append(subtitles, t.Index)

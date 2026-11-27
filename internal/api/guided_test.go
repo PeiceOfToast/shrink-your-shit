@@ -302,7 +302,7 @@ func TestGuidedPreview(t *testing.T) {
 	}
 	want := []string{
 		"Converts video to HEVC at quality 3, keeping the picture size, on the graphics card when it can.",
-		"Audio: Same as the source, same channels as the source, every language.",
+		"Audio: AAC, stereo, every language.",
 		"Keeps every subtitle.",
 		"Saves as MKV.",
 		"Puts the new file next to the original; the original stays where it is.",
@@ -313,8 +313,7 @@ func TestGuidedPreview(t *testing.T) {
 	if apiQualityOf(t, preview.Flow) != 3 {
 		t.Errorf("preview quality = %d, want 3", apiQualityOf(t, preview.Flow))
 	}
-	// The defaults are what the guide starts a person on, so they must be publishable today: the
-	// audio default is as_is until item 7 builds conversion (ui-shop ask 11-27).
+	// The defaults are what the guide starts a person on, so they must be publishable today.
 	if len(preview.Problems) != 0 {
 		t.Errorf("preview of the defaults has problems: %+v", preview.Problems)
 	}

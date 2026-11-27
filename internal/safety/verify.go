@@ -30,6 +30,7 @@ const (
 	CodeVideoMissing    = "check.video_missing"
 	CodeAudioMissing    = "check.audio_missing"
 	CodeAudioLanguage   = "check.audio_language"
+	CodeAudioChannels   = "check.audio_channels"
 	CodeSubtitleMissing = "check.subtitle_missing"
 
 	// NextKeepOriginal is what every "no" tells the job.
@@ -74,10 +75,18 @@ func (r Recorder) log(check string, v Verdict) Verdict {
 
 // Want is what the plan asked for. Flow fills it in; safety never imports encode.
 type Want struct {
-	// AudioLanguages has one entry per audio track the output must keep, by language ("" for unknown).
-	AudioLanguages []string
+	// Audio has one entry per audio track the output must keep.
+	Audio []WantedAudio
 	// SubtitleLanguages has one entry per subtitle track the container can hold.
 	SubtitleLanguages []string
+}
+
+// WantedAudio is one kept audio track: the language the output must still carry ("" for unknown)
+// and the channels it must have there. A zero channel count means the source's count was unknown,
+// so the output's is not checked.
+type WantedAudio struct {
+	Language string
+	Channels int
 }
 
 // Verify runs checks 1-3 of backend-plan §7.1 in order and stops at the first "no". Checks 4-5 (playback decode,
@@ -184,16 +193,34 @@ func checkStreams(out media.Info, want Want) *Verdict {
 		v := noVerdict(CodeVideoMissing, "the result has no video stream")
 		return &v
 	}
-	if len(out.Audio) < len(want.AudioLanguages) {
-		v := noVerdict(CodeAudioMissing, fmt.Sprintf("the result has %d audio tracks, %d were planned", len(out.Audio), len(want.AudioLanguages)))
+	if len(out.Audio) < len(want.Audio) {
+		v := noVerdict(CodeAudioMissing, fmt.Sprintf("the result has %d audio tracks, %d were planned", len(out.Audio), len(want.Audio)))
 		return &v
 	}
 	got := make([]string, 0, len(out.Audio))
 	for _, a := range out.Audio {
 		got = append(got, a.Language)
 	}
-	if !sameMultiset(got, want.AudioLanguages) {
-		v := noVerdict(CodeAudioLanguage, fmt.Sprintf("audio languages are %v, planned %v", got, want.AudioLanguages))
+	wantLanguages := make([]string, 0, len(want.Audio))
+	var wantChannels []int
+	for _, a := range want.Audio {
+		wantLanguages = append(wantLanguages, a.Language)
+		if a.Channels > 0 {
+			wantChannels = append(wantChannels, a.Channels)
+		}
+	}
+	if !sameMultiset(got, wantLanguages) {
+		v := noVerdict(CodeAudioLanguage, fmt.Sprintf("audio languages are %v, planned %v", got, wantLanguages))
+		return &v
+	}
+	gotChannels := make([]int, 0, len(out.Audio))
+	for _, a := range out.Audio {
+		if a.Channels > 0 {
+			gotChannels = append(gotChannels, a.Channels)
+		}
+	}
+	if !sameIntMultiset(gotChannels, wantChannels) {
+		v := noVerdict(CodeAudioChannels, fmt.Sprintf("audio channels are %v, planned %v", gotChannels, wantChannels))
 		return &v
 	}
 	subs := make([]string, 0, len(out.Subtitles))
@@ -219,6 +246,21 @@ func sorted(s []string) []string {
 
 func sameMultiset(a, b []string) bool {
 	x, y := sorted(a), sorted(b)
+	if len(x) != len(y) {
+		return false
+	}
+	for i := range x {
+		if x[i] != y[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func sameIntMultiset(a, b []int) bool {
+	x, y := append([]int(nil), a...), append([]int(nil), b...)
+	sort.Ints(x)
+	sort.Ints(y)
 	if len(x) != len(y) {
 		return false
 	}

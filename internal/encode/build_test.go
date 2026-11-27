@@ -94,7 +94,7 @@ func TestBuildMapsKeptStreamsInInputOrder(t *testing.T) {
 	info := baseInfo()
 	info.Audio = append(info.Audio, media.AudioTrack{Index: 4, Codec: "aac"})
 	plan := basePlan(CodecHEVC)
-	plan.Audio = []StreamPlan{{Index: 1, Action: StreamDrop}}
+	plan.Audio = []AudioPlan{{Index: 1, Action: StreamDrop}}
 
 	res := buildOK(t, plan, info, cpuRung(CodecHEVC))
 	if got := mapped(res.Argv); strings.Join(got, " ") != "0:0 0:4 0:2" {
@@ -135,7 +135,9 @@ func TestBuildFaststartOnlyOnMP4(t *testing.T) {
 	}
 }
 
-func TestBuildDropsATrackTheContainerCannotHold(t *testing.T) {
+// TestBuildConvertsATrackMP4CannotHold is L-AUD-10: audio a container cannot hold is converted,
+// never dropped, and the note says which codec it became. Subtitles are still dropped.
+func TestBuildConvertsATrackMP4CannotHold(t *testing.T) {
 	info := baseInfo()
 	info.Audio = []media.AudioTrack{{Index: 1, Codec: "opus"}, {Index: 4, Codec: "aac"}}
 	info.Subtitles = []media.SubtitleTrack{
@@ -147,16 +149,24 @@ func TestBuildDropsATrackTheContainerCannotHold(t *testing.T) {
 	plan.Output = "out.mp4"
 
 	res := buildOK(t, plan, info, cpuRung(CodecHEVC))
-	if got := mapped(res.Argv); strings.Join(got, " ") != "0:0 0:4 0:3" {
-		t.Errorf("maps = %v, want only what MP4 can hold", got)
+	if got := mapped(res.Argv); strings.Join(got, " ") != "0:0 0:1 0:4 0:3" {
+		t.Errorf("maps = %v, want both audio tracks and the subtitle MP4 holds", got)
+	}
+	if v, _ := flagValue(res.Argv, "-c:a:0"); v != "eac3" {
+		t.Errorf("first audio codec = %q, want eac3", v)
+	}
+	if v, _ := flagValue(res.Argv, "-b:a:0"); v != "192k" {
+		t.Errorf("first audio bitrate = %q, want the automatic eac3 rate", v)
 	}
 	wantNotes(t, res,
-		"dropped audio stream #1 (opus): MP4 cannot hold Opus",
+		"audio stream #1 (opus) is converted to eac3: MP4 cannot hold Opus",
 		"dropped subtitle stream #2 (hdmv_pgs_subtitle): MP4 cannot hold it",
 	)
 }
 
-func TestBuildDropsWhatWebMCannotHold(t *testing.T) {
+// TestBuildConvertsToOpusForWebM is L-AUD-8: WebM gets libopus at 128 kbps, and audio is not
+// dropped. The titles are still dropped, since WebM holds only WebVTT.
+func TestBuildConvertsToOpusForWebM(t *testing.T) {
 	info := baseInfo()
 	info.Audio = []media.AudioTrack{{Index: 1, Codec: "aac"}, {Index: 4, Codec: "opus"}}
 	info.Subtitles = []media.SubtitleTrack{
@@ -168,11 +178,17 @@ func TestBuildDropsWhatWebMCannotHold(t *testing.T) {
 	plan.Output = "out.webm"
 
 	res := buildOK(t, plan, info, cpuRung(CodecAV1))
-	if got := mapped(res.Argv); strings.Join(got, " ") != "0:0 0:4 0:3" {
-		t.Errorf("maps = %v, want only what WebM can hold", got)
+	if got := mapped(res.Argv); strings.Join(got, " ") != "0:0 0:1 0:4 0:3" {
+		t.Errorf("maps = %v, want both audio tracks and the WebVTT subtitle", got)
+	}
+	if v, _ := flagValue(res.Argv, "-c:a:0"); v != "libopus" {
+		t.Errorf("first audio codec = %q, want libopus", v)
+	}
+	if v, _ := flagValue(res.Argv, "-b:a:0"); v != "128k" {
+		t.Errorf("first audio bitrate = %q, want 128k", v)
 	}
 	wantNotes(t, res,
-		"dropped audio stream #1 (aac): WebM needs Opus or Vorbis audio",
+		"audio stream #1 (aac) is converted to opus: WebM needs Opus or Vorbis audio",
 		"dropped subtitle stream #2 (subrip): WebM cannot hold it",
 	)
 }
@@ -316,11 +332,6 @@ func TestBuildRefusesLaterStageFields(t *testing.T) {
 		t.Errorf("tonemap: error = %v, want ErrNotBuiltYet", err)
 	}
 
-	plan = basePlan(CodecHEVC)
-	plan.Audio = []StreamPlan{{Index: 1, Action: StreamConvert}}
-	if _, err := Build(plan, baseInfo(), cpuRung(CodecHEVC)); !errors.Is(err, ErrNotBuiltYet) {
-		t.Errorf("audio convert: error = %v, want ErrNotBuiltYet", err)
-	}
 }
 
 func TestBuildSkipsHDRTheFlowLeavesAlone(t *testing.T) {
@@ -495,13 +506,13 @@ func TestBuildRefusesInvalidPlans(t *testing.T) {
 		{"bit depth 12", func(p *Plan, _ *media.Info, _ *Rung) { p.Video.BitDepth = 12 }, ErrInvalidPlan},
 		{"negative scale", func(p *Plan, _ *media.Info, _ *Rung) { p.Video.Scale = Scale{Width: -10} }, ErrInvalidPlan},
 		{"unknown stream", func(p *Plan, _ *media.Info, _ *Rung) {
-			p.Audio = []StreamPlan{{Index: 9, Action: StreamDrop}}
+			p.Audio = []AudioPlan{{Index: 9, Action: StreamDrop}}
 		}, ErrInvalidPlan},
 		{"stream named twice", func(p *Plan, _ *media.Info, _ *Rung) {
-			p.Audio = []StreamPlan{{Index: 1, Action: StreamDrop}, {Index: 1, Action: StreamCopy}}
+			p.Audio = []AudioPlan{{Index: 1, Action: StreamDrop}, {Index: 1, Action: StreamCopy}}
 		}, ErrInvalidPlan},
 		{"unknown action", func(p *Plan, _ *media.Info, _ *Rung) {
-			p.Audio = []StreamPlan{{Index: 1, Action: "mix"}}
+			p.Audio = []AudioPlan{{Index: 1, Action: "mix"}}
 		}, ErrInvalidPlan},
 		{"webm with HEVC", func(p *Plan, _ *media.Info, _ *Rung) {
 			p.Container = ContainerWebM

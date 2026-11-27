@@ -79,30 +79,27 @@ func TestEverySentenceIsPinned(t *testing.T) {
 		{name: "video quality out of range", video: video(`,"quality":9`),
 			problems: []string{`settings|setting.invalid|video.convert settings: Quality must be at most 5.`}},
 
-		// Audio and subtitles: item 7's not_yets.
-		{name: "audio convert", audio: `{"format":"aac"}`,
-			problems: []string{`format|audio.not_yet|Converting audio is not built yet; Copy is the only choice for now.`}},
-		{name: "audio channels", audio: `{"format":"copy","channels":"stereo"}`,
-			problems: []string{`channels|audio.not_yet|Changing the channels is not built yet; every track keeps the channels it has.`}},
-		{name: "audio languages", audio: `{"format":"copy","languages":["eng"]}`,
-			problems: []string{`languages|audio.not_yet|Keeping only some languages is not built yet; every track is kept.`}},
+		// Audio: a number that needs conversion is refused while the sound is copied, beyond
+		// copying needs a format, and the subtitles are item 7's second half.
 		{name: "audio codec", audio: `{"format":"copy","codec":"opus"}`,
-			problems: []string{`codec|audio.not_yet|Choosing the codec in Advanced is not built yet; Format decides for now.`},
 			disabled: []string{`audio|format||Advanced is set: Opus. It replaces Format above.`}},
-		{name: "audio bitrate", audio: `{"format":"copy","bitrateKbps":128}`,
-			problems: []string{`bitrateKbps|audio.not_yet|Setting the audio bitrate is not built yet.`}},
-		{name: "audio bitrate per track", audio: `{"format":"copy","bitrateKbps":128,"bitratePer":"track"}`,
-			problems: []string{`bitratePer|audio.not_yet|Setting one bitrate for the whole track is not built yet.`}},
-		{name: "audio sample rate", audio: `{"format":"copy","sampleRate":48000}`,
-			problems: []string{`sampleRate|audio.not_yet|Changing the sample rate is not built yet.`}},
-		{name: "audio downmix", audio: `{"format":"copy","downmix":"speech"}`,
-			problems: []string{`downmix|audio.not_yet|Making stereo from surround is not built yet.`}},
-		{name: "audio loudness", audio: `{"format":"copy","loudnorm":true}`,
-			problems: []string{`loudnorm|audio.not_yet|Evening out loudness is not built yet.`}},
-		{name: "audio commentary", audio: `{"format":"copy","commentary":"drop"}`,
-			problems: []string{`commentary|audio.not_yet|Dropping commentary tracks is not built yet.`}},
-		{name: "audio default track", audio: `{"format":"copy","defaultTrack":"eng"}`,
-			problems: []string{`defaultTrack|audio.not_yet|Choosing the default track is not built yet.`}},
+		{name: "audio channels while copying", audio: `{"format":"copy","channels":"stereo"}`,
+			problems: []string{`channels|audio.copy_conflict|Copying the sound keeps each track's channels. Pick a format above to change them.`}},
+		{name: "audio bitrate while copying", audio: `{"format":"copy","bitrateKbps":128}`,
+			problems: []string{`bitrateKbps|audio.copy_conflict|Copying the sound keeps each track's bitrate. Pick a format above to set one.`}},
+		{name: "audio sample rate while copying", audio: `{"format":"copy","sampleRate":48000}`,
+			problems: []string{`sampleRate|audio.copy_conflict|Copying the sound keeps each track's sample rate. Pick a format above to change it.`}},
+		{name: "audio loudness while copying", audio: `{"format":"copy","loudnorm":true}`,
+			problems: []string{`loudnorm|audio.copy_conflict|Evening out loudness needs a format. Pick one above.`}},
+		{name: "audio downmix while copying", audio: `{"format":"copy","downmix":"speech"}`,
+			problems: []string{`downmix|audio.copy_conflict|Making stereo from surround needs a format. Pick one above.`}},
+		{name: "audio downmix needs stereo", audio: `{"format":"aac"}`,
+			disabled: []string{`audio|downmix||Making stereo from surround happens when the channels go down to Stereo or Mono; pick one above.`}},
+		{name: "audio FLAC has no bitrate", audio: `{"format":"aac","codec":"flac","bitrateKbps":128}`,
+			disabled: []string{
+				`audio|format||Advanced is set: FLAC. It replaces Format above.`,
+				`audio|bitrateKbps||FLAC is lossless, so it has no bitrate to set.`,
+			}},
 		{name: "audio keep original", audio: `{"format":"copy","keepOriginal":true}`,
 			problems: []string{`keepOriginal|audio.not_yet|Keeping the original track as well is not built yet.`}},
 		{name: "audio subtitles choice", audio: `{"format":"copy","subtitles":"srt"}`,
@@ -136,8 +133,8 @@ func TestEverySentenceIsPinned(t *testing.T) {
 
 	// Every problem code and every greyed sentence the check can carry, so a new one cannot arrive
 	// without its row here.
-	wantCodes := []string{"video.not_yet", "video.no_bitrate", "audio.not_yet", "save.not_yet", "save.folder_missing",
-		"save.empty_suffix", "container_unsupported", "setting.invalid"}
+	wantCodes := []string{"video.not_yet", "video.no_bitrate", "audio.not_yet", "audio.copy_conflict",
+		"save.not_yet", "save.folder_missing", "save.empty_suffix", "container_unsupported", "setting.invalid"}
 	wantWhys := []string{
 		"Not used: Advanced sets a bitrate instead.",
 		"Variable bitrate doesn't work with AV1 yet. Pick Constant bitrate or Quality, or another format.",
@@ -146,6 +143,9 @@ func TestEverySentenceIsPinned(t *testing.T) {
 		"No worker has a graphics card.",
 		"No worker can encode H.264: libx264 is not installed.",
 		"Advanced is set: Opus. It replaces Format above.",
+		"Advanced is set: FLAC. It replaces Format above.",
+		"Making stereo from surround happens when the channels go down to Stereo or Mono; pick one above.",
+		"FLAC is lossless, so it has no bitrate to set.",
 		"Replacing the original comes in a later update; for now the new file is saved next to it.",
 		"Saving to a different folder comes in a later update; for now the new file is saved next to it.",
 		"WebM needs AV1 video and Opus audio.",

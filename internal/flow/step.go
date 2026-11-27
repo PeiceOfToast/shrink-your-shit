@@ -68,6 +68,10 @@ type Decision struct {
 	Label  string // the words the log and the step card show, e.g. "Already HEVC"
 	Reason string // the typed code, e.g. "video.already_target"
 	Detail F      // fields for the log: from/to codec, the chosen rung …
+	// Notes are sentences the log should carry beside the decision: a language that matched
+	// nothing, a track kept because dropping it would leave no sound. They are warnings, not
+	// refusals: the run continues.
+	Notes []string
 }
 
 // F is a small set of named fields for an event's data.

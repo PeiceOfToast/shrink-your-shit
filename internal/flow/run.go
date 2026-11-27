@@ -152,6 +152,13 @@ func (e *engine) run(ctx context.Context) (res Result) {
 		return skip("flow.nothing", strings.Join(labels, "; "))
 	}
 
+	// 3b. Measure the loudness of every track whose loudness will be evened out (L-AUD-15). The
+	// measurement only feeds Build's filter, so it happens after the steps have agreed there is
+	// work and before the command is written.
+	if res = e.measureLoudness(ctx, &plan, info); res.Outcome != "" {
+		return res
+	}
+
 	// 4. Build the command.
 	if res = ctxStop(ctx); res.Outcome != "" {
 		return res
@@ -458,28 +465,104 @@ func (e *engine) encodeOwner(d Decisions) string {
 	return "video"
 }
 
-// verifyWant is what the result must keep: the streams the plan maps, by language.
+// verifyWant is what the result must keep: the audio the plan writes (each with its language and
+// channels, since a conversion changes the channels) and the subtitle languages it maps.
 func (e *engine) verifyWant(plan encode.Plan, info media.Info) (safety.Want, error) {
-	audio, subtitles, err := encode.KeptStreams(plan, info)
+	audio, _, err := encode.AudioOutputs(plan, info)
 	if err != nil {
 		return safety.Want{}, err
 	}
-	byIndex := make(map[int]media.AudioTrack, len(info.Audio))
-	for _, a := range info.Audio {
-		byIndex[a.Index] = a
+	_, subtitles, err := encode.KeptStreams(plan, info)
+	if err != nil {
+		return safety.Want{}, err
 	}
 	subByIndex := make(map[int]media.SubtitleTrack, len(info.Subtitles))
 	for _, s := range info.Subtitles {
 		subByIndex[s.Index] = s
 	}
 	var want safety.Want
-	for _, i := range audio {
-		want.AudioLanguages = append(want.AudioLanguages, byIndex[i].Language)
+	for _, a := range audio {
+		want.Audio = append(want.Audio, safety.WantedAudio{Language: a.Language, Channels: a.Channels})
 	}
 	for _, i := range subtitles {
 		want.SubtitleLanguages = append(want.SubtitleLanguages, subByIndex[i].Language)
 	}
 	return want, nil
+}
+
+// loudnessBudget is L-AUD-15's cap on the whole analysis: ten minutes across every track. Past it,
+// every track is left un-normalized rather than half-normalized.
+const loudnessBudget = 10 * time.Minute
+
+// measureLoudness fills in each converting track's loudness before Build writes the filter. A
+// failed measurement leaves that track as it is; running past the budget drops them all.
+func (e *engine) measureLoudness(ctx context.Context, plan *encode.Plan, info media.Info) Result {
+	var targets []int
+	for i, a := range plan.Audio {
+		if a.Action != encode.StreamConvert || !a.Loudnorm {
+			continue
+		}
+		// A track whose rate is unknown cannot be measured without guessing the rate to restore
+		// afterwards (L-AUD-15).
+		if t := sourceAudio(info.Audio, a.Index); t == nil || t.SampleRate <= 0 {
+			continue
+		}
+		targets = append(targets, i)
+	}
+	if len(targets) == 0 {
+		return Result{}
+	}
+	deadline := e.env.now().Add(loudnessBudget)
+	for _, i := range targets {
+		if res := ctxStop(ctx); res.Outcome != "" {
+			return res
+		}
+		remaining := deadline.Sub(e.env.now())
+		if remaining <= 0 {
+			clearLoudness(plan)
+			e.warn("Evening out loudness took too long, so no track's loudness is changed.")
+			return Result{}
+		}
+		mctx, cancel := context.WithTimeout(ctx, remaining)
+		run, err := e.env.Media.Run(mctx, encode.LoudnessArgs(e.in.Source, plan.Audio[i].Index), nil)
+		timedOut := mctx.Err() != nil
+		cancel()
+		if err != nil {
+			if ctx.Err() != nil {
+				return cancelled()
+			}
+			if timedOut {
+				clearLoudness(plan)
+				e.warn("Evening out loudness took too long, so no track's loudness is changed.")
+				return Result{}
+			}
+			e.warn("A track's loudness could not be measured, so it is kept as it is.")
+			continue
+		}
+		l, perr := encode.ParseLoudness(run.KeyLines)
+		if perr != nil {
+			e.warn("A track's loudness could not be measured, so it is kept as it is.")
+			continue
+		}
+		plan.Audio[i].Loudness = l
+	}
+	return Result{}
+}
+
+// clearLoudness forgets every measurement, so Build writes no loudnorm filter at all.
+func clearLoudness(plan *encode.Plan) {
+	for i := range plan.Audio {
+		plan.Audio[i].Loudness = nil
+	}
+}
+
+func sourceAudio(tracks []media.AudioTrack, index int) *media.AudioTrack {
+	for i := range tracks {
+		if tracks[i].Index == index {
+			return &tracks[i]
+		}
+	}
+	return nil
 }
 
 // writeRaw writes ffmpeg's tail to the raw file.
@@ -576,6 +659,16 @@ func (e *engine) decisionEvent(sd StepDecision) {
 		Port: port, PortLabel: label, Reason: sd.Decision.Reason, Message: label,
 		Data: sd.Decision.Detail,
 	})
+	// A note explains why the plan is not exactly what the settings asked for (a language that
+	// matched nothing, a track kept so the file keeps its sound). It is a warning, not a refusal.
+	for _, note := range sd.Decision.Notes {
+		e.warn(note)
+	}
+}
+
+// warn writes a warning line for the job log.
+func (e *engine) warn(message string) {
+	e.emit(events.Event{Kind: events.KindWarning, Level: events.LevelWarn, Message: message})
 }
 
 func (e *engine) command(argv []string) {

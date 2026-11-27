@@ -231,7 +231,7 @@ func TestRunGoodRunEventFrame(t *testing.T) {
 	if sf.gotRecorder.JobID != 42 {
 		t.Errorf("check recorder = %+v, want the job's", sf.gotRecorder)
 	}
-	if sf.gotWant.AudioLanguages[0] != "eng" || sf.gotWant.AudioLanguages[1] != "ger" ||
+	if sf.gotWant.Audio[0].Language != "eng" || sf.gotWant.Audio[1].Language != "ger" ||
 		sf.gotWant.SubtitleLanguages[0] != "eng" || len(sf.gotWant.SubtitleLanguages) != 1 {
 		t.Errorf("verify want = %+v, want eng/ger audio and eng subtitles", sf.gotWant)
 	}
@@ -250,11 +250,11 @@ func TestRunGoodRunEventFrame(t *testing.T) {
 	}
 }
 
-// TestRunSaysWhichStreamItLeftOut is the file-dependent case the check cannot see: Audio copies, so
-// the flow's container rule passes, but the source's Opus track cannot go into MP4. The run leaves
-// the track out and says so in the job log as a plain warning; it does not fail on a check nobody
-// could pass, and it does not drop the track silently.
-func TestRunSaysWhichStreamItLeftOut(t *testing.T) {
+// TestRunConvertedATrackTheFileTypeCannotHold is the file-dependent case the check cannot see:
+// Audio copies, so the flow's container rule passes, but the source's Opus track cannot go into
+// MP4. The run converts the track to E-AC-3 instead (L-AUD-10) and says so in the job log as a
+// plain warning; it does not fail on a check nobody could pass, and it does not drop the track.
+func TestRunConvertedATrackTheFileTypeCannotHold(t *testing.T) {
 	root, src, info := libraryFile(t, "clip.mkv", "h264")
 	info.Audio = []media.AudioTrack{{Index: 1, Codec: "opus", Language: "eng"}}
 	want := filepath.Join(root, "clip-shrunk.mp4")
@@ -273,12 +273,16 @@ func TestRunSaysWhichStreamItLeftOut(t *testing.T) {
 		if e.Level == events.LevelError {
 			t.Errorf("error event %q: a stream the file type cannot hold is a warning, not a failure", e.Message)
 		}
-		if e.Kind == events.KindWarning && e.Message == "dropped audio stream #1 (opus): MP4 cannot hold Opus" {
+		if e.Kind == events.KindWarning && e.Message == "audio stream #1 (opus) is converted to eac3: MP4 cannot hold Opus" {
 			warned = e.Level == events.LevelWarn
 		}
 	}
 	if !warned {
-		t.Errorf("events = %v, want the plain sentence about the dropped Opus track", frameKinds(bus.all()))
+		t.Errorf("events = %v, want the plain sentence about the converted Opus track", frameKinds(bus.all()))
+	}
+	argvs := m.Argvs()
+	if len(argvs) == 0 || !strings.Contains(strings.Join(argvs[0], " "), "-c:a:0 eac3") {
+		t.Errorf("argv = %v, want the Opus track written as E-AC-3", argvs)
 	}
 }
 
@@ -605,7 +609,7 @@ func TestPlanFileIsTheSameAnswerAsTheRun(t *testing.T) {
 	if d.Work() {
 		t.Errorf("an HEVC file planned work: %+v", d.Steps)
 	}
-	if d.Reasons()[0] != "video.already_target" || d.Reasons()[1] != "audio.as_is" || d.Reasons()[2] != "save.nothing" {
+	if d.Reasons()[0] != "video.already_target" || d.Reasons()[1] != "audio.no_audio" || d.Reasons()[2] != "save.nothing" {
 		t.Errorf("reasons = %v", d.Reasons())
 	}
 }

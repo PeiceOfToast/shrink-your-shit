@@ -271,11 +271,11 @@ func TestSentencesMatchPage06(t *testing.T) {
 		want    []string
 	}{
 		{
-			// The default audio is as_is until item 7 builds conversion (ui-shop ask 11-27).
+			// Page 06's default audio is stereo AAC now that item 7 built conversion.
 			name: "the defaults",
 			want: []string{
 				"Converts video to HEVC at quality 3, keeping the picture size, on the graphics card when it can.",
-				"Audio: Same as the source, same channels as the source, every language.",
+				"Audio: AAC, stereo, every language.",
 				"Keeps every subtitle.",
 				"Saves as MKV.",
 				"Puts the new file next to the original; the original stays where it is.",
@@ -303,7 +303,7 @@ func TestSentencesMatchPage06(t *testing.T) {
 			},
 			want: []string{
 				"Converts video to HEVC at quality 3, keeping the picture size, on the graphics card when it can.",
-				"Audio: Same as the source, same channels as the source, every language.",
+				"Audio: AAC, stereo, every language.",
 				"Only text subtitles are kept.",
 				"The file keeps its container.",
 				"Puts the new file next to the original; the original stays where it is.",
@@ -314,7 +314,7 @@ func TestSentencesMatchPage06(t *testing.T) {
 			changes: map[string]any{"subtitles": "srt", "original": "replace"},
 			want: []string{
 				"Converts video to HEVC at quality 3, keeping the picture size, on the graphics card when it can.",
-				"Audio: Same as the source, same channels as the source, every language.",
+				"Audio: AAC, stereo, every language.",
 				"Subtitles are made into SRT files.",
 				"Saves as MKV.",
 				"Replaces the original. The old file goes to the trash and is kept 7 days.",
@@ -374,10 +374,12 @@ func TestTheGuideGreysWhereItCannotSave(t *testing.T) {
 	}
 }
 
-// TestTheGuideGreysTheAudioLanguages: until item 7 can keep only some languages, the chip and the
-// languages field are greyed with AudioWhy, so the page cannot send an answer the check refuses
-// (review2 N3).
-func TestTheGuideGreysTheAudioLanguages(t *testing.T) {
+// TestTheGuideOffersTheAudioChoices: item 7 builds audio conversion, so the chip, the languages
+// field and every audio choice are offered, and the default is page 06's stereo AAC.
+func TestTheGuideOffersTheAudioChoices(t *testing.T) {
+	if got := flow.DefaultAnswers()["audio"]; got != "stereo_aac" {
+		t.Errorf("default audio = %v, want stereo_aac", got)
+	}
 	guide := flow.Guide()
 	var chip *flow.GuideChip
 	for i := range guide.Chips {
@@ -388,22 +390,29 @@ func TestTheGuideGreysTheAudioLanguages(t *testing.T) {
 	if chip == nil {
 		t.Fatal("the guide has no keep_my_languages chip")
 	}
-	if chip.Available || chip.Why != flow.AudioWhy {
-		t.Errorf("chip = %+v; want greyed with %q", *chip, flow.AudioWhy)
+	if !chip.Available || chip.Why != "" {
+		t.Errorf("chip = %+v; want available", *chip)
 	}
-	var field *flow.GuideField
+	var languages *flow.GuideField
 	for _, part := range guide.Parts {
 		for i := range part.Fields {
-			if part.Fields[i].Key == "languages" {
-				field = &part.Fields[i]
+			switch field := &part.Fields[i]; field.Key {
+			case "languages":
+				languages = field
+			case "audio":
+				for _, choice := range field.Choices {
+					if !choice.Available || choice.Why != "" {
+						t.Errorf("audio choice %q = %+v; want available", choice.Value, choice)
+					}
+				}
 			}
 		}
 	}
-	if field == nil {
+	if languages == nil {
 		t.Fatal("the guide has no languages field")
 	}
-	if field.Available == nil || *field.Available || field.Why != flow.AudioWhy {
-		t.Errorf("languages field = %+v; want greyed with %q", *field, flow.AudioWhy)
+	if languages.Available != nil || languages.Why != "" {
+		t.Errorf("languages field = %+v; want an ordinary field", *languages)
 	}
 }
 

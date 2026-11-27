@@ -3,17 +3,20 @@
 package steps
 
 import (
+	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/PeiceOfToast/shrink-your-shit/internal/encode"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/events"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/flow"
+	"github.com/PeiceOfToast/shrink-your-shit/internal/media"
 )
 
 // AudioSettings is page 07's Audio card: the format, the channels and the languages to keep,
 // then Advanced's codec, bitrate, sample rate, downmix, loudness, commentary and default track,
-// then the subtitles. Every field's tags are the page's form; the engine copies every track until
-// item 7 builds the rest, which Validate reports.
+// then the subtitles. Every field's tags are the page's form. Subtitles are item 7's second half
+// (S2-7b), so choosing them still answers "not yet".
 type AudioSettings struct {
 	Format    string   `set:"format" label:"Format" choices:"aac=AAC,opus=Opus,copy=Same as the source" default:"copy"`
 	Channels  string   `set:"channels" label:"Channels" choices:"stereo=Stereo,source=Same as the source,mono=Mono,5.1=5.1" default:"source" help:"A most, never an upmix: a stereo file stays stereo wherever 5.1 is asked for."`
@@ -35,7 +38,7 @@ type AudioSettings struct {
 
 func init() { flow.RegisterStep(AudioStep{}) }
 
-// AudioStep carries the audio and subtitle tracks through untouched in stage 2's first items.
+// AudioStep chooses which tracks the output keeps and how each one is written.
 type AudioStep struct{}
 
 var _ flow.Step = AudioStep{}
@@ -55,7 +58,7 @@ func (AudioStep) Def() flow.Definition {
 		Type:     "audio.tracks",
 		Version:  1,
 		Name:     "Audio",
-		Help:     "Keep the sound as it is, or choose another format once that is built.",
+		Help:     "Keep every track as it is, or choose the format, the channels and the languages to keep.",
 		Settings: AudioSettings{},
 		Sections: []flow.Section{
 			{ID: "advanced", Label: "Advanced"},
@@ -64,32 +67,391 @@ func (AudioStep) Def() flow.Definition {
 		Events: []flow.EventDef{
 			{Code: "audio.as_is", Level: events.LevelInfo, Text: "Audio copied as is",
 				Fields: []string{"format", "audioTracks", "subtitleTracks"}, Keep: events.KeepLog},
+			{Code: "audio.convert", Level: events.LevelInfo, Text: "Converting audio",
+				Fields: []string{"format", "audioTracks", "kept", "converted", "dropped", "subtitleTracks"}, Keep: events.KeepLog},
+			{Code: "audio.keep_languages", Level: events.LevelInfo, Text: "Keeping some audio tracks",
+				Fields: []string{"format", "audioTracks", "kept", "dropped"}, Keep: events.KeepLog},
+			{Code: "audio.default_track", Level: events.LevelInfo, Text: "Setting the default audio track",
+				Fields: []string{"audioTracks", "defaultTrack"}, Keep: events.KeepLog},
+			{Code: "audio.no_audio", Level: events.LevelInfo, Text: "The file has no audio",
+				Fields: []string{"audioTracks", "subtitleTracks"}, Keep: events.KeepLog},
 		},
 	}
 }
 
-// Plan always decides "nothing": a stream the plan does not name is copied, so there is nothing
-// to add. It is the audio step's honest answer until conversion exists (item 7).
+// The sentences the log carries beside the decision. They are notes, not refusals: the run goes
+// on, and each one says why the plan is not exactly what the settings asked for.
+const (
+	// onlyCommentaryNote is K2's never-silent rule: dropping every track is never the answer.
+	onlyCommentaryNote = "Every audio track is commentary, so they are kept; dropping them would leave the file silent."
+	// origNotFoundNote is K1: "orig" matches nothing, and the log says so.
+	origNotFoundNote = "The original language was not found, so it matches no track."
+	// noMatchMainNote and noMatchAllNote are K2: what stays when no track is in the person's
+	// languages, by whether the choice wanted one track or every surround track.
+	noMatchMainNote     = "None of the audio is in your languages, so the main track is kept."
+	noMatchAllNote      = "None of the audio is in your languages, so all audio tracks are kept."
+	defaultNotFoundNote = "The default track's language is not among the kept tracks, so each file keeps its own default flag."
+	smallKeptNote       = "Small stereo track kept as it is: converting would not make it smaller."
+	surroundKeptNote    = "Surround track kept as it is: converting would not make it smaller."
+	foldedNote          = "7.1 sound became 5.1 (E-AC-3 and AC-3 hold up to 5.1)."
+)
+
+// Plan keeps the tracks the language and commentary choices leave, writes each the way the format
+// and channels ask, and names every dropped track so Build does not copy it. A file with no audio
+// is not an error (K2).
 func (AudioStep) Plan(s flow.Settings, in flow.PlanInput, p *encode.Plan) (flow.Decision, error) {
 	set := s.(AudioSettings)
+	tracks := in.Info.Audio
+	if len(tracks) == 0 {
+		return flow.Decision{
+			Work: false, Label: "The file has no audio", Reason: "audio.no_audio",
+			Detail: flow.F{"format": set.AudioCodec(), "audioTracks": 0, "subtitleTracks": len(in.Info.Subtitles)},
+		}, nil
+	}
+
+	kept, notes := chooseTracks(set, tracks)
+	keptSet := make(map[int]bool, len(kept))
+	for _, t := range kept {
+		keptSet[t.Index] = true
+	}
+
+	codec := set.AudioCodec()
+	var entries []encode.AudioPlan
+	var keptTracks []media.AudioTrack
+	converted, dropped := 0, 0
+	for _, t := range tracks {
+		if !keptSet[t.Index] {
+			entries = append(entries, encode.AudioPlan{Index: t.Index, Action: encode.StreamDrop})
+			dropped++
+			continue
+		}
+		keptTracks = append(keptTracks, t)
+		entry, note, didConvert := trackPlan(set, codec, t)
+		if didConvert {
+			converted++
+		}
+		if note != "" {
+			notes = append(notes, note)
+		}
+		entries = append(entries, entry)
+	}
+
+	defaultChanged := false
+	if set.DefaultTrack != nil && strings.TrimSpace(*set.DefaultTrack) != "" {
+		if chosen, ok := chooseDefault(*set.DefaultTrack, keptTracks); ok {
+			for i := range entries {
+				if entries[i].Action == encode.StreamDrop {
+					continue
+				}
+				flag := entries[i].Index == chosen
+				entries[i].Default = &flag
+				if t := trackByIndex(keptTracks, entries[i].Index); t != nil && t.Default != flag {
+					defaultChanged = true
+				}
+			}
+		} else {
+			notes = append(notes, defaultNotFoundNote)
+		}
+	}
+
+	p.Audio = append(p.Audio, entries...)
+
+	label, reason := audioDecisionLabel(set, len(tracks), len(keptTracks), converted, dropped, defaultChanged)
 	return flow.Decision{
-		Work: false, Label: "Audio copied as is", Reason: "audio.as_is",
+		Work: converted > 0 || dropped > 0 || defaultChanged,
+		// Reason is the code the log types this decision with; Label is its sentence.
+		Reason: reason, Label: label, Notes: notes,
 		Detail: flow.F{
-			"format":         set.Format,
-			"audioTracks":    len(in.Info.Audio),
-			"subtitleTracks": len(in.Info.Subtitles),
+			"format": set.AudioCodec(), "audioTracks": len(tracks), "kept": len(keptTracks),
+			"converted": converted, "dropped": dropped, "subtitleTracks": len(in.Info.Subtitles),
 		},
 	}, nil
 }
 
-// Validate refuses what the engine cannot do yet, with a problem on each field, so page 07 marks
-// them. Item 7 deletes these problems as it builds audio and subtitles.
+// audioDecisionLabel is the decision's sentence and code, from what the plan does.
+func audioDecisionLabel(set AudioSettings, total, kept, converted, dropped int, defaultChanged bool) (label, reason string) {
+	switch {
+	case converted > 0:
+		label = fmt.Sprintf("Converting %d of %d audio tracks to %s", converted, total, codecLabel(set.AudioCodec()))
+		if dropped > 0 {
+			label += "; dropping " + strconv.Itoa(dropped)
+		}
+		return label, "audio.convert"
+	case dropped > 0:
+		return fmt.Sprintf("Keeping %d of %d audio tracks", kept, total), "audio.keep_languages"
+	case defaultChanged:
+		return "Setting the default audio track", "audio.default_track"
+	}
+	return "Audio copied as is", "audio.as_is"
+}
+
+// trackPlan is one kept track's entry: copied when re-encoding would not make it smaller
+// (L-AUD-4/5), converted otherwise.
+func trackPlan(set AudioSettings, codec string, t media.AudioTrack) (encode.AudioPlan, string, bool) {
+	if codec == "copy" {
+		return encode.AudioPlan{Index: t.Index}, "", false
+	}
+	wanted := wantedChannels(set.Channels)
+	outChannels := encode.TargetChannels(codec, t.Channels, wanted)
+	target := targetBitrate(set, codec, outChannels)
+	if keep, note := keepAsIs(set, codec, outChannels, target, t); keep {
+		return encode.AudioPlan{Index: t.Index}, note, false
+	}
+	entry := encode.AudioPlan{
+		Index: t.Index, Action: encode.StreamConvert, Codec: codec,
+		Channels: wanted, SampleRate: sampleRateChoice(set), Downmix: downmixChoice(set),
+		Loudnorm: set.Loudnorm,
+	}
+	if set.BitrateKbps != nil {
+		entry.BitrateKbps = *set.BitrateKbps
+		entry.BitratePer = set.BitratePer
+	}
+	note := ""
+	// L-AUD-6: a surround codec holds at most 5.1, and the log says the 7.1 track became 5.1.
+	if outChannels == 6 && t.Channels > 6 {
+		note = foldedNote
+	}
+	return entry, note, true
+}
+
+// keepAsIs answers whether the track can be copied: the same codec with nothing to change, or a
+// small lossy track converting could not beat. A channel, sample-rate or loudness change always
+// converts, and so does a lossless source, whose copy would not be smaller.
+func keepAsIs(set AudioSettings, codec string, outChannels, targetKbps int, t media.AudioTrack) (bool, string) {
+	if t.Channels > 0 && outChannels > 0 && outChannels != t.Channels {
+		return false, ""
+	}
+	if set.SampleRate != nil && t.SampleRate > 0 && *set.SampleRate != t.SampleRate {
+		return false, ""
+	}
+	if set.Loudnorm {
+		return false, ""
+	}
+	if t.Codec == codec {
+		return true, ""
+	}
+	if losslessAudio[t.Codec] {
+		return false, ""
+	}
+	if t.BitRate == 0 || t.BitRate <= int64(targetKbps)*1000 {
+		if t.Channels <= 2 {
+			return true, smallKeptNote
+		}
+		return true, surroundKeptNote
+	}
+	return false, ""
+}
+
+// targetBitrate is the rate the conversion would write: the person's number, per channel or for
+// the whole track, else the codec's automatic one (L-AUD-7).
+func targetBitrate(set AudioSettings, codec string, channels int) int {
+	if codec == "flac" {
+		return 0
+	}
+	if set.BitrateKbps != nil && *set.BitrateKbps > 0 {
+		if set.BitratePer == "track" {
+			return *set.BitrateKbps
+		}
+		ch := channels
+		if ch <= 0 {
+			ch = 2
+		}
+		return *set.BitrateKbps * ch
+	}
+	return encode.AutoBitrate(codec, channels)
+}
+
+// chooseTracks applies the commentary and language choices, in that order: a commentary track is
+// dropped before the language filter looks, so it can never be the main track a filter falls back
+// to (K5).
+func chooseTracks(set AudioSettings, tracks []media.AudioTrack) ([]media.AudioTrack, []string) {
+	var notes []string
+	work := append([]media.AudioTrack{}, tracks...)
+	if set.Commentary == "drop" {
+		var rest []media.AudioTrack
+		for _, t := range work {
+			if !isCommentary(t) {
+				rest = append(rest, t)
+			}
+		}
+		if len(rest) > 0 {
+			work = rest
+		} else {
+			notes = append(notes, onlyCommentaryNote)
+		}
+	}
+
+	codes, active, origNote := wantedLanguages(set.Languages, work)
+	if origNote != "" {
+		notes = append(notes, origNote)
+	}
+	if !active {
+		return work, notes
+	}
+	var matched []media.AudioTrack
+	for _, t := range work {
+		if codes[flow.CanonLang(t.Language)] {
+			matched = append(matched, t)
+		}
+	}
+	if len(matched) == 0 {
+		if stereoChoice(set.Channels) {
+			matched = []media.AudioTrack{mainTrack(work)}
+			notes = append(notes, noMatchMainNote)
+		} else {
+			matched = work
+			notes = append(notes, noMatchAllNote)
+		}
+	}
+	return matched, notes
+}
+
+// wantedLanguages is the language filter: the canonical codes to keep, whether a filter was asked
+// for at all, and the sentence to log when "orig" matched nothing (K1).
+func wantedLanguages(list []string, tracks []media.AudioTrack) (map[string]bool, bool, string) {
+	if len(list) == 0 {
+		return nil, false, ""
+	}
+	codes := map[string]bool{}
+	note := ""
+	for _, raw := range list {
+		switch c := strings.ToLower(strings.TrimSpace(raw)); c {
+		case "":
+		case "orig":
+			if orig, ok := originalLanguage(tracks); ok {
+				codes[orig] = true
+			} else {
+				note = origNotFoundNote
+			}
+		case "und":
+			codes[""] = true
+		default:
+			// L-AUD-16: an unknown code means no language, and it must not turn into a match for
+			// the untagged tracks the way an explicit "und" does.
+			if code := flow.CanonLang(c); code != "" {
+				codes[code] = true
+			}
+		}
+	}
+	return codes, true, note
+}
+
+// originalLanguage is K1's "orig": the first track in file order whose language is set and not
+// und. A connected downloader's language would come first, but no downloader is built.
+func originalLanguage(tracks []media.AudioTrack) (string, bool) {
+	for _, t := range tracks {
+		if c := flow.CanonLang(t.Language); c != "" {
+			return c, true
+		}
+	}
+	return "", false
+}
+
+// stereoChoice is whether the Channels choice asks for one track (stereo or mono) rather than
+// every surround track (source or 5.1).
+func stereoChoice(channels string) bool {
+	return channels == "stereo" || channels == "mono"
+}
+
+// mainTrack is K2's track when nothing matches: the default-flagged one, else the first.
+func mainTrack(tracks []media.AudioTrack) media.AudioTrack {
+	for _, t := range tracks {
+		if t.Default {
+			return t
+		}
+	}
+	return tracks[0]
+}
+
+// chooseDefault is the Default track setting: the first kept track in that language, "und" for a
+// track with no language, "orig" for the film's own.
+func chooseDefault(raw string, tracks []media.AudioTrack) (int, bool) {
+	var want string
+	switch low := strings.ToLower(strings.TrimSpace(raw)); low {
+	case "orig":
+		orig, ok := originalLanguage(tracks)
+		if !ok {
+			return 0, false
+		}
+		want = orig
+	case "und":
+		want = ""
+	default:
+		// An unknown language names no track: the page's list is the only source of these codes.
+		if want = flow.CanonLang(low); want == "" {
+			return 0, false
+		}
+	}
+	for _, t := range tracks {
+		if flow.CanonLang(t.Language) == want {
+			return t.Index, true
+		}
+	}
+	return 0, false
+}
+
+// isCommentary is K5's rule: the comment disposition, or a title that says commentary in any
+// case. "Comment" alone is not one, while "Commentaries" is.
+func isCommentary(t media.AudioTrack) bool {
+	if t.Comment {
+		return true
+	}
+	return strings.Contains(strings.ToLower(t.Title), "commentar")
+}
+
+// wantedChannels is the Channels choice as a number; 0 keeps the source's.
+func wantedChannels(channels string) int {
+	switch channels {
+	case "stereo":
+		return 2
+	case "mono":
+		return 1
+	case "5.1":
+		return 6
+	}
+	return 0
+}
+
+func sampleRateChoice(set AudioSettings) int {
+	if set.SampleRate != nil {
+		return *set.SampleRate
+	}
+	return 0
+}
+
+func downmixChoice(set AudioSettings) string {
+	if set.Downmix != nil {
+		return *set.Downmix
+	}
+	return ""
+}
+
+func trackByIndex(tracks []media.AudioTrack, index int) *media.AudioTrack {
+	for i := range tracks {
+		if tracks[i].Index == index {
+			return &tracks[i]
+		}
+	}
+	return nil
+}
+
+// losslessAudio is the codecs whose copy is already the smallest form: converting them to a lossy
+// format saves space but loses what the track is for, and L-AUD-5 converts them.
+var losslessAudio = map[string]bool{
+	"flac": true, "truehd": true, "mlp": true, "alac": true, "wavpack": true, "tta": true,
+	"pcm_s16le": true, "pcm_s24le": true, "pcm_s32le": true, "pcm_f32le": true,
+}
+
+// Validate refuses what the engine cannot do yet and what the settings contradict, with a problem
+// on each field, so page 07 marks them. Subtitles stay "not yet" until S2-7b.
 func (AudioStep) Validate(s flow.Settings, vc flow.ValidateContext) flow.Check {
 	set := s.(AudioSettings)
 	var c flow.Check
 	c.Problems = append(c.Problems, flow.TagProblems(AudioStep{}.Def(), set)...)
 	c.Disabled = append(c.Disabled, audioDisabled(set)...)
+	c.Disabled = append(c.Disabled, audioInert(set)...)
 	c.Problems = append(c.Problems, audioNotYet(set)...)
+	c.Problems = append(c.Problems, audioCopyConflicts(set)...)
 	c.Summary = audioSummary(set)
 	return c
 }
@@ -106,54 +468,67 @@ func audioDisabled(set AudioSettings) []flow.Disabled {
 	}}
 }
 
-// audioNotYet is every setting the engine cannot act on yet (item 7).
+// audioInert greys the Advanced fields the current choices cannot use: a surroundings-to-stereo
+// mix needs stereo as the target, and FLAC has no bitrate.
+func audioInert(set AudioSettings) []flow.Disabled {
+	var out []flow.Disabled
+	if set.AudioCodec() != "copy" && !stereoChoice(set.Channels) {
+		out = append(out, flow.Disabled{
+			Field: "downmix",
+			Why:   "Making stereo from surround happens when the channels go down to Stereo or Mono; pick one above.",
+		})
+	}
+	if set.AudioCodec() == "flac" && set.BitrateKbps != nil {
+		out = append(out, flow.Disabled{
+			Field: "bitrateKbps",
+			Why:   "FLAC is lossless, so it has no bitrate to set.",
+		})
+	}
+	return out
+}
+
+// audioNotYet is every setting the engine cannot act on yet: the subtitles, which are S2-7b.
 func audioNotYet(set AudioSettings) []flow.Problem {
 	var out []flow.Problem
 	add := func(field, message string) {
 		out = append(out, flow.Problem{Field: field, Code: "audio.not_yet", Message: message})
 	}
-	if set.Format == "aac" || set.Format == "opus" {
-		add("format", flow.AudioWhy) // item 7; the guide's greyed choices read the same constant
-	}
-	if set.Channels != "" && set.Channels != "source" {
-		add("channels", "Changing the channels is not built yet; every track keeps the channels it has.") // item 7
-	}
-	if len(set.Languages) > 0 {
-		add("languages", "Keeping only some languages is not built yet; every track is kept.") // item 7
-	}
-	if set.Codec != nil && *set.Codec != "" && *set.Codec != "copy" {
-		add("codec", "Choosing the codec in Advanced is not built yet; Format decides for now.") // item 7
-	}
-	if set.BitrateKbps != nil {
-		add("bitrateKbps", "Setting the audio bitrate is not built yet.") // item 7
-	}
-	if set.BitratePer == "track" && set.BitrateKbps != nil {
-		add("bitratePer", "Setting one bitrate for the whole track is not built yet.") // item 7
-	}
-	if set.SampleRate != nil {
-		add("sampleRate", "Changing the sample rate is not built yet.") // item 7
-	}
-	// Plain (the default) is what a copied track keeps anyway; only the two mixes change it.
-	if set.Downmix != nil && *set.Downmix != "" && *set.Downmix != "plain" {
-		add("downmix", "Making stereo from surround is not built yet.") // item 7
-	}
-	if set.Loudnorm {
-		add("loudnorm", "Evening out loudness is not built yet.") // item 7
-	}
-	if set.Commentary == "drop" {
-		add("commentary", "Dropping commentary tracks is not built yet.") // item 7
-	}
-	if set.DefaultTrack != nil && *set.DefaultTrack != "" {
-		add("defaultTrack", "Choosing the default track is not built yet.") // item 7
-	}
 	if set.KeepOriginal {
-		add("keepOriginal", "Keeping the original track as well is not built yet.") // item 7
+		add("keepOriginal", "Keeping the original track as well is not built yet.") // item 7's second half
 	}
 	if set.Subtitles != "" && set.Subtitles != "keep_all" {
-		add("subtitles", "Choosing which subtitles to keep is not built yet; every subtitle is kept.") // item 7
+		add("subtitles", "Choosing which subtitles to keep is not built yet; every subtitle is kept.") // S2-7b
 	}
 	if len(set.SubtitleLanguages) > 0 {
-		add("subtitleLanguages", "Keeping only some subtitle languages is not built yet; every subtitle is kept.") // item 7
+		add("subtitleLanguages", "Keeping only some subtitle languages is not built yet; every subtitle is kept.") // S2-7b
+	}
+	return out
+}
+
+// audioCopyConflicts refuses a number that needs conversion while the sound is copied: copying
+// keeps each track exactly as the file has it, so the page must pick a format first.
+func audioCopyConflicts(set AudioSettings) []flow.Problem {
+	if set.AudioCodec() != "copy" {
+		return nil
+	}
+	var out []flow.Problem
+	add := func(field, message string) {
+		out = append(out, flow.Problem{Field: field, Code: "audio.copy_conflict", Message: message})
+	}
+	if set.Channels != "" && set.Channels != "source" {
+		add("channels", "Copying the sound keeps each track's channels. Pick a format above to change them.")
+	}
+	if set.BitrateKbps != nil {
+		add("bitrateKbps", "Copying the sound keeps each track's bitrate. Pick a format above to set one.")
+	}
+	if set.SampleRate != nil {
+		add("sampleRate", "Copying the sound keeps each track's sample rate. Pick a format above to change it.")
+	}
+	if set.Loudnorm {
+		add("loudnorm", "Evening out loudness needs a format. Pick one above.")
+	}
+	if set.Downmix != nil && *set.Downmix != "" && *set.Downmix != "plain" {
+		add("downmix", "Making stereo from surround needs a format. Pick one above.")
 	}
 	return out
 }
