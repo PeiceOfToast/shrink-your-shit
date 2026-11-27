@@ -540,7 +540,7 @@ func TestPlanFileIsTheSameAnswerAsTheRun(t *testing.T) {
 	if plan.Video.Codec != encode.CodecHEVC || plan.Video.CRF == nil || *plan.Video.CRF != 23 {
 		t.Errorf("plan = %+v, want HEVC CRF 23", plan.Video)
 	}
-	if plan.Container != encode.ContainerMKV || plan.Output != "/library/clip-shrunk.mkv" {
+	if plan.Container != encode.ContainerMKV || filepath.ToSlash(plan.Output) != "/library/clip-shrunk.mkv" {
 		t.Errorf("save = %q %q", plan.Container, plan.Output)
 	}
 

@@ -4,6 +4,7 @@ package steps
 
 import (
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -42,7 +43,7 @@ func TestSaveKeepsTheFileType(t *testing.T) {
 	if p.Container != encode.ContainerMP4 {
 		t.Errorf("container = %q, want mp4", p.Container)
 	}
-	if p.Output != "/library/Movies/media-shrunk.mp4" {
+	if filepath.ToSlash(p.Output) != "/library/Movies/media-shrunk.mp4" {
 		t.Errorf("output = %q, want media-shrunk.mp4", p.Output)
 	}
 	if d.Label != "Saving next to the original as MP4" {
@@ -55,7 +56,7 @@ func TestSaveContainerChoices(t *testing.T) {
 	if _, err := (SaveStep{}).Plan(saveSettings("mkv", "next_to", "x"), flow.PlanInput{Info: mp4Info()}, &p); err != nil {
 		t.Fatalf("mkv: %v", err)
 	}
-	if p.Output != "/library/Movies/media-x.mkv" {
+	if filepath.ToSlash(p.Output) != "/library/Movies/media-x.mkv" {
 		t.Errorf("mkv output = %q", p.Output)
 	}
 	webm := media.Info{Path: "/library/a.webm", Format: media.Format{Names: []string{"matroska", "webm"}}}
@@ -63,7 +64,7 @@ func TestSaveContainerChoices(t *testing.T) {
 	if _, err := (SaveStep{}).Plan(saveSettings("keep", "next_to", "x"), flow.PlanInput{Info: webm}, &p); err != nil {
 		t.Fatalf("webm: %v", err)
 	}
-	if p.Container != encode.ContainerWebM || p.Output != "/library/a-x.webm" {
+	if p.Container != encode.ContainerWebM || filepath.ToSlash(p.Output) != "/library/a-x.webm" {
 		t.Errorf("webm = %q %q, want webm/a-x.webm", p.Container, p.Output)
 	}
 }
@@ -77,7 +78,7 @@ func TestSaveNothingWhenTheVideoIsUntouched(t *testing.T) {
 	if d.Work || d.Reason != "save.nothing" {
 		t.Errorf("decision = %+v, want nothing", d)
 	}
-	if p.Output != "/library/Movies/media-shrunk.mkv" {
+	if filepath.ToSlash(p.Output) != "/library/Movies/media-shrunk.mkv" {
 		t.Errorf("output = %q, want it named even when nothing is written", p.Output)
 	}
 }
@@ -99,7 +100,7 @@ func TestSaveRefusesToLandOnTheSource(t *testing.T) {
 	if _, err := (SaveStep{}).Plan(saveSettings("mp4", "next_to", ""), flow.PlanInput{Info: info}, &p); err != nil {
 		t.Fatalf("mkv source to mp4: %v", err)
 	}
-	if p.Output != "/library/Movies/media.mp4" {
+	if filepath.ToSlash(p.Output) != "/library/Movies/media.mp4" {
 		t.Errorf("output = %q", p.Output)
 	}
 }
@@ -133,7 +134,7 @@ func TestSaveCleansTheSuffix(t *testing.T) {
 	if _, err := (SaveStep{}).Plan(saveSettings("mkv", "next_to", "a b<>"), flow.PlanInput{Info: mp4Info()}, &p); err != nil {
 		t.Fatalf("plan: %v", err)
 	}
-	if p.Output != "/library/Movies/media-a b.mkv" {
+	if filepath.ToSlash(p.Output) != "/library/Movies/media-a b.mkv" {
 		t.Errorf("output = %q, want the cleaned suffix", p.Output)
 	}
 }
