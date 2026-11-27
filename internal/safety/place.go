@@ -23,10 +23,12 @@ var ErrSourceLeftBehind = errors.New("safety: placed, but the source could not b
 // maxPlaceNames bounds the "name (2)", "name (3)" loop.
 const maxPlaceNames = 1000
 
-// Hooks for tests: a sync that fails with EINVAL must be ignored, so tests replace these.
+// Hooks for tests: a sync that fails with EINVAL must be ignored, and a source left behind needs a rename that
+// fails after the link, so tests replace these.
 var (
-	syncFile = func(f *os.File) error { return f.Sync() }
-	syncDir  = func(d *os.File) error { return d.Sync() }
+	syncFile        = func(f *os.File) error { return f.Sync() }
+	syncDir         = func(d *os.File) error { return d.Sync() }
+	renameNoReplace = fsx.RenameNoReplace
 )
 
 // Place moves the staged file to final without ever overwriting: if final exists it tries "name (2).ext",
@@ -56,7 +58,7 @@ func Place(ctx context.Context, st Staged, final string) (string, error) {
 		if n > 1 {
 			cand = fmt.Sprintf("%s (%d)%s", stem, n, ext)
 		}
-		err := fsx.RenameNoReplace(st.Path, cand)
+		err := renameNoReplace(st.Path, cand)
 		if err == nil {
 			used = cand
 			break
@@ -65,8 +67,10 @@ func Place(ctx context.Context, st Staged, final string) (string, error) {
 			continue
 		}
 		if errors.Is(err, fsx.ErrNotRemoved) {
+			// The file is at its final name and the staged copy is still in the staging folder. Keep the folder: it
+			// holds the leftover, and the caller reports it. Only the destination folder is synced here.
 			used = cand
-			if err := finishPlace(st, used); err != nil {
+			if err := syncDestination(used); err != nil {
 				return used, err
 			}
 			return used, ErrSourceLeftBehind
@@ -79,12 +83,21 @@ func Place(ctx context.Context, st Staged, final string) (string, error) {
 	return used, nil
 }
 
+// syncDestination syncs the folder the placed file is in, where the platform can (L-SAFE-12).
+func syncDestination(used string) error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	if err := syncDirOf(used); err != nil {
+		return fmt.Errorf("place: sync folder: %w", err)
+	}
+	return nil
+}
+
 // finishPlace syncs the destination folder and removes the staging folder once the file has left it.
 func finishPlace(st Staged, used string) error {
-	if runtime.GOOS != "windows" {
-		if err := syncDirOf(used); err != nil {
-			return fmt.Errorf("place: sync folder: %w", err)
-		}
+	if err := syncDestination(used); err != nil {
+		return err
 	}
 	if err := os.Remove(st.Folder); err != nil {
 		return fmt.Errorf("place: placed, but the staging folder is left: %w", err)

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"testing"
@@ -68,13 +69,16 @@ func TestStageIsPrivateAndInvisibleAtTheFinalName(t *testing.T) {
 	if !strings.HasPrefix(filepath.Base(st.Folder), ".a b.c.") || !strings.HasSuffix(st.Folder, ".syp-tmp") {
 		t.Fatalf("folder name %q is not .<stem>.<random>.syp-tmp", filepath.Base(st.Folder))
 	}
-	fi, err := os.Stat(st.Folder)
-	if err != nil || !fi.IsDir() || fi.Mode().Perm() != 0o700 {
-		t.Fatalf("folder mode = %v, %v; want a 0700 directory", fi.Mode(), err)
-	}
-	ff, err := os.Stat(st.Path)
-	if err != nil || ff.Mode().Perm() != 0o600 {
-		t.Fatalf("file mode = %v, %v; want 0600", ff.Mode(), err)
+	// Windows has no Unix modes; the privacy is the folder's ACL there, so only the modes are skipped on it.
+	if runtime.GOOS != "windows" {
+		fi, err := os.Stat(st.Folder)
+		if err != nil || !fi.IsDir() || fi.Mode().Perm() != 0o700 {
+			t.Fatalf("folder mode = %v, %v; want a 0700 directory", fi.Mode(), err)
+		}
+		ff, err := os.Stat(st.Path)
+		if err != nil || ff.Mode().Perm() != 0o600 {
+			t.Fatalf("file mode = %v, %v; want 0600", ff.Mode(), err)
+		}
 	}
 	if _, err := os.Stat(dst); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("nothing may appear at the final name before Place: %v", err)
