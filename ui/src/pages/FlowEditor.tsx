@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { navigate, useLocation } from "../router.tsx";
 import { api, type Flow, type FlowCheck, type FlowStep, type StepId, type TryLine } from "../api/index.ts";
 import { useApi } from "../api/useApi.ts";
-import { ChoiceField, QUALITY_NAMES, Row, Seg, qualityMeaning, toErr, type Err } from "./flowParts.tsx";
+import { ChoiceField, QUALITY_NAMES, Row, Seg, qualityMeaning, toErr, useBitrateLadder, type Err } from "./flowParts.tsx";
 import { languageName, normalizeLanguage } from "../format/language.ts";
 
 // The two choices the list from the API doesn't include. Their codes are final: orig and und.
@@ -472,10 +472,10 @@ function Editor({ id, initial }: { id: string; initial: Loaded }) {
 
 // Quality: the 1–5 slider with its name, and the number it resolves to for the picture size.
 function QualityRow({ value, format, card, size, off, onChange }: { value: number; format: string; card: boolean; size: string | null; off?: string; onChange: (q: number) => void }) {
-  const where = size == null ? "at 1080p (one lower at 720p and below, one higher at 2160p)" : size === "custom" ? "at the custom size" : `for ${size}p`;
+  const ladder = useBitrateLadder();
   return (
     <div className={off ? "wf-dim" : undefined}>
-      <Row label={`Quality · ${value} · ${QUALITY_NAMES[value - 1]}`} hint={off ?? qualityMeaning(value, format, card, where)}>
+      <Row label={`Quality · ${value} · ${QUALITY_NAMES[value - 1]}`} hint={off ?? (ladder ? qualityMeaning(ladder, value, format, card, size) : undefined)}>
         <div className="wf-quality">
           <input type="range" min={1} max={5} step={1} value={value} disabled={Boolean(off)} aria-label="Quality" aria-valuetext={`${value} · ${QUALITY_NAMES[value - 1]}`} onChange={(e) => onChange(Number(e.target.value))} />
         </div>

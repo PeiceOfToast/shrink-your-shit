@@ -3,7 +3,7 @@ import { navigate } from "../router.tsx";
 import { api, type Answers, type GuideDoc, type GuideField, type GuidePart, type GuidePreview, type TryLine } from "../api/index.ts";
 import { languageName } from "../format/language.ts";
 import { useApi } from "../api/useApi.ts";
-import { ChoiceField, QUALITY_NAMES, Row, qualityMeaning, toErr, type Err } from "./flowParts.tsx";
+import { ChoiceField, QUALITY_NAMES, Row, qualityMeaning, toErr, useBitrateLadder, type Err } from "./flowParts.tsx";
 
 // Guided builder (06): a short set of questions that build the flow. Nothing reaches the library until
 // "Save and use it". The three panels are the parts index, the part cards and "What this does".
@@ -346,6 +346,7 @@ function PartCard({ part, answers, languages, setAnswer }: { part: GuidePart; an
 }
 
 function FieldRow({ field, value, answers, languages, onChange }: { field: GuideField; value: unknown; answers: Answers; languages: string[]; onChange: (v: unknown) => void }) {
+  const ladder = useBitrateLadder();
   if (field.type === "choice" && field.choices) {
     return (
       <>
@@ -360,7 +361,7 @@ function FieldRow({ field, value, answers, languages, onChange }: { field: Guide
     return (
       <Row
         label={isQuality ? `Quality · ${n} · ${QUALITY_NAMES[n - 1]}` : field.label}
-        hint={isQuality ? qualityMeaning(n, String(answers.format ?? "hevc"), answers.useGpu !== false, "at 1080p (one lower at 720p and below, one higher at 2160p)") : undefined}
+        hint={isQuality && ladder ? qualityMeaning(ladder, n, String(answers.format ?? "hevc"), answers.useGpu !== false, null) : undefined}
       >
         <div className="wf-quality">
           <input type="range" min={1} max={5} step={1} value={n} aria-label={field.label} aria-valuetext={isQuality ? `${n} · ${QUALITY_NAMES[n - 1]}` : `${n}`} onChange={(e) => onChange(Number(e.target.value))} />
