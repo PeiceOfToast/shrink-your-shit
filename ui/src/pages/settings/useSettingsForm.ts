@@ -5,7 +5,7 @@ import { asProblem, useDirty, useDraft, type FieldProblem } from "./parts.tsx";
 
 export type SettingsGroup = "general" | "appearance" | "processing" | "logs";
 
-const READ_ONLY = new Set(["updateAvailable", "trashPath"]);
+const READ_ONLY = new Set(["version", "updateAvailable", "trashPath"]);
 
 // Only the changed fields, nested by group.
 export function settingsPatch(server: SettingsData, draft: SettingsData, groups: SettingsGroup[]): SettingsPatch {

@@ -401,13 +401,21 @@ export interface AppearanceSettings {
   accent: string | null;
 }
 
+export interface UpdateAvailable {
+  version: string;
+  notesUrl: string;
+  checkedAt: string;
+}
+
 export interface GeneralSettings {
   serverName: string;
   language: "en";
   timeFormat: "24h" | "12h";
   dateFormat: "YYYY-MM-DD" | "DD.MM.YYYY" | "MM/DD/YYYY";
   checkForUpdates: boolean;
-  updateAvailable: string | null;
+  // Read-only. The running version, and the newer release when one is found (null = up to date, never checked, or checks off).
+  version: string;
+  updateAvailable: UpdateAvailable | null;
   // My languages: three-letter codes, kept for the workflows that keep only some tracks.
   languages: string[];
 }
@@ -440,7 +448,7 @@ export interface SettingsData {
 
 // PATCH sends only the changed fields, nested by group.
 export type SettingsPatch = {
-  general?: Partial<Omit<GeneralSettings, "updateAvailable">>;
+  general?: Partial<Omit<GeneralSettings, "updateAvailable" | "version">>;
   appearance?: Partial<AppearanceSettings>;
   processing?: Partial<Omit<ProcessingSettings, "trashPath">>;
   logs?: Partial<LogSettings>;
