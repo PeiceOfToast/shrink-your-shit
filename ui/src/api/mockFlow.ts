@@ -15,10 +15,10 @@ export const DEFAULT_ANSWERS: Answers = {
   ifGpuFails: "cpu",
   audio: "stereo_aac",
   allLanguages: false,
-  languages: [],
+  languages: ["en", "de"],
   languagesEverywhere: false,
   subtitles: "keep_all",
-  subtitleLanguages: [],
+  subtitleLanguages: ["en", "de"],
   fileType: "mkv",
   includeDolbyVision: false,
   original: "replace",
@@ -89,7 +89,7 @@ const GUIDE: GuideDoc = {
   chips: [
     { id: "shrink_hevc", label: "Shrink to HEVC", always: false, on: { format: "hevc" }, off: { format: "h264" }, available: true },
     { id: "keep_my_languages", label: "Keep only my languages", always: false, on: { allLanguages: false }, off: { allLanguages: true }, available: true },
-    { id: "use_gpu", label: "Use the graphics card", always: false, on: { useGpu: true }, off: { useGpu: false }, available: true },
+    { id: "use_gpu", label: "Use the graphics card (QSV)", always: false, on: { useGpu: true }, off: { useGpu: false }, available: true },
     { id: "never_worse", label: "Never make anything worse", always: true, on: {}, off: {}, available: true },
     { id: "hdr_kept", label: "HDR kept, Dolby Vision left alone", always: true, on: {}, off: {}, available: true },
   ],
@@ -108,10 +108,11 @@ const GUIDE: GuideDoc = {
             { value: "av1", label: "AV1", available: true },
           ],
         },
-        { key: "quality", label: "Quality (1 smallest, 5 best)", type: "number" },
-        { key: "useGpu", label: "Use the graphics card", type: "yesno" },
+        { key: "quality", label: "Quality", type: "number" },
+        { key: "useGpu", label: "Use the graphics card", type: "yesno", more: true },
         {
           key: "ifGpuFails",
+          more: true,
           label: "If the graphics card can't do it",
           type: "choice",
           choices: [
@@ -185,7 +186,6 @@ const GUIDE: GuideDoc = {
             { value: "keep", label: "Keep the same", available: true },
           ],
         },
-        { key: "includeDolbyVision", label: "Keep Dolby Vision as it is", type: "yesno" },
       ],
     },
     {
@@ -199,7 +199,7 @@ const GUIDE: GuideDoc = {
           choices: [
             { value: "replace", label: "Replace the original", available: true },
             { value: "next_to_original", label: "Next to the original", available: true },
-            { value: "one_folder", label: "In one folder", available: true },
+            { value: "one_folder", label: "A different folder", available: true },
           ],
         },
         { key: "folder", label: "Folder", type: "folder" },
@@ -338,13 +338,22 @@ export function checkFlow(flow: Flow): FlowCheck {
 }
 
 // The guide's sentences ("What this does") from the answers. The flow and the check come from the same mapping as the editor.
-function sentencesFor(flow: Flow): string[] {
+function sentencesFor(flow: Flow, a: Answers): string[] {
   const v = flow.steps[0].settings;
   const au = flow.steps[1].settings;
   const sv = flow.steps[2].settings;
+  const list = (xs: unknown) => (Array.isArray(xs) ? (xs as string[]).join(" and ") : "");
+  const sub = list(a.subtitleLanguages) || "every language";
+  const subtitles =
+    a.subtitles === "srt" ? "Subtitles are made into SRT files."
+    : a.subtitles === "text_only" ? "Only text subtitles are kept."
+    : a.subtitles === "my_languages" ? `Keeps subtitles in ${sub}.`
+    : "Keeps every subtitle.";
   const out = [
-    `Converts video to ${FORMAT_LABEL[String(v.format)]} at quality ${v.quality}${v.useGpu ? ", on the graphics card when it can" : ""}.`,
-    `Audio: ${CODEC_LABEL[String(au.codec ?? au.format)]}, ${CHANNEL_LABEL[String(au.channels)]}${Array.isArray(au.languages) && au.languages.length ? `, ${(au.languages as string[]).join(" and ")}` : ""}.`,
+    `Converts video to ${FORMAT_LABEL[String(v.format)]} at quality ${v.quality}, ${v.size ? `at most ${String(v.size)}p` : "keeping the picture size"}${v.useGpu ? ", on the graphics card when it can" : ""}.`,
+    `Audio: ${CODEC_LABEL[String(au.codec ?? au.format)]}, ${CHANNEL_LABEL[String(au.channels)]}${list(au.languages) ? `, in ${list(au.languages)}` : ", every language"}.`,
+    subtitles,
+    a.fileType === "keep" ? "The file keeps its container." : `Saves as ${({ mkv: "MKV", mp4: "MP4", webm: "WebM" } as Record<string, string>)[String(a.fileType)] ?? String(a.fileType)}.`,
   ];
   if (sv.where === "replace") out.push("Replaces the original. The old file goes to the trash and is kept 7 days.");
   else if (sv.where === "folder") out.push(`Puts the new file in ${sv.folder ? String(sv.folder) : "the folder you pick"}; the original stays where it is.`);
@@ -400,7 +409,7 @@ export function guidePreview(answers: Answers): Promise<GuidePreview> {
   return respond(() => {
     checkQuality(answers);
     const flow = answersToFlow(answers, { name: "", description: "" });
-    return { sentences: sentencesFor(flow), flow, problems: checkFlow(flow).problems };
+    return { sentences: sentencesFor(flow, answers), flow, problems: checkFlow(flow).problems };
   });
 }
 

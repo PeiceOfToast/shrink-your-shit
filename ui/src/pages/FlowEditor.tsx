@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { navigate, useLocation } from "../router.tsx";
 import { api, type Flow, type FlowCheck, type FlowStep, type StepId, type TryLine } from "../api/index.ts";
 import { useApi } from "../api/useApi.ts";
-import { ChoiceField, QUALITY_NAMES, Row, Seg, toErr, type Err } from "./flowParts.tsx";
+import { ChoiceField, QUALITY_NAMES, Row, Seg, qualityMeaning, toErr, type Err } from "./flowParts.tsx";
 
 // Flow editor (07): the fixed walk Video → Audio → Save the result. Nothing is added or reordered.
 // The Advanced parts replace the simple choices for the things the guided page doesn't cover.
@@ -26,21 +26,27 @@ interface Loaded {
   flow: Flow;
   rev: number;
   name: string;
+  usedBy: string[];
 }
+
+// The graphics card choice. The backend has no separate value for Automatic and Intel (QSV): both use the card.
+type GpuPick = "auto" | "qsv" | "none";
 
 export function FlowEditor({ id }: { id: string }) {
   const starter = useLocation().query.get("starter");
   const loaded = useApi<Loaded>(async () => {
     const rows = await api.listWorkflows();
-    const name = rows.find((r) => r.id === id)?.name ?? "New workflow";
+    const row = rows.find((r) => r.id === id);
+    const name = row?.name ?? "New workflow";
+    const usedBy = row?.usedBy.map((u) => u.name) ?? [];
     if (id === NEW) {
       const g = await api.getGuideAnswers(NEW);
       const extra = starter ? (await api.getStarter(starter)).answers : {};
       const p = await api.guidePreview({ ...g.answers, ...extra });
-      return { flow: { ...p.flow, name }, rev: 0, name };
+      return { flow: { ...p.flow, name }, rev: 0, name, usedBy };
     }
     const f = await api.getFlow(id);
-    return { flow: f.flow, rev: f.rev, name };
+    return { flow: f.flow, rev: f.rev, name, usedBy };
   }, [id, starter]);
 
   if (loaded.error && !loaded.data) {
@@ -64,6 +70,8 @@ function Editor({ id, initial }: { id: string; initial: Loaded }) {
   const [tryLines, setTryLines] = useState<TryLine[] | null>(null);
   const [tryErr, setTryErr] = useState<Err | null>(null);
   const [draftId, setDraftId] = useState(id);
+  const [tryOpen, setTryOpen] = useState(false);
+  const [gpu, setGpu] = useState<GpuPick>(() => (initial.flow.steps.find((s) => s.id === "video")?.settings.useGpu === false ? "none" : "auto"));
   const seq = useRef(0);
   const isNew = draftId === NEW;
 
@@ -150,7 +158,7 @@ function Editor({ id, initial }: { id: string; initial: Loaded }) {
   const cards: Record<StepId, ReactNode> = {
     video: (
       <>
-        <Row label="Format">
+        <Row label="Format" hint={video.format === "hevc" ? "Small files that play on most TVs and phones since 2016." : undefined}>
           <Seg
             label="Format"
             value={String(video.format)}
@@ -166,19 +174,25 @@ function Editor({ id, initial }: { id: string; initial: Loaded }) {
           value={Number(video.quality ?? 3)}
           format={String(video.format)}
           card={video.useGpu !== false}
+          size={video.size == null ? null : String(video.size)}
           off={video.rateControl != null ? "Not used: Advanced sets a bitrate instead." : why("video", "quality")}
           onChange={(q) => set("video", { quality: q })}
         />
-        <Row label="Graphics card">
-          <Seg
-            label="Graphics card"
-            value={video.useGpu === false ? "off" : "auto"}
-            options={[
-              { value: "auto", label: "Automatic" },
-              { value: "off", label: "Off" },
-            ]}
-            onChange={(v) => set("video", { useGpu: v === "auto" })}
-          />
+        <Row label="Graphics card" hint="Made on your card (QSV) when it can.">
+          <select
+            className="sel"
+            aria-label="Graphics card"
+            value={gpu}
+            onChange={(e) => {
+              const v = e.target.value as GpuPick;
+              setGpu(v);
+              set("video", { useGpu: v !== "none" });
+            }}
+          >
+            <option value="auto">Automatic</option>
+            <option value="qsv">Intel (QSV)</option>
+            <option value="none">None, use the processor</option>
+          </select>
         </Row>
         <Row label="If the graphics card can't do it">
           <Seg
@@ -265,32 +279,55 @@ function Editor({ id, initial }: { id: string; initial: Loaded }) {
   };
 
   return (
-    <>
+    <div className="wf-col">
       <div className="wf-head">
         <div>
-          <h1>{flow.name || "Untitled"}</h1>
+          <button type="button" className="wf-back" onClick={() => navigate("/workflows")}>‹ Workflows</button>
+          <div className="wf-head-meta">
+            <h1>{flow.name || "Untitled"}</h1>
+            {check ? (
+              problemCount === 0 ? (
+                <span className="pill ok">No problems</span>
+              ) : (
+                <button type="button" className="pill bad" aria-expanded={showProblems} onClick={() => setShowProblems((v) => !v)}>
+                  {problemCount} {problemCount === 1 ? "problem" : "problems"} · Show
+                </button>
+              )
+            ) : checkErr ? (
+              <span className="pill warn">Can't check</span>
+            ) : (
+              <span className="pill">Checking…</span>
+            )}
+          </div>
           <span className="muted sm">
-            Video
+            Video{initial.usedBy.length > 0 ? ` · used by ${initial.usedBy.join(", ")}` : ""}
             {dirty ? <span className="wf-dirty" aria-label="Unsaved changes" /> : null}
           </span>
         </div>
         <span className="sp" />
-        {check ? (
-          problemCount === 0 ? (
-            <span className="pill ok">No problems</span>
-          ) : (
-            <button type="button" className="pill bad" aria-expanded={showProblems} onClick={() => setShowProblems((v) => !v)}>
-              {problemCount} {problemCount === 1 ? "problem" : "problems"} · Show
-            </button>
-          )
-        ) : checkErr ? (
-          <span className="pill warn">Can't check</span>
-        ) : (
-          <span className="pill">Checking…</span>
-        )}
+        <button type="button" className="btn" aria-expanded={tryOpen} onClick={() => setTryOpen((v) => !v)}>Try on one file</button>
         <button type="button" className="btn" disabled={busy} onClick={save}>Save as a draft</button>
         <button type="button" className="btn primary" disabled={busy || problemCount > 0 || !check} onClick={publish}>Publish</button>
       </div>
+
+      {tryOpen && (
+        <section className="card" style={{ marginBottom: 14 }} aria-label="Try on one file">
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <input className="inp" aria-label="File to try" placeholder="File name" value={tryFile} onChange={(e) => setTryFile(e.target.value)} style={{ flex: "1 1 220px", minWidth: 0 }} />
+            <button type="button" className="btn sm" onClick={onTry} disabled={!check}>Try</button>
+          </div>
+          {tryErr && <p className="bad">{tryErr.message}</p>}
+          {tryLines && (
+            <ul className="wf-try-lines">
+              {tryLines.map((l) => (
+                <li key={l.stepId + l.text}>
+                  {STEP_NAME[l.stepId]}: {l.text}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
 
       {showProblems && check && check.problems.length > 0 && (
         <ul className="card" style={{ margin: "0 0 14px", paddingLeft: 36 }} aria-label="Problems">
@@ -305,7 +342,7 @@ function Editor({ id, initial }: { id: string; initial: Loaded }) {
       {err && <p className="bad" role="alert">{err.message}</p>}
 
       <details className="wf-settings">
-        <summary>Flow settings</summary>
+        <summary>Flow settings <span className="hint">Name · if a step fails · variables</span></summary>
         <Row label="Name">
           <input className="inp" aria-label="Name" value={flow.name} onChange={(e) => setMeta({ name: e.target.value })} />
         </Row>
@@ -334,16 +371,18 @@ function Editor({ id, initial }: { id: string; initial: Loaded }) {
                   <span className="wf-step-title">{STEP_NAME[stepId]}</span>
                   {!isOpen && <span className="wf-step-sum">{summary}</span>}
                 </span>
-                {ps.length > 0 && <span className="pill bad">{ps.length === 1 ? "1 problem" : `${ps.length} problems`}</span>}
+                <span className="wf-step-right">
+                  {ps.length > 0 && <span className="pill bad">{ps.length === 1 ? "1 problem" : `${ps.length} problems`}</span>}
+                  <span className="wf-step-of">Step {i + 1} of 3</span>
+                </span>
               </button>
               {isOpen && (
                 <div className="wf-step-body">
-                  <p className="wf-step-of">Step {i + 1} of 3</p>
                   {cards[stepId]}
                   <div className="wf-step-nav">
-                    <button type="button" className="btn" disabled={i === 0} onClick={() => setOpen(ORDER[i - 1])}>Back</button>
+                    {i > 0 && <button type="button" className="btn" onClick={() => setOpen(ORDER[i - 1])}>Back</button>}
                     {i < ORDER.length - 1 ? (
-                      <button type="button" className="btn primary" onClick={() => setOpen(ORDER[i + 1])}>Next</button>
+                      <button type="button" className="btn primary" onClick={() => setOpen(ORDER[i + 1])}>Next: {STEP_NAME[ORDER[i + 1]]}</button>
                     ) : (
                       <button type="button" className="btn primary" onClick={() => setOpen(null)}>Done</button>
                     )}
@@ -355,41 +394,18 @@ function Editor({ id, initial }: { id: string; initial: Loaded }) {
         })}
       </div>
 
-      <section className="card" style={{ marginTop: 14 }} aria-label="Try on one file">
-        <h2 style={{ margin: "0 0 8px", fontSize: 15 }}>Try on one file</h2>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <input className="inp" aria-label="File to try" placeholder="File name" value={tryFile} onChange={(e) => setTryFile(e.target.value)} style={{ flex: "1 1 220px", minWidth: 0 }} />
-          <button type="button" className="btn sm" onClick={onTry} disabled={!check}>Try</button>
-        </div>
-        {tryErr && <p className="bad">{tryErr.message}</p>}
-        {tryLines && (
-          <ul className="wf-try-lines">
-            {tryLines.map((l) => (
-              <li key={l.stepId + l.text}>
-                {STEP_NAME[l.stepId]}: {l.text}
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-    </>
+    </div>
   );
 }
 
-// Quality: the 1–5 slider with its name, and the processor CRF (and the card's CRF) it resolves to.
-function QualityRow({ value, format, card, off, onChange }: { value: number; format: string; card: boolean; off?: string; onChange: (q: number) => void }) {
-  const crf = api.crfFor(value, format, false);
-  const qsv = api.crfFor(value, format, true);
-  const hint =
-    format === "hevc" && card
-      ? `Uses the Intel card (QSV) at CRF ${qsv} when it can, otherwise the processor CRF ${crf} for 1080p. Lower means a better picture and a bigger file.`
-      : `Uses the processor CRF ${crf} for 1080p. Lower means a better picture and a bigger file.`;
+// Quality: the 1–5 slider with its name, and the number it resolves to for the picture size.
+function QualityRow({ value, format, card, size, off, onChange }: { value: number; format: string; card: boolean; size: string | null; off?: string; onChange: (q: number) => void }) {
+  const where = size == null ? "at 1080p (one lower at 720p and below, one higher at 2160p)" : size === "custom" ? "at the custom size" : `for ${size}p`;
   return (
     <div className={off ? "wf-dim" : undefined}>
-      <Row label="Quality" hint={off ?? hint}>
+      <Row label={`Quality · ${value} · ${QUALITY_NAMES[value - 1]}`} hint={off ?? qualityMeaning(value, format, card, where)}>
         <div className="wf-quality">
           <input type="range" min={1} max={5} step={1} value={value} disabled={Boolean(off)} aria-label="Quality" aria-valuetext={`${value} · ${QUALITY_NAMES[value - 1]}`} onChange={(e) => onChange(Number(e.target.value))} />
-          <output>{`${value} · ${QUALITY_NAMES[value - 1]}`}</output>
         </div>
       </Row>
     </div>

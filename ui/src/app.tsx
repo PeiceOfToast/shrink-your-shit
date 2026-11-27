@@ -92,8 +92,14 @@ export function App() {
     case "workflows":
       page = <Workflows />;
       break;
+    // The dialog opens over the Workflows list, which stays behind it (dimmed).
     case "workflowPicker":
-      page = <NewWorkflow />;
+      page = (
+        <>
+          <Workflows />
+          <NewWorkflow />
+        </>
+      );
       break;
     case "workflowGuided":
       page = <Guided id={route.id} />;

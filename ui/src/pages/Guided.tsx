@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { navigate } from "../router.tsx";
 import { api, type Answers, type GuideDoc, type GuideField, type GuidePart, type GuidePreview, type TryLine } from "../api/index.ts";
 import { useApi } from "../api/useApi.ts";
-import { ChoiceField, QUALITY_NAMES, Row, toErr, type Err } from "./flowParts.tsx";
+import { ChoiceField, QUALITY_NAMES, Row, qualityMeaning, toErr, type Err } from "./flowParts.tsx";
 
 // Guided builder (06): a short set of questions that build the flow. Nothing reaches the library until
 // "Save and use it". The three panels are the parts index, the part cards and "What this does".
@@ -16,19 +16,22 @@ function choiceLabel(field: GuideField, value: unknown): string {
   return field.choices?.find((c) => c.value === String(value))?.label ?? String(value ?? "");
 }
 
-// The part's current value as text, for the index: "HEVC · quality 3 · Keep the size".
+// The part's value as short text for the index and the card's top right: "HEVC · 3 · en de".
 function partValue(part: GuidePart, answers: Answers): string {
   return part.fields
+    .filter((f) => !f.more && (f.type !== "folder" || answers.original === "one_folder"))
     .map((f) => {
       if (f.type === "choice") return choiceLabel(f, answers[f.key]);
-      if (f.type === "number") return `${f.label.toLowerCase()} ${answers[f.key]}`;
-      if (f.type === "yesno") return answers[f.key] ? "Yes" : "No";
-      if (f.type === "languages") return (answers[f.key] as string[] | undefined)?.join(", ") || "any";
+      if (f.type === "number") return String(answers[f.key] ?? "");
+      if (f.type === "yesno") return answers[f.key] ? "yes" : "no";
+      if (f.type === "languages") return (answers[f.key] as string[] | undefined)?.join(" ") || "all";
       return String(answers[f.key] ?? "");
     })
     .filter(Boolean)
     .join(" · ");
 }
+
+const LANGUAGE_NAME: Record<string, string> = { en: "English", de: "German", fr: "French", es: "Spanish", it: "Italian" };
 
 interface Loaded {
   guide: GuideDoc;
@@ -231,14 +234,12 @@ function GuidedForm({ id, initial }: { id: string; initial: Loaded }) {
         </nav>
 
         <div className="wf-parts">
-          <ChipRow chips={initial.guide.chips} answers={answers} onToggle={toggleChip} />
+          <section className="card wf-quick" aria-labelledby="wf-quick-h">
+            <h2 id="wf-quick-h">What should it do?</h2>
+            <ChipRow chips={initial.guide.chips} answers={answers} onToggle={toggleChip} />
+          </section>
           {initial.guide.parts.map((p) => (
-            <section key={p.id} id={`wf-part-${p.id}`} className="card wf-part" aria-labelledby={`wf-h-${p.id}`}>
-              <h2 id={`wf-h-${p.id}`}>{p.label}</h2>
-              {p.fields.map((f) => (
-                <FieldRow key={f.key} field={f} value={answers[f.key]} languages={initial.guide.languages} onChange={(v) => setAnswer(f.key, v)} />
-              ))}
-            </section>
+            <PartCard key={p.id} part={p} answers={answers} languages={initial.guide.languages} setAnswer={setAnswer} />
           ))}
         </div>
 
@@ -295,41 +296,74 @@ function GuidedForm({ id, initial }: { id: string; initial: Loaded }) {
 }
 
 function ChipRow({ chips, answers, onToggle }: { chips: GuideDoc["chips"]; answers: Answers; onToggle: (c: GuideDoc["chips"][number]) => void }) {
+  const tickable = chips.filter((c) => !c.always);
+  const always = chips.filter((c) => c.always);
   return (
-    <div className="wf-chips" role="group" aria-label="Quick choices">
-      {chips.map((c) => (
-        <button
-          key={c.id}
-          type="button"
-          className="wf-chip"
-          aria-pressed={c.always ? true : chipOn(c.on, answers)}
-          disabled={c.always || !c.available}
-          title={c.why}
-          onClick={() => onToggle(c)}
-        >
-          <span className="k" aria-hidden="true" />
-          <span>
-            {c.label}
-            {c.always ? " (always on)" : ""}
-            {c.why && !c.available ? <span className="hint" style={{ display: "block" }}>{c.why}</span> : null}
-          </span>
-        </button>
-      ))}
-    </div>
+    <>
+      <div className="wf-chips" role="group" aria-label="Quick choices">
+        {tickable.map((c) => (
+          <button key={c.id} type="button" className="wf-chip" aria-pressed={chipOn(c.on, answers)} disabled={!c.available} title={c.why} onClick={() => onToggle(c)}>
+            <span className="k" aria-hidden="true" />
+            <span>
+              {c.label}
+              {c.why && !c.available ? <span className="hint" style={{ display: "block" }}>{c.why}</span> : null}
+            </span>
+          </button>
+        ))}
+      </div>
+      <div className="wf-always">
+        <span>Always on:</span>
+        {always.map((c) => (
+          <span key={c.id} className="wf-mini">{c.label}</span>
+        ))}
+      </div>
+      <p className="hint">A tick sets the parts below. Change a part and its tick follows.</p>
+    </>
   );
 }
 
-function FieldRow({ field, value, languages, onChange }: { field: GuideField; value: unknown; languages: string[]; onChange: (v: unknown) => void }) {
+function PartCard({ part, answers, languages, setAnswer }: { part: GuidePart; answers: Answers; languages: string[]; setAnswer: (key: string, v: unknown) => void }) {
+  const shown = part.fields.filter((f) => f.type !== "folder" || answers.original === "one_folder");
+  const field = (f: GuideField) => (
+    <FieldRow key={f.key} field={f} value={answers[f.key]} answers={answers} languages={languages} onChange={(v) => setAnswer(f.key, v)} />
+  );
+  const rare = shown.filter((f) => f.more);
+  return (
+    <section id={`wf-part-${part.id}`} className="card wf-part" aria-labelledby={`wf-h-${part.id}`}>
+      <div className="wf-part-head">
+        <h2 id={`wf-h-${part.id}`}>{part.label}</h2>
+        <span className="wf-part-sum">{partValue(part, answers)}</span>
+      </div>
+      <div className="wf-stack">{shown.filter((f) => !f.more).map(field)}</div>
+      {rare.length > 0 && (
+        <details className="wf-more">
+          <summary>More</summary>
+          <div className="wf-stack">{rare.map(field)}</div>
+        </details>
+      )}
+    </section>
+  );
+}
+
+function FieldRow({ field, value, answers, languages, onChange }: { field: GuideField; value: unknown; answers: Answers; languages: string[]; onChange: (v: unknown) => void }) {
   if (field.type === "choice" && field.choices) {
-    return <ChoiceField label={field.label} value={String(value ?? "")} choices={field.choices} onChange={onChange} />;
+    return (
+      <>
+        <ChoiceField label={field.label} value={String(value ?? "")} choices={field.choices} onChange={onChange} />
+        {field.key === "original" && value === "replace" && <p className="hint wf-full">The original goes to the trash and is kept 7 days.</p>}
+      </>
+    );
   }
   if (field.type === "number") {
     const n = Number(value ?? 3);
+    const isQuality = field.label === "Quality";
     return (
-      <Row label={field.label}>
+      <Row
+        label={isQuality ? `Quality · ${n} · ${QUALITY_NAMES[n - 1]}` : field.label}
+        hint={isQuality ? qualityMeaning(n, String(answers.format ?? "hevc"), answers.useGpu !== false, "at 1080p (one lower at 720p and below, one higher at 2160p)") : undefined}
+      >
         <div className="wf-quality">
-          <input type="range" min={1} max={5} step={1} value={n} aria-label={field.label} aria-valuetext={`${n}`} onChange={(e) => onChange(Number(e.target.value))} />
-          <output>{field.label === "Quality" ? `${n} · ${QUALITY_NAMES[n - 1]}` : n}</output>
+          <input type="range" min={1} max={5} step={1} value={n} aria-label={field.label} aria-valuetext={isQuality ? `${n} · ${QUALITY_NAMES[n - 1]}` : `${n}`} onChange={(e) => onChange(Number(e.target.value))} />
         </div>
       </Row>
     );
@@ -346,19 +380,21 @@ function FieldRow({ field, value, languages, onChange }: { field: GuideField; va
   }
   if (field.type === "languages") {
     const list = (value as string[] | undefined) ?? [];
+    const toggle = (code: string) => onChange(list.includes(code) ? list.filter((c) => c !== code) : [...list, code]);
     return (
-      <Row label={field.label} hint={`Codes from: ${languages.join(", ")}. Separate with commas.`}>
-        <input
-          className="inp"
-          aria-label={field.label}
-          value={list.join(", ")}
-          onChange={(e) => onChange(e.target.value.split(",").map((s) => s.trim()).filter(Boolean))}
-        />
+      <Row label={field.label} full hint={list.length === 0 ? "None picked keeps every language." : undefined}>
+        <div className="wf-togs" role="group" aria-label={field.label}>
+          {languages.map((code) => (
+            <button key={code} type="button" aria-pressed={list.includes(code)} onClick={() => toggle(code)}>
+              {LANGUAGE_NAME[code] ?? code}
+            </button>
+          ))}
+        </div>
       </Row>
     );
   }
   return (
-    <Row label={field.label}>
+    <Row label={field.label} full={field.type === "folder"}>
       <input className="inp" aria-label={field.label} value={String(value ?? "")} onChange={(e) => onChange(e.target.value)} />
     </Row>
   );

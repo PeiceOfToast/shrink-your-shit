@@ -53,6 +53,8 @@ export interface GuideField {
   key: string;
   label: string;
   type: "choice" | "number" | "yesno" | "languages" | "folder";
+  // Rare settings: the guided page puts them under "More".
+  more?: boolean;
   choices?: GuideChoice[];
 }
 

@@ -7,7 +7,7 @@ import "../styles/workflows.css";
 
 type Starter = Awaited<ReturnType<typeof api.getStarters>>[number];
 
-// New workflow (page 05): a dialog with one kind for now (Video), and a guided card and a Blank card.
+// New workflow (page 05): a dialog over the Workflows list with one kind for now (Video), and a guided card and a Blank card.
 // Start opens the guided page (06) for a guided card, or the editor (07) for every other card. Nothing is saved yet.
 
 export function NewWorkflow() {
@@ -42,11 +42,12 @@ export function NewWorkflow() {
     <>
       <div className="scrim" onClick={() => navigate("/workflows")} />
       <div className="dlg wf-dlg" role="dialog" aria-modal="true" aria-labelledby="new-wf-title">
-        <h2 id="new-wf-title">New workflow</h2>
-
-        <div className="wf-kinds" role="group" aria-label="Kind">
-          <button type="button" className="wf-kind" aria-pressed="true">Video</button>
+        <div className="wf-dlg-head">
+          <h2 id="new-wf-title">New workflow</h2>
+          <button type="button" className="wf-close" aria-label="Close" onClick={() => navigate("/workflows")}>×</button>
         </div>
+
+        <p className="wf-kicker wf-kind-label">Video</p>
 
         {starters.error && !starters.data && <p className="bad">Can't load the starting points. <button type="button" className="btn ghost sm" onClick={starters.reload}>Try now</button></p>}
 
@@ -63,8 +64,10 @@ export function NewWorkflow() {
                 onClick={() => setPicked(s.id)}
                 onDoubleClick={() => start(s)}
               >
-                <span className="wf-kicker">{s.guided ? "Video · guided" : "Video"}</span>
-                <span className="wf-card-name">{s.name}</span>
+                <span className="wf-card-name">
+                  {s.name}
+                  {s.guided && <span className="wf-badge">guided</span>}
+                </span>
                 <span className="hint">{s.line}</span>
               </button>
             );
@@ -72,7 +75,7 @@ export function NewWorkflow() {
         </div>
 
         <div className="dlg-actions wf-actions">
-          <button type="button" className="btn" onClick={() => navigate("/workflows")}>Cancel</button>
+          <button type="button" className="btn ghost" onClick={() => navigate("/workflows")}>Cancel</button>
           <button type="button" className="btn primary" disabled={!selected} onClick={() => selected && start(selected)}>Start</button>
         </div>
       </div>
