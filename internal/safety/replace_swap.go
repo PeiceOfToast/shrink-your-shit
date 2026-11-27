@@ -31,6 +31,14 @@ type SwapResult struct {
 // ErrSwapFailed means the new file did not reach its name; the original was put back, so nothing is lost.
 var ErrSwapFailed = errors.New("safety: the new file could not be placed; the original is back in place")
 
+// ErrStrangerInTrash means a file that was not the original took the name and was moved to the trash, and it could
+// not be put back. It is in the trash folder; the original was not replaced (review #865).
+var ErrStrangerInTrash = errors.New("safety: a file that was not the original was moved to the trash and could not be put back")
+
+// ErrRecordNotSettled means the swap happened, but the journal row could not be marked settled. The new file is at its
+// name and the original is in the trash; the row stays "moving" for recovery to settle (review #865).
+var ErrRecordNotSettled = errors.New("safety: the swap happened, but its record could not be settled")
+
 // ErrPutBackFailed means the new file did not reach its name and the original could not be put back. It is never
 // reported as done: the row is "attention" and the original is still in the trash.
 var ErrPutBackFailed = errors.New("safety: the new file could not be placed and the original could not be put back")
@@ -107,7 +115,7 @@ func Swap(ctx context.Context, j *Journal, p SwapPlan) (SwapResult, error) {
 	if got, err := identify(trash); err != nil || !sameIdent(got, origID) {
 		if rerr := fsx.RenameNoReplace(trash, p.Original); rerr != nil {
 			_ = j.SetState(ctx, id, StateAttention)
-			return SwapResult{}, fmt.Errorf("%w: the file at the name was not the original, and it could not be put back to the name (%v)", ErrPutBackFailed, rerr)
+			return SwapResult{}, fmt.Errorf("%w (%v)", ErrStrangerInTrash, rerr)
 		}
 		_ = j.SetState(ctx, id, StateAttention)
 		return SwapResult{}, ErrSourceChanged
@@ -137,10 +145,10 @@ func Swap(ctx context.Context, j *Journal, p SwapPlan) (SwapResult, error) {
 		}
 		res.Purged = true
 		if err := j.SetState(ctx, id, StatePurged); err != nil {
-			return res, err
+			return res, fmt.Errorf("%w: %v", ErrRecordNotSettled, err)
 		}
 	} else if err := j.SetState(ctx, id, StateDone); err != nil {
-		return res, err
+		return res, fmt.Errorf("%w: %v", ErrRecordNotSettled, err)
 	}
 	crashPoint(7)
 	return res, nil

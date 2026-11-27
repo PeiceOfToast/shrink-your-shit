@@ -176,14 +176,18 @@ func (e *engine) run(ctx context.Context) (res Result) {
 		return fatal("encode.plan_failed", err.Error(), e.encodeOwner(decisions), "")
 	}
 	if len(extracts) > 0 && !e.in.Try {
-		name, err := safety.FreeName(plan.Output)
-		if err != nil {
-			// Nothing has been written yet: the original is untouched and no new file exists.
-			return fatal("save.name_failed",
-				"The original was left as it is and no new file was made, because no free name for it could be found. ("+err.Error()+")",
-				"save", "")
+		// A replace takes the original's own name (its stem, the new extension): the original is swapped out, so that
+		// name is free by design and must not be renamed (review #865).
+		if !e.replace {
+			name, err := safety.FreeName(plan.Output)
+			if err != nil {
+				// Nothing has been written yet: the original is untouched and no new file exists.
+				return fatal("save.name_failed",
+					"The original was left as it is and no new file was made, because no free name for it could be found. ("+err.Error()+")",
+					"save", "")
+			}
+			plan.Output = name
 		}
-		plan.Output = name
 		// A subtitle file name taken already stops the run now, before anything is written: the
 		// person moves or renames that file and retries (L-AUD-25).
 		for _, x := range extracts {

@@ -56,6 +56,11 @@ func ensureTrash(libDir string) (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", ErrNoTrash
 	}
+	// An existing trash folder the app cannot write in is the same refusal: the original stays and the job is kept
+	// (L-SAFE-6, review #865).
+	if err := checkWritable(dir); err != nil {
+		return "", ErrNoTrash
+	}
 	return dir, nil
 }
 

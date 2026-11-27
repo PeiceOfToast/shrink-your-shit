@@ -85,8 +85,14 @@ func (e *engine) replaceOriginal(ctx context.Context, staged safety.Staged, fina
 		return Result{Outcome: OutcomeSkip, Reason: "replace.shared",
 			Message: "The original is hard-linked, so it is shared and was not replaced.", SizeBefore: e.in.Size}
 	case errors.Is(err, safety.ErrPutBackFailed):
-		return fatal("replace.put_back_failed", err.Error(), "save",
-			"The original is in the library's trash folder; check the folder and put it back.")
+		return fatal("replace.put_back_failed", "The new file could not be placed, and the original could not be put back from the trash. The original is in the library's trash folder.", "save",
+			"Check the library's trash folder and put the original back by hand.")
+	case errors.Is(err, safety.ErrStrangerInTrash):
+		return fatal("replace.stranger_in_trash", "A file that was not the original took the name and was moved to the trash folder, and it could not be put back. The name was not replaced; the file is in the library's trash folder.", "save",
+			"Check the library's trash folder.")
+	case errors.Is(err, safety.ErrRecordNotSettled):
+		return fatal("replace.record_unsettled", "The new file is in place and the original is in the library's trash folder, but the replace record could not be saved. It needs a look.", "save",
+			"The next start settles the record; check the file names.")
 	}
 	return fatal("replace.failed", err.Error(), "save", "")
 }

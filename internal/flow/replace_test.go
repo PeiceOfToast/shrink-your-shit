@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/PeiceOfToast/shrink-your-shit/internal/flow"
@@ -30,7 +31,12 @@ func (f *fakeReplacer) Swap(ctx context.Context, p safety.SwapPlan) (safety.Swap
 // replaceFlow is the starter with its save step set to replace the original.
 func replaceFlow(t *testing.T) flow.Flow {
 	t.Helper()
-	f := starterFlow(t)
+	return setReplace(t, starterFlow(t))
+}
+
+// setReplace sets a flow's save step to replace the original.
+func setReplace(t *testing.T, f flow.Flow) flow.Flow {
+	t.Helper()
 	for i, ref := range f.Steps {
 		if ref.Type != "file.save" {
 			continue
@@ -90,6 +96,8 @@ func TestRunReplaceRefusalsKeepTheOriginal(t *testing.T) {
 		{"original changed", safety.ErrSourceChanged, flow.OutcomeMayPass, "replace.source_changed"},
 		{"hard-linked original", safety.ErrSharedSource, flow.OutcomeSkip, "replace.shared"},
 		{"put-back failed", safety.ErrPutBackFailed, flow.OutcomeFatal, "replace.put_back_failed"},
+		{"stranger in the trash", safety.ErrStrangerInTrash, flow.OutcomeFatal, "replace.stranger_in_trash"},
+		{"swap done, record not settled", safety.ErrRecordNotSettled, flow.OutcomeFatal, "replace.record_unsettled"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -117,5 +125,35 @@ func TestRunReplaceWithoutAJournalKeepsTheOriginal(t *testing.T) {
 	res := flow.Run(context.Background(), runInput(t, root, src), newEnv(m, sf, &recorder{}, replaceFlow(t), nil))
 	if res.Outcome != flow.OutcomeFatal || res.Reason != "replace.unavailable" {
 		t.Fatalf("result = %+v, want fatal replace.unavailable", res)
+	}
+}
+
+// TestRunReplaceWithSidecarsUsesTheOriginalName: a replace with subtitle files takes the original's own name with the
+// new extension, and the subtitle files follow that name. The free-name rename does not apply to a replace (review
+// #865, the "clip (2).mkv" bug).
+func TestRunReplaceWithSidecarsUsesTheOriginalName(t *testing.T) {
+	root, src, info, rev := srtRun(t)
+	rev = setReplace(t, rev)
+	m := &srtWriting{Media: &fake.Media{Probes: map[string]media.Info{src: info}}}
+	sf := &fakeSafety{verify: safety.Verdict{OK: true}}
+	rp := &fakeReplacer{}
+	journal := &fakeJournal{}
+	env := newEnv(m, sf, &recorder{}, rev, nil)
+	env.Replacer = rp
+	env.Sidecars = journal
+	res := flow.Run(context.Background(), runInput(t, root, src), env)
+	if res.Outcome != flow.OutcomeSmaller {
+		t.Fatalf("result = %+v, want smaller", res)
+	}
+	if rp.got.Final != src {
+		t.Errorf("swap final = %q, want the original's own name %q", rp.got.Final, src)
+	}
+	for _, name := range []string{"clip.eng.srt", "clip.eng.2.srt"} {
+		if b, err := os.ReadFile(filepath.Join(root, name)); err != nil || len(b) == 0 {
+			t.Errorf("%s: %v, want the subtitle file beside the replaced name", name, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "clip (2).mkv")); err == nil {
+		t.Errorf("a renamed copy clip (2).mkv was made")
 	}
 }

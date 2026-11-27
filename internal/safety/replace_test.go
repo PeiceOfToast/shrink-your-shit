@@ -558,4 +558,38 @@ func TestAStrangerAtTheNameIsNotLost(t *testing.T) {
 	if len(rows) != 0 {
 		t.Errorf("a row is still moving: %+v", rows)
 	}
+	var state string
+	if err := f.j.db.Read().QueryRow(`SELECT state FROM replace_journal WHERE job_id = 13`).Scan(&state); err != nil {
+		t.Fatal(err)
+	}
+	if state != StateAttention {
+		t.Errorf("journal state = %q, want attention", state)
+	}
+}
+
+// TestUnwritableTrashKeepsTheOriginal: an existing trash folder the app cannot write in keeps the original where it is
+// and keeps the job (L-SAFE-6, review #865). Root writes anywhere, so the refusal is not tried as root.
+func TestUnwritableTrashKeepsTheOriginal(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("read-only folders are not modelled by mode bits on Windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root writes to a read-only folder, so the refusal is not tried")
+	}
+	f := newSwapFixture(t, "")
+	trash := filepath.Join(f.lib, TrashDir)
+	if err := os.Mkdir(trash, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(trash, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(trash, 0o755) })
+	_, err := Swap(context.Background(), f.j, f.plan(14, 1))
+	if !errors.Is(err, ErrNoTrash) {
+		t.Fatalf("error = %v, want ErrNoTrash for an unwritable trash folder", err)
+	}
+	if got := readFile(t, f.original); got != origBytes {
+		t.Errorf("original = %q, want it untouched", got)
+	}
 }
