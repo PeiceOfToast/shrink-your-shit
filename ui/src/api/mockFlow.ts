@@ -231,11 +231,15 @@ const AUDIO_FROM_GUIDED: Record<string, { format: string; channels: string; code
 
 // The file types and what each can hold (page 07; dev's selectors.go). MKV and Keep the same take anything.
 // The rules are one table: a new rule goes here, not into the editor or the guide.
-const CONTAINER_RULES: Record<string, { why: string; ok: (video: string, audio: string) => boolean }> = {
-  mkv: { why: "", ok: () => true },
-  mp4: { why: "MP4 can't hold Opus audio.", ok: (_v, audio) => audio !== "opus" },
-  webm: { why: "WebM needs AV1 video and Opus audio.", ok: (video, audio) => video === "av1" && audio === "opus" },
-  keep: { why: "", ok: () => true },
+// The reason names what to pick; WebM gives the video reason first, then the audio one (page 07, the File type field).
+const CONTAINER_RULES: Record<string, { why: (video: string, audio: string) => string; ok: (video: string, audio: string) => boolean }> = {
+  mkv: { why: () => "", ok: () => true },
+  mp4: { why: () => "MP4 can't hold Opus audio.", ok: (_v, audio) => audio !== "opus" },
+  webm: {
+    why: (video) => (video !== "av1" ? "WebM needs AV1 video. Pick AV1 in Video to use it." : "WebM needs Opus audio. Pick Opus in Audio to use it."),
+    ok: (video, audio) => video === "av1" && audio === "opus",
+  },
+  keep: { why: () => "", ok: () => true },
 };
 
 // The audio codec the step will write: Advanced's codec when set, else the Format choice.
@@ -353,9 +357,10 @@ export function checkFlow(flow: Flow): FlowCheck {
   for (const value of Object.keys(CONTAINER_RULES)) {
     const rule = CONTAINER_RULES[value];
     if (rule.ok(String(v.format), audioCodec(au))) continue;
-    disabled.push({ stepId: "save", field: "container", value, why: rule.why });
+    const why = rule.why(String(v.format), audioCodec(au));
+    disabled.push({ stepId: "save", field: "container", value, why });
     if (sv.container === value) {
-      problems.push({ stepId: "save", field: "container", code: "container_unsupported", message: `${rule.why} Pick another file type.` });
+      problems.push({ stepId: "save", field: "container", code: "container_unsupported", message: `${why} Pick another file type.` });
     }
   }
 
