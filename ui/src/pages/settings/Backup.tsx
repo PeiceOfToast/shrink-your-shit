@@ -112,7 +112,7 @@ export function Backup() {
         <div className="dlg" role="dialog" aria-modal="true" aria-labelledby="restore-q">
           <h2 id="restore-q">Replace all settings and workflows with this backup from {dayMonth(preview.createdAt)}?</h2>
           <p className="muted sm">
-            {plural(preview.contents.workflows, "workflow", "workflows")}, {plural(preview.contents.libraries, "library", "libraries")}, {plural(preview.contents.shares, "share", "shares")}, {plural(preview.contents.connections, "connection", "connections")}. Jobs and files aren't touched.
+            {plural(preview.contents.workflows, "workflow", "workflows")}, {plural(preview.contents.libraries, "library", "libraries")}, {plural(preview.contents.shares, "share", "shares")}, {plural(preview.contents.connections, "connection", "connections")}. Jobs, history and files aren't touched.
           </p>
           {preview.warnings.map((w) => <p className="bad sm" key={w}>{w}</p>)}
           <div className="row dlg-actions">

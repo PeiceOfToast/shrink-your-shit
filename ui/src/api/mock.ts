@@ -173,7 +173,28 @@ export function getJobNeighbours(id: string, state?: string): Promise<{ prev: st
   });
 }
 
-// POST /api/v2/jobs/{id}/convert-again: queues the file again; the panel stays open on the new attempt.
+// POST /api/v2/jobs/{id}/convert-again: a finished job (done or skipped) makes a NEW job with a new id, so the
+// old job keeps its record. (Retry on a failed job keeps the id; see runJobsAction.) The panel moves to the new job.
+let againSeq = 0;
 export function convertAgain(id: string): Promise<{ ok: true; jobId: string }> {
-  return respond(() => ({ ok: true as const, jobId: id }));
+  return respond(() => {
+    const job = JOBS.find((j) => j.id === id);
+    if (!job) throw new ApiError("job_not_found", "That job doesn't exist.");
+    if (job.state !== "done" && job.state !== "skipped") throw new ApiError("not_finished", "Only a finished job can run again.");
+    const jobId = `${id}-again-${++againSeq}`;
+    const fresh = {
+      ...job,
+      id: jobId,
+      state: "waiting" as const,
+      step: null,
+      progress: null,
+      queuedAt: new Date().toISOString(),
+      startedAt: null,
+      finishedAt: null,
+      tookMs: null,
+      result: { ...job.result, sizeAfter: null, outcome: null, failedStep: null, reason: null },
+    };
+    JOBS.unshift(fresh);
+    return { ok: true as const, jobId };
+  });
 }
