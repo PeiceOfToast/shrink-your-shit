@@ -1,7 +1,7 @@
 // The workflow mock no longer carries "if a step fails" or flow variables: not in the flow, not in the guide, not in the summary.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { answersToFlow, checkFlow, createDraft, DEFAULT_ANSWERS, getFlow, getGuide, guidePreview } from "./mockFlow.ts";
+import { answersToFlow, checkFlow, createDraft, DEFAULT_ANSWERS, getFlow, getGuide, guidePreview, tryFlow } from "./mockFlow.ts";
 import type { Answers } from "./flowTypes.ts";
 import { exportWorkflow, importWorkflow } from "./mockWorkflows.ts";
 import { ApiError } from "./errors.ts";
@@ -120,4 +120,25 @@ test("an export then an import opens the same flow", async () => {
 test("the old app's format is refused as not_a_workflow", async () => {
   const old = JSON.stringify({ format: "shrink-your-shit.workflow", version: 1, name: "Old", description: "", kind: "video", madeWith: "editor" });
   await assert.rejects(importWorkflow(old), (e: unknown) => e instanceof ApiError && e.code === "not_a_workflow");
+});
+
+test("a try answers when it is not stopped", async () => {
+  const flow = answersToFlow(DEFAULT_ANSWERS, META);
+  const r = await tryFlow(flow, "clip.mp4");
+  assert.equal(r.lines.length, 3);
+});
+
+test("a try rejects with AbortError when its signal aborts", async () => {
+  const flow = answersToFlow(DEFAULT_ANSWERS, META);
+  const ctl = new AbortController();
+  const p = tryFlow(flow, "clip.mp4", ctl.signal);
+  setTimeout(() => ctl.abort(), 50);
+  await assert.rejects(p, { name: "AbortError" });
+});
+
+test("a try started with an aborted signal rejects at once", async () => {
+  const flow = answersToFlow(DEFAULT_ANSWERS, META);
+  const ctl = new AbortController();
+  ctl.abort();
+  await assert.rejects(tryFlow(flow, "clip.mp4", ctl.signal), { name: "AbortError" });
 });
