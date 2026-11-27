@@ -242,8 +242,9 @@ func (b *Bus) seedLocked(job int64) error {
 	return nil
 }
 
-// Page is where a Query starts and how many events it returns. Cursor is the seq of the last event of the
-// previous page, as returned in the next Page; zero starts at the beginning (oldest first) or the end (newest first).
+// Page is where a Query starts and how many events it returns. Cursor is the last event's seq of the previous page
+// when the Query has a JobID, and its row id when it does not; the Query returns it, so pass it back unchanged.
+// Zero starts at the beginning (oldest first) or the end (newest first).
 type Page struct {
 	Limit  int
 	Newest bool
@@ -309,12 +310,17 @@ func (b *Bus) Query(ctx context.Context, f Filter, p Page) ([]Event, Page, error
 	if p.Newest {
 		order = "DESC"
 	}
-	// Paging is by seq, which is per job: a page walk is meant to be scoped to one JobID.
+	// A JobID-scoped walk pages by seq, which is unique within the job. An unscoped walk pages by row id, because
+	// seq restarts per job and per process and would skip events.
+	key := "id"
+	if f.JobID != 0 {
+		key = "seq"
+	}
 	if p.Cursor > 0 {
 		if p.Newest {
-			add("seq < ?", p.Cursor)
+			add(key+" < ?", p.Cursor)
 		} else {
-			add("seq > ?", p.Cursor)
+			add(key+" > ?", p.Cursor)
 		}
 	}
 
@@ -322,7 +328,7 @@ func (b *Bus) Query(ctx context.Context, f Filter, p Page) ([]Event, Page, error
 	if len(where) > 0 {
 		q += " WHERE " + strings.Join(where, " AND ")
 	}
-	q += " ORDER BY seq " + order + ", id " + order + " LIMIT ?"
+	q += " ORDER BY " + key + " " + order + ", id " + order + " LIMIT ?"
 	args = append(args, p.Limit)
 
 	rows, err := b.db.Read().QueryContext(ctx, q, args...)
@@ -340,7 +346,11 @@ func (b *Bus) Query(ctx context.Context, f Filter, p Page) ([]Event, Page, error
 			return nil, Page{}, err
 		}
 		out = append(out, e)
-		cursor = e.Seq
+		if f.JobID != 0 {
+			cursor = e.Seq
+		} else {
+			cursor = id
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, Page{}, fmt.Errorf("read events: %w", err)

@@ -245,3 +245,59 @@ func TestSeqContinuesAfterRunEnd(t *testing.T) {
 		t.Fatalf("seqs after run_end: %v; want [1 2 3]", seqs)
 	}
 }
+
+// An unscoped walk (no JobID) pages by row id, because seq is per job and per process. Two jobs and an app
+// event each start at seq 1, so paging by seq would skip rows. Every event must come back once, both ways.
+func TestUnscopedWalkReturnsEveryEventOnce(t *testing.T) {
+	db := openTestDB(t)
+	b, err := New(Options{Clock: clockFn(), DB: db})
+	if err != nil {
+		t.Fatal(err)
+	}
+	emit := func(job int64, msg string) {
+		if err := b.Emit(Event{JobID: job, Kind: KindNote, Level: LevelInfo, Message: msg}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	emit(5, "j5-1")
+	emit(5, "j5-2")
+	emit(5, "j5-3")
+	emit(6, "j6-1")
+	emit(0, "app-1")
+	closeBus(t, b)
+
+	for _, newest := range []bool{false, true} {
+		var got []string
+		page := Page{Limit: 2, Newest: newest}
+		for {
+			evs, next, err := b.Query(context.Background(), Filter{}, page)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got = append(got, messages(evs))
+			if len(evs) < page.Limit {
+				break
+			}
+			page.Cursor = next.Cursor
+		}
+		seen := map[string]int{}
+		total := 0
+		for _, s := range got {
+			for _, m := range strings.Split(s, ",") {
+				if m == "" {
+					continue
+				}
+				seen[m]++
+				total++
+			}
+		}
+		if total != 5 || len(seen) != 5 {
+			t.Fatalf("newest=%v: pages %v; want 5 distinct events once each", newest, got)
+		}
+		for _, m := range []string{"j5-1", "j5-2", "j5-3", "j6-1", "app-1"} {
+			if seen[m] != 1 {
+				t.Fatalf("newest=%v: %s returned %d times; pages %v", newest, m, seen[m], got)
+			}
+		}
+	}
+}
