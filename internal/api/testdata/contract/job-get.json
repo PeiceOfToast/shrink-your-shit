@@ -2,31 +2,31 @@
   "body": {
     "attempt": 1,
     "failure": null,
-    "finishedAt": "2026-11-27T16:27:07.954Z",
+    "finishedAt": "2026-11-27T04:00:00.000Z",
     "history": [
       {
         "level": "info",
         "text": "queued",
-        "time": "2026-11-27T16:27:07.954Z"
+        "time": "2026-11-27T04:00:00.000Z"
       },
       {
         "level": "info",
         "text": "picked",
-        "time": "2026-11-27T16:27:07.954Z"
+        "time": "2026-11-27T04:00:00.000Z"
       },
       {
         "level": "info",
         "text": "smaller",
-        "time": "2026-11-27T16:27:07.954Z"
+        "time": "2026-11-27T04:00:00.000Z"
       }
     ],
     "job": {
       "file": "three.mkv",
-      "finishedAt": "2026-11-27T16:27:07.954Z",
+      "finishedAt": "2026-11-27T04:00:00.000Z",
       "id": "3",
       "library": "Clips",
       "progress": null,
-      "queuedAt": "2026-11-27T16:27:07.953Z",
+      "queuedAt": "2026-11-27T04:00:00.000Z",
       "result": {
         "failedStep": null,
         "outcome": "smaller",
@@ -35,7 +35,7 @@
         "sizeBefore": 1000,
         "warnings": 0
       },
-      "startedAt": "2026-11-27T16:27:07.954Z",
+      "startedAt": "2026-11-27T04:00:00.000Z",
       "state": "done",
       "step": null,
       "tookMs": 0,
@@ -48,18 +48,18 @@
       "action": "not_touched",
       "until": null
     },
-    "outputPath": "/tmp/TestContractGoldensForJobs2202158970/002/three-shrunk.mkv",
-    "path": "/tmp/TestContractGoldensForJobs2202158970/002/three.mkv",
+    "outputPath": "/videos/three-shrunk.mkv",
+    "path": "/videos/three.mkv",
     "sizeAfterBytes": 400,
     "sizeBeforeBytes": 1000,
     "skipReason": null,
-    "startedAt": "2026-11-27T16:27:07.954Z",
+    "startedAt": "2026-11-27T04:00:00.000Z",
     "steps": [],
     "timeLeftMs": null,
     "tookMs": 0,
     "worker": "",
     "workflow": "Shrink",
-    "writtenAt": "2026-11-27T16:27:07.954Z"
+    "writtenAt": "2026-11-27T04:00:00.000Z"
   },
   "method": "GET",
   "path": "/api/v2/jobs/3",
