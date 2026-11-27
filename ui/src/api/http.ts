@@ -2,21 +2,28 @@
 // error body {error:{code, message, field?}} becomes an ApiError whose message is shown as it is.
 import { setConnection } from "./connection.ts";
 import { ApiError } from "./errors.ts";
-import { navigate } from "../router.tsx";
 
 export type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
-// Contract section 3: the codes the client acts on. Navigation is wired for the sign-in and first-run codes; the
-// screens for the rest (the message on the sign-in form, the starting screen's retry) are not live yet.
+// The app sets the navigator once (main.tsx, to the router's navigate). Kept out of this module so the request code
+// runs in a plain node test without the router's JSX.
+let navigator: (to: string) => void = () => {};
+export function setCodeNavigator(fn: (to: string) => void): void {
+  navigator = fn;
+}
+
+// Contract section 3: the codes the client acts on. Navigation is wired for the sign-in and first-run codes. 503
+// starting is not navigated here: the starting screen shows it and retries every 2 s (its screen is not live yet).
 export function onRouteCode(status: number, code: string): void {
+  const here = typeof location === "undefined" ? "/" : location.pathname + location.search;
+  const at = typeof location === "undefined" ? "/" : location.pathname;
   // Already on the page the code leads to: no navigation (a 401 on /signin would otherwise loop).
-  const at = location.pathname;
   if (status === 401 && code === "signed_out" && !at.startsWith("/signin")) {
-    navigate(`/signin?next=${encodeURIComponent(location.pathname + location.search)}`);
+    navigator(`/signin?next=${encodeURIComponent(here)}`);
   } else if (status === 403 && code === "setup_needed" && at !== "/start") {
-    navigate("/start");
+    navigator("/start");
   } else if (status === 409 && code === "setup_done" && at !== "/signin") {
-    navigate("/signin");
+    navigator("/signin");
   }
 }
 
@@ -49,3 +56,17 @@ export async function request<T>(method: Method, path: string, body?: unknown): 
   }
   return data as T;
 }
+
+// A query string from the defined values: undefined, null and "" are left out.
+export function query(params: Record<string, unknown>): string {
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v === undefined || v === null || v === "") continue;
+    q.set(k, String(v));
+  }
+  const s = q.toString();
+  return s ? "?" + s : "";
+}
+
+// The return type of a mock function, so a real module types its result the same way as the mock.
+export type Out<F> = F extends (...a: never[]) => Promise<infer T> ? T : never;

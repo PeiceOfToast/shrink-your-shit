@@ -6,6 +6,7 @@ export const REAL = {
   jobs: false,
   events: false,
   summary: false,
+  overview: false,
 } as const;
 
 export type Group = keyof typeof REAL;
