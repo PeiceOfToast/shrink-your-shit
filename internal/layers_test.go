@@ -1,10 +1,10 @@
 package internal_test
 
 import (
-	"bytes"
-	"encoding/json"
-	"errors"
-	"os/exec"
+	"go/parser"
+	"go/token"
+	"io/fs"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -48,44 +48,59 @@ var exceptions = map[string]bool{
 	"internal/flow -> internal/flow/steps": true,
 }
 
-type listedPackage struct {
-	ImportPath string
-	GoFiles    []string
-	Imports    []string
-}
-
+// TestPackageLayers reads the module's own source with go/parser rather than running `go list`. The test cache
+// tracks the files a test process opens, so a changed import invalidates a cached pass. A subprocess would hide
+// the change, and `go test` would report ok from cache after a bad import. Every non-test .go file counts,
+// including ones behind other build tags, so the check is stricter than a single-platform build.
 func TestPackageLayers(t *testing.T) {
-	cmd := exec.Command("go", "list", "-deps", "-json", "./...")
-	cmd.Dir = ".." // the module root
-	out, err := cmd.Output()
-	if err != nil {
-		var ee *exec.ExitError
-		if errors.As(err, &ee) {
-			t.Fatalf("go list: %v\n%s", err, ee.Stderr)
+	root := ".." // the module root
+	imports := map[string][]string{}
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
 		}
-		t.Fatalf("go list: %v", err)
+		rel, _ := filepath.Rel(root, path)
+		if d.IsDir() {
+			name := d.Name()
+			skip := strings.HasPrefix(name, ".") && rel != "." || name == "node_modules" || name == "testdata" ||
+				name == "vendor" || rel == "ui"
+			if skip {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		f, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
+		if err != nil {
+			return err
+		}
+		pkg := filepath.ToSlash(filepath.Dir(rel))
+		for _, spec := range f.Imports {
+			p, err := strconv.Unquote(spec.Path.Value)
+			if err != nil {
+				return err
+			}
+			imports[pkg] = append(imports[pkg], p)
+		}
+		if _, ok := imports[pkg]; !ok {
+			imports[pkg] = nil
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("read module source: %v", err)
 	}
 
 	var problems []string
-	dec := json.NewDecoder(bytes.NewReader(out))
-	for dec.More() {
-		var p listedPackage
-		if err := dec.Decode(&p); err != nil {
-			t.Fatalf("decode go list: %v", err)
-		}
-		if p.ImportPath != module && !strings.HasPrefix(p.ImportPath, module+"/") {
-			continue // standard library and dependencies
-		}
-		if len(p.GoFiles) == 0 {
-			continue // a folder with only test files, such as this one
-		}
-		from := strings.TrimPrefix(strings.TrimPrefix(p.ImportPath, module), "/")
+	for from, imps := range imports {
 		fromLayer, known := layers[from]
 		if !known {
 			problems = append(problems, "package "+from+" is not in the layer table")
 			continue
 		}
-		for _, imp := range p.Imports {
+		for _, imp := range imps {
 			if imp != module && !strings.HasPrefix(imp, module+"/") {
 				continue
 			}
