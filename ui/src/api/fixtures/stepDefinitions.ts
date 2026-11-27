@@ -1022,9 +1022,10 @@ export const STEP_DEFINITIONS: StepDefinition[] = [
             "x-ui": {
               "choices": [
                 {
-                  "available": true,
+                  "available": false,
                   "label": "Replace the original",
-                  "value": "replace"
+                  "value": "replace",
+                  "why": "Replacing the original comes in a later update; for now the converted file is saved next to it."
                 },
                 {
                   "available": true,

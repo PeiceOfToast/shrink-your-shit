@@ -119,6 +119,7 @@ const (
 	tagUnset        = "unset"
 	tagSliderLabels = "sliderLabels"
 	tagNeeds        = "needs"
+	tagNotYet       = "notYet"
 )
 
 // Form builds one step's card from its settings struct's tags. Env says what this server's
@@ -336,6 +337,15 @@ func propertyOf(def Definition, info fieldInfo, env Env) (Property, error) {
 			p.Enum = append(p.Enum, nil)
 			p.Layout.Choices = append(p.Layout.Choices, Option{Value: nil, Label: unsetLabel, Available: true})
 		}
+		unbuilt, err := parseNotYet(sf.Tag.Get(tagNotYet))
+		if err != nil {
+			return Property{}, fmt.Errorf("flow: %s.%s: %w", def.Type, info.name, err)
+		}
+		byValue := make(map[string]string, len(unbuilt))
+		for _, u := range unbuilt {
+			byValue[u.Value] = u.Why
+		}
+		greyed := make(map[string]bool, len(unbuilt))
 		for _, c := range parseChoices(choicesTag) {
 			value, err := choiceValue(kind, c.Value)
 			if err != nil {
@@ -343,11 +353,21 @@ func propertyOf(def Definition, info fieldInfo, env Env) (Property, error) {
 			}
 			p.Enum = append(p.Enum, value)
 			option := Option{Value: value, Label: c.Label, Available: true}
-			if !availableNow(available) {
+			if noWhy, no := byValue[c.Value]; no {
+				option.Available, option.Why = false, noWhy
+				greyed[c.Value] = true
+			} else if !availableNow(available) {
 				option.Available, option.Why = false, why
 			}
 			p.Layout.Choices = append(p.Layout.Choices, option)
 		}
+		for _, u := range unbuilt {
+			if !greyed[u.Value] {
+				return Property{}, fmt.Errorf("flow: %s.%s greys %q, which is not one of its choices", def.Type, info.name, u.Value)
+			}
+		}
+	} else if sf.Tag.Get(tagNotYet) != "" {
+		return Property{}, fmt.Errorf("flow: %s.%s has a notYet tag but no choices to grey", def.Type, info.name)
 	}
 
 	if widget := sf.Tag.Get(tagWidget); widget != "" {
@@ -381,6 +401,31 @@ func propertyOf(def Definition, info fieldInfo, env Env) (Property, error) {
 		p.Layout.ShowIf = when
 	}
 	return p, nil
+}
+
+// notYetChoice is one choice a notYet tag greys: the choice's value and the sentence the page shows.
+type notYetChoice struct{ Value, Why string }
+
+// parseNotYet reads a notYet: tag, "value=why" pairs separated by commas: a choice this build
+// cannot offer yet, so the page greys it with the sentence rather than letting a person pick it.
+func parseNotYet(tag string) ([]notYetChoice, error) {
+	if tag == "" {
+		return nil, nil
+	}
+	var out []notYetChoice
+	for _, item := range strings.Split(tag, ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		value, why, ok := strings.Cut(item, "=")
+		value, why = strings.TrimSpace(value), strings.TrimSpace(why)
+		if !ok || value == "" || why == "" {
+			return nil, fmt.Errorf("notYet wants value=why, got %q", item)
+		}
+		out = append(out, notYetChoice{Value: value, Why: why})
+	}
+	return out, nil
 }
 
 // envAvailability answers whether this server can use a choice field. A field tagged needs:"card"

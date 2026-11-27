@@ -94,6 +94,7 @@ func New(version string) *Server {
 	s.mux.HandleFunc("GET /api/v2/workflows/starters", s.getStarters)
 	s.mux.HandleFunc("GET /api/v2/workflows/starters/{id}", s.getStarter)
 	s.mux.HandleFunc("GET /api/v2/workflows/guide", s.getGuide)
+	s.mux.HandleFunc("POST /api/v2/workflows/{id}/validate", s.validateWorkflow)
 	s.mux.HandleFunc("GET /api/v2/folders", s.getFolders)
 	s.mux.HandleFunc("POST /api/v2/libraries/check", s.checkLibraryFolder)
 	// Libraries (R1-9a).

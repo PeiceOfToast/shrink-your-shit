@@ -3,6 +3,7 @@
 package steps
 
 import (
+	"fmt"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -18,7 +19,7 @@ import (
 // to until item 10 builds replacing and a chosen folder, which Validate reports.
 type SaveSettings struct {
 	Container  string `set:"container" label:"File type" choices:"mkv=MKV,mp4=MP4,webm=WebM,keep=Keep the same" default:"mkv" help:"MKV holds every track and subtitle. MP4 plays on more devices but drops some subtitles."`
-	Where      string `set:"where" label:"Where it goes" choices:"replace=Replace the original,next_to=Next to the original,folder=A different folder" default:"next_to"`
+	Where      string `set:"where" label:"Where it goes" choices:"replace=Replace the original,next_to=Next to the original,folder=A different folder" default:"next_to" notYet:"replace=Replacing the original comes in a later update; for now the converted file is saved next to it."`
 	Folder     string `set:"folder" label:"Folder" widget:"text" showIf:"where=folder"`
 	NameSuffix string `set:"nameSuffix" label:"Add to the file name" default:"" help:"Added after a hyphen: media.mp4 becomes media-small.mp4. Empty keeps the name."`
 }
@@ -30,6 +31,10 @@ func init() { flow.RegisterStep(SaveStep{}) }
 type SaveStep struct{}
 
 var _ flow.Step = SaveStep{}
+
+// ContainerChoice is one of the settings facts the flow's container rules read
+// (flow/containers.go): the file type this step asks for.
+func (set SaveSettings) ContainerChoice() string { return set.Container }
 
 // Def is the step's own description.
 func (SaveStep) Def() flow.Definition {
@@ -89,6 +94,10 @@ func (SaveStep) Validate(s flow.Settings, vc flow.ValidateContext) flow.Check {
 	set := s.(SaveSettings)
 	var c flow.Check
 	c.Problems = append(c.Problems, flow.TagProblems(SaveStep{}.Def(), set)...)
+	// Replacing the original arrives with item 10. The form greys that choice with this sentence
+	// from the notYet tag; the check greys it here with the same words, and a stored value is still
+	// a problem below rather than a silent fall back to next-to.
+	c.Disabled = append(c.Disabled, flow.Disabled{Field: "where", Value: "replace", Why: replaceWhy})
 	if set.Where != "next_to" {
 		c.Problems = append(c.Problems, flow.Problem{
 			Field: "where", Code: "save.not_yet",
@@ -101,14 +110,8 @@ func (SaveStep) Validate(s flow.Settings, vc flow.ValidateContext) flow.Check {
 			Message: "Choose the folder the new file goes in.",
 		})
 	}
-	// WebM needs AV1 video and Opus audio: a cross-step rule (item 2) once items 6-7 can make
-	// both, so for now the choice itself is refused. Item 2 deletes this problem.
-	if set.Container == "webm" {
-		c.Problems = append(c.Problems, flow.Problem{
-			Field: "container", Code: "save.not_yet",
-			Message: "Saving as WebM is not built yet; WebM needs AV1 video and Opus audio.",
-		})
-	}
+	// What the picked file type can hold is the flow's rule, not this step's
+	// (flow/containers.go): it needs Video's format and Audio's codec too.
 	// Only "keep" guarantees the output has the source's extension. With an explicit container the
 	// source may be another file type, so an empty suffix is not a problem by itself; Plan refuses
 	// the one source type whose name it would really take.
@@ -119,11 +122,23 @@ func (SaveStep) Validate(s flow.Settings, vc flow.ValidateContext) flow.Check {
 		})
 	}
 
-	c.Summary = containerLabel(set.Container) + " · " + whereText(set.Where)
-	if cleaned := cleanSuffix(set.NameSuffix); cleaned != "" {
-		c.Summary += " · -" + cleaned
-	}
+	c.Summary = saveSummary(set)
 	return c
+}
+
+// replaceWhy is why the page greys "Replace the original" until item 10. The where field's notYet
+// tag repeats it for the form; TestSaveReplaceIsGreyed fails if the two ever differ.
+const replaceWhy = "Replacing the original comes in a later update; for now the converted file is saved next to it."
+
+// trashDays is how long a replaced original stays in the trash. Page 11's
+// processing.keepOriginalsDays is the app-wide setting; until that page feeds the check, the
+// summary carries the page's own number.
+const trashDays = 7
+
+// saveSummary is the closed card's line in page 07's words: the file type, then where the result
+// goes. It starts with the file type, as the page draws it.
+func saveSummary(set SaveSettings) string {
+	return containerLabel(set.Container) + " · " + whereText(set.Where, set.Folder)
 }
 
 // containerFor resolves the file-type choice; "keep" is the source's own container.
@@ -190,16 +205,23 @@ func containerLabel(choice string) string {
 		return "MKV"
 	case "mp4":
 		return "MP4"
+	case "webm":
+		return "WebM"
+	case "keep":
+		return "Keep the same"
 	}
-	return "Same file type"
+	return choice
 }
 
-func whereText(where string) string {
+func whereText(where, folder string) string {
 	switch where {
 	case "replace":
-		return "replacing the original"
+		return fmt.Sprintf("replace the original · old file in the trash %d days", trashDays)
 	case "folder":
-		return "in a chosen folder"
+		if folder != "" {
+			return "a different folder: " + folder
+		}
+		return "a different folder"
 	}
 	return "next to the original"
 }

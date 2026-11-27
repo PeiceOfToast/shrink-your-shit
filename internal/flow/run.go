@@ -157,6 +157,13 @@ func (e *engine) run(ctx context.Context) (res Result) {
 		}
 		return fatal("encode.plan_failed", err.Error(), e.encodeOwner(decisions), "")
 	}
+	// A stream the file type cannot hold is left out of the output, and the note says which and
+	// why. Some of this is invisible to the check: Audio copies a track, so the flow's container
+	// rule sees "copy" and passes, while the source's own codec is one the file type refuses. The
+	// job log shows the plain sentence instead of dropping the track silently.
+	for _, note := range built.Notes {
+		e.emit(events.Event{Kind: events.KindWarning, Level: events.LevelWarn, Message: note})
+	}
 	argv := append([]string{"ffmpeg"}, built.Argv...)
 
 	// 5. Stage the output beside its destination. The encoder writes the staged file, not the

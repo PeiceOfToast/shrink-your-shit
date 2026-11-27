@@ -144,7 +144,7 @@ func TestSaveValidate(t *testing.T) {
 	if len(check.Problems) != 0 {
 		t.Errorf("problems = %+v, want none", check.Problems)
 	}
-	if check.Summary != "MKV · next to the original · -shrunk" {
+	if check.Summary != "MKV · next to the original" {
 		t.Errorf("summary = %q", check.Summary)
 	}
 
@@ -161,11 +161,11 @@ func TestSaveValidate(t *testing.T) {
 	if check = (SaveStep{}).Validate(set, flow.ValidateContext{}); len(check.Problems) != 1 || check.Problems[0].Field != "where" {
 		t.Errorf("filled folder problems = %+v, want only the not-yet problem", check.Problems)
 	}
-	// WebM is refused until the cross-step rules can be checked (item 2) and audio can convert (item 7).
+	// WebM itself is not a problem here: what a file type can hold is the flow's cross-step rule
+	// (flow/containers.go), which knows Video's format and Audio's codec.
 	check = SaveStep{}.Validate(saveSettings("webm", "next_to", "shrunk"), flow.ValidateContext{})
-	if len(check.Problems) != 1 || check.Problems[0].Field != "container" ||
-		!strings.Contains(check.Problems[0].Message, "not built yet") {
-		t.Errorf("webm problems = %+v, want the not-yet problem", check.Problems)
+	if len(check.Problems) != 0 {
+		t.Errorf("webm problems = %+v, want the container rule to own it", check.Problems)
 	}
 
 	check = SaveStep{}.Validate(saveSettings("keep", "next_to", "///"), flow.ValidateContext{})
@@ -184,6 +184,55 @@ func TestSaveValidate(t *testing.T) {
 	check = SaveStep{}.Validate(saveSettings("avi", "next_to", "x"), flow.ValidateContext{})
 	if len(check.Problems) != 1 || check.Problems[0].Code != "setting.choice" {
 		t.Errorf("problems = %+v, want the choice problem", check.Problems)
+	}
+}
+
+// TestSaveReplaceIsGreyed is item 10's placeholder: the page draws "Replace the original" as a
+// choice it cannot pick, and the check greys the same choice with the same sentence. The stored
+// value still blocks publishing, so a saved flow cannot quietly fall back to next-to.
+func TestSaveReplaceIsGreyed(t *testing.T) {
+	form, err := flow.BuildForm(SaveStep{}.Def(), flow.Env{})
+	if err != nil {
+		t.Fatalf("form: %v", err)
+	}
+	var replace *flow.Option
+	for i := range form.Schema.Properties["where"].Layout.Choices {
+		if o := form.Schema.Properties["where"].Layout.Choices[i]; o.Value == "replace" {
+			replace = &form.Schema.Properties["where"].Layout.Choices[i]
+		}
+	}
+	if replace == nil {
+		t.Fatal("no replace choice on where")
+	}
+	if replace.Available || replace.Why == "" {
+		t.Errorf("form choice = %+v, want it unavailable with a why", *replace)
+	}
+
+	check := SaveStep{}.Validate(saveSettings("mkv", "next_to", "shrunk"), flow.ValidateContext{})
+	why := ""
+	for _, d := range check.Disabled {
+		if d.Field == "where" && d.Value == "replace" {
+			why = d.Why
+		}
+	}
+	if why == "" {
+		t.Fatalf("disabled = %+v, want the replace choice greyed", check.Disabled)
+	}
+	if why != replace.Why {
+		t.Errorf("check says %q, the form says %q; one sentence, not two", why, replace.Why)
+	}
+
+	// A stored replace value is still a problem: the greyed choice is a promise, not a silent
+	// rewrite of what was saved.
+	check = SaveStep{}.Validate(saveSettings("mkv", "replace", "shrunk"), flow.ValidateContext{})
+	blocked := false
+	for _, p := range check.Problems {
+		if p.Field == "where" && p.Code == "save.not_yet" {
+			blocked = true
+		}
+	}
+	if !blocked {
+		t.Errorf("problems = %+v, want save.not_yet for a stored replace", check.Problems)
 	}
 }
 

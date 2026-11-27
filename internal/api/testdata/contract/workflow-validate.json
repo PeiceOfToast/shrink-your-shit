@@ -1,0 +1,33 @@
+{
+  "body": {
+    "disabled": [
+      {
+        "field": "ifGpuFails",
+        "stepId": "video",
+        "why": "The graphics card is not used."
+      },
+      {
+        "field": "where",
+        "stepId": "save",
+        "value": "replace",
+        "why": "Replacing the original comes in a later update; for now the converted file is saved next to it."
+      },
+      {
+        "field": "container",
+        "stepId": "save",
+        "value": "webm",
+        "why": "WebM needs AV1 video and Opus audio."
+      }
+    ],
+    "problems": [],
+    "summaries": {
+      "audio": "Same as the source · same channels as the source · my languages · subtitles: keep all",
+      "save": "MKV · next to the original",
+      "video": "HEVC · quality 3 · graphics card off"
+    }
+  },
+  "method": "POST",
+  "path": "/api/v2/workflows/1/validate",
+  "status": 200,
+  "type": "FlowCheck"
+}

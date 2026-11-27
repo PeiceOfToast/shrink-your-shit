@@ -23,7 +23,7 @@ export const DEFAULT_ANSWERS: Answers = {
   subtitleLanguages: ["eng", "ger"],
   fileType: "mkv",
   includeDolbyVision: false,
-  original: "replace",
+  original: "next_to_original",
   folder: "",
 };
 
@@ -195,7 +195,7 @@ const GUIDE: GuideDoc = {
           label: "Where the new file goes",
           type: "choice",
           choices: [
-            { value: "replace", label: "Replace the original", available: true },
+            { value: "replace", label: "Replace the original", available: false, why: "Replacing the original comes in a later update; for now the converted file is saved next to it." },
             { value: "next_to_original", label: "Next to the original", available: true },
             { value: "one_folder", label: "A different folder", available: true },
           ],
@@ -238,7 +238,7 @@ function step(id: StepId, type: FlowStep["type"], settings: Record<string, unkno
 
 export function answersToFlow(a: Answers, meta: { name: string; description: string }): Flow {
   const audio = AUDIO_FROM_GUIDED[String(a.audio ?? "stereo_aac")] ?? AUDIO_FROM_GUIDED.stereo_aac;
-  const original = String(a.original ?? "replace");
+  const original = String(a.original ?? "next_to_original");
   const where = original === "replace" ? "replace" : original === "one_folder" ? "folder" : "next_to";
   const size = a.resolution && a.resolution !== "keep" ? String(a.resolution) : null;
   return {

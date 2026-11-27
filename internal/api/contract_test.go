@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/PeiceOfToast/shrink-your-shit/internal/flow"
 	// The real steps, so the step-definitions golden is the registry the binary serves.
 	_ "github.com/PeiceOfToast/shrink-your-shit/internal/flow/steps"
 )
@@ -110,6 +111,12 @@ func TestContractGoldens(t *testing.T) {
 	// The steps' cards (S2-1): page 07's form, from the registry.
 	writeGolden(t, "step-definitions", "StepDefinition[]", http.MethodGet, "/api/v2/step-definitions",
 		e.do(http.MethodGet, "/api/v2/step-definitions", "", withSession(cookie), false))
+
+	// The flow editor's check (S2-2): the starter's flow as page 07 sends it.
+	starter := flow.Starters()[0]
+	writeGolden(t, "workflow-validate", "FlowCheck", http.MethodPost, "/api/v2/workflows/1/validate",
+		e.do(http.MethodPost, "/api/v2/workflows/1/validate",
+			mustJSON(t, map[string]any{"flow": starter.Flow}), write(withSession(cookie)), false))
 
 	// Summary and attention (R1-9a).
 	writeGolden(t, "summary", "Summary", http.MethodGet, "/api/v2/summary",

@@ -32,51 +32,58 @@ var fixedSteps = []struct{ ID, Type string }{
 	{"save", "file.save"},
 }
 
-// Report is page 07's answer to a check: what blocks publishing, what is greyed, and the steps'
-// one-line summaries.
+// Report is page 07's answer to a check: what blocks publishing, what is greyed, and the closed
+// cards' one-line summaries, by step id (ui/src/api/flowTypes.ts's FlowCheck).
 type Report struct {
-	Problems  []Problem
-	Disabled  []Disabled
-	Summaries []Summary
+	Problems  []Problem         `json:"problems"`
+	Disabled  []Disabled        `json:"disabled"`
+	Summaries map[string]string `json:"summaries"`
 }
 
 // OK reports whether the flow may be published.
 func (r Report) OK() bool { return len(r.Problems) == 0 }
 
-// Summary is one closed card's line for the flow editor.
-type Summary struct {
-	StepID string `json:"id"`
-	Text   string `json:"text"`
-}
-
 // Validate runs the three steps' own checks and adds the flow-level ones: exactly three steps, in
-// the fixed order, with known types and versions (step-interface.md, flow-model.md).
+// the fixed order, with known types and versions, and the rules that cross steps (the container a
+// video format and an audio codec can go into). A step's problems and greyed fields come back with
+// its id attached, so the page can mark the right card.
 func Validate(f Flow, vc ValidateContext) Report {
-	var rep Report
+	// Empty, never null: the page reads both lists and draws them as they are.
+	rep := Report{Problems: []Problem{}, Disabled: []Disabled{}, Summaries: map[string]string{}}
 	if problems := shapeProblems(f); len(problems) > 0 {
 		for _, text := range problems {
 			rep.Problems = append(rep.Problems, Problem{Code: "flow.invalid", Message: text})
 		}
 		return rep
 	}
+	decoded := make([]Settings, 0, len(f.Steps))
 	for _, ref := range f.Steps {
 		step, settings, err := decodeStep(ref)
 		if err != nil {
 			rep.Problems = append(rep.Problems, Problem{
-				Field: "settings", Code: "setting.invalid", Message: err.Error(),
+				StepID: ref.ID, Field: "settings", Code: "setting.invalid", Message: err.Error(),
 			})
 			continue
 		}
+		decoded = append(decoded, settings)
 		check := step.Validate(settings, vc)
 		for _, p := range check.Problems {
 			if p.Code == "" {
 				p.Code = "step.invalid"
 			}
+			p.StepID = ref.ID
 			rep.Problems = append(rep.Problems, p)
 		}
-		rep.Disabled = append(rep.Disabled, check.Disabled...)
-		rep.Summaries = append(rep.Summaries, Summary{StepID: ref.ID, Text: check.Summary})
+		for _, d := range check.Disabled {
+			d.StepID = ref.ID
+			rep.Disabled = append(rep.Disabled, d)
+		}
+		rep.Summaries[ref.ID] = check.Summary
 	}
+	// The container rules are the flow's, not a step's: they need the format Video asks for and
+	// the codec Audio will write as well as the file type Save chose (page 07).
+	rep.Disabled = append(rep.Disabled, containerDisabled(decoded)...)
+	rep.Problems = append(rep.Problems, containerProblems(decoded)...)
 	return rep
 }
 
