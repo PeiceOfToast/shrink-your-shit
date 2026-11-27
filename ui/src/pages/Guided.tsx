@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { navigate } from "../router.tsx";
 import { api, type Answers, type GuideDoc, type GuideField, type GuidePart, type GuidePreview, type TryLine } from "../api/index.ts";
-import { LANGUAGE_NAME } from "../api/mockFlow.ts";
+import { languageName } from "../format/language.ts";
 import { useApi } from "../api/useApi.ts";
 import { ChoiceField, QUALITY_NAMES, Row, qualityMeaning, toErr, type Err } from "./flowParts.tsx";
 
@@ -17,7 +17,7 @@ function choiceLabel(field: GuideField, value: unknown): string {
   return field.choices?.find((c) => c.value === String(value))?.label ?? String(value ?? "");
 }
 
-// The part's value as short text for the index and the card's top right: "HEVC · 3 · en de".
+// The part's value as short text for the index and the card's top right: "HEVC · 3 · eng ger".
 function partValue(part: GuidePart, answers: Answers): string {
   return part.fields
     .filter((f) => !f.more && (f.type !== "folder" || answers.original === "one_folder"))
@@ -25,7 +25,7 @@ function partValue(part: GuidePart, answers: Answers): string {
       if (f.type === "choice") return choiceLabel(f, answers[f.key]);
       if (f.type === "number") return String(answers[f.key] ?? "");
       if (f.type === "yesno") return answers[f.key] ? "yes" : "no";
-      if (f.type === "languages") return (answers[f.key] as string[] | undefined)?.join(" ") || "all";
+      if (f.type === "languages") return (answers[f.key] as string[] | undefined)?.map(languageName).join(" and ") || "all";
       return String(answers[f.key] ?? "");
     })
     .filter(Boolean)
@@ -386,7 +386,7 @@ function FieldRow({ field, value, answers, languages, onChange }: { field: Guide
         <div className="wf-togs" role="group" aria-label={field.label}>
           {languages.map((code) => (
             <button key={code} type="button" aria-pressed={list.includes(code)} onClick={() => toggle(code)}>
-              {LANGUAGE_NAME[code] ?? code}
+              {languageName(code)}
             </button>
           ))}
         </div>

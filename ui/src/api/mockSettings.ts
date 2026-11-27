@@ -324,7 +324,7 @@ export function testTarget(input: { id?: string; kind?: string; url?: string }):
 // ---- Variables
 
 let variables: WorkflowVariable[] = [
-  { name: "my_languages", type: "string", value: "en, de", description: "The languages to keep", usedBy: [{ type: "workflow", id: "keep-surround", name: "Keep surround" }] },
+  { name: "my_languages", type: "string", value: "eng, ger", description: "The languages to keep", usedBy: [{ type: "workflow", id: "keep-surround", name: "Keep surround" }] },
   { name: "max_height", type: "number", value: 1080, description: "The tallest picture height", usedBy: [{ type: "workflow", id: "shrink-videos", name: "Shrink videos" }, { type: "library", id: "movies", name: "Movies" }] },
   { name: "quality", type: "enum", value: "balanced", options: ["smaller", "balanced", "sharper"], usedBy: [] },
   { name: "scratch_folder", type: "path", value: "/media/scratch", usedBy: [{ type: "workflow", id: "shrink-old-tv", name: "Shrink old TV" }] },

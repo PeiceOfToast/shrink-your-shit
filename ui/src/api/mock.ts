@@ -8,6 +8,7 @@ import { currentLibraries, reconnectShare } from "./mockLibraries.ts";
 import { setAllWorkers, workerName } from "./mockWorkers.ts";
 import { healthFailing } from "./mockSettings.ts";
 import { getSeenAt, getSeenSeq, newErrorCount } from "./mockLog.ts";
+import { LANGUAGES } from "../format/languages.ts";
 
 // Mock implementation of the API. Route-named functions; shapes come from the page specs.
 // The dev state switcher sets a forced state (mockState.ts); pages see it only through these calls.
@@ -23,6 +24,11 @@ export * from "./mockFlow.ts";
 
 // The status line reads this even when a page's own call is forced to fail, so it keeps its counts.
 // With no libraries nothing converts, queues or fails, and the log is empty.
+// The languages the app offers, as workshop's GET /api/v2/languages gives them: [{code, name}], three-letter codes.
+export function getLanguages(): Promise<{ code: string; name: string }[]> {
+  return Promise.resolve(LANGUAGES);
+}
+
 export function getSummary(): Promise<Summary> {
   return respond(
     () => {

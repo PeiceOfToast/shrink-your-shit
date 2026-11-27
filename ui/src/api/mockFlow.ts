@@ -4,6 +4,7 @@ import type { Answers, BitrateLadder, Flow, FlowCheck, FlowProblem, FlowStep, Gu
 import { ApiError } from "./errors.ts";
 import { respond } from "./mockState.ts";
 import { createWorkflowRow, peekWorkflowRow, updateWorkflowRow } from "./mockWorkflows.ts";
+import { languageName } from "../format/language.ts";
 
 // The answers a new workflow starts from (page 06 "New": sensible defaults ticked).
 export const DEFAULT_ANSWERS: Answers = {
@@ -15,10 +16,10 @@ export const DEFAULT_ANSWERS: Answers = {
   ifGpuFails: "cpu",
   audio: "stereo_aac",
   allLanguages: false,
-  languages: ["en", "de"],
+  languages: ["eng", "ger"],
   languagesEverywhere: false,
   subtitles: "keep_all",
-  subtitleLanguages: ["en", "de"],
+  subtitleLanguages: ["eng", "ger"],
   fileType: "mkv",
   includeDolbyVision: false,
   original: "replace",
@@ -27,7 +28,6 @@ export const DEFAULT_ANSWERS: Answers = {
 };
 
 const FORMAT_LABEL: Record<string, string> = { hevc: "HEVC", h264: "H.264", av1: "AV1" };
-export const LANGUAGE_NAME: Record<string, string> = { en: "English", de: "German", fr: "French", es: "Spanish", it: "Italian" };
 const CODEC_LABEL: Record<string, string> ={ aac: "AAC", opus: "Opus", ac3: "AC-3", eac3: "E-AC-3", flac: "FLAC", copy: "Same as the source" };
 const CHANNEL_LABEL: Record<string, string> = { stereo: "stereo", source: "same channels as the source", mono: "mono", "5.1": "5.1" };
 
@@ -224,7 +224,7 @@ const GUIDE: GuideDoc = {
     },
   ],
   defaults: DEFAULT_ANSWERS,
-  languages: ["en", "de"],
+  languages: ["eng", "ger"],
 };
 
 // The three fixed steps and their settings, from the answers the guided page sends. The server does this in the app.
@@ -326,7 +326,7 @@ export function checkFlow(flow: Flow): FlowCheck {
   const videoSummary = v.rateControl
     ? `${FORMAT_LABEL[String(v.format)]} · ${v.rateControl === "vbr" ? "variable" : "constant"} bitrate about ${bitrateFor(v)} Mb/s`
     : `${FORMAT_LABEL[String(v.format)]} · quality ${v.quality} · graphics card ${v.useGpu ? "automatic" : "off"}`;
-  const langs = Array.isArray(au.languages) && au.languages.length ? (au.languages as string[]).map((c) => LANGUAGE_NAME[c] ?? c).join(" and ") : "my languages";
+  const langs = Array.isArray(au.languages) && au.languages.length ? (au.languages as string[]).map(languageName).join(" and ") : "my languages";
   const audioSummary = `${CODEC_LABEL[String(au.codec ?? au.format)]} · ${CHANNEL_LABEL[String(au.channels)]} · ${langs}`;
   const where = String(sv.where);
   const saveSummary = where === "replace"
@@ -343,7 +343,7 @@ function sentencesFor(flow: Flow, a: Answers): string[] {
   const v = flow.steps[0].settings;
   const au = flow.steps[1].settings;
   const sv = flow.steps[2].settings;
-  const list = (xs: unknown) => (Array.isArray(xs) ? (xs as string[]).join(" and ") : "");
+  const list = (xs: unknown) => (Array.isArray(xs) ? (xs as string[]).map(languageName).join(" and ") : "");
   const sub = list(a.subtitleLanguages) || "every language";
   const subtitles =
     a.subtitles === "srt" ? "Subtitles are made into SRT files."

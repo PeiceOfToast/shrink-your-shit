@@ -3,6 +3,33 @@ import { navigate, useLocation } from "../router.tsx";
 import { api, type Flow, type FlowCheck, type FlowStep, type StepId, type TryLine } from "../api/index.ts";
 import { useApi } from "../api/useApi.ts";
 import { ChoiceField, QUALITY_NAMES, Row, Seg, qualityMeaning, toErr, type Err } from "./flowParts.tsx";
+import { languageName, normalizeLanguage } from "../format/language.ts";
+
+// Languages as chips: a picked one is removed by its chip, and "+ Add" offers the rest of the list. No free text.
+function LanguageChips({ label, value, onChange }: { label: string; value: string[]; onChange: (v: string[]) => void }) {
+  const all = useApi(() => api.getLanguages(), []);
+  const picked = value.map(normalizeLanguage);
+  const rest = (all.data ?? []).filter((l) => !picked.includes(l.code));
+  return (
+    <Row label={label} full hint={picked.length === 0 ? "None picked keeps every language." : undefined}>
+      <div className="wf-togs" role="group" aria-label={label}>
+        {picked.map((code) => (
+          <button key={code} type="button" aria-label={`Remove ${languageName(code)}`} onClick={() => onChange(picked.filter((c) => c !== code))}>
+            {languageName(code)} ×
+          </button>
+        ))}
+        <select className="sel" aria-label="Add a language" value="" onChange={(e) => e.target.value && onChange([...picked, e.target.value])}>
+          <option value="">+ Add</option>
+          {rest.map((l) => (
+            <option key={l.code} value={l.code}>
+              {l.name}
+            </option>
+          ))}
+        </select>
+      </div>
+    </Row>
+  );
+}
 
 // Flow editor (07): the fixed walk Video → Audio → Save the result. Nothing is added or reordered.
 // The Advanced parts replace the simple choices for the things the guided page doesn't cover.
@@ -233,14 +260,7 @@ function Editor({ id, initial }: { id: string; initial: Loaded }) {
             <option value="source">Same as the source</option>
           </select>
         </Row>
-        <Row label="Languages" hint="Codes separated by commas. Empty keeps every language.">
-          <input
-            className="inp"
-            aria-label="Languages"
-            value={((audio.languages as string[] | undefined) ?? []).join(", ")}
-            onChange={(e) => set("audio", { languages: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })}
-          />
-        </Row>
+        <LanguageChips label="Languages" value={(audio.languages as string[] | undefined) ?? []} onChange={(languages) => set("audio", { languages })} />
         <Advanced summary="Advanced" description="Codec, bitrate, downmix, loudness, commentary, original track">
           <AudioAdvanced s={audio} set={(patch) => set("audio", patch)} />
         </Advanced>
