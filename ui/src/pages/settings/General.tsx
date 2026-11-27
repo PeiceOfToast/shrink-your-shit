@@ -41,18 +41,6 @@ export function General() {
           <option value="MM/DD/YYYY">11/26/2026</option>
         </select>
       </Row>
-      <Row label="Theme for new browsers" hint="Used by a browser that hasn't picked one. The top bar's sun button changes it for one browser.">
-        <Seg
-          label="Theme default"
-          value={g.theme}
-          options={[
-            { value: "system", label: "System" },
-            { value: "light", label: "Light" },
-            { value: "dark", label: "Dark" },
-          ]}
-          onChange={(theme) => set({ theme })}
-        />
-      </Row>
       <Row label="Check for updates" hint={g.updateAvailable ? `Version ${g.updateAvailable} is available.` : "Look for new versions of this app."}>
         <Switch label="Check for updates" on={g.checkForUpdates} onChange={(checkForUpdates) => set({ checkForUpdates })} />
       </Row>

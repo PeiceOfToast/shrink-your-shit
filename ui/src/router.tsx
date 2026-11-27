@@ -56,7 +56,7 @@ const TITLES: Record<string, string> = {
   "system-log": "System log",
 };
 
-const SECTION_KEYS: SettingsSection[] = ["general", "processing", "connections", "notifications", "backup", "health", "access"];
+const SECTION_KEYS: SettingsSection[] = ["general", "appearance", "processing", "connections", "notifications", "backup", "health", "access"];
 
 export function resolve(pathname: string): Route {
   const parts = pathname.split("/").filter(Boolean).map(decodeURIComponent);

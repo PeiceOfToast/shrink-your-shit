@@ -6,6 +6,7 @@ import { hasChanges, setAsker } from "../../settings/leaveGuard.ts";
 import { Access } from "./Access.tsx";
 import { Backup } from "./Backup.tsx";
 import { Connections } from "./Connections.tsx";
+import { Appearance } from "./Appearance.tsx";
 import { General } from "./General.tsx";
 import { Health } from "./Health.tsx";
 import { Notifications } from "./Notifications.tsx";
@@ -13,6 +14,7 @@ import { Processing } from "./Processing.tsx";
 
 const SECTIONS: { key: SettingsSection; label: string }[] = [
   { key: "general", label: "General" },
+  { key: "appearance", label: "Appearance" },
   { key: "processing", label: "Processing" },
   { key: "connections", label: "Connections" },
   { key: "notifications", label: "Notifications" },
@@ -24,6 +26,7 @@ const SECTIONS: { key: SettingsSection; label: string }[] = [
 function Body({ section }: { section: SettingsSection }) {
   switch (section) {
     case "general": return <General />;
+    case "appearance": return <Appearance />;
     case "processing": return <Processing />;
     case "connections": return <Connections />;
     case "notifications": return <Notifications />;
