@@ -81,6 +81,9 @@ type tryMedia struct {
 	src    string
 	whole  media.Info
 	sample time.Duration
+	// onRun, when set, runs while the engine's encode is "running": the staging folder exists and
+	// nothing has been placed, which is the moment a try's footprint in the library can be seen.
+	onRun func(argv []string)
 }
 
 func (m *tryMedia) Probe(ctx context.Context, path string) (media.Info, error) {
@@ -94,6 +97,9 @@ func (m *tryMedia) Probe(ctx context.Context, path string) (media.Info, error) {
 }
 
 func (m *tryMedia) Run(ctx context.Context, argv []string, onProgress func(media.Progress)) (media.Result, error) {
+	if m.onRun != nil && !strings.Contains(strings.Join(argv, " "), " -c copy ") {
+		m.onRun(argv)
+	}
 	res, err := m.Media.Run(ctx, argv, onProgress)
 	if err == nil && m.sample > 0 && strings.Contains(strings.Join(argv, " "), " -c copy ") {
 		os.WriteFile(argv[len(argv)-1], []byte("sample"), 0o600)
@@ -187,6 +193,52 @@ func TestATryNeverWritesBesideTheOriginal(t *testing.T) {
 	}
 	if got := res.Lines[len(res.Lines)-1].Text; got != "Size: 7 B (now 600 B)." {
 		t.Errorf("size line = %q", got)
+	}
+}
+
+// TestATryStagesOutsideTheLibrary pins the footprint while the try is actually running: the
+// original's folder holds only the original, and both the encoder's output and the staging folder
+// are under the app's own folder. After the try the folder is byte-identical. If the engine ever
+// stages beside the destination again, this test sees it happen rather than only its remains.
+func TestATryStagesOutsideTheLibrary(t *testing.T) {
+	root, src, info := trySource(t, 60*time.Second)
+	before := entries(t, root)
+	sourceBefore, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scratch := t.TempDir()
+	mf := &fake.Media{Probes: map[string]media.Info{src: info}, Runs: []fake.RunScript{{}}}
+	sf := &trySafety{verify: safety.Verdict{OK: true}, size: 7}
+	checked := false
+	m := &tryMedia{Media: mf, onRun: func(argv []string) {
+		checked = true
+		if got := entries(t, root); strings.Join(got, ",") != strings.Join(before, ",") {
+			t.Errorf("while the try ran, the library folder held %v, want only the original %v", got, before)
+		}
+		if sf.folder == "" || !strings.HasPrefix(sf.folder, scratch+string(filepath.Separator)) {
+			t.Errorf("while the try ran, it staged in %q, want a folder under the app's %s", sf.folder, scratch)
+		}
+		staged := argv[len(argv)-1]
+		if !strings.HasPrefix(staged, scratch+string(filepath.Separator)) {
+			t.Errorf("while the try ran, the encoder wrote %q, want a file under the app's %s", staged, scratch)
+		}
+	}}
+	if _, err := flow.Try(context.Background(), starterFlow(t), src, tryEnv(m, sf), scratch); err != nil {
+		t.Fatalf("try: %v", err)
+	}
+	if !checked {
+		t.Fatal("the try never ran the encoder; the footprint was not seen")
+	}
+	if got := entries(t, root); strings.Join(got, ",") != strings.Join(before, ",") {
+		t.Errorf("after the try the library folder held %v, want only the original %v", got, before)
+	}
+	sourceAfter, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatalf("the original is gone: %v", err)
+	}
+	if string(sourceAfter) != string(sourceBefore) {
+		t.Errorf("the original changed: %d -> %d bytes", len(sourceBefore), len(sourceAfter))
 	}
 }
 
