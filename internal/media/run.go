@@ -63,8 +63,8 @@ func Run(ctx context.Context, argv []string, onProgress func(Progress)) (Result,
 
 	args := append([]string(nil), argv[1:]...)
 	args = append(args, "-progress", "pipe:1", "-nostats")
-	cmd := exec.Command(bin, args...)
-	cmd.Env = toolEnv(program)
+	// Run stops its own process group on cancel (below), so the command is not tied to ctx here.
+	cmd := toolCommand(context.Background(), program, args...)
 	// The pipes are ours rather than StdoutPipe/StderrPipe, because Wait closes the read ends of
 	// those while a reader may still be using them, and a reader beside Wait is what lets a
 	// leftover child holding the pipe be handled at all.
@@ -318,6 +318,15 @@ func tool(name string) string {
 		return name
 	}
 	return filepath.Join(toolDir, name)
+}
+
+// toolCommand is how every ffmpeg and ffprobe child is made: the program comes from the tool folder and its environment
+// is toolEnv's. Nothing in this package starts one of those tools any other way, so a new caller cannot leave the
+// installer's library folder out (review2 #852 F1, F2).
+func toolCommand(ctx context.Context, program string, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, tool(program), args...)
+	cmd.Env = toolEnv(program)
+	return cmd
 }
 
 // toolEnv is the environment of one ffmpeg or ffprobe process. When the tool folder has a lib folder (the installer's
