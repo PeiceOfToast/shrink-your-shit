@@ -55,7 +55,7 @@ type Bus struct {
 	subs       map[int]*subscriber
 	nextSub    int
 	nextGlobal int64
-	jobSeq     map[int64]int64 // a job's last seq; absent until its first event this run (seeded from the table)
+	jobSeq     map[int64]int64 // a job's last seq this run; absent until its first event (seeded from the table); kept after run_end
 	pending    map[int64]int   // job events accepted by the db sink and not yet committed; guarded by mu
 	closed     bool
 }
@@ -184,12 +184,9 @@ func (b *Bus) Emit(e Event) error {
 			b.mu.Unlock()
 			return ErrClosed
 		}
+		// The counter stays after run_end: a job's later events continue its seq without waiting on the table.
 		b.jobSeq[e.JobID]++
 		e.Seq = b.jobSeq[e.JobID]
-		if e.Kind == KindRunEnd {
-			// The job is finished; a later event for it seeds again from the table.
-			delete(b.jobSeq, e.JobID)
-		}
 	} else {
 		b.nextGlobal++
 		e.Seq = b.nextGlobal

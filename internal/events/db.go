@@ -242,7 +242,7 @@ func (b *Bus) seedLocked(job int64) error {
 	return nil
 }
 
-// Page is where a Query starts and how many events it returns. Cursor is the id of the last event of the
+// Page is where a Query starts and how many events it returns. Cursor is the seq of the last event of the
 // previous page, as returned in the next Page; zero starts at the beginning (oldest first) or the end (newest first).
 type Page struct {
 	Limit  int
@@ -272,6 +272,12 @@ func (b *Bus) Query(ctx context.Context, f Filter, p Page) ([]Event, Page, error
 	if f.JobID != 0 {
 		add("job_id = ?", f.JobID)
 	}
+	if f.Kind != "" {
+		add("kind = ?", string(f.Kind))
+	}
+	if f.Attempt != 0 {
+		add("attempt = ?", f.Attempt)
+	}
 	if f.MinLevel != "" {
 		levels := levelsAtLeast(f.MinLevel)
 		if len(levels) == 0 {
@@ -284,15 +290,31 @@ func (b *Bus) Query(ctx context.Context, f Filter, p Page) ([]Event, Page, error
 		}
 		add("level IN ("+marks+")", vals...)
 	}
+	if f.Source != "" {
+		add("source = ?", f.Source)
+	}
+	if f.StepID != "" {
+		add("step_id = ?", f.StepID)
+	}
+	if !f.Since.IsZero() {
+		add("ts >= ?", f.Since.UnixMilli())
+	}
+	if !f.Until.IsZero() {
+		add("ts <= ?", f.Until.UnixMilli())
+	}
+	if f.AfterSeq > 0 {
+		add("seq > ?", f.AfterSeq)
+	}
 	order := "ASC"
 	if p.Newest {
 		order = "DESC"
 	}
+	// Paging is by seq, which is per job: a page walk is meant to be scoped to one JobID.
 	if p.Cursor > 0 {
 		if p.Newest {
-			add("id < ?", p.Cursor)
+			add("seq < ?", p.Cursor)
 		} else {
-			add("id > ?", p.Cursor)
+			add("seq > ?", p.Cursor)
 		}
 	}
 
@@ -300,7 +322,7 @@ func (b *Bus) Query(ctx context.Context, f Filter, p Page) ([]Event, Page, error
 	if len(where) > 0 {
 		q += " WHERE " + strings.Join(where, " AND ")
 	}
-	q += " ORDER BY id " + order + " LIMIT ?"
+	q += " ORDER BY seq " + order + ", id " + order + " LIMIT ?"
 	args = append(args, p.Limit)
 
 	rows, err := b.db.Read().QueryContext(ctx, q, args...)
@@ -318,7 +340,7 @@ func (b *Bus) Query(ctx context.Context, f Filter, p Page) ([]Event, Page, error
 			return nil, Page{}, err
 		}
 		out = append(out, e)
-		cursor = id
+		cursor = e.Seq
 	}
 	if err := rows.Err(); err != nil {
 		return nil, Page{}, fmt.Errorf("read events: %w", err)

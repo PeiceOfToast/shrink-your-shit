@@ -127,17 +127,48 @@ func (e Event) validate() error {
 	return nil
 }
 
-// Filter selects events for a subscriber. A zero JobID matches every job and the app; an empty MinLevel matches every level.
+// Filter selects events for a subscriber or a Query. Each zero field matches everything: JobID 0 is every job
+// and the app, Attempt 0 every attempt, MinLevel "" every level, and a zero Since or Until is no bound. Since
+// and Until are inclusive, compared at millisecond precision as the table stores them. AfterSeq keeps only
+// events whose seq is greater. Kind "" is every kind. An unknown MinLevel matches nothing, as Query refuses it.
 type Filter struct {
 	JobID    int64
+	Kind     Kind
+	Attempt  int
 	MinLevel Level
+	Source   string
+	StepID   string
+	Since    time.Time
+	Until    time.Time
+	AfterSeq int64
 }
 
 func (f Filter) match(e Event) bool {
 	if f.JobID != 0 && e.JobID != f.JobID {
 		return false
 	}
-	if f.MinLevel != "" && e.Level.rank() < f.MinLevel.rank() {
+	if f.Kind != "" && e.Kind != f.Kind {
+		return false
+	}
+	if f.Attempt != 0 && e.Attempt != f.Attempt {
+		return false
+	}
+	if f.MinLevel != "" && (f.MinLevel.rank() < 0 || e.Level.rank() < f.MinLevel.rank()) {
+		return false
+	}
+	if f.Source != "" && e.Source != f.Source {
+		return false
+	}
+	if f.StepID != "" && e.StepID != f.StepID {
+		return false
+	}
+	if !f.Since.IsZero() && e.TS.UnixMilli() < f.Since.UnixMilli() {
+		return false
+	}
+	if !f.Until.IsZero() && e.TS.UnixMilli() > f.Until.UnixMilli() {
+		return false
+	}
+	if f.AfterSeq > 0 && e.Seq <= f.AfterSeq {
 		return false
 	}
 	return true
