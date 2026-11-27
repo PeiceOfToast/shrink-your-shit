@@ -97,7 +97,7 @@ func jobState(s jobs.State) string {
 func (s *Server) view(ctx context.Context, d *jobDeps, j jobs.Job) jobJSON {
 	v := jobJSON{
 		ID: strconv.FormatInt(j.ID, 10), State: jobState(j.State), File: filepath.Base(j.Path),
-		Worker: j.WorkerID, Result: resultJSON{Warnings: 0},
+		Worker: s.workerOf(ctx, d, j), Result: resultJSON{Warnings: 0},
 	}
 	if lib, err := d.libraries.GetLibrary(ctx, j.LibraryID); err == nil {
 		v.Library = lib.Name
@@ -381,8 +381,10 @@ func (s *Server) steps(ctx context.Context, d *jobDeps, j jobs.Job) []stepJSON {
 	if d.bus == nil {
 		return []stepJSON{}
 	}
+	// Only the latest attempt's steps count: an earlier attempt that failed in a step must not stretch that step.
 	starts, _ := s.kindEvents(ctx, d, j.ID, events.KindStepStart)
 	ends, _ := s.kindEvents(ctx, d, j.ID, events.KindStepEnd)
+	starts, ends = onAttempt(starts, j.Attempt), onAttempt(ends, j.Attempt)
 	endBy := map[int]events.Event{}
 	for _, e := range ends {
 		endBy[e.StepIndex] = e
@@ -391,7 +393,7 @@ func (s *Server) steps(ctx context.Context, d *jobDeps, j jobs.Job) []stepJSON {
 	for _, st := range starts {
 		step := stepJSON{Index: st.StepIndex, Name: st.StepName}
 		if end, ok := endBy[st.StepIndex]; ok {
-			ms := end.DurationMS
+			ms := end.TS.Sub(st.TS).Milliseconds()
 			step.DurationMs = &ms
 			step.Outcome = "done"
 		} else if j.State == jobs.Running {
@@ -441,7 +443,7 @@ func (s *Server) detail(ctx context.Context, d *jobDeps, j jobs.Job) (jobDetailJ
 	}
 	done := j.State == jobs.Done
 	out := jobDetailJSON{
-		Job: head, Path: j.Path, Workflow: head.Workflow, Worker: j.WorkerID, Attempt: j.Attempt,
+		Job: head, Path: j.Path, Workflow: head.Workflow, Worker: head.Worker, Attempt: j.Attempt,
 		StartedAt: head.StartedAt, TookMs: head.TookMs, SizeBeforeBytes: derefInt(j.SizeBefore),
 		SizeAfterBytes: j.SizeAfter, FinishedAt: head.FinishedAt, OutputPath: nonEmpty(j.OutputPath),
 		SkipReason: nonEmpty(j.SkipReason), Steps: s.steps(ctx, d, j), Logs: []any{}, Media: []any{}, History: hist,
@@ -459,4 +461,28 @@ func (s *Server) detail(ctx context.Context, d *jobDeps, j jobs.Job) (jobDetailJ
 		out.Failure = &failureJSON{Step: j.FailedStep, Reason: j.Reason, NextAction: j.NextAction, ActionLabel: j.NextAction}
 	}
 	return out, nil
+}
+
+// workerOf is the worker that ran a job's latest attempt. The job row clears its worker when it finishes, so the
+// attempt is the record; the row's own worker is the fallback while nothing is recorded.
+func (s *Server) workerOf(ctx context.Context, d *jobDeps, j jobs.Job) string {
+	attempts, err := d.queue.Attempts(ctx, j.ID)
+	if err != nil || len(attempts) == 0 {
+		return j.WorkerID
+	}
+	if w := attempts[len(attempts)-1].WorkerID; w != "" {
+		return w
+	}
+	return j.WorkerID
+}
+
+// onAttempt keeps the events of one attempt, in their order.
+func onAttempt(evs []events.Event, attempt int) []events.Event {
+	var out []events.Event
+	for _, e := range evs {
+		if e.Attempt == attempt {
+			out = append(out, e)
+		}
+	}
+	return out
 }
