@@ -63,13 +63,26 @@ jobs:
 
       # Real ffmpeg, pinned by name and sha256 so the runner image cannot move it (L-INST-7).
       # BtbN's static build n8.0.1, the same source the installer's later pin may reuse.
+      # The cache is keyed on the checksum: a cached copy skips the download, and a BtbN prune
+      # breaks CI only once the cache has expired.
+      - name: Cache ffmpeg 8
+        id: ffmpeg-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/ffmpeg-8
+          key: ffmpeg-cab6b5dd9cede8a8db8891e28f2fec2ddfd6401785328d139cbcfd23af9f691e
+
       - name: Install ffmpeg 8
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
         run: |
           curl -fsSL -o "$RUNNER_TEMP/ff.tar.xz" \
             "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2025-11-30-12-53/ffmpeg-n8.0.1-17-g27a297f186-linux64-gpl-8.0.tar.xz"
           echo "cab6b5dd9cede8a8db8891e28f2fec2ddfd6401785328d139cbcfd23af9f691e  $RUNNER_TEMP/ff.tar.xz" | sha256sum -c -
-          tar -xf "$RUNNER_TEMP/ff.tar.xz" -C "$RUNNER_TEMP"
-          echo "$RUNNER_TEMP/ffmpeg-n8.0.1-17-g27a297f186-linux64-gpl-8.0/bin" >> "$GITHUB_PATH"
+          mkdir -p "$RUNNER_TEMP/ffmpeg-8"
+          tar -xf "$RUNNER_TEMP/ff.tar.xz" -C "$RUNNER_TEMP/ffmpeg-8"
+
+      - name: Put ffmpeg 8 on PATH
+        run: echo "$RUNNER_TEMP/ffmpeg-8/ffmpeg-n8.0.1-17-g27a297f186-linux64-gpl-8.0/bin" >> "$GITHUB_PATH"
 
       # The real-media tests must run, not skip: SYP_REQUIRE_FFMPEG turns a missing tool into a
       # failure, and the grep turns any "--- SKIP: TestReal" into one too.

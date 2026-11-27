@@ -6,23 +6,30 @@ package media
 
 import (
 	"os/exec"
+	"strconv"
 	"syscall"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
 
-// tree is a started process and the job object that holds it and its children.
+// openProcess is windows.OpenProcess, a variable so the "Windows will not hand us the process"
+// fallback can be tested. Tests set it and restore it; none run in parallel.
+var openProcess = windows.OpenProcess
+
+// tree is a started process and the job object that holds it and its children. fallback ends the
+// whole tree without a job object: taskkill walks the children, and cmd.Process.Kill is the last
+// resort because after Start the command always keeps its own process handle.
 type tree struct {
-	job  windows.Handle
-	proc windows.Handle
-	pid  int
+	job      windows.Handle
+	proc     windows.Handle
+	pid      int
+	fallback func() error
 }
 
 // startTree starts cmd in a job object with kill-on-close, so killing the job also kills every
 // child ffmpeg starts (L-Q-7). A runner that refuses job objects (a nested job without breakaway
-// rights) falls back to killing the process itself; Run still works, only the tree guarantee is
-// weaker there.
+// rights) falls back to walking the tree with taskkill; Run keeps the same promise there.
 func startTree(cmd *exec.Cmd) (*tree, error) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_NEW_PROCESS_GROUP}
 	job, err := windows.CreateJobObject(nil, nil)
@@ -43,9 +50,11 @@ func startTree(cmd *exec.Cmd) (*tree, error) {
 		}
 		return nil, err
 	}
-	t := &tree{job: job, pid: cmd.Process.Pid}
-	proc, err := windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE, false, uint32(t.pid))
+	t := &tree{job: job, pid: cmd.Process.Pid, fallback: killTree(cmd.Process.Pid, cmd.Process.Kill)}
+	proc, err := openProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE, false, uint32(t.pid))
 	if err != nil {
+		// Without this handle the process cannot be put in the job either, so the job is empty:
+		// close it and let kill walk the tree by pid.
 		if job != 0 {
 			windows.CloseHandle(job)
 			t.job = 0
@@ -63,14 +72,27 @@ func startTree(cmd *exec.Cmd) (*tree, error) {
 	return t, nil
 }
 
-// kill ends the job (process and children), or just the process when no job is in force.
+// kill ends the job (process and children), else walks the tree through taskkill, so a cancel always
+// ends the program and what it started. A process handle alone would end only the root: on Windows
+// `cmd /c ffmpeg ...` makes ffmpeg a child, and TerminateProcess on cmd.exe would leave it running.
 func (t *tree) kill() {
 	if t.job != 0 {
 		_ = windows.TerminateJobObject(t.job, 1)
 		return
 	}
-	if t.proc != 0 {
-		_ = windows.TerminateProcess(t.proc, 1)
+	if t.fallback != nil {
+		_ = t.fallback()
+	}
+}
+
+// killTree ends pid and its children through taskkill, which is the tree walk Windows offers
+// without a job object. fallback ends the program itself when even that is unavailable.
+func killTree(pid int, fallback func() error) func() error {
+	return func() error {
+		if err := exec.Command("taskkill", "/T", "/F", "/PID", strconv.Itoa(pid)).Run(); err != nil {
+			return fallback()
+		}
+		return nil
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -92,7 +93,7 @@ func TestRealProbeGeneratedClips(t *testing.T) {
 		if len(info.Subtitles) != 1 {
 			t.Fatalf("subtitles = %d, want 1", len(info.Subtitles))
 		}
-		if s := info.Subtitles[0]; s.Codec != "subrip" || !s.Text || s.Language != "eng" {
+		if s := info.Subtitles[0]; s.Codec != "subrip" || s.Kind() != SubtitleText || s.Language != "eng" {
 			t.Errorf("subtitle = %+v, want text subrip eng", s)
 		}
 		if len(info.Chapters) != 2 {
@@ -130,7 +131,8 @@ func TestRealProbeGeneratedClips(t *testing.T) {
 }
 
 // TestRealProbeUnreadableFile keeps a text file with a media name out of the library with a typed
-// error, not a crash.
+// error, not a crash. A file ffprobe can open but not parse is ErrNotMedia; one it cannot open is
+// the file's own error, so a scanner does not quietly skip a permission problem.
 func TestRealProbeUnreadableFile(t *testing.T) {
 	requireFFmpeg(t)
 	path := filepath.Join(t.TempDir(), "not-media.mp4")
@@ -139,6 +141,49 @@ func TestRealProbeUnreadableFile(t *testing.T) {
 	}
 	if _, err := Probe(context.Background(), path); !errors.Is(err, ErrNotMedia) {
 		t.Fatalf("error = %v, want ErrNotMedia", err)
+	}
+
+	if runtime.GOOS == "windows" {
+		t.Skip("a chmod of 0 does not make a file unreadable to this user on Windows")
+	}
+	locked := filepath.Join(t.TempDir(), "locked.mp4")
+	if err := os.WriteFile(locked, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(locked, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(locked, 0o600) })
+	_, err := Probe(context.Background(), locked)
+	if err == nil {
+		t.Fatal("an unreadable file returned no error")
+	}
+	if errors.Is(err, ErrNotMedia) {
+		t.Errorf("error = %v, want the permission error, not ErrNotMedia", err)
+	}
+}
+
+// TestRealProbeAPathBeginningWithADash is the argument guard: a file named "-clip.mp4" must not be
+// read as an option.
+func TestRealProbeAPathBeginningWithADash(t *testing.T) {
+	requireFFmpeg(t)
+	dir := t.TempDir()
+	clip := filepath.Join(dir, "clip.mp4")
+	if out, err := exec.Command("ffmpeg", "-v", "error", "-f", "lavfi", "-i",
+		"testsrc2=size=160x120:rate=30", "-t", "1", clip).CombinedOutput(); err != nil {
+		t.Fatalf("make the clip: %v\n%s", err, out)
+	}
+	dashed := filepath.Join(dir, "-clip.mp4")
+	if err := os.Rename(clip, dashed); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	info, err := Probe(context.Background(), "-clip.mp4")
+	if err != nil {
+		t.Fatalf("probe a leading-dash path: %v", err)
+	}
+	if len(info.Video) != 1 || info.Video[0].Width != 160 {
+		t.Errorf("video = %+v, want the 160-wide clip", info.Video)
 	}
 }
 

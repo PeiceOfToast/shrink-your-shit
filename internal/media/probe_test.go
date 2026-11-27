@@ -135,8 +135,8 @@ func TestParseProbeLanguagesAndSubtitles(t *testing.T) {
 		t.Fatalf("subtitles = %d, want 1", len(info.Subtitles))
 	}
 	s := info.Subtitles[0]
-	if s.Codec != "subrip" || s.Language != "eng" || !s.Text {
-		t.Errorf("subtitle = %+v, want subrip/eng/text", s)
+	if s.Codec != "subrip" || s.Language != "eng" || s.Kind() != SubtitleText {
+		t.Errorf("subtitle = %+v, want subrip/eng/text kind", s)
 	}
 
 	if len(info.Chapters) != 2 {
@@ -184,7 +184,7 @@ func TestParseProbePlainValues(t *testing.T) {
 	if len(info.Video) != 1 || len(info.Subtitles) != 1 {
 		t.Fatalf("video/subtitles = %d/%d, want 1/1", len(info.Video), len(info.Subtitles))
 	}
-	if s := info.Subtitles[0]; s.Text || !s.Forced {
+	if s := info.Subtitles[0]; s.Kind() != SubtitleBitmap || !s.Forced {
 		t.Errorf("PGS subtitle = %+v, want bitmap, forced", s)
 	}
 	if v := info.Video[0]; v.FrameRate.Float() != 0 || v.BitDepth != 10 {
@@ -195,11 +195,56 @@ func TestParseProbePlainValues(t *testing.T) {
 	}
 }
 
+// TestSubtitleKindsAreExplicit covers both lists and the third value: text codecs, known bitmap
+// codecs, and everything else, which must not be mistaken for convertible text.
+func TestSubtitleKindsAreExplicit(t *testing.T) {
+	cases := map[string]SubtitleKind{
+		"subrip":            SubtitleText,
+		"ass":               SubtitleText,
+		"ssa":               SubtitleText,
+		"webvtt":            SubtitleText,
+		"mov_text":          SubtitleText,
+		"text":              SubtitleText,
+		"hdmv_pgs_subtitle": SubtitleBitmap,
+		"dvd_subtitle":      SubtitleBitmap,
+		"dvb_subtitle":      SubtitleBitmap,
+		"xsub":              SubtitleBitmap,
+		"dvb_teletext":      SubtitleOther,
+		"eia_608":           SubtitleOther,
+		"":                  SubtitleOther,
+		"something_new":     SubtitleOther,
+	}
+	for codec, want := range cases {
+		if got := subtitleKind(codec); got != want {
+			t.Errorf("subtitleKind(%q) = %q, want %q", codec, got, want)
+		}
+	}
+}
+
 func TestProbeWithNoFFprobe(t *testing.T) {
+	clip := filepath.Join(t.TempDir(), "clip.mp4")
+	if err := os.WriteFile(clip, []byte("media"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("PATH", t.TempDir())
-	_, err := Probe(context.Background(), "clip.mp4")
+	_, err := Probe(context.Background(), clip)
 	if !errors.Is(err, ErrFFprobeMissing) {
 		t.Fatalf("error = %v, want ErrFFprobeMissing", err)
+	}
+}
+
+// A missing file is reported as missing, not as "not media": a scanner skips ErrNotMedia, and a
+// folder that went away is a person's problem.
+func TestProbeOfAMissingFileIsNotNotMedia(t *testing.T) {
+	_, err := Probe(context.Background(), filepath.Join(t.TempDir(), "gone.mp4"))
+	if err == nil {
+		t.Fatal("a missing file returned no error")
+	}
+	if errors.Is(err, ErrNotMedia) || errors.Is(err, ErrFFprobeMissing) {
+		t.Errorf("error = %v, want the file's own error", err)
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("error = %v, want os.ErrNotExist in it", err)
 	}
 }
 

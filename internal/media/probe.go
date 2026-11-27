@@ -9,7 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -120,8 +122,7 @@ type AudioTrack struct {
 	Comment       bool
 }
 
-// SubtitleTrack is one subtitle stream. Text is false for bitmap subtitles (PGS, VobSub, DVB),
-// which cannot be converted to text and need different handling.
+// SubtitleTrack is one subtitle stream.
 type SubtitleTrack struct {
 	Index    int
 	Codec    string
@@ -129,7 +130,34 @@ type SubtitleTrack struct {
 	Title    string
 	Default  bool
 	Forced   bool
-	Text     bool
+}
+
+// SubtitleKind is how a subtitle stream can be handled. The three values are explicit on purpose:
+// a codec that is neither text nor a known bitmap format (teletext, closed captions, anything new)
+// must not be treated as convertible text by mistake.
+type SubtitleKind string
+
+const (
+	SubtitleText   SubtitleKind = "text"
+	SubtitleBitmap SubtitleKind = "bitmap"
+	SubtitleOther  SubtitleKind = "other"
+)
+
+// Kind reports how this stream can be handled, from its codec.
+func (s SubtitleTrack) Kind() SubtitleKind {
+	return subtitleKind(s.Codec)
+}
+
+// subtitleKind lists both directions explicitly: text codecs that convert to .srt, bitmap codecs
+// that need picture handling (PGS, VobSub, DVB), and everything else as other.
+func subtitleKind(codec string) SubtitleKind {
+	switch codec {
+	case "subrip", "ass", "ssa", "webvtt", "mov_text", "text":
+		return SubtitleText
+	case "hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle", "xsub":
+		return SubtitleBitmap
+	}
+	return SubtitleOther
 }
 
 // Chapter is one chapter marker.
@@ -141,12 +169,30 @@ type Chapter struct {
 
 // Probe asks ffprobe about one file. Errors keep their cause: errors.Is can tell ErrNotMedia,
 // ErrFFprobeMissing and context.Canceled / DeadlineExceeded apart.
+//
+// The file is checked before ffprobe runs, so a missing or unreadable file is reported as itself
+// rather than as "not media": a scanner skips ErrNotMedia quietly, but a permission problem is for
+// the person. The path is made absolute, so a name beginning with "-" is not read as an option.
 func Probe(ctx context.Context, path string) (Info, error) {
 	if err := ctx.Err(); err != nil {
 		return Info{}, fmt.Errorf("probe %s: %w", path, err)
 	}
+	if _, err := os.Stat(path); err != nil {
+		return Info{}, fmt.Errorf("probe %s: %w", path, err)
+	}
+	// Opening it proves readability the same way ffprobe would; a file we cannot open is not a
+	// verdict about its contents.
+	file, err := os.Open(path)
+	if err != nil {
+		return Info{}, fmt.Errorf("probe %s: %w", path, err)
+	}
+	file.Close()
 	if _, err := exec.LookPath("ffprobe"); err != nil {
 		return Info{}, fmt.Errorf("probe %s: %w: %v", path, ErrFFprobeMissing, err)
+	}
+	arg := path
+	if abs, err := filepath.Abs(path); err == nil {
+		arg = abs
 	}
 	args := []string{
 		"-v", "error",
@@ -154,13 +200,13 @@ func Probe(ctx context.Context, path string) (Info, error) {
 		"-show_format",
 		"-show_streams",
 		"-show_chapters",
-		path,
+		arg,
 	}
 	cmd := exec.CommandContext(ctx, "ffprobe", args...)
 	var out, stderr bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &stderr
-	err := cmd.Run()
+	err = cmd.Run()
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return Info{}, fmt.Errorf("probe %s: %w", path, ctxErr)
 	}
@@ -395,18 +441,7 @@ func subtitleTrack(s *probeStream) SubtitleTrack {
 		Title:    s.Tags.Strings()["title"],
 		Default:  s.Disposition.Default != 0,
 		Forced:   s.Disposition.Forced != 0,
-		Text:     isTextSubtitle(s.CodecName),
 	}
-}
-
-// isTextSubtitle knows the bitmap subtitle codecs; everything else (subrip, ass, mov_text,
-// webvtt) is text.
-func isTextSubtitle(codec string) bool {
-	switch codec {
-	case "dvd_subtitle", "dvdsub", "hdmv_pgs_subtitle", "pgssub", "dvb_subtitle", "xsub", "dvbsub":
-		return false
-	}
-	return true
 }
 
 // parseRational prefers the average frame rate and falls back to the real one; "0/0" means the

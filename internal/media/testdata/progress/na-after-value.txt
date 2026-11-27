@@ -1,0 +1,16 @@
+frame=10
+fps=25.00
+total_size=400
+out_time_us=400000
+out_time_ms=400000
+out_time=00:00:00.400000
+speed=1.00x
+progress=continue
+frame=N/A
+fps=N/A
+total_size=N/A
+out_time_us=N/A
+out_time_ms=N/A
+out_time=N/A
+speed=N/A
+progress=end

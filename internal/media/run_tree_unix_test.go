@@ -58,6 +58,38 @@ func TestRunCancelKillsTheProcessTree(t *testing.T) {
 	}
 }
 
+// TestRunReturnsWhenAChildKeepsTheProgressPipe: the program exits but leaves a child holding
+// stdout. Waiting for the read to end would hang Run until something cancelled it.
+func TestRunReturnsWhenAChildKeepsTheProgressPipe(t *testing.T) {
+	dir := t.TempDir()
+	pidFile := filepath.Join(dir, "child.pid")
+	script := fmt.Sprintf(`sleep 300 & echo $! > %q; exit 0`, pidFile)
+	t.Cleanup(func() {
+		if data, err := os.ReadFile(pidFile); err == nil {
+			if pid, convErr := strconv.Atoi(strings.TrimSpace(string(data))); convErr == nil && pid > 0 {
+				syscall.Kill(pid, syscall.SIGKILL)
+			}
+		}
+	})
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := Run(context.Background(), []string{"sh", "-c", script}, nil)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("Run: %v, want success after the program exited", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Run waited for a child that kept its progress pipe open")
+	}
+
+	pid := waitForPID(t, pidFile)
+	waitUntilGone(t, "the child holding the pipe", pid)
+}
+
 // TestRunReportsAFailingExit keeps the exit code and the end of stderr for the failure card.
 func TestRunReportsAFailingExit(t *testing.T) {
 	result, err := Run(context.Background(), []string{"sh", "-c", "echo 'boom: bad input' >&2; exit 3"}, nil)

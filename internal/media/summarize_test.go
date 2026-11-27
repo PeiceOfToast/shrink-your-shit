@@ -41,8 +41,12 @@ func TestSummarizeHDRAndSubtitles(t *testing.T) {
 			FrameRate: Rational{Num: 24000, Den: 1001}, PixelFormat: "yuv420p10le", BitDepth: 10,
 			ColorTransfer: "smpte2084", HDR: HDR{MasteringDisplay: true, ContentLight: true},
 		}},
-		Audio:     []AudioTrack{{Codec: "eac3", Channels: 6, ChannelLayout: "5.1", Language: "eng"}},
-		Subtitles: []SubtitleTrack{{Codec: "hdmv_pgs_subtitle", Language: "eng", Text: false}},
+		Audio: []AudioTrack{{Codec: "eac3", Channels: 6, ChannelLayout: "5.1", Language: "eng"}},
+		Subtitles: []SubtitleTrack{
+			{Codec: "hdmv_pgs_subtitle", Language: "eng"},
+			{Codec: "subrip", Language: "eng"},
+			{Codec: "dvb_teletext", Language: "eng"},
+		},
 	}
 	tracks := Summarize(info)
 
@@ -54,6 +58,12 @@ func TestSummarizeHDRAndSubtitles(t *testing.T) {
 	}
 	if got := tracks.Subtitles[0]; got.Text {
 		t.Errorf("PGS subtitle summary = %+v, want text false", got)
+	}
+	if got := tracks.Subtitles[1]; !got.Text {
+		t.Errorf("subrip subtitle summary = %+v, want text true", got)
+	}
+	if got := tracks.Subtitles[2]; got.Text {
+		t.Errorf("teletext subtitle summary = %+v, want text false", got)
 	}
 
 	data, err := json.Marshal(tracks)

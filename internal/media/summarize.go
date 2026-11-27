@@ -46,7 +46,8 @@ type TrackAudio struct {
 	Forced        bool   `json:"forced,omitempty"`
 }
 
-// TrackSubtitle is one subtitle track; Text says whether it can become an .srt sidecar.
+// TrackSubtitle is one subtitle track; Text says whether it can become an .srt sidecar. It is true
+// only for an explicit text codec: bitmap and unknown kinds both stay false.
 type TrackSubtitle struct {
 	Codec    string `json:"codec"`
 	Language string `json:"language,omitempty"`
@@ -100,7 +101,7 @@ func Summarize(info Info) Tracks {
 			Codec:    s.Codec,
 			Language: s.Language,
 			Title:    s.Title,
-			Text:     s.Text,
+			Text:     s.Kind() == SubtitleText,
 			Default:  s.Default,
 			Forced:   s.Forced,
 		})

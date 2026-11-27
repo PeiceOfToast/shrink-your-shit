@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -61,25 +62,44 @@ func Run(ctx context.Context, argv []string, onProgress func(Progress)) (Result,
 	args := append([]string(nil), argv[1:]...)
 	args = append(args, "-progress", "pipe:1", "-nostats")
 	cmd := exec.Command(program, args...)
-	stdout, err := cmd.StdoutPipe()
+	// The pipes are ours rather than StdoutPipe/StderrPipe, because Wait closes the read ends of
+	// those while a reader may still be using them, and a reader beside Wait is what lets a
+	// leftover child holding the pipe be handled at all.
+	stdout, stdoutW, err := os.Pipe()
 	if err != nil {
-		return Result{}, fmt.Errorf("run %s: read its progress: %w", program, err)
+		return Result{}, fmt.Errorf("run %s: make a progress pipe: %w", program, err)
 	}
+	stderr, stderrW, err := os.Pipe()
+	if err != nil {
+		stdout.Close()
+		stdoutW.Close()
+		return Result{}, fmt.Errorf("run %s: make an error pipe: %w", program, err)
+	}
+	cmd.Stdout = stdoutW
+	cmd.Stderr = stderrW
 	key := &lineRing{max: keyLineCount}
-	cmd.Stderr = key
 
 	res := Result{}
 	started := time.Now()
 	tree, err := startTree(cmd)
 	if err != nil {
+		for _, f := range []*os.File{stdout, stdoutW, stderr, stderrW} {
+			f.Close()
+		}
 		return res, fmt.Errorf("run %s: %w", program, err)
 	}
 	res.PID = cmd.Process.Pid
+	// The child inherited its own copies; ours would keep the pipes from ever reaching EOF.
+	stdoutW.Close()
+	stderrW.Close()
 
-	// The watcher is the only thing that kills the tree. Closing finished after Wait lets it stop;
-	// if ctx fires in the same moment, killing an already-reaped group is a harmless no-op.
+	// The watcher is the only thing that kills the tree on cancel. Waiting for it to return before
+	// release() means the two never touch the handles at the same time: if ctx fires just as the
+	// process ends, release could otherwise close a handle kill is still using.
 	finished := make(chan struct{})
+	watcherDone := make(chan struct{})
 	go func() {
+		defer close(watcherDone)
 		select {
 		case <-ctx.Done():
 			tree.kill()
@@ -87,9 +107,28 @@ func Run(ctx context.Context, argv []string, onProgress func(Progress)) (Result,
 		}
 	}()
 
-	readProgress(stdout, onProgress)
+	// Reading both pipes runs beside Wait, so a child that outlives the program cannot hold us in a
+	// read: after Wait we kill the tree and close our ends.
+	progressDone := make(chan struct{})
+	go func() {
+		defer close(progressDone)
+		readProgress(stdout, onProgress)
+	}()
+	stderrDone := make(chan struct{})
+	go func() {
+		defer close(stderrDone)
+		_, _ = io.Copy(key, stderr)
+	}()
 	waitErr := cmd.Wait()
+	// Anything still holding a pipe after the program exited is a leftover child.
+	tree.kill()
+	// The readers finish by themselves once the tree is gone; closing our end is only the guard for
+	// something outside the tree still holding the pipe, and the grace keeps a close from throwing
+	// away tail data the reader had not drained yet.
+	waitRead(progressDone, stdout.Close)
+	waitRead(stderrDone, stderr.Close)
 	close(finished)
+	<-watcherDone
 	tree.release()
 
 	res.Duration = time.Since(started)
@@ -111,6 +150,20 @@ func Run(ctx context.Context, argv []string, onProgress func(Progress)) (Result,
 		return res, fmt.Errorf("run %s: ffmpeg exited with code %d%s", program, res.ExitCode, line)
 	}
 	return res, nil
+}
+
+// readGrace is how long a pipe reader may take to see EOF once the tree is gone before we close the
+// pipe under it. Anything this slow is holding a process outside the tree.
+const readGrace = time.Second
+
+// waitRead waits for a reader to finish, and closes its pipe to unblock it after the grace.
+func waitRead(done <-chan struct{}, closePipe func() error) {
+	select {
+	case <-done:
+	case <-time.After(readGrace):
+		closePipe()
+		<-done
+	}
 }
 
 // readProgress parses ffmpeg's -progress stream and calls onProgress at the end of each block,
@@ -145,12 +198,19 @@ func readProgress(r io.Reader, onProgress func(Progress)) Progress {
 		case "speed":
 			block.Speed = parseNumber(strings.TrimSuffix(value, "x"))
 		case "progress":
-			// "continue" or "end" ends the block; emit it whole.
+			// "continue" or "end" ends the block; emit it whole and start the next one empty, so a
+			// field the next block omits does not repeat this one's value.
 			last = block
 			if onProgress != nil {
 				onProgress(block)
 			}
+			block = Progress{}
 		}
+	}
+	if err := sc.Err(); err != nil {
+		// A line over the buffer ends the scan. Keep draining so the child is never blocked
+		// writing progress we stopped reading.
+		_, _ = io.Copy(io.Discard, r)
 	}
 	return last
 }

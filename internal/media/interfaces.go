@@ -34,7 +34,8 @@ type MediaFuncs struct {
 
 func (m MediaFuncs) Probe(ctx context.Context, path string) (Info, error) {
 	if m.ProbeFunc == nil {
-		return Info{}, ErrNotMedia
+		// A mis-wired test double is a mistake to fix, not a file that turned out not to be media.
+		return Info{}, errors.New("media: no Probe function")
 	}
 	return m.ProbeFunc(ctx, path)
 }
