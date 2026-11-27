@@ -1,7 +1,8 @@
 #!/bin/sh
 # shrink-your-shit installer for Debian 12, Debian 13 and Ubuntu 24.04 (amd64 and arm64), with systemd.
 #
-#   curl -fsSL https://github.com/PeiceOfToast/shrink-your-shit/releases/download/rebuild/install.sh | sh
+#   wget -qO- https://github.com/PeiceOfToast/shrink-your-shit/releases/download/rebuild/install.sh | sh
+#   (as a user without root: wget -qO- <the same URL> | sudo sh)
 #
 # SYP_BASE_URL (optional) overrides the default address; it must hold checksums.txt and syp-linux-<arch>. Each download is checked against
 # checksums.txt before it is put in place. ffmpeg 8 is the pinned BtbN static build below; the distro ffmpeg is
