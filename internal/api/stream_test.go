@@ -4,6 +4,7 @@ package api
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -196,5 +197,83 @@ func TestStreamRefusesWithoutSignInAndUnknownJobs(t *testing.T) {
 	rec := f.get("/api/v2/events?job=999999")
 	if code, _, _ := errorBody(t, rec); rec.Code != http.StatusNotFound || code != "job_not_found" {
 		t.Errorf("stream for an unknown job: %d %s; want 404 job_not_found", rec.Code, code)
+	}
+}
+
+// The global stream names the lifecycle the way the UI listens for it: queued, state changes, job.done and
+// job.failed. A job's log kinds stay off it.
+func TestGlobalStreamSpeaksTheContractNames(t *testing.T) {
+	f := newJobsFixture(t)
+	ts := streamServer(t, f)
+	frames, body := openStream(t, ts, f.cookie.String(), "/api/v2/events", "0")
+	defer body.Close()
+	seen := map[string]bool{}
+	deadline := time.Now().Add(5 * time.Second)
+	for !(seen["job.queued"] && seen["job.state"] && seen["job.done"] && seen["job.failed"]) {
+		if time.Now().After(deadline) {
+			t.Fatalf("names seen %v; want job.queued, job.state, job.done and job.failed", seen)
+		}
+		select {
+		case fr, ok := <-frames:
+			if !ok {
+				t.Fatal("the stream ended early")
+			}
+			seen[fr.event] = true
+			if fr.event != "ping" && !strings.HasPrefix(fr.event, "job.") && !strings.HasPrefix(fr.event, "scan.") {
+				t.Errorf("the global stream sent %q; want a contract name", fr.event)
+			}
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+}
+
+// Progress is live only: a job's stream gets it with no id line, and the store never keeps it.
+func TestProgressReachesAJobStreamAndIsNotStored(t *testing.T) {
+	f := newJobsFixture(t)
+	ts := streamServer(t, f)
+	for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		if strings.Contains(f.get(fmt.Sprintf("/api/v2/jobs/%d/events", f.waiting)).Body.String(), `"queued"`) {
+			break
+		}
+	}
+	frames, body := openStream(t, ts, f.cookie.String(), fmt.Sprintf("/api/v2/events?job=%d", f.waiting), "")
+	defer body.Close()
+	time.Sleep(50 * time.Millisecond)
+	if err := f.e.bus.Emit(events.Event{JobID: f.waiting, Kind: events.KindProgress, Level: events.LevelInfo, Source: "test", Message: "half way"}); err != nil {
+		t.Fatal(err)
+	}
+	var got sseFrame
+	for {
+		fr := nextFrame(t, frames, "progress")
+		if fr.event == "progress" {
+			got = fr
+			break
+		}
+	}
+	if got.id != "" || !strings.Contains(got.data, "half way") {
+		t.Errorf("progress frame = %+v; want no id and the line", got)
+	}
+	time.Sleep(300 * time.Millisecond)
+	stored, _, err := f.e.bus.Query(context.Background(), events.Filter{JobID: f.waiting, Kind: events.KindProgress}, events.Page{Limit: 10})
+	if err != nil || len(stored) != 0 {
+		t.Errorf("stored progress = %d (%v); want none", len(stored), err)
+	}
+}
+
+// contractKind is the mapping the UI depends on. Each lifecycle kind has one contract name.
+func TestContractKindMapsTheLifecycle(t *testing.T) {
+	want := map[events.Kind]string{
+		events.KindQueued: "job.queued", events.KindPicked: "job.state", events.KindRetry: "job.state",
+		events.KindRequeued: "job.state", events.KindCancelled: "job.state",
+		events.KindDone: "job.done", events.KindSkipped: "job.done", events.KindFailed: "job.failed",
+		events.KindScanStart: "scan.start", events.KindScanEnd: "scan.end",
+	}
+	for k, name := range want {
+		if got, ok := contractKind(k); !ok || got != name {
+			t.Errorf("contractKind(%s) = %q, %v; want %q", k, got, ok, name)
+		}
+	}
+	if _, ok := contractKind(events.KindRunStart); ok {
+		t.Error("run_start is a job-log kind; it must not be sent on the global stream")
 	}
 }

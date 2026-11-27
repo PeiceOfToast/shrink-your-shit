@@ -3,12 +3,17 @@
     {
       "level": "info",
       "text": "queued",
-      "time": "2026-11-27T16:14:36.440Z"
+      "time": "2026-11-27T16:27:07.954Z"
     },
     {
       "level": "info",
       "text": "picked",
-      "time": "2026-11-27T16:14:36.441Z"
+      "time": "2026-11-27T16:27:07.954Z"
+    },
+    {
+      "level": "info",
+      "text": "smaller",
+      "time": "2026-11-27T16:27:07.954Z"
     }
   ],
   "method": "GET",

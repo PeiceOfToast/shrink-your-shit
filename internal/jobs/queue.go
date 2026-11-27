@@ -327,8 +327,15 @@ func (q *Queue) Finish(ctx context.Context, id int64, attempt int, r Result) err
 	if err != nil {
 		return err
 	}
-	if to == RetryWait {
+	switch to {
+	case RetryWait:
 		return q.emit(events.KindRetry, events.LevelWarn, id, attempt, libraryID, reason, reason)
+	case Done:
+		_ = q.emit(events.KindDone, events.LevelInfo, id, attempt, libraryID, r.Outcome, r.Outcome)
+	case Skipped:
+		_ = q.emit(events.KindSkipped, events.LevelInfo, id, attempt, libraryID, r.SkipReason, r.Reason)
+	case Failed:
+		_ = q.emit(events.KindFailed, events.LevelError, id, attempt, libraryID, r.FailedStep, r.Reason)
 	}
 	return nil
 }

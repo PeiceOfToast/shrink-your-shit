@@ -11,11 +11,11 @@
     "items": [
       {
         "file": "three.mkv",
-        "finishedAt": "2026-11-27T16:14:36.441Z",
+        "finishedAt": "2026-11-27T16:27:07.954Z",
         "id": "3",
         "library": "Clips",
         "progress": null,
-        "queuedAt": "2026-11-27T16:14:36.439Z",
+        "queuedAt": "2026-11-27T16:27:07.953Z",
         "result": {
           "failedStep": null,
           "outcome": "smaller",
@@ -24,20 +24,20 @@
           "sizeBefore": 1000,
           "warnings": 0
         },
-        "startedAt": "2026-11-27T16:14:36.440Z",
+        "startedAt": "2026-11-27T16:27:07.954Z",
         "state": "done",
         "step": null,
-        "tookMs": 1,
+        "tookMs": 0,
         "worker": "",
         "workflow": "Shrink"
       },
       {
         "file": "two.mkv",
-        "finishedAt": "2026-11-27T16:14:36.443Z",
+        "finishedAt": "2026-11-27T16:27:07.955Z",
         "id": "2",
         "library": "Clips",
         "progress": null,
-        "queuedAt": "2026-11-27T16:14:36.437Z",
+        "queuedAt": "2026-11-27T16:27:07.953Z",
         "result": {
           "failedStep": "encode",
           "outcome": null,
@@ -46,7 +46,7 @@
           "sizeBefore": 0,
           "warnings": 0
         },
-        "startedAt": "2026-11-27T16:14:36.442Z",
+        "startedAt": "2026-11-27T16:27:07.954Z",
         "state": "failed",
         "step": null,
         "tookMs": 1,
@@ -59,7 +59,7 @@
         "id": "1",
         "library": "Clips",
         "progress": null,
-        "queuedAt": "2026-11-27T16:14:36.436Z",
+        "queuedAt": "2026-11-27T16:27:07.953Z",
         "result": {
           "failedStep": null,
           "outcome": null,

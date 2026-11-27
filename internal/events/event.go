@@ -59,6 +59,10 @@ const (
 	KindRetry     Kind = "retry"
 	KindRequeued  Kind = "requeued"
 	KindCancelled Kind = "cancelled"
+	// Outcome kinds: a job's finish as the app saw it. Finish emits one after its commit.
+	KindDone    Kind = "done"
+	KindSkipped Kind = "skipped"
+	KindFailed  Kind = "failed"
 )
 
 var knownKinds = map[Kind]bool{
@@ -68,6 +72,7 @@ var knownKinds = map[Kind]bool{
 	KindError: true, KindNote: true,
 	KindScanStart: true, KindScanProgress: true, KindScanEnd: true,
 	KindQueued: true, KindPicked: true, KindRetry: true, KindRequeued: true, KindCancelled: true,
+	KindDone: true, KindSkipped: true, KindFailed: true,
 }
 
 // jobKinds are kept in the job's own record (keep "job") rather than only in the log.
@@ -78,6 +83,7 @@ var jobKinds = map[Kind]bool{
 // historyKinds are the kinds that belong to a job's history. They keep "job" like jobKinds.
 var historyKinds = map[Kind]bool{
 	KindQueued: true, KindPicked: true, KindRetry: true, KindRequeued: true, KindCancelled: true,
+	KindDone: true, KindSkipped: true, KindFailed: true,
 }
 
 // Keep says where an event is kept long-term. Emit sets it from the kind.

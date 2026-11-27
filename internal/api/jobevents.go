@@ -41,6 +41,7 @@ var historyKinds = map[events.Kind]bool{
 	events.KindQueued: true, events.KindPicked: true, events.KindRetry: true, events.KindRequeued: true,
 	events.KindCancelled: true, events.KindRunStart: true, events.KindRunEnd: true,
 	events.KindWarning: true, events.KindError: true,
+	events.KindDone: true, events.KindSkipped: true, events.KindFailed: true,
 }
 
 // jobEvents reads every event of a job, oldest first, one page at a time.
@@ -131,10 +132,22 @@ func (s *Server) jobHistory(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// logKind is the log kind a stored event shows as. The outcome kinds have no place in types.ts LogKind, so a
+// finished job's line shows as a note, and a failed one as an error.
+func logKind(k events.Kind) string {
+	switch k {
+	case events.KindDone, events.KindSkipped:
+		return string(events.KindNote)
+	case events.KindFailed:
+		return string(events.KindError)
+	}
+	return string(k)
+}
+
 // logLine is one stored event as the job log and the stream send it.
 func logLine(e events.Event) logEventJSON {
 	return logEventJSON{
-		Seq: e.Seq, TS: timeJSON2(e.TS), Level: string(e.Level), Kind: string(e.Kind), Source: e.Source,
+		Seq: e.Seq, TS: timeJSON2(e.TS), Level: string(e.Level), Kind: logKind(e.Kind), Source: e.Source,
 		Message: e.Message, JobID: idOrNil(e.JobID), LibraryID: strOrNil(e.LibraryID), WorkerID: strOrNil(e.WorkerID),
 		NextAction: strOrNil(e.NextAction),
 	}

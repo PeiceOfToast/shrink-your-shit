@@ -101,11 +101,20 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 
 	for {
 		next, err := catchUp(ctx, d.bus, filter, cursor, func(e events.Event) error {
+			name := logKind(e.Kind)
+			if filter.JobID == 0 {
+				// The global stream speaks the contract's names; other job-log kinds stay on ?job=.
+				n, ok := contractKind(e.Kind)
+				if !ok {
+					return nil
+				}
+				name = n
+			}
 			data, err := json.Marshal(logLine(e))
 			if err != nil {
 				return err
 			}
-			return streamFrame(w, idOf(e), string(e.Kind), data)
+			return streamFrame(w, idOf(e), name, data)
 		})
 		if err != nil {
 			return // a failed write or read ends the stream; the browser reconnects
@@ -118,9 +127,21 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 			return
 		case <-s.stopped:
 			return
-		case _, open := <-wake:
+		case e, open := <-wake:
 			if !open {
 				return
+			}
+			// Progress is live only: it is never stored, so the subscription is the one way it reaches a client.
+			// It goes to a job's stream with no id line, so it never moves Last-Event-ID.
+			if e.Kind == events.KindProgress && filter.JobID != 0 {
+				data, err := json.Marshal(logLine(e))
+				if err != nil {
+					return
+				}
+				if err := streamFrame(w, "", string(events.KindProgress), data); err != nil {
+					return
+				}
+				flusher.Flush()
 			}
 		case <-poll.C:
 		case <-ping.C:
@@ -183,4 +204,23 @@ func (s *Server) pingInterval() time.Duration {
 // stream never ends on its own.
 func (s *Server) CloseStreams() {
 	s.closeOnce.Do(func() { close(s.stopped) })
+}
+
+// contractKind is the name the UI listens for on the global stream (real-client-contract.md §5, Q2). Queue lifecycle
+// kinds map to job.queued or job.state; a job's end maps to job.done or job.failed. The scan kinds already carry the
+// contract names. Anything else is not sent on the global stream.
+func contractKind(k events.Kind) (string, bool) {
+	switch k {
+	case events.KindQueued:
+		return "job.queued", true
+	case events.KindPicked, events.KindRetry, events.KindRequeued, events.KindCancelled:
+		return "job.state", true
+	case events.KindDone, events.KindSkipped:
+		return "job.done", true
+	case events.KindFailed:
+		return "job.failed", true
+	case events.KindScanStart, events.KindScanProgress, events.KindScanEnd:
+		return string(k), true
+	}
+	return "", false
 }

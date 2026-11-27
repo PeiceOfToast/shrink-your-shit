@@ -8,7 +8,7 @@
       "message": "queued",
       "seq": 1,
       "source": "jobs",
-      "ts": "2026-11-27T16:14:36.440Z",
+      "ts": "2026-11-27T16:27:07.954Z",
       "workerId": null
     },
     {
@@ -19,7 +19,18 @@
       "message": "picked",
       "seq": 2,
       "source": "jobs",
-      "ts": "2026-11-27T16:14:36.441Z",
+      "ts": "2026-11-27T16:27:07.954Z",
+      "workerId": null
+    },
+    {
+      "jobId": "3",
+      "kind": "note",
+      "level": "info",
+      "libraryId": "1",
+      "message": "smaller",
+      "seq": 3,
+      "source": "jobs",
+      "ts": "2026-11-27T16:27:07.954Z",
       "workerId": null
     }
   ],
