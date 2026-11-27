@@ -26,8 +26,13 @@ export function jobResultText(job: Job): string {
       return `${Math.round((freed / r.sizeBefore) * 100)}% smaller · ${sizeText(freed)} freed${warn}`;
     }
     case "bigger_kept": {
-      const grew = (r.sizeAfter ?? r.sizeBefore) - r.sizeBefore;
-      return `${Math.round((grew / r.sizeBefore) * 100)}% bigger · original kept${warn}`;
+      // The size is compared only when the new file is bigger (the size rule kept it). A check that kept the original
+      // (playback, picture, ...) has no size to compare: its reason says why.
+      if (r.sizeAfter != null && r.sizeAfter > r.sizeBefore) {
+        const grew = r.sizeAfter - r.sizeBefore;
+        return `${Math.round((grew / r.sizeBefore) * 100)}% bigger · original kept${warn}`;
+      }
+      return `${r.reason ?? "Original kept"}${warn}`;
     }
     case "failed":
       return `${r.reason ?? "Failed"}${warn}`;
