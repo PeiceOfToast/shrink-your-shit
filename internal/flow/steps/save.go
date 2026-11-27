@@ -14,12 +14,13 @@ import (
 	"github.com/PeiceOfToast/shrink-your-shit/internal/media"
 )
 
-// SaveSettings is page 07's Save card. Stage 1 has next to the original only; replacing and a
-// chosen folder are stage 2.
+// SaveSettings is page 07's Save card. Next to the original is the only place the engine writes
+// to until item 10 builds replacing and a chosen folder, which Validate reports.
 type SaveSettings struct {
-	Container  string `set:"container" label:"File type" choices:"mkv,mp4,keep" default:"keep"`
-	Where      string `set:"where" label:"Where" choices:"next_to,replace,folder" default:"next_to"`
-	NameSuffix string `set:"nameSuffix" label:"Name suffix" default:""`
+	Container  string `set:"container" label:"File type" choices:"mkv=MKV,mp4=MP4,webm=WebM,keep=Keep the same" default:"mkv" help:"MKV holds every track and subtitle. MP4 plays on more devices but drops some subtitles."`
+	Where      string `set:"where" label:"Where it goes" choices:"replace=Replace the original,next_to=Next to the original,folder=A different folder" default:"next_to"`
+	Folder     string `set:"folder" label:"Folder" widget:"text" showIf:"where=folder"`
+	NameSuffix string `set:"nameSuffix" label:"Add to the file name" default:"" help:"Added after a hyphen: media.mp4 becomes media-small.mp4. Empty keeps the name."`
 }
 
 func init() { flow.RegisterStep(SaveStep{}) }
@@ -92,6 +93,20 @@ func (SaveStep) Validate(s flow.Settings, vc flow.ValidateContext) flow.Check {
 		c.Problems = append(c.Problems, flow.Problem{
 			Field: "where", Code: "save.not_yet",
 			Message: "Saving somewhere else is not built yet; next to the original is the only choice for now.",
+		})
+	}
+	if set.Where == "folder" && strings.TrimSpace(set.Folder) == "" {
+		c.Problems = append(c.Problems, flow.Problem{
+			Field: "folder", Code: "save.folder_missing",
+			Message: "Choose the folder the new file goes in.",
+		})
+	}
+	// WebM needs AV1 video and Opus audio: a cross-step rule (item 2) once items 6-7 can make
+	// both, so for now the choice itself is refused. Item 2 deletes this problem.
+	if set.Container == "webm" {
+		c.Problems = append(c.Problems, flow.Problem{
+			Field: "container", Code: "save.not_yet",
+			Message: "Saving as WebM is not built yet; WebM needs AV1 video and Opus audio.",
 		})
 	}
 	// Only "keep" guarantees the output has the source's extension. With an explicit container the

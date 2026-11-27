@@ -8,6 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	// The real steps, so the step-definitions golden is the registry the binary serves.
+	_ "github.com/PeiceOfToast/shrink-your-shit/internal/flow/steps"
 )
 
 // writeGolden writes internal/api/testdata/contract/<slug>.json from a real response. The UI's `npm run contract`
@@ -103,6 +106,10 @@ func TestContractGoldens(t *testing.T) {
 		e.do(http.MethodPost, "/api/v2/libraries/1/scan", "", write(withSession(cookie)), false), dir)
 	writeGolden(t, "libraries-scan", "ScanAllDone", http.MethodPost, "/api/v2/libraries/scan",
 		e.do(http.MethodPost, "/api/v2/libraries/scan", "", write(withSession(cookie)), false), dir)
+
+	// The steps' cards (S2-1): page 07's form, from the registry.
+	writeGolden(t, "step-definitions", "StepDefinition[]", http.MethodGet, "/api/v2/step-definitions",
+		e.do(http.MethodGet, "/api/v2/step-definitions", "", withSession(cookie), false))
 
 	// Summary and attention (R1-9a).
 	writeGolden(t, "summary", "Summary", http.MethodGet, "/api/v2/summary",

@@ -115,6 +115,26 @@ func setField(field reflect.Value, name string, raw json.RawMessage) error {
 		} else {
 			target.SetBool(b)
 		}
+	case reflect.Float64:
+		var n json.Number
+		if err = json.Unmarshal(raw, &n); err != nil {
+			err = fmt.Errorf("%q must be a number", name)
+		} else if v, convErr := n.Float64(); convErr != nil {
+			err = fmt.Errorf("%q must be a number", name)
+		} else {
+			target.SetFloat(v)
+		}
+	case reflect.Slice:
+		if target.Type().Elem().Kind() != reflect.String {
+			err = fmt.Errorf("%q has a type this program cannot read", name)
+			break
+		}
+		var list []string
+		if err = json.Unmarshal(raw, &list); err != nil {
+			err = fmt.Errorf("%q must be a list of text", name)
+		} else {
+			target.Set(reflect.ValueOf(list))
+		}
 	default:
 		err = fmt.Errorf("%q has a type this program cannot read", name)
 	}
@@ -162,6 +182,21 @@ func applyDefaults(v reflect.Value, present map[string]bool) error {
 				return fmt.Errorf("%q has a default that is not yes or no: %q", name, text)
 			}
 			target.SetBool(b)
+		case reflect.Float64:
+			n, err := strconv.ParseFloat(text, 64)
+			if err != nil {
+				return fmt.Errorf("%q has a default that is not a number: %q", name, text)
+			}
+			target.SetFloat(n)
+		case reflect.Slice:
+			if target.Type().Elem().Kind() != reflect.String {
+				return fmt.Errorf("%q has a default this program cannot read", name)
+			}
+			if text == "" {
+				target.SetZero()
+			} else {
+				target.Set(reflect.ValueOf(strings.Split(text, ",")))
+			}
 		default:
 			return fmt.Errorf("%q has a default this program cannot read", name)
 		}
@@ -198,16 +233,15 @@ func fieldProblems(def Definition, s Settings) []Problem {
 		if label == "" {
 			label = name
 		}
-		if choices := sf.Tag.Get("choices"); choices != "" && field.Kind() == reflect.String {
-			list := strings.Split(choices, ",")
-			if !slices.Contains(list, field.String()) {
+		switch field.Kind() {
+		case reflect.String:
+			if list := choiceValues(sf.Tag.Get("choices")); len(list) > 0 && !slices.Contains(list, field.String()) {
 				out = append(out, Problem{
 					Field: name, Code: "setting.choice",
-					Message: fmt.Sprintf("%s must be %s.", label, humanList(list)),
+					Message: fmt.Sprintf("%s must be %s.", label, humanList(choiceLabels(sf.Tag.Get("choices")))),
 				})
 			}
-		}
-		if field.Kind() == reflect.Int {
+		case reflect.Int:
 			n := field.Int()
 			if text, ok := sf.Tag.Lookup("min"); ok {
 				if min, err := strconv.ParseInt(text, 10, 64); err == nil && n < min {
@@ -225,9 +259,109 @@ func fieldProblems(def Definition, s Settings) []Problem {
 					})
 				}
 			}
+			if list := choiceNumbers(sf.Tag.Get("choices")); len(list) > 0 && !slices.Contains(list, n) {
+				out = append(out, Problem{
+					Field: name, Code: "setting.choice",
+					Message: fmt.Sprintf("%s must be %s.", label, humanList(choiceLabels(sf.Tag.Get("choices")))),
+				})
+			}
+		case reflect.Float64:
+			n := field.Float()
+			min, minOK := floatTag(sf, "min")
+			max, maxOK := floatTag(sf, "max")
+			if minOK && n < min {
+				out = append(out, Problem{
+					Field: name, Code: "setting.range",
+					Message: fmt.Sprintf("%s must be at least %s.", label, numberText(min)),
+				})
+			}
+			if maxOK && n > max {
+				out = append(out, Problem{
+					Field: name, Code: "setting.range",
+					Message: fmt.Sprintf("%s must be at most %s.", label, numberText(max)),
+				})
+			}
 		}
 	}
 	return out
+}
+
+// choice is one value a setting accepts and the words the page shows for it. The tag is
+// "value", "value=Label" for a choice whose words differ from its value, joined by commas.
+type choice struct {
+	Value string
+	Label string
+}
+
+// parseChoices reads a choices: tag. A malformed pair keeps the value as its label.
+func parseChoices(tag string) []choice {
+	if tag == "" {
+		return nil
+	}
+	items := strings.Split(tag, ",")
+	out := make([]choice, 0, len(items))
+	for _, item := range items {
+		value, label, _ := strings.Cut(strings.TrimSpace(item), "=")
+		value = strings.TrimSpace(value)
+		label = strings.TrimSpace(label)
+		if value == "" {
+			continue
+		}
+		if label == "" {
+			label = value
+		}
+		out = append(out, choice{Value: value, Label: label})
+	}
+	return out
+}
+
+func choiceValues(tag string) []string {
+	choices := parseChoices(tag)
+	out := make([]string, 0, len(choices))
+	for _, c := range choices {
+		out = append(out, c.Value)
+	}
+	return out
+}
+
+func choiceLabels(tag string) []string {
+	choices := parseChoices(tag)
+	out := make([]string, 0, len(choices))
+	for _, c := range choices {
+		out = append(out, c.Label)
+	}
+	return out
+}
+
+// choiceNumbers is the choices that are whole numbers, so a number field can check membership.
+func choiceNumbers(tag string) []int64 {
+	choices := parseChoices(tag)
+	var out []int64
+	for _, c := range choices {
+		if n, err := strconv.ParseInt(c.Value, 10, 64); err == nil {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// floatTag reads a whole or decimal number tag, so a number setting can carry a range.
+func floatTag(sf reflect.StructField, name string) (float64, bool) {
+	text, ok := sf.Tag.Lookup(name)
+	if !ok {
+		return 0, false
+	}
+	n, err := strconv.ParseFloat(text, 64)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
+// numberText writes a whole number without its decimal point and keeps a decimal one as typed
+// ("1000", "0.1").
+func numberText(n float64) string {
+	return strconv.FormatFloat(n, 'f', -1, 64)
 }
 
 // TagProblems is the tags' part of a step's Validate, exported so the steps can run it on settings

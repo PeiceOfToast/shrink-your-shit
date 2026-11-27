@@ -31,10 +31,20 @@ type Definition struct {
 	Name     string
 	Help     string
 	Settings any
+	// Sections are the card's groups beyond its basic body, in the order page 07 shows them. A
+	// field's group: tag names one of these; its own tags carry everything else the card needs.
+	Sections []Section
 	// Events is every code this step's decisions and warnings can carry; a test fails on a code
 	// that is emitted but not declared, and on a declared code no case makes.
 	Events  []EventDef
 	Upgrade func(old map[string]any, from int) map[string]any
+}
+
+// Section is one fold-out group of a step's card ("Advanced", "Subtitles").
+type Section struct {
+	ID    string
+	Label string
+	Help  string
 }
 
 // EventDef is one code a step can put in an event, with the words the log builds from it.

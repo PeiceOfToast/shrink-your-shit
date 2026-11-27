@@ -4,6 +4,8 @@ package steps
 
 import (
 	"errors"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/PeiceOfToast/shrink-your-shit/internal/encode"
@@ -23,7 +25,8 @@ func probeInfo(codec string, width, height int) media.Info {
 }
 
 func videoSettings(format string, quality int) VideoSettings {
-	return VideoSettings{Format: format, Quality: quality, UseGpu: false, IfGpuFails: "cpu"}
+	return VideoSettings{Format: format, Quality: quality, UseGpu: false, IfGpuFails: "cpu",
+		BitrateLevel: "medium", Preset: ptr("normal"), HDR: ptr("keep")}
 }
 
 // TestVideoCRFTable is page 07's slider table: five positions of three formats, each moved by
@@ -150,5 +153,93 @@ func TestVideoDefaults(t *testing.T) {
 	got := s.(VideoSettings)
 	if got.Format != "hevc" || got.Quality != 3 || !got.UseGpu || got.IfGpuFails != "cpu" {
 		t.Errorf("defaults = %+v", got)
+	}
+}
+
+// TestVideoRefusesBadAdvancedSettingsAtRun is TagProblems on the advanced fields: the same rules
+// DecodeSettings applies are checked again at run time, because an old flow may be out of range.
+func TestVideoRefusesBadAdvancedSettingsAtRun(t *testing.T) {
+	set := videoSettings("hevc", 3)
+	set.BitDepth = ptr(9)
+	set.AvgMbps = ptr(0.05)
+	check := VideoStep{}.Validate(set, flow.ValidateContext{})
+	var fields []string
+	for _, p := range check.Problems {
+		fields = append(fields, p.Field+":"+p.Code)
+	}
+	for _, want := range []string{"bitDepth:setting.choice", "avgMbps:setting.range"} {
+		if !slices.Contains(fields, want) {
+			t.Errorf("problems = %v, want %s", fields, want)
+		}
+	}
+}
+
+// TestVideoNotYet pins which advanced settings are accepted now and reported "not yet": one
+// problem per field, on the field that asked for it, until items 6 and 8 build them.
+func TestVideoNotYet(t *testing.T) {
+	set := videoSettings("hevc", 3)
+	set.Size = ptr("1080")
+	set.Preset = ptr("slower")
+	set.FPS = ptr(30.0)
+	set.BitDepth = ptr(10)
+	set.HDR = ptr("tonemap")
+	set.KeepDolbyVision = true
+	set.RateControl = ptr("vbr")
+	set.BitrateLevel = "high"
+	set.AvgMbps = ptr(3.6)
+	check := VideoStep{}.Validate(set, flow.ValidateContext{})
+	got := map[string]bool{}
+	for _, p := range check.Problems {
+		if p.Code != "video.not_yet" {
+			t.Errorf("problem = %+v, want video.not_yet", p)
+		}
+		got[p.Field] = true
+	}
+	for _, field := range []string{"size", "preset", "fps", "bitDepth", "hdr", "keepDolbyVision", "rateControl", "bitrateLevel"} {
+		if !got[field] {
+			t.Errorf("problems = %v, want one on %s", got, field)
+		}
+	}
+	// The bitrate fields live inside the one rateControl problem; they are not repeated.
+	if got["avgMbps"] {
+		t.Errorf("problems = %v, want no separate avgMbps problem while rateControl is the one named", got)
+	}
+	// A bitrate greys the slider, and the summary says which bitrate instead of the quality.
+	disabled := false
+	for _, d := range check.Disabled {
+		if d.Field == "quality" && strings.Contains(d.Why, "bitrate") {
+			disabled = true
+		}
+	}
+	if !disabled {
+		t.Errorf("disabled = %+v, want the Quality slider greyed", check.Disabled)
+	}
+	if !strings.Contains(check.Summary, "variable bitrate") || !strings.Contains(check.Summary, "1080p") {
+		t.Errorf("summary = %q, want the bitrate and size", check.Summary)
+	}
+
+	// The defaults are the engine's current behaviour: nothing to report.
+	def, err := flow.DecodeSettings(VideoStep{}.Def(), []byte(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if problems := (VideoStep{}).Validate(def, flow.ValidateContext{}).Problems; len(problems) != 0 {
+		t.Errorf("defaults problems = %+v, want none", problems)
+	}
+}
+
+// TestVideoDolbyVisionNeedsHEVC is page 07's greyed check box with its sentence.
+func TestVideoDolbyVisionNeedsHEVC(t *testing.T) {
+	set := videoSettings("h264", 3)
+	set.KeepDolbyVision = true
+	check := VideoStep{}.Validate(set, flow.ValidateContext{})
+	found := false
+	for _, d := range check.Disabled {
+		if d.Field == "keepDolbyVision" && d.Why == "Only with HEVC." {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("disabled = %+v, want the Dolby Vision greyed on H.264", check.Disabled)
 	}
 }

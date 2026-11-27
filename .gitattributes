@@ -1,2 +1,4 @@
 # Golden tables are compared byte for byte; keep LF on every OS (Windows checkout would add CR).
 *.tsv text eol=lf
+# The JSON goldens (form schemas, API contract bodies) are compared or rewritten the same way.
+*.json text eol=lf

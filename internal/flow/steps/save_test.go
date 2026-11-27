@@ -150,10 +150,22 @@ func TestSaveValidate(t *testing.T) {
 
 	for _, where := range []string{"replace", "folder"} {
 		check = SaveStep{}.Validate(saveSettings("mkv", where, "shrunk"), flow.ValidateContext{})
-		if len(check.Problems) != 1 || check.Problems[0].Field != "where" ||
+		if len(check.Problems) == 0 || check.Problems[0].Field != "where" ||
 			!strings.Contains(check.Problems[0].Message, "not built yet") {
-			t.Errorf("%s problems = %+v, want the not-yet problem", where, check.Problems)
+			t.Errorf("%s problems = %+v, want the not-yet problem first", where, check.Problems)
 		}
+	}
+	// A folder it is told to use but that is empty is its own problem, and a folder it has fills it.
+	set := saveSettings("mkv", "folder", "shrunk")
+	set.Folder = "/library/Shrunk"
+	if check = (SaveStep{}).Validate(set, flow.ValidateContext{}); len(check.Problems) != 1 || check.Problems[0].Field != "where" {
+		t.Errorf("filled folder problems = %+v, want only the not-yet problem", check.Problems)
+	}
+	// WebM is refused until the cross-step rules can be checked (item 2) and audio can convert (item 7).
+	check = SaveStep{}.Validate(saveSettings("webm", "next_to", "shrunk"), flow.ValidateContext{})
+	if len(check.Problems) != 1 || check.Problems[0].Field != "container" ||
+		!strings.Contains(check.Problems[0].Message, "not built yet") {
+		t.Errorf("webm problems = %+v, want the not-yet problem", check.Problems)
 	}
 
 	check = SaveStep{}.Validate(saveSettings("keep", "next_to", "///"), flow.ValidateContext{})
@@ -181,7 +193,7 @@ func TestSaveDefaults(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 	got := s.(SaveSettings)
-	if got.Container != "keep" || got.Where != "next_to" || got.NameSuffix != "" {
+	if got.Container != "mkv" || got.Where != "next_to" || got.Folder != "" || got.NameSuffix != "" {
 		t.Errorf("defaults = %+v", got)
 	}
 }
