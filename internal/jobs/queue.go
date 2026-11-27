@@ -52,9 +52,11 @@ func (q *Queue) now() time.Time { return q.clock().UTC() }
 
 // Enqueue puts a file on the queue as waiting. A file that already has an open job gets that job back with
 // alreadyOpen true and no new row. A paused or missing library gets ErrLibraryUnavailable and no row.
+// workflowRev is the workflow's published revision at this moment: the job keeps it, so a later publish
+// does not change what this job runs.
 //
 // TODO(L-SCAN-5): refuse a workflow that is not published. The workflows table comes in stage 2.
-func (q *Queue) Enqueue(ctx context.Context, fileID, libraryID, workflowID int64, path, by string) (int64, bool, error) {
+func (q *Queue) Enqueue(ctx context.Context, fileID, libraryID, workflowID int64, workflowRev int, path, by string) (int64, bool, error) {
 	var id int64
 	open := false
 	now := q.now()
@@ -70,11 +72,15 @@ func (q *Queue) Enqueue(ctx context.Context, fileID, libraryID, workflowID int64
 		if !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
+		var rev any // NULL when the caller could not name one
+		if workflowRev > 0 {
+			rev = workflowRev
+		}
 		res, err := tx.Exec(`
-			INSERT INTO jobs (file_id, library_id, workflow_id, path, state, queued_at, queued_by)
-			SELECT ?, ?, ?, ?, 'waiting', ?, ?
+			INSERT INTO jobs (file_id, library_id, workflow_id, workflow_rev, path, state, queued_at, queued_by)
+			SELECT ?, ?, ?, ?, ?, 'waiting', ?, ?
 			WHERE EXISTS (SELECT 1 FROM libraries WHERE id = ? AND paused = 0)`,
-			fileID, libraryID, workflowID, path, ms(now), by, libraryID)
+			fileID, libraryID, workflowID, rev, path, ms(now), by, libraryID)
 		if err != nil {
 			return err
 		}

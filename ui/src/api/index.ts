@@ -5,6 +5,7 @@ import * as realSummary from "./real/summary.ts";
 import * as realAccess from "./real/access.ts";
 import * as realLibraries from "./real/libraries.ts";
 import * as realJobs from "./real/jobs.ts";
+import * as realWorkflows from "./real/workflows.ts";
 import * as realOverview from "./real/overview.ts";
 import * as realEvents from "./real/events.ts";
 import { isReal, type Group } from "./groups.ts";
@@ -14,6 +15,7 @@ const realByGroup: Partial<Record<Group, object>> = {
   access: realAccess,
   libraries: realLibraries,
   jobs: realJobs,
+  workflows: realWorkflows,
   overview: realOverview,
   events: realEvents,
 };

@@ -60,12 +60,18 @@ func (b Builtin) input(ctx context.Context, j jobs.Job, workerID string) (flow.R
 	if err != nil {
 		return flow.RunInput{}, &transientError{err}
 	}
-	if wf.CurrentRev == 0 {
+	// The revision the job was queued with, so a publish after it was queued does not change what
+	// it runs. A job queued before the revision was recorded falls back to the current one.
+	rev := j.WorkflowRev
+	if rev == 0 {
+		rev = wf.CurrentRev
+	}
+	if rev == 0 {
 		return flow.RunInput{}, errors.New("the workflow has no published revision")
 	}
 	return flow.RunInput{
 		JobID: j.ID, Attempt: j.Attempt, LibraryID: strconv.FormatInt(j.LibraryID, 10), WorkerID: workerID,
-		WorkflowID: j.WorkflowID, Revision: wf.CurrentRev,
+		WorkflowID: j.WorkflowID, Revision: rev,
 		LibraryRoot: root, Source: filepath.Join(root, rel),
 		Size: size, MTime: time.Unix(0, mtime).UTC(), FileID: fileID,
 	}, nil

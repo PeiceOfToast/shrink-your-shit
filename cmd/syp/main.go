@@ -227,7 +227,13 @@ func newScanner(catalog *library.Catalog, flows *flow.Store, queue *jobs.Queue, 
 				return err
 			}
 			path := filepath.Join(lib.Path, filepath.FromSlash(f.RelPath))
-			_, open, err := queue.Enqueue(ctx, fileID, lib.ID, *lib.WorkflowID, path, "scan")
+			// The published revision at this moment: the job keeps it even if the workflow is
+			// published again before the job runs.
+			rev := 0
+			if wf, err := flows.Get(ctx, *lib.WorkflowID); err == nil {
+				rev = wf.CurrentRev
+			}
+			_, open, err := queue.Enqueue(ctx, fileID, lib.ID, *lib.WorkflowID, rev, path, "scan")
 			if err != nil {
 				return err
 			}

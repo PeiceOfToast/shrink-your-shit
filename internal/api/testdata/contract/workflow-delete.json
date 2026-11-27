@@ -1,0 +1,17 @@
+{
+  "body": {
+    "code": "in_use",
+    "ok": false,
+    "usedBy": [
+      {
+        "id": "1",
+        "name": "Clips",
+        "type": "library"
+      }
+    ]
+  },
+  "method": "DELETE",
+  "path": "/api/v2/workflows/1",
+  "status": 200,
+  "type": "WorkflowDeleted"
+}

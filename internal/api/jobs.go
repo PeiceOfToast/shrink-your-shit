@@ -134,9 +134,17 @@ func (s *Server) latestStep(ctx context.Context, d *jobDeps, j jobs.Job) *stepRe
 		return nil
 	}
 	ref := &stepRefJSON{Index: evs[0].StepIndex, Name: evs[0].StepName}
-	if wf, err := d.flows.Get(ctx, j.WorkflowID); err == nil && wf.CurrentRev > 0 {
-		if rev, err := d.flows.Revision(ctx, j.WorkflowID, wf.CurrentRev); err == nil {
-			ref.Count = len(rev.Flow.Steps)
+	// The revision this job ran, not the workflow's current one: a publish since it was queued
+	// may have changed the step count.
+	rev := j.WorkflowRev
+	if wf, err := d.flows.Get(ctx, j.WorkflowID); err == nil {
+		if rev == 0 {
+			rev = wf.CurrentRev
+		}
+		if rev > 0 {
+			if r, err := d.flows.Revision(ctx, j.WorkflowID, rev); err == nil {
+				ref.Count = len(r.Flow.Steps)
+			}
 		}
 	}
 	return ref

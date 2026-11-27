@@ -16,25 +16,28 @@ type Job struct {
 	FileID     int64
 	LibraryID  int64
 	WorkflowID int64
-	Path       string
-	State      State
-	Top        bool
-	QueuedAt   time.Time
-	QueuedBy   string
-	StartedAt  *time.Time
-	FinishedAt *time.Time
-	NextTryAt  *time.Time
-	WorkerID   string
-	Attempt    int
-	Tries      int
-	SizeBefore *int64
-	SizeAfter  *int64
-	Outcome    string
-	FailedStep string
-	Reason     string
-	NextAction string
-	SkipReason string
-	OutputPath string
+	// WorkflowRev is the published revision the job was queued with. Jobs queued before it was
+	// recorded carry 0; the worker then falls back to the workflow's current revision.
+	WorkflowRev int
+	Path        string
+	State       State
+	Top         bool
+	QueuedAt    time.Time
+	QueuedBy    string
+	StartedAt   *time.Time
+	FinishedAt  *time.Time
+	NextTryAt   *time.Time
+	WorkerID    string
+	Attempt     int
+	Tries       int
+	SizeBefore  *int64
+	SizeAfter   *int64
+	Outcome     string
+	FailedStep  string
+	Reason      string
+	NextAction  string
+	SkipReason  string
+	OutputPath  string
 }
 
 // Attempt is one row of job_attempts.
@@ -59,8 +62,8 @@ type ListFilter struct {
 	Limit      int
 }
 
-const jobColumns = `id, file_id, library_id, workflow_id, path, state, top, queued_at, queued_by,
-	started_at, finished_at, next_try_at, COALESCE(worker_id, ''), attempt, tries,
+const jobColumns = `id, file_id, library_id, workflow_id, COALESCE(workflow_rev, 0), path, state, top,
+	queued_at, queued_by, started_at, finished_at, next_try_at, COALESCE(worker_id, ''), attempt, tries,
 	size_before, size_after, COALESCE(outcome, ''), COALESCE(failed_step, ''), COALESCE(reason, ''),
 	COALESCE(next_action, ''), COALESCE(skip_reason, ''), COALESCE(output_path, '')`
 
@@ -74,8 +77,8 @@ func scanJob(r rowScanner) (Job, error) {
 	var top int
 	var queuedAt int64
 	var started, finished, nextTry, sizeBefore, sizeAfter sql.NullInt64
-	err := r.Scan(&j.ID, &j.FileID, &j.LibraryID, &j.WorkflowID, &j.Path, &state, &top, &queuedAt, &j.QueuedBy,
-		&started, &finished, &nextTry, &j.WorkerID, &j.Attempt, &j.Tries,
+	err := r.Scan(&j.ID, &j.FileID, &j.LibraryID, &j.WorkflowID, &j.WorkflowRev, &j.Path, &state, &top,
+		&queuedAt, &j.QueuedBy, &started, &finished, &nextTry, &j.WorkerID, &j.Attempt, &j.Tries,
 		&sizeBefore, &sizeAfter, &j.Outcome, &j.FailedStep, &j.Reason,
 		&j.NextAction, &j.SkipReason, &j.OutputPath)
 	if err != nil {

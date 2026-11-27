@@ -54,6 +54,16 @@ type Deps struct {
 type Workflows interface {
 	CreateFromStarterTx(ctx context.Context, tx *sql.Tx, starterID, name string) (int64, int, error)
 	Get(ctx context.Context, id int64) (flow.Workflow, error)
+	// S2-3: the list, create, the editor's draft, publish, revisions and restore, duplicate, delete.
+	List(ctx context.Context) ([]flow.ListItem, error)
+	Create(ctx context.Context, f flow.Flow, madeWith string) (int64, int, error)
+	Draft(ctx context.Context, id int64) (flow.DraftInfo, error)
+	SaveDraft(ctx context.Context, id int64, f flow.Flow, baseRev int) (int, error)
+	Publish(ctx context.Context, id int64, given *flow.Flow, vc flow.ValidateContext) (int, error)
+	Revisions(ctx context.Context, id int64) ([]flow.RevisionInfo, error)
+	Restore(ctx context.Context, id int64, rev int) (int, error)
+	Duplicate(ctx context.Context, id int64) (flow.Workflow, error)
+	Delete(ctx context.Context, id int64) error
 }
 
 // Scanner is library.Scanner as the api uses it: one scan of one library.
@@ -94,7 +104,19 @@ func New(version string) *Server {
 	s.mux.HandleFunc("GET /api/v2/workflows/starters", s.getStarters)
 	s.mux.HandleFunc("GET /api/v2/workflows/starters/{id}", s.getStarter)
 	s.mux.HandleFunc("GET /api/v2/workflows/guide", s.getGuide)
+	// The flow editor's check (S2-2).
 	s.mux.HandleFunc("POST /api/v2/workflows/{id}/validate", s.validateWorkflow)
+	// Workflows (S2-3): the list, create, the editor's draft, publish, revisions, duplicate, delete.
+	s.mux.HandleFunc("GET /api/v2/workflows", s.listWorkflows)
+	s.mux.HandleFunc("POST /api/v2/workflows", s.createWorkflow)
+	// Everything below /workflows/ is the {id} subtree. It is one handler per method because Go's
+	// mux cannot rank "{id}/revisions" against the starters' literal "/workflows/starters/{id}"
+	// (both match "/workflows/starters/revisions"), and neither is more specific. The trailing
+	// wildcard is a subset of the literal routes, so those still win.
+	s.mux.HandleFunc("GET /api/v2/workflows/{rest...}", s.workflowSubtree)
+	s.mux.HandleFunc("PUT /api/v2/workflows/{rest...}", s.workflowSubtree)
+	s.mux.HandleFunc("POST /api/v2/workflows/{rest...}", s.workflowSubtree)
+	s.mux.HandleFunc("DELETE /api/v2/workflows/{rest...}", s.workflowSubtree)
 	s.mux.HandleFunc("GET /api/v2/folders", s.getFolders)
 	s.mux.HandleFunc("POST /api/v2/libraries/check", s.checkLibraryFolder)
 	// Libraries (R1-9a).

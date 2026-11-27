@@ -1,0 +1,495 @@
+// Copyright (C) shrink-your-shit contributors. Licensed under AGPL-3.0-or-later.
+
+package api
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/PeiceOfToast/shrink-your-shit/internal/flow"
+)
+
+// The workflows group (pages 04 and 07): the list, create, the draft the editor loads and saves,
+// publish, the revisions and restoring one, duplicate and delete. The rules are the flow package's;
+// this file shapes them into the pages' JSON.
+
+// workflowUseJSON is WorkflowUse in types.ts: the library that uses a workflow.
+type workflowUseJSON struct {
+	Type string `json:"type"` // "library" today
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// workflowRowJSON is WorkflowRow in types.ts: one row of page 04's list.
+type workflowRowJSON struct {
+	ID           string            `json:"id"`
+	Name         string            `json:"name"`
+	Description  string            `json:"description"`
+	Kind         string            `json:"kind"`
+	UsedBy       []workflowUseJSON `json:"usedBy"`
+	UpdatedAt    string            `json:"updatedAt"`
+	State        string            `json:"state"`
+	ProblemCount int               `json:"problemCount"`
+	MadeWith     string            `json:"madeWith"`
+	FitsGuided   bool              `json:"fitsGuided"`
+}
+
+// workflowSubtree is every route below /workflows/ except the starters' and the guide's literal
+// ones: one workflow by id, its draft, publish, revisions, restore, duplicate and delete. It
+// reads the path's own segments and hands each route the id (and rev) it would have had from the
+// mux, because Go's mux cannot rank these patterns against "/workflows/starters/{id}".
+func (s *Server) workflowSubtree(w http.ResponseWriter, r *http.Request) {
+	segs := strings.Split(strings.Trim(r.PathValue("rest"), "/"), "/")
+	id := func() { r.SetPathValue("id", segs[0]) }
+	switch r.Method {
+	case http.MethodGet:
+		switch {
+		case len(segs) == 1:
+			id()
+			s.getWorkflow(w, r)
+		case len(segs) == 2 && segs[1] == "revisions":
+			id()
+			s.listWorkflowRevisions(w, r)
+		default:
+			notFound(w, r)
+		}
+	case http.MethodPut:
+		if len(segs) == 2 && segs[1] == "draft" {
+			id()
+			s.putWorkflowDraft(w, r)
+			return
+		}
+		notFound(w, r)
+	case http.MethodPost:
+		switch {
+		case len(segs) == 2 && segs[1] == "publish":
+			id()
+			s.publishWorkflow(w, r)
+		case len(segs) == 2 && segs[1] == "duplicate":
+			id()
+			s.duplicateWorkflow(w, r)
+		case len(segs) == 4 && segs[1] == "revisions" && segs[3] == "restore":
+			id()
+			r.SetPathValue("rev", segs[2])
+			s.restoreWorkflow(w, r)
+		default:
+			notFound(w, r)
+		}
+	case http.MethodDelete:
+		if len(segs) == 1 {
+			id()
+			s.deleteWorkflow(w, r)
+			return
+		}
+		notFound(w, r)
+	default:
+		notFound(w, r)
+	}
+}
+
+func (s *Server) listWorkflows(w http.ResponseWriter, r *http.Request) {
+	rs := s.ready.Load()
+	ctx := r.Context()
+	items, err := rs.Workflows.List(ctx)
+	if err != nil {
+		internalError(w)
+		return
+	}
+	uses, err := s.workflowUses(ctx, rs)
+	if err != nil {
+		internalError(w)
+		return
+	}
+	out := []workflowRowJSON{}
+	for _, it := range items {
+		out = append(out, workflowRowOf(it, uses[it.ID]))
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// workflowRowOf adds the check and the libraries to one workflow. The check is the editor's:
+// problemCount and the "problems" state come from it, so the list never disagrees with the page.
+func workflowRowOf(it flow.ListItem, uses []workflowUseJSON) workflowRowJSON {
+	if uses == nil {
+		uses = []workflowUseJSON{}
+	}
+	rep := flow.Validate(it.Flow, flow.ValidateContext{Env: flow.Env{}})
+	state := "published"
+	if len(rep.Problems) > 0 {
+		state = "problems"
+	} else if it.DraftAhead {
+		state = "draft"
+	}
+	return workflowRowJSON{
+		ID:           strconv.FormatInt(it.ID, 10),
+		Name:         it.Name,
+		Description:  it.Description,
+		Kind:         it.Kind,
+		UsedBy:       uses,
+		UpdatedAt:    utcJSON(it.UpdatedAt),
+		State:        state,
+		ProblemCount: len(rep.Problems),
+		MadeWith:     madeWithJSON(it.MadeWith),
+		// The guided builder is item 4; until it can read a flow as answers, no flow fits it.
+		FitsGuided: false,
+	}
+}
+
+// madeWithJSON maps the row's made_with onto types.ts's "guided" | "editor". A workflow setup made
+// from a starter is a guided flow saved unchanged, so it counts as guided.
+func madeWithJSON(madeWith string) string {
+	if madeWith == "editor" {
+		return "editor"
+	}
+	return "guided"
+}
+
+// workflowUses is the libraries' answer to "who uses what", by workflow id.
+func (s *Server) workflowUses(ctx context.Context, rs *Deps) (map[int64][]workflowUseJSON, error) {
+	libs, err := rs.Catalog.ListLibraries(ctx)
+	if err != nil {
+		return nil, err
+	}
+	uses := map[int64][]workflowUseJSON{}
+	for _, lib := range libs {
+		if lib.WorkflowID == nil {
+			continue
+		}
+		uses[*lib.WorkflowID] = append(uses[*lib.WorkflowID], workflowUseJSON{
+			Type: "library", ID: strconv.FormatInt(lib.ID, 10), Name: lib.Name,
+		})
+	}
+	return uses, nil
+}
+
+// createWorkflowBody is POST /workflows: the editor's flow, or the guided builder's answers (item 4).
+type createWorkflowBody struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	Answers     json.RawMessage `json:"answers"`
+	Flow        *flow.Flow      `json:"flow"`
+}
+
+func (s *Server) createWorkflow(w http.ResponseWriter, r *http.Request) {
+	rs := s.ready.Load()
+	var body createWorkflowBody
+	if !decode(w, r, &body) {
+		return
+	}
+	// The guided page saves answers; they are item 4. A plain "not yet" keeps the page honest
+	// instead of inventing a flow from them.
+	if len(body.Answers) > 0 && string(body.Answers) != "null" {
+		writeError(w, http.StatusBadRequest, "not_yet", "The guided builder is not built yet; use the editor.", "", 0)
+		return
+	}
+	if body.Flow == nil {
+		writeError(w, http.StatusBadRequest, "invalid_flow", "A workflow needs its three steps.", "", 0)
+		return
+	}
+	f := *body.Flow
+	name := strings.TrimSpace(body.Name)
+	if name == "" {
+		name = strings.TrimSpace(f.Name)
+	}
+	if name == "" {
+		name = "New workflow"
+	}
+	f.Name = name
+	f.Description = body.Description
+	if err := flow.CheckShape(f); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_flow", err.Error(), "", 0)
+		return
+	}
+	id, rev, err := rs.Workflows.Create(r.Context(), f, "editor")
+	if err != nil {
+		internalError(w)
+		return
+	}
+	writeJSON(w, http.StatusCreated, struct {
+		ID  string `json:"id"`
+		Rev int    `json:"rev"`
+	}{ID: strconv.FormatInt(id, 10), Rev: rev})
+}
+
+func (s *Server) getWorkflow(w http.ResponseWriter, r *http.Request) {
+	rs := s.ready.Load()
+	id, ok := pathID(r, "id")
+	if !ok {
+		writeWorkflowNotFound(w)
+		return
+	}
+	info, err := rs.Workflows.Draft(r.Context(), id)
+	if errors.Is(err, flow.ErrNotFound) {
+		writeWorkflowNotFound(w)
+		return
+	}
+	if err != nil {
+		internalError(w)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Flow       flow.Flow `json:"flow"`
+		Rev        int       `json:"rev"`
+		FitsGuided bool      `json:"fitsGuided"`
+	}{Flow: info.Flow, Rev: info.Rev, FitsGuided: false})
+}
+
+// putDraftBody is PUT /workflows/{id}/draft: the flow the editor holds and the revision it read.
+type putDraftBody struct {
+	Flow    *flow.Flow `json:"flow"`
+	BaseRev *int       `json:"baseRev"`
+}
+
+func (s *Server) putWorkflowDraft(w http.ResponseWriter, r *http.Request) {
+	rs := s.ready.Load()
+	id, ok := pathID(r, "id")
+	if !ok {
+		writeWorkflowNotFound(w)
+		return
+	}
+	var body putDraftBody
+	if !decode(w, r, &body) {
+		return
+	}
+	if body.Flow == nil {
+		writeError(w, http.StatusBadRequest, "invalid_flow", "A workflow needs its three steps.", "", 0)
+		return
+	}
+	if body.BaseRev == nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "The request is missing baseRev.", "baseRev", 0)
+		return
+	}
+	if err := flow.CheckShape(*body.Flow); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_flow", err.Error(), "", 0)
+		return
+	}
+	rev, err := rs.Workflows.SaveDraft(r.Context(), id, *body.Flow, *body.BaseRev)
+	var changed *flow.ChangedSinceError
+	switch {
+	case errors.As(err, &changed):
+		writeChangedSince(w, changed.Rev)
+	case errors.Is(err, flow.ErrNotFound):
+		writeWorkflowNotFound(w)
+	case err != nil:
+		internalError(w)
+	default:
+		writeJSON(w, http.StatusOK, struct {
+			Rev int `json:"rev"`
+		}{Rev: rev})
+	}
+}
+
+// writeChangedSince is the editor's 409: the envelope plus the draft's current rev, so the page
+// can say what happened and reload.
+func writeChangedSince(w http.ResponseWriter, rev int) {
+	body := struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+		Rev int `json:"rev"`
+	}{Rev: rev}
+	body.Error.Code = "changed_since"
+	body.Error.Message = "This workflow was saved somewhere else since you opened it. Reload to see the newer version."
+	writeJSON(w, http.StatusConflict, body)
+}
+
+// publishBody is POST /workflows/{id}/publish: the editor sends the flow it is publishing; without
+// one the stored draft is published (flow-model.md's route).
+type publishBody struct {
+	Flow *flow.Flow `json:"flow"`
+}
+
+func (s *Server) publishWorkflow(w http.ResponseWriter, r *http.Request) {
+	rs := s.ready.Load()
+	id, ok := pathID(r, "id")
+	if !ok {
+		writeWorkflowNotFound(w)
+		return
+	}
+	var body publishBody
+	if !decodeOptional(w, r, &body) {
+		return
+	}
+	rev, err := rs.Workflows.Publish(r.Context(), id, body.Flow, flow.ValidateContext{Env: flow.Env{}})
+	var blocked *flow.PublishBlockedError
+	switch {
+	case errors.As(err, &blocked):
+		writeError(w, http.StatusConflict, "has_problems", "Fix this first: "+blocked.Problem.Message, "", 0)
+	case errors.Is(err, flow.ErrNothingToPublish):
+		writeError(w, http.StatusBadRequest, "nothing_to_publish", "There is nothing to publish.", "", 0)
+	case errors.Is(err, flow.ErrNotFound):
+		writeWorkflowNotFound(w)
+	case err != nil:
+		internalError(w)
+	default:
+		writeJSON(w, http.StatusOK, struct {
+			Rev       int  `json:"rev"`
+			Published bool `json:"published"`
+		}{Rev: rev, Published: true})
+	}
+}
+
+func (s *Server) listWorkflowRevisions(w http.ResponseWriter, r *http.Request) {
+	rs := s.ready.Load()
+	id, ok := pathID(r, "id")
+	if !ok {
+		writeWorkflowNotFound(w)
+		return
+	}
+	revs, err := rs.Workflows.Revisions(r.Context(), id)
+	if errors.Is(err, flow.ErrNotFound) {
+		writeWorkflowNotFound(w)
+		return
+	}
+	if err != nil {
+		internalError(w)
+		return
+	}
+	type revisionJSON struct {
+		Rev       int    `json:"rev"`
+		CreatedAt string `json:"createdAt"`
+	}
+	out := []revisionJSON{}
+	for _, rev := range revs {
+		out = append(out, revisionJSON{Rev: rev.Rev, CreatedAt: utcJSON(rev.CreatedAt)})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) restoreWorkflow(w http.ResponseWriter, r *http.Request) {
+	rs := s.ready.Load()
+	id, ok := pathID(r, "id")
+	if !ok {
+		writeWorkflowNotFound(w)
+		return
+	}
+	rev, ok := pathID(r, "rev")
+	if !ok {
+		writeError(w, http.StatusNotFound, "revision_not_found", "That revision doesn't exist.", "", 0)
+		return
+	}
+	newRev, err := rs.Workflows.Restore(r.Context(), id, int(rev))
+	switch {
+	case errors.Is(err, flow.ErrNotFound):
+		writeWorkflowNotFound(w)
+	case errors.Is(err, flow.ErrRevisionNotFound):
+		writeError(w, http.StatusNotFound, "revision_not_found", "That revision doesn't exist.", "", 0)
+	case err != nil:
+		internalError(w)
+	default:
+		writeJSON(w, http.StatusOK, struct {
+			Rev int `json:"rev"`
+		}{Rev: newRev})
+	}
+}
+
+func (s *Server) duplicateWorkflow(w http.ResponseWriter, r *http.Request) {
+	rs := s.ready.Load()
+	ctx := r.Context()
+	id, ok := pathID(r, "id")
+	if !ok {
+		writeWorkflowNotFound(w)
+		return
+	}
+	copied, err := rs.Workflows.Duplicate(ctx, id)
+	if errors.Is(err, flow.ErrNotFound) {
+		writeWorkflowNotFound(w)
+		return
+	}
+	if err != nil {
+		internalError(w)
+		return
+	}
+	info, err := rs.Workflows.Draft(ctx, copied.ID)
+	if err != nil {
+		internalError(w)
+		return
+	}
+	uses, err := s.workflowUses(ctx, rs)
+	if err != nil {
+		internalError(w)
+		return
+	}
+	writeJSON(w, http.StatusOK, workflowRowOf(flow.ListItem{
+		Workflow: copied, DraftAhead: true, Flow: info.Flow,
+	}, uses[copied.ID]))
+}
+
+// deleteWorkflowJSON is the mock's answer (ui/src/api/mockWorkflows.ts): {ok:true}, or
+// {ok:false, code:"in_use", usedBy} so the page can name the libraries in its refusal.
+type deleteWorkflowJSON struct {
+	OK     bool              `json:"ok"`
+	Code   string            `json:"code,omitempty"`
+	UsedBy []workflowUseJSON `json:"usedBy,omitempty"`
+}
+
+func (s *Server) deleteWorkflow(w http.ResponseWriter, r *http.Request) {
+	rs := s.ready.Load()
+	ctx := r.Context()
+	id, ok := pathID(r, "id")
+	if !ok {
+		writeWorkflowNotFound(w)
+		return
+	}
+	if _, err := rs.Workflows.Get(ctx, id); err != nil {
+		if errors.Is(err, flow.ErrNotFound) {
+			writeWorkflowNotFound(w)
+			return
+		}
+		internalError(w)
+		return
+	}
+	uses, err := s.workflowUses(ctx, rs)
+	if err != nil {
+		internalError(w)
+		return
+	}
+	if len(uses[id]) > 0 {
+		writeJSON(w, http.StatusOK, deleteWorkflowJSON{OK: false, Code: "in_use", UsedBy: uses[id]})
+		return
+	}
+	if err := rs.Workflows.Delete(ctx, id); err != nil {
+		if errors.Is(err, flow.ErrNotFound) {
+			writeWorkflowNotFound(w)
+			return
+		}
+		internalError(w)
+		return
+	}
+	writeJSON(w, http.StatusOK, deleteWorkflowJSON{OK: true})
+}
+
+func writeWorkflowNotFound(w http.ResponseWriter) {
+	writeError(w, http.StatusNotFound, "workflow_not_found", "That workflow doesn't exist.", "", 0)
+}
+
+// pathID reads a positive integer path value.
+func pathID(r *http.Request, name string) (int64, bool) {
+	id, err := strconv.ParseInt(r.PathValue(name), 10, 64)
+	if err != nil || id <= 0 {
+		return 0, false
+	}
+	return id, true
+}
+
+// decodeOptional is decode for a route whose body may be absent (publish without a flow).
+func decodeOptional(w http.ResponseWriter, r *http.Request, v any) bool {
+	err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody)).Decode(v)
+	if err == nil || errors.Is(err, io.EOF) {
+		return true
+	}
+	writeError(w, http.StatusBadRequest, "invalid_request", "The request is not valid JSON.", "", 0)
+	return false
+}
+
+// utcJSON formats a time the way the rest of the API does: RFC 3339 in UTC, milliseconds kept.
+func utcJSON(t time.Time) string {
+	return t.UTC().Format("2006-01-02T15:04:05.000Z07:00")
+}

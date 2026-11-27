@@ -1,0 +1,10 @@
+{
+  "body": {
+    "id": "2",
+    "rev": 1
+  },
+  "method": "POST",
+  "path": "/api/v2/workflows",
+  "status": 201,
+  "type": "WorkflowCreated"
+}

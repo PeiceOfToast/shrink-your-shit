@@ -6,6 +6,7 @@ export const REAL = {
   jobs: true,
   events: true,
   summary: true,
+  workflows: true,
   overview: false,
 } as const;
 

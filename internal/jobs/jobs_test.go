@@ -232,7 +232,7 @@ func TestEnqueueAlreadyOpen(t *testing.T) {
 	env := newEnv(t)
 	env.addLibrary(t, 1, false)
 	first := env.enqueue(t, 1, 1)
-	id, open, err := env.q.Enqueue(ctx, 1, 1, 1, "/media/a.mkv", "test")
+	id, open, err := env.q.Enqueue(ctx, 1, 1, 1, 1, "/media/a.mkv", "test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,7 +250,7 @@ func TestEnqueueRefusesPausedOrMissingLibrary(t *testing.T) {
 	env := newEnv(t)
 	env.addLibrary(t, 3, true)
 	for _, lib := range []int64{3, 99} { // 3 is paused, 99 is not there at all
-		_, _, err := env.q.Enqueue(ctx, 50+lib, lib, 1, "/m/a.mkv", "test")
+		_, _, err := env.q.Enqueue(ctx, 50+lib, lib, 1, 1, "/m/a.mkv", "test")
 		if !errors.Is(err, ErrLibraryUnavailable) {
 			t.Fatalf("library %d: err = %v, want ErrLibraryUnavailable", lib, err)
 		}

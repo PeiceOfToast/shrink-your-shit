@@ -81,7 +81,7 @@ func (e *testEnv) addFile(t *testing.T, id, library, size int64) {
 func (e *testEnv) enqueue(t *testing.T, file, library int64) int64 {
 	t.Helper()
 	e.exec(t, `INSERT OR IGNORE INTO files (id, library_id, rel_path, size) VALUES (?, ?, ?, ?)`, file, library, fmt.Sprintf("f%d.mkv", file), file*1000)
-	id, open, err := e.q.Enqueue(context.Background(), file, library, 1, fmt.Sprintf("/media/%d.mkv", file), "test")
+	id, open, err := e.q.Enqueue(context.Background(), file, library, 1, 1, fmt.Sprintf("/media/%d.mkv", file), "test")
 	if err != nil {
 		t.Fatal(err)
 	}

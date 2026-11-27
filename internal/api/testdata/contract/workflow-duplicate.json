@@ -1,0 +1,18 @@
+{
+  "body": {
+    "description": "Smaller HEVC files next to the originals.",
+    "fitsGuided": false,
+    "id": "3",
+    "kind": "video",
+    "madeWith": "editor",
+    "name": "Holidays copy",
+    "problemCount": 0,
+    "state": "draft",
+    "updatedAt": "2026-11-27T04:00:00.000Z",
+    "usedBy": []
+  },
+  "method": "POST",
+  "path": "/api/v2/workflows/2/duplicate",
+  "status": 200,
+  "type": "WorkflowRow"
+}
