@@ -103,16 +103,18 @@ func (s Share) inside(o Share) bool {
 // folder's own path below the mount point. So a subfolder of an export mounted directly and the same folder
 // through a mount of the subfolder's export are one share path.
 func ShareOf(mounts []Mount, real string) (Share, bool) {
+	// The mount that really holds the folder is the longest mount point over every file system: a local disk mounted
+	// under a share holds its own folder, so the share does not count there (review #856).
 	best := -1
 	for i, m := range mounts {
-		if !networkFSTypes[m.FSType] || !holds(m.Point, real) {
+		if !holds(m.Point, real) {
 			continue
 		}
 		if best < 0 || len(m.Point) > len(mounts[best].Point) {
 			best = i
 		}
 	}
-	if best < 0 {
+	if best < 0 || !networkFSTypes[mounts[best].FSType] {
 		return Share{}, false
 	}
 	m := mounts[best]

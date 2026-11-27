@@ -4,6 +4,7 @@ package library
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"io"
 	"os"
@@ -122,6 +123,31 @@ func TestShareComparesMountSourceAndPath(t *testing.T) {
 			a: "/mnt/outer/x", b: "/mnt/b/x", want: "none",
 		},
 		{
+			name: "a local disk mounted under a share is not on the share (review #856)",
+			table: []string{
+				"36 25 0:32 / /mnt/nfs rw - nfs4 server:/export rw",
+				"37 25 8:17 / /mnt/nfs/local rw - ext4 /dev/sdb1 rw",
+				"38 25 0:33 / /mnt/b rw - nfs4 server:/export rw",
+			},
+			a: "/mnt/nfs/local/x", b: "/mnt/b/local/x", want: "none",
+		},
+		{
+			name: "the same export path on two hosts is two shares (NFS)",
+			table: []string{
+				"36 25 0:32 / /mnt/a rw - nfs4 alpha:/media rw",
+				"37 25 0:33 / /mnt/b rw - nfs4 beta:/media rw",
+			},
+			a: "/mnt/a", b: "/mnt/b", want: "none",
+		},
+		{
+			name: "the same SMB share on two hosts is two shares",
+			table: []string{
+				"36 25 0:32 / /mnt/a rw - cifs //alpha/share rw",
+				"37 25 0:33 / /mnt/b rw - cifs //beta/share rw",
+			},
+			a: "/mnt/a", b: "/mnt/b", want: "none",
+		},
+		{
 			name: "local disks are unaffected: two mounts of one disk are not compared by source",
 			table: []string{
 				"36 25 8:17 / /mnt/a rw - ext4 /dev/sdb1 rw",
@@ -235,5 +261,83 @@ func TestLocalDisksAreNotRefusedBySource(t *testing.T) {
 	addLibrary(t, c, a)
 	if _, err := c.AddLibrary(context.Background(), NewLibrary{Path: b}); err != nil {
 		t.Fatalf("a second local mount was refused by the share check: %v", err)
+	}
+}
+
+// TestLocalDiskUnderAShareIsNotRefused: a library on a local disk mounted inside a share is a different folder from the
+// share folder another library holds, so the add is allowed (review #856, the false refusal).
+func TestLocalDiskUnderAShareIsNotRefused(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the mount table is read on Linux only")
+	}
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	nas := filepath.Join(base, "nas")
+	local := filepath.Join(nas, "local")
+	b := filepath.Join(base, "b")
+	for _, d := range []string{nas, local, filepath.Join(b, "local")} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	table := strings.Join([]string{
+		"36 25 0:32 / " + nas + " rw - nfs4 server:/export rw",
+		"37 25 8:17 / " + local + " rw - ext4 /dev/sdb1 rw",
+		"38 25 0:33 / " + b + " rw - nfs4 server:/export rw",
+	}, "\n") + "\n"
+	saved := mountInfoSource
+	defer func() { mountInfoSource = saved }()
+	mountInfoSource = func() (io.ReadCloser, error) { return io.NopCloser(strings.NewReader(table)), nil }
+
+	c, _ := newTestCatalog(t)
+	addLibrary(t, c, filepath.Join(b, "local")) // the share's folder /export/local
+	if _, err := c.AddLibrary(context.Background(), NewLibrary{Path: local}); err != nil {
+		t.Fatalf("the local disk under the share was refused as the share folder: %v", err)
+	}
+}
+
+// TestOverlapsReportsTwoMountsOfOneShare: an install that already holds two mounts of one share is reported at start-up
+// by the share compare, which the identity cannot see (review #856).
+func TestOverlapsReportsTwoMountsOfOneShare(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the mount table is read on Linux only")
+	}
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := filepath.Join(base, "a", "shows")
+	b := filepath.Join(base, "b", "shows")
+	for _, d := range []string{a, b} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	table := strings.Join([]string{
+		"36 25 0:32 / " + filepath.Join(base, "a") + " rw - nfs4 server:/export rw",
+		"37 25 0:33 / " + filepath.Join(base, "b") + " rw - nfs4 server:/export rw",
+	}, "\n") + "\n"
+	saved := mountInfoSource
+	defer func() { mountInfoSource = saved }()
+	mountInfoSource = func() (io.ReadCloser, error) { return io.NopCloser(strings.NewReader(table)), nil }
+
+	c, _ := newTestCatalog(t)
+	addLibrary(t, c, a)
+	if err := c.db.Tx(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(context.Background(),
+			`INSERT INTO libraries(name, path, workflow_id, watch, paused, next_scan_at) VALUES(?, ?, NULL, 'daily', 0, ?)`,
+			"Second mount", b, testNow().UnixMilli())
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	overlaps, err := c.Overlaps(context.Background())
+	if err != nil {
+		t.Fatalf("overlaps: %v", err)
+	}
+	if len(overlaps) != 1 || !overlaps[0].Same {
+		t.Fatalf("overlaps = %+v, want one same-folder pair from two mounts of one share", overlaps)
 	}
 }
