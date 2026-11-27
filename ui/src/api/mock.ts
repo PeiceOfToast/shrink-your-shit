@@ -1,4 +1,4 @@
-import type { Attention, HistoryLine, Job, JobDetail, JobsPage, JobsParams, LogEvent, Overview, Summary } from "./types.ts";
+import type { Attention, HistoryLine, Job, JobDetail, JobNeighbours, JobsPage, JobsParams, LogEvent, Overview, Summary } from "./types.ts";
 import { ATTENTION, OVERVIEW, SUMMARY } from "./fixtures/index.ts";
 import { JOBS } from "./fixtures/jobs.ts";
 import { jobDetail } from "./fixtures/jobDetail.ts";
@@ -204,7 +204,7 @@ export function getJobHistory(id: string): Promise<HistoryLine[]> {
 }
 
 // GET /api/v2/jobs/{id}/neighbours?state=: the ids before and after this one in the list behind the panel.
-export function getJobNeighbours(id: string, state?: string): Promise<{ prev: string | null; next: string | null }> {
+export function getJobNeighbours(id: string, state?: string): Promise<JobNeighbours> {
   return respond(() => {
     const list = state && state !== "all" ? JOBS.filter((j) => j.state === state) : JOBS;
     const i = list.findIndex((j) => j.id === id);

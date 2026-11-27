@@ -241,6 +241,12 @@ export interface JobsPage {
   next: string | null;
 }
 
+// GET /api/v2/jobs/{id}/neighbours: the ids before and after a job in the list behind the panel.
+export interface JobNeighbours {
+  prev: string | null;
+  next: string | null;
+}
+
 export interface JobsParams {
   state?: JobState | "all";
   worker?: string; // a worker id; the jobs it ran or is running
