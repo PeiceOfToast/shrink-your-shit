@@ -131,6 +131,11 @@ func run(dataDir, listen string) error {
 		Scanner:   newScanner(catalog, flows, q, bus, wk.Wake),
 		Wake:      wk.Wake,
 		DiskFree:  fsx.FreeBytes,
+		// Try on one file (S2-5): the same engine as a job, with its own events that answer the
+		// page rather than going to the log.
+		Try: func(ctx context.Context, f flow.Flow, file string) (flow.TryResult, error) {
+			return flow.Try(ctx, f, file, engineEnv())
+		},
 	})
 	fmt.Fprintln(os.Stderr, "syp serving on", ln.Addr())
 
@@ -178,16 +183,25 @@ func sweepLeftovers(bus *events.Bus) func(context.Context, jobs.Job) error {
 
 // workerEnv is what a real job runs with: the real media tools, the real safety steps, the processor encoder
 // until stage 2 adds the hardware picker, and the job events on the bus.
-func workerEnv(flows *flow.Store, bus *events.Bus) flow.Env {
+// engineEnv is the world the flow engine runs in: the real media tools, the real safety check,
+// the processor picker and the clock. The worker adds its log and revision loader; a try adds
+// neither, so its events answer the page and nothing reaches a job's log.
+func engineEnv() flow.Env {
 	return flow.Env{
 		Media:  media.MediaFuncs{ProbeFunc: media.Probe, RunFunc: media.Run},
 		Safety: flow.RealSafety{}, Pick: flow.ProcessorPick,
-		LoadRevision: func(ctx context.Context, id int64, rev int) (flow.Flow, error) {
-			r, err := flows.Revision(ctx, id, rev)
-			return r.Flow, err
-		},
-		Bus: bus, Now: time.Now, Sleep: time.Sleep, AppVersion: version,
+		Now: time.Now, Sleep: time.Sleep, AppVersion: version,
 	}
+}
+
+func workerEnv(flows *flow.Store, bus *events.Bus) flow.Env {
+	env := engineEnv()
+	env.LoadRevision = func(ctx context.Context, id int64, rev int) (flow.Flow, error) {
+		r, err := flows.Revision(ctx, id, rev)
+		return r.Flow, err
+	}
+	env.Bus = bus
+	return env
 }
 
 // newScanner is the library scanner wired to the real world: ffprobe for the probe, the library's

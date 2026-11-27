@@ -64,15 +64,17 @@ func (c *clock) Sleeps() []time.Duration {
 }
 
 type env struct {
-	t         *testing.T
-	srv       *Server
-	db        *store.DB
-	access    *system.Access
-	bus       *events.Bus
-	flows     *flow.Store
-	catalog   *library.Catalog
-	queue     *jobs.Queue
-	scans     *scanRecorder
+	t       *testing.T
+	srv     *Server
+	db      *store.DB
+	access  *system.Access
+	bus     *events.Bus
+	flows   *flow.Store
+	catalog *library.Catalog
+	queue   *jobs.Queue
+	scans   *scanRecorder
+	// try answers the try route when a test sets it; the real flow.Try is not run here.
+	try       func(ctx context.Context, f flow.Flow, file string) (flow.TryResult, error)
 	closeOnce sync.Once
 	clock     *clock
 	dir       string
@@ -158,6 +160,7 @@ func (e *env) deps() Deps {
 		Access: e.access, Events: e.bus, DB: e.db,
 		Workflows: e.flows, Catalog: e.catalog, Jobs: e.queue, Scanner: e.scans,
 		Wake:     e.scans.wake,
+		Try:      e.try,
 		DiskFree: func(string) (uint64, error) { return 123456789, nil },
 	}
 }

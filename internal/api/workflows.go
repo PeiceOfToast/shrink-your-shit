@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -410,6 +411,82 @@ func (s *Server) previewWorkflow(w http.ResponseWriter, r *http.Request) {
 		Problems  []flow.Problem  `json:"problems"`
 		Disabled  []flow.Disabled `json:"disabled"`
 	}{Sentences: flow.Sentences(f), Flow: f, Problems: rep.Problems, Disabled: rep.Disabled})
+}
+
+// tryBody is POST /workflows/try: the flow to try (or the guide's answers) and the file.
+type tryBody struct {
+	Answers json.RawMessage `json:"answers"`
+	Flow    *flow.Flow      `json:"flow"`
+	File    string          `json:"file"`
+}
+
+// tryWorkflow is S2-5's "Try on one file": one bounded request that answers the lines the pages
+// show, and keeps nothing. The flow is the page's own (answers or flow), so it may be unsaved; a
+// flow the check refuses is refused here too, before anything is read.
+func (s *Server) tryWorkflow(w http.ResponseWriter, r *http.Request) {
+	rs := s.ready.Load()
+	var body tryBody
+	if !decode(w, r, &body) {
+		return
+	}
+	if strings.TrimSpace(body.File) == "" {
+		writeError(w, http.StatusBadRequest, "file_required", "Pick a file to try.", "file", 0)
+		return
+	}
+	if !filepath.IsAbs(body.File) {
+		writeError(w, http.StatusBadRequest, "invalid_file", "Use the file's full path.", "file", 0)
+		return
+	}
+	var f flow.Flow
+	switch {
+	case body.Flow != nil && answersGiven(body.Answers):
+		writeError(w, http.StatusBadRequest, "invalid_request", "Send the flow or the answers, not both.", "flow", 0)
+		return
+	case body.Flow != nil:
+		if err := flow.CheckShape(*body.Flow); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_flow", err.Error(), "", 0)
+			return
+		}
+		f = *body.Flow
+	case answersGiven(body.Answers):
+		answers, ok := decodeAnswers(w, body.Answers)
+		if !ok {
+			return
+		}
+		var problems []flow.Problem
+		f, problems = flow.FromAnswers(answers, flow.DefaultAnswers())
+		if len(problems) > 0 {
+			writeAnswerProblem(w, problems[0])
+			return
+		}
+	default:
+		writeError(w, http.StatusBadRequest, "invalid_request", "The request is missing a flow.", "flow", 0)
+		return
+	}
+	if rep := flow.Validate(f, flow.ValidateContext{Env: flow.Env{}}); len(rep.Problems) > 0 {
+		writeError(w, http.StatusConflict, "has_problems", "Fix this first: "+rep.Problems[0].Message, "", 0)
+		return
+	}
+	if rs.Try == nil {
+		internalError(w)
+		return
+	}
+	res, err := rs.Try(r.Context(), f, body.File)
+	// A stopped request (the page's Stop) has nobody left to answer.
+	if r.Context().Err() != nil {
+		return
+	}
+	var refuse *flow.TryError
+	switch {
+	case errors.As(err, &refuse):
+		writeError(w, http.StatusBadRequest, refuse.Code, refuse.Message, "", 0)
+	case err != nil:
+		internalError(w)
+	default:
+		writeJSON(w, http.StatusOK, struct {
+			Lines []flow.TryLine `json:"lines"`
+		}{Lines: res.Lines})
+	}
 }
 
 // putDraftBody is PUT /workflows/{id}/draft: the flow the editor holds and the revision it read.

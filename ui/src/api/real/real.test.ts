@@ -6,7 +6,7 @@ import { ApiError } from "../errors.ts";
 import { getJobNeighbours, getJobs } from "./jobs.ts";
 import { getLibraries, createLibrary } from "./libraries.ts";
 import { getAttention, getOverview } from "./overview.ts";
-import { createDraft, deleteWorkflow, duplicateWorkflow, exportWorkflow, getFlow, getGuideAnswers, guidePreview, listWorkflows, publishFlow, putAnswers, putDraft, validateFlow } from "./workflows.ts";
+import { createDraft, deleteWorkflow, duplicateWorkflow, exportWorkflow, getFlow, getGuideAnswers, guidePreview, listWorkflows, publishFlow, putAnswers, putDraft, tryFlow, validateFlow } from "./workflows.ts";
 
 type Call = { url: string; init: RequestInit };
 const realFetch = globalThis.fetch;
@@ -140,6 +140,17 @@ test("the guided builder's answers and preview use the routes the server has", a
   assert.equal(calls[0].url, "/api/v2/workflows/preview");
   assert.equal(calls[0].init.method, "POST");
   assert.deepEqual(JSON.parse(String(calls[0].init.body)), { answers: { quality: 4 } });
+
+  // Try on one file sends the page's own flow and the file's full path, and answers the lines as they came.
+  const lines = [{ stepId: "video", text: "Video: about 3 s." }, { stepId: "save", text: "Size: 1.9 GB (now 4.6 GB)." }];
+  calls = stub(200, JSON.stringify({ lines }));
+  const stop = new AbortController();
+  assert.deepEqual(await tryFlow(flow as never, "/videos/holiday.mkv", stop.signal), { lines });
+  assert.equal(calls[0].url, "/api/v2/workflows/try");
+  assert.equal(calls[0].init.method, "POST");
+  assert.deepEqual(JSON.parse(String(calls[0].init.body)), { flow, file: "/videos/holiday.mkv" });
+  // The page's Stop is the request's signal: the fetch is the one a Stop can abort.
+  assert.equal(calls[0].init.signal, stop.signal);
 });
 
 test("the list, duplicate and delete use the routes the server has", async () => {

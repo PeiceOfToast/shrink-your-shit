@@ -70,6 +70,12 @@ type RunInput struct {
 	Size   int64
 	MTime  time.Time
 	FileID string
+
+	// Try is one page's try on one file: Run uses Flow (the flow as the page holds it, no saved
+	// revision) and stops after the result check. Nothing is placed, and the staging goes with the
+	// run.
+	Try  bool
+	Flow *Flow
 }
 
 // Want is the codec the runner must be able to encode.
@@ -231,6 +237,11 @@ func (e *engine) run(ctx context.Context) (res Result) {
 	}
 	after := st.Size()
 	e.size(e.in.Size, after)
+	// A try stops here: its result has been checked and measured. Nothing is placed, and the
+	// staging is removed by the deferred cleanup (placed stays false).
+	if e.in.Try {
+		return Result{Outcome: OutcomeSmaller, SizeBefore: e.in.Size, SizeAfter: after}
+	}
 	if after >= e.in.Size {
 		return Result{
 			Outcome: OutcomeBiggerKept, SizeBefore: e.in.Size, SizeAfter: after,
@@ -361,8 +372,11 @@ func (e *engine) probeSource(ctx context.Context) (media.Info, Result) {
 	return info, Result{}
 }
 
-// revision loads the saved flow the job names.
+// revision loads the saved flow the job names. A try brings its own flow, which has no revision.
 func (e *engine) revision(ctx context.Context) (Revision, error) {
+	if e.in.Flow != nil {
+		return Revision{Flow: *e.in.Flow}, nil
+	}
 	if e.env.LoadRevision == nil {
 		return Revision{}, errors.New("no revision loader")
 	}
