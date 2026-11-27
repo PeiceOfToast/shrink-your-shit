@@ -12,12 +12,12 @@ import (
 	"github.com/PeiceOfToast/shrink-your-shit/internal/media"
 )
 
-// TestRealHardwareInventory runs on a real machine, not in CI: it proves every candidate with real test encodes, probes
+// TestHardwareInventoryOnTheMachine runs on a real machine, not in CI: it proves every candidate with real test encodes, probes
 // each one that passes, and prints the inventory. It runs only with SYP_HW_INVENTORY=1, from a cross-built test binary:
 //
 //	GOOS=linux GOARCH=amd64 go test -c -o hwtest ./internal/hw/
-//	SYP_HW_INVENTORY=1 ./hwtest -test.run TestRealHardwareInventory -test.v
-func TestRealHardwareInventory(t *testing.T) {
+//	SYP_HW_INVENTORY=1 ./hwtest -test.run TestHardwareInventoryOnTheMachine -test.v
+func TestHardwareInventoryOnTheMachine(t *testing.T) {
 	if os.Getenv("SYP_HW_INVENTORY") != "1" {
 		t.Skip("set SYP_HW_INVENTORY=1 on a machine with a GPU to print the inventory")
 	}
