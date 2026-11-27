@@ -11,7 +11,9 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/PeiceOfToast/shrink-your-shit/internal/events"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/system"
@@ -35,16 +37,27 @@ type Server struct {
 	ready   atomic.Pointer[readyState]
 	csrf    http.CrossOriginProtection
 	mux     *http.ServeMux
+	jobs    atomic.Pointer[jobDeps]
+	// stopped closes when the server shuts down, so open event streams end. pingEvery overrides the 15 s ping in tests.
+	stopped   chan struct{}
+	closeOnce sync.Once
+	pingEvery time.Duration
 }
 
 // New makes a server that answers 503 starting until Ready is called.
 func New(version string) *Server {
-	s := &Server{version: version, mux: http.NewServeMux()}
+	s := &Server{version: version, mux: http.NewServeMux(), stopped: make(chan struct{})}
 	s.mux.HandleFunc("GET /api/v2/health", s.health)
 	s.mux.HandleFunc("GET /api/v2/setup", s.getSetup)
 	s.mux.HandleFunc("POST /api/v2/setup", s.postSetup)
 	s.mux.HandleFunc("POST /api/v2/signin", s.signin)
 	s.mux.HandleFunc("POST /api/v2/signout", s.signout)
+	s.mux.HandleFunc("GET /api/v2/jobs", s.listJobs)
+	s.mux.HandleFunc("GET /api/v2/jobs/{id}", s.getJob)
+	s.mux.HandleFunc("GET /api/v2/jobs/{id}/neighbours", s.neighbours)
+	s.mux.HandleFunc("GET /api/v2/jobs/{id}/events", s.jobLog)
+	s.mux.HandleFunc("GET /api/v2/jobs/{id}/history", s.jobHistory)
+	s.mux.HandleFunc("GET /api/v2/events", s.stream)
 	s.mux.HandleFunc("/", notFound)
 	return s
 }

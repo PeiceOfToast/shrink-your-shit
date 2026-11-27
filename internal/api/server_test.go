@@ -61,6 +61,7 @@ func (c *clock) Sleeps() []time.Duration {
 type env struct {
 	t         *testing.T
 	srv       *Server
+	db        *store.DB
 	access    *system.Access
 	bus       *events.Bus
 	closeOnce sync.Once
@@ -82,7 +83,7 @@ func newEnv(t *testing.T, ready bool) *env {
 	if err := db.Migrate(); err != nil {
 		t.Fatal(err)
 	}
-	e := &env{t: t, srv: New("test-version"), clock: &clock{now: time.Date(2026, 11, 27, 4, 0, 0, 0, time.UTC)}, dir: dir, stderr: &bytes.Buffer{}}
+	e := &env{t: t, srv: New("test-version"), db: db, clock: &clock{now: time.Date(2026, 11, 27, 4, 0, 0, 0, time.UTC)}, dir: dir, stderr: &bytes.Buffer{}}
 	e.bus, err = events.New(events.Options{DataDir: dir, DB: db, Stderr: e.stderr})
 	if err != nil {
 		t.Fatal(err)

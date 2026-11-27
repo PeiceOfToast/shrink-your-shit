@@ -19,7 +19,7 @@ import (
 	"github.com/PeiceOfToast/shrink-your-shit/internal/flow"
 	_ "github.com/PeiceOfToast/shrink-your-shit/internal/flow/steps"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/jobs"
-	_ "github.com/PeiceOfToast/shrink-your-shit/internal/library" // registers the libraries and files migration
+	"github.com/PeiceOfToast/shrink-your-shit/internal/library" // also registers the libraries and files migration
 	"github.com/PeiceOfToast/shrink-your-shit/internal/media"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/safety"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/store"
@@ -88,6 +88,7 @@ func run(dataDir, listen string) error {
 
 	flows := flow.Open(db)
 	q := jobs.New(jobs.Options{DB: db, Bus: bus})
+	srv.Jobs(q, library.NewCatalog(db), flows, bus)
 	if err := q.Recover(ctx, sweepLeftovers(bus)); err != nil {
 		httpSrv.Close()
 		bus.Close(context.Background())
@@ -119,6 +120,7 @@ func run(dataDir, listen string) error {
 	// The worker must finish or requeue its job before the store closes (deferred above).
 	stopWorker()
 	<-workerDone
+	srv.CloseStreams() // event streams never end on their own
 	shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	httpSrv.Shutdown(shutdown)

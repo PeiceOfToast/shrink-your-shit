@@ -1,0 +1,41 @@
+{
+  "body": [
+    {
+      "jobId": "3",
+      "kind": "queued",
+      "level": "info",
+      "libraryId": "1",
+      "message": "queued",
+      "seq": 1,
+      "source": "jobs",
+      "ts": "2026-11-27T16:27:07.954Z",
+      "workerId": null
+    },
+    {
+      "jobId": "3",
+      "kind": "picked",
+      "level": "info",
+      "libraryId": "1",
+      "message": "picked",
+      "seq": 2,
+      "source": "jobs",
+      "ts": "2026-11-27T16:27:07.954Z",
+      "workerId": null
+    },
+    {
+      "jobId": "3",
+      "kind": "note",
+      "level": "info",
+      "libraryId": "1",
+      "message": "smaller",
+      "seq": 3,
+      "source": "jobs",
+      "ts": "2026-11-27T16:27:07.954Z",
+      "workerId": null
+    }
+  ],
+  "method": "GET",
+  "path": "/api/v2/jobs/3/events",
+  "status": 200,
+  "type": "LogEvent[]"
+}

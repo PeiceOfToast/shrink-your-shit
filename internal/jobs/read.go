@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -118,17 +119,9 @@ func (q *Queue) Get(ctx context.Context, id int64) (Job, error) {
 
 // List returns jobs newest first, by id.
 func (q *Queue) List(ctx context.Context, f ListFilter) ([]Job, error) {
-	conds := []string{`state <> 'cancelled'`}
-	var args []any
-	switch f.Shown {
-	case "":
-	case "waiting":
-		conds = append(conds, `state IN ('waiting', 'retry_wait')`)
-	case "running", "done", "failed", "skipped":
-		conds = append(conds, `state = ?`)
-		args = append(args, f.Shown)
-	default:
-		return nil, fmt.Errorf("jobs: unknown list state %q", f.Shown)
+	conds, args, err := shownCond(f.Shown)
+	if err != nil {
+		return nil, err
 	}
 	if f.LibraryID != 0 {
 		conds = append(conds, `library_id = ?`)
@@ -174,6 +167,70 @@ func (q *Queue) List(ctx context.Context, f ListFilter) ([]Job, error) {
 		out = append(out, j)
 	}
 	return out, rows.Err()
+}
+
+// shownCond is the WHERE for one list: "" is every job, waiting covers retry_wait too. Cancelled jobs are never
+// shown. It returns the conditions and their arguments.
+func shownCond(shown string) ([]string, []any, error) {
+	conds := []string{`state <> 'cancelled'`}
+	switch shown {
+	case "":
+		return conds, nil, nil
+	case "waiting":
+		return append(conds, `state IN ('waiting', 'retry_wait')`), nil, nil
+	case "running", "done", "failed", "skipped":
+		return append(conds, `state = ?`), []any{shown}, nil
+	}
+	return nil, nil, fmt.Errorf("jobs: unknown list state %q", shown)
+}
+
+// Counts returns how many jobs are in each inside state. Cancelled jobs are not counted.
+func (q *Queue) Counts(ctx context.Context) (map[State]int, error) {
+	rows, err := q.db.Read().QueryContext(ctx, `SELECT state, COUNT(*) FROM jobs WHERE state <> 'cancelled' GROUP BY state`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[State]int{}
+	for rows.Next() {
+		var s string
+		var n int
+		if err := rows.Scan(&s, &n); err != nil {
+			return nil, err
+		}
+		out[State(s)] = n
+	}
+	return out, rows.Err()
+}
+
+// Neighbours returns the ids of the list items just above and below job id in the list shown by shown (newest
+// first, as List orders it). A missing neighbour is 0. It returns ErrNotFound when job id is not in that list.
+func (q *Queue) Neighbours(ctx context.Context, id int64, shown string) (prev, next int64, err error) {
+	conds, args, err := shownCond(shown)
+	if err != nil {
+		return 0, 0, err
+	}
+	in := append(append([]string{}, conds...), `id = ?`)
+	var found int64
+	if err := q.db.Read().QueryRowContext(ctx, `SELECT id FROM jobs WHERE `+strings.Join(in, " AND "),
+		append(append([]any{}, args...), id)...).Scan(&found); err != nil {
+		if err == sql.ErrNoRows {
+			return 0, 0, ErrNotFound
+		}
+		return 0, 0, err
+	}
+	// Above in the list is a larger id; below is a smaller one.
+	above := append(append([]string{}, conds...), `id > ?`)
+	below := append(append([]string{}, conds...), `id < ?`)
+	if err := q.db.Read().QueryRowContext(ctx, `SELECT COALESCE(MIN(id), 0) FROM jobs WHERE `+strings.Join(above, " AND "),
+		append(append([]any{}, args...), id)...).Scan(&prev); err != nil {
+		return 0, 0, err
+	}
+	if err := q.db.Read().QueryRowContext(ctx, `SELECT COALESCE(MAX(id), 0) FROM jobs WHERE `+strings.Join(below, " AND "),
+		append(append([]any{}, args...), id)...).Scan(&next); err != nil {
+		return 0, 0, err
+	}
+	return prev, next, nil
 }
 
 // Attempts returns the attempt rows of job id, oldest first.
