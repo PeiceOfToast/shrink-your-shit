@@ -1,0 +1,16 @@
+{
+  "body": [
+    {
+      "guided": true,
+      "icon": "flow",
+      "id": "shrink-videos",
+      "kind": "video",
+      "line": "Answer a few plain questions. The steps are set for you, and you can open them in the editor later.",
+      "name": "Shrink videos"
+    }
+  ],
+  "method": "GET",
+  "path": "/api/v2/workflows/starters",
+  "status": 200,
+  "type": "Starter[]"
+}

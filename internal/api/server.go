@@ -5,6 +5,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"net"
@@ -16,6 +17,10 @@ import (
 	"time"
 
 	"github.com/PeiceOfToast/shrink-your-shit/internal/events"
+	"github.com/PeiceOfToast/shrink-your-shit/internal/flow"
+	"github.com/PeiceOfToast/shrink-your-shit/internal/jobs"
+	"github.com/PeiceOfToast/shrink-your-shit/internal/library"
+	"github.com/PeiceOfToast/shrink-your-shit/internal/store"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/system"
 )
 
@@ -25,16 +30,40 @@ const (
 	maxBody       = 64 << 10
 )
 
-// readyState exists once the store is open and migrated. Before that the server answers 503 starting.
-type readyState struct {
-	access *system.Access
-	events *events.Bus
+// Deps is the world behind the routes: each module's API, bound when the store is open and
+// migrated. Before that the server answers 503 starting.
+type Deps struct {
+	Access *system.Access
+	Events *events.Bus
+	DB     *store.DB
+	// Workflows and Catalog write setup's one transaction; Jobs and Scanner are what the library
+	// routes read and start. They are interfaces so a test can fail one step or record a scan.
+	Workflows Workflows
+	Catalog   *library.Catalog
+	Jobs      *jobs.Queue
+	Scanner   Scanner
+	// Wake asks the worker to pick up newly queued jobs. Stage 1 has no worker loop; cmd wires a
+	// no-op. nil means no wake.
+	Wake func()
+	// DiskFree reads the free space of the volume that holds a folder. nil reports 0.
+	DiskFree func(path string) (uint64, error)
+}
+
+// Workflows is flow.Store as the api uses it.
+type Workflows interface {
+	CreateFromStarterTx(ctx context.Context, tx *sql.Tx, starterID, name string) (int64, int, error)
+	Get(ctx context.Context, id int64) (flow.Workflow, error)
+}
+
+// Scanner is library.Scanner as the api uses it: one scan of one library.
+type Scanner interface {
+	Scan(ctx context.Context, lib library.Library) (library.ScanResult, error)
 }
 
 // Server is the api's door: the gate every request passes, and the /api/v2 routes behind it.
 type Server struct {
 	version string
-	ready   atomic.Pointer[readyState]
+	ready   atomic.Pointer[Deps]
 	csrf    http.CrossOriginProtection
 	mux     *http.ServeMux
 	jobs    atomic.Pointer[jobDeps]
@@ -58,13 +87,29 @@ func New(version string) *Server {
 	s.mux.HandleFunc("GET /api/v2/jobs/{id}/events", s.jobLog)
 	s.mux.HandleFunc("GET /api/v2/jobs/{id}/history", s.jobHistory)
 	s.mux.HandleFunc("GET /api/v2/events", s.stream)
+	// Access (R1-9a): the first-run page's calls, the languages and the guide.
+	s.mux.HandleFunc("GET /api/v2/languages", s.getLanguages)
+	s.mux.HandleFunc("GET /api/v2/workflows/starters", s.getStarters)
+	s.mux.HandleFunc("GET /api/v2/workflows/starters/{id}", s.getStarter)
+	s.mux.HandleFunc("GET /api/v2/workflows/guide", s.getGuide)
+	s.mux.HandleFunc("GET /api/v2/folders", s.getFolders)
+	s.mux.HandleFunc("POST /api/v2/libraries/check", s.checkLibraryFolder)
+	// Libraries (R1-9a).
+	s.mux.HandleFunc("GET /api/v2/libraries", s.getLibraries)
+	s.mux.HandleFunc("POST /api/v2/libraries", s.postLibrary)
+	s.mux.HandleFunc("GET /api/v2/libraries/{id}", s.getLibrary)
+	s.mux.HandleFunc("POST /api/v2/libraries/{id}/scan", s.scanLibrary)
+	s.mux.HandleFunc("POST /api/v2/libraries/scan", s.scanAllLibraries)
+	// Summary and attention (R1-9a).
+	s.mux.HandleFunc("GET /api/v2/summary", s.getSummary)
+	s.mux.HandleFunc("GET /api/v2/attention", s.getAttention)
 	s.mux.HandleFunc("/", notFound)
 	return s
 }
 
-// Ready lets requests through. events receives a warning for each refused sign-in; it may be nil.
-func (s *Server) Ready(a *system.Access, bus *events.Bus) {
-	s.ready.Store(&readyState{access: a, events: bus})
+// Ready lets requests through. Events receives a warning for each refused sign-in; it may be nil.
+func (s *Server) Ready(d Deps) {
+	s.ready.Store(&d)
 }
 
 // ServeHTTP is the gate: starting, setup, the ?token= link, the bearer token, CSRF and the session,
@@ -79,20 +124,19 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	apiPath := strings.HasPrefix(r.URL.Path, "/api/")
 	unsafe := !(r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions)
 
-	needs, err := rs.access.NeedsAccount(ctx)
+	needs, err := rs.Access.NeedsAccount(ctx)
 	if err != nil {
 		internalError(w)
 		return
 	}
 	if needs {
-		// Before setup only the allow-list works. The later pre-setup routes (library, starters, folders,
-		// shares) are not built yet; when they are, they join this list (backend-plan §12).
+		// Before setup only the allow-list answers: /setup and /health, plus the ones that answer
+		// without a session once setup is done (backend-plan §12).
 		if unsafe && !s.csrfOK(r) {
 			writeError(w, http.StatusForbidden, "csrf", "That request came from another site, or is missing its header.", "", 0)
 			return
 		}
-		if r.URL.Path == "/api/v2/setup" && (r.Method == http.MethodGet || r.Method == http.MethodPost) ||
-			r.URL.Path == "/api/v2/health" && r.Method == http.MethodGet {
+		if setupRouteIsAllowed(r.Method, r.URL.Path) {
 			s.mux.ServeHTTP(w, r)
 			return
 		}
@@ -107,7 +151,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	byBearer := false
 	if token, ok := bearerToken(r); ok {
-		if err := rs.access.CheckBearer(ctx, token); err != nil {
+		if err := rs.Access.CheckBearer(ctx, token); err != nil {
 			if errors.Is(err, system.ErrBadToken) {
 				writeError(w, http.StatusUnauthorized, "bad_token", "That token isn't right.", "", 0)
 				return
@@ -126,7 +170,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	authed := byBearer
 	if !authed {
 		if c, err := r.Cookie(sessionCookie); err == nil {
-			live, err := rs.access.LookupSession(ctx, c.Value)
+			live, err := rs.Access.LookupSession(ctx, c.Value)
 			if err != nil {
 				internalError(w)
 				return
@@ -158,6 +202,31 @@ func publicRoute(path string) bool {
 	return false
 }
 
+// setupAllowList is what answers before an account exists, with no cookie: /setup and /health, and
+// the first-run page's own calls (page 13). Each is the same trust as POST /setup itself. Once setup
+// is done they need a session like every other route.
+var setupAllowList = []struct{ method, path string }{
+	{http.MethodGet, "/api/v2/setup"},
+	{http.MethodPost, "/api/v2/setup"},
+	{http.MethodGet, "/api/v2/health"},
+	{http.MethodGet, "/api/v2/languages"},
+	{http.MethodGet, "/api/v2/workflows/starters"},
+	{http.MethodGet, "/api/v2/workflows/guide"},
+	{http.MethodGet, "/api/v2/folders"},
+	{http.MethodPost, "/api/v2/libraries/check"},
+}
+
+// setupRouteIsAllowed reports whether a method and path may answer before setup. The starter detail
+// route takes an id, so it matches by prefix.
+func setupRouteIsAllowed(method, path string) bool {
+	for _, row := range setupAllowList {
+		if row.method == method && row.path == path {
+			return true
+		}
+	}
+	return method == http.MethodGet && strings.HasPrefix(path, "/api/v2/workflows/starters/")
+}
+
 // csrfOK is true for a request the browser sent from this origin with the X-SYP header the UI always sends.
 func (s *Server) csrfOK(r *http.Request) bool {
 	if r.Header.Get("X-SYP") == "" {
@@ -169,9 +238,9 @@ func (s *Server) csrfOK(r *http.Request) bool {
 // swapToken signs the browser in with a ?token= link and redirects to the same page without the token,
 // so the token stays out of the address bar and history (§12). A refused token still redirects; the page
 // then shows its sign-in form.
-func (s *Server) swapToken(w http.ResponseWriter, r *http.Request, rs *readyState) {
+func (s *Server) swapToken(w http.ResponseWriter, r *http.Request, rs *Deps) {
 	token := r.URL.Query().Get("token")
-	cookie, err := rs.access.SignInToken(r.Context(), remoteHost(r), token, r.UserAgent())
+	cookie, err := rs.Access.SignInToken(r.Context(), remoteHost(r), token, r.UserAgent())
 	if err == nil {
 		setSessionCookie(w, r, cookie, sessionMaxAge)
 	} else {
@@ -193,65 +262,12 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getSetup(w http.ResponseWriter, r *http.Request) {
-	needs, err := s.ready.Load().access.NeedsAccount(r.Context())
+	needs, err := s.ready.Load().Access.NeedsAccount(r.Context())
 	if err != nil {
 		internalError(w)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"needsAccount": needs, "starting": false})
-}
-
-// fixedStarterID is stage 1's one starter (build-order stage 1 item 5). The Start page always sends a
-// starter, so setup accepts this one; item 9 makes the workflow from it in the same call.
-const fixedStarterID = "shrink-videos"
-
-// postSetup sets the password and signs the browser in. The library part is not built yet: a non-null
-// library, or any starter but the fixed one, is refused, so nothing is half set up.
-func (s *Server) postSetup(w http.ResponseWriter, r *http.Request) {
-	rs := s.ready.Load()
-	var body struct {
-		Account struct {
-			Password string `json:"password"`
-		} `json:"account"`
-		Library json.RawMessage `json:"library"`
-		Starter json.RawMessage `json:"starter"`
-	}
-	if !decode(w, r, &body) {
-		return
-	}
-	if !isNull(body.Library) {
-		writeError(w, http.StatusBadRequest, "invalid_request", "A library can't be set up yet. Send library as null.", "library", 0)
-		return
-	}
-	if !isNull(body.Starter) {
-		var st struct {
-			ID string `json:"id"`
-		}
-		if json.Unmarshal(body.Starter, &st) != nil || st.ID != fixedStarterID {
-			writeError(w, http.StatusBadRequest, "invalid_request", "Only the Shrink videos starter can be set up for now.", "starter", 0)
-			return
-		}
-	}
-	ctx := r.Context()
-	err := rs.access.SetPassword(ctx, body.Account.Password)
-	switch {
-	case errors.Is(err, system.ErrSetupDone):
-		writeError(w, http.StatusConflict, "setup_done", "Setup is already done.", "", 0)
-		return
-	case errors.Is(err, system.ErrInvalidPassword):
-		writeError(w, http.StatusBadRequest, "invalid_password", "A password needs at least 8 characters and at most 72 bytes.", "account.password", 0)
-		return
-	case err != nil:
-		internalError(w)
-		return
-	}
-	cookie, err := rs.access.CreateSession(ctx, r.UserAgent(), remoteHost(r))
-	if err != nil {
-		internalError(w)
-		return
-	}
-	setSessionCookie(w, r, cookie, sessionMaxAge)
-	writeJSON(w, http.StatusOK, map[string]any{"scanStarted": false})
 }
 
 func (s *Server) signin(w http.ResponseWriter, r *http.Request) {
@@ -271,9 +287,9 @@ func (s *Server) signin(w http.ResponseWriter, r *http.Request) {
 	var cookie string
 	var err error
 	if body.Password != nil {
-		cookie, err = rs.access.SignInPassword(ctx, remoteHost(r), *body.Password, r.UserAgent())
+		cookie, err = rs.Access.SignInPassword(ctx, remoteHost(r), *body.Password, r.UserAgent())
 	} else {
-		cookie, err = rs.access.SignInToken(ctx, remoteHost(r), *body.Token, r.UserAgent())
+		cookie, err = rs.Access.SignInToken(ctx, remoteHost(r), *body.Token, r.UserAgent())
 	}
 	if err != nil {
 		s.refusedWrite(w, rs, r, err)
@@ -285,7 +301,7 @@ func (s *Server) signin(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) signout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(sessionCookie); err == nil {
-		if err := s.ready.Load().access.EndSession(r.Context(), c.Value); err != nil {
+		if err := s.ready.Load().Access.EndSession(r.Context(), c.Value); err != nil {
 			internalError(w)
 			return
 		}
@@ -295,7 +311,7 @@ func (s *Server) signout(w http.ResponseWriter, r *http.Request) {
 }
 
 // refusedWrite answers a failed sign-in with the envelope and its status.
-func (s *Server) refusedWrite(w http.ResponseWriter, rs *readyState, r *http.Request, err error) {
+func (s *Server) refusedWrite(w http.ResponseWriter, rs *Deps, r *http.Request, err error) {
 	var locked *system.LockedError
 	switch {
 	case errors.As(err, &locked):
@@ -315,8 +331,8 @@ func (s *Server) refusedWrite(w http.ResponseWriter, rs *readyState, r *http.Req
 }
 
 // refused leaves one warning in the system log. It names the address and the reason, never the secret.
-func (s *Server) refused(rs *readyState, r *http.Request, err error) {
-	if rs.events == nil {
+func (s *Server) refused(rs *Deps, r *http.Request, err error) {
+	if rs.Events == nil {
 		return
 	}
 	reason := "a wrong password"
@@ -327,7 +343,7 @@ func (s *Server) refused(rs *readyState, r *http.Request, err error) {
 	default:
 		return // a locked-out attempt is refused without a new warning
 	}
-	_ = rs.events.Emit(events.Event{
+	_ = rs.Events.Emit(events.Event{
 		Kind:    events.KindWarning,
 		Level:   events.LevelWarn,
 		Source:  "api",
@@ -364,11 +380,6 @@ func remoteHost(r *http.Request) string {
 		return r.RemoteAddr
 	}
 	return host
-}
-
-func isNull(raw json.RawMessage) bool {
-	s := strings.TrimSpace(string(raw))
-	return s == "" || s == "null"
 }
 
 // decode reads one JSON body of at most maxBody bytes. It writes the 400 itself and returns false on error.

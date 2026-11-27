@@ -148,54 +148,79 @@ func (a *Access) NeedsAccount(ctx context.Context) (bool, error) {
 	return n == 0, nil
 }
 
-// SetPassword is setup's only write: it sets the password once and creates the access token, stored
-// encrypted under the key file. It fails with ErrSetupDone if a password already exists.
-func (a *Access) SetPassword(ctx context.Context, password string) error {
+// PreparedPassword is setup's slow part, done before its transaction: the hash, a new access token
+// and the token sealed under the key file. SetPasswordTx writes it.
+type PreparedPassword struct {
+	hash   string
+	digest string
+	sealed []byte
+	now    int64
+}
+
+// PreparePassword checks the password and does the work that needs no transaction: the hash, a new
+// access token and its sealed copy. Setup calls this before opening its one transaction, so a slow
+// hash does not hold the writer. It answers ErrInvalidPassword or ErrSetupDone.
+func (a *Access) PreparePassword(ctx context.Context, password string) (PreparedPassword, error) {
 	if err := checkPasswordRules(password); err != nil {
-		return err
+		return PreparedPassword{}, err
 	}
 	needs, err := a.NeedsAccount(ctx)
 	if err != nil {
-		return err
+		return PreparedPassword{}, err
 	}
 	if !needs {
-		return ErrSetupDone
+		return PreparedPassword{}, ErrSetupDone
 	}
 	hash, err := hashPassword(password)
 	if err != nil {
-		return err
+		return PreparedPassword{}, err
 	}
 	token, err := randomSecret()
 	if err != nil {
-		return err
+		return PreparedPassword{}, err
 	}
 	a.mu.Lock()
 	err = a.ensureKeyLocked()
 	key := a.key
 	a.mu.Unlock()
 	if err != nil {
-		return err
+		return PreparedPassword{}, err
 	}
 	sealed, err := seal(key, []byte(token))
 	if err != nil {
+		return PreparedPassword{}, err
+	}
+	return PreparedPassword{hash: hash, digest: digest(token), sealed: sealed, now: a.now().Unix()}, nil
+}
+
+// SetPasswordTx writes a prepared password and its access token on the caller's transaction, so setup
+// can create the workflow and the library in the same all-or-nothing call. It fails with ErrSetupDone
+// if a password already exists; the check inside the transaction is the one that counts.
+func (a *Access) SetPasswordTx(ctx context.Context, tx *sql.Tx, p PreparedPassword) error {
+	var n int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM auth`).Scan(&n); err != nil {
 		return err
 	}
-	now := a.now().Unix()
-	return a.db.Tx(ctx, func(tx *sql.Tx) error {
-		var n int
-		if err := tx.QueryRow(`SELECT COUNT(*) FROM auth`).Scan(&n); err != nil {
-			return err
-		}
-		if n > 0 {
-			return ErrSetupDone
-		}
-		if _, err := tx.Exec(`INSERT INTO auth(id, password_hash, set_at) VALUES(1, ?, ?)`, hash, now); err != nil {
-			return err
-		}
-		_, err := tx.Exec(`INSERT INTO tokens(id, name, hash, sealed, created, last_used) VALUES(?, ?, ?, ?, ?, NULL)`,
-			accessTokenID, "access", digest(token), sealed, now)
+	if n > 0 {
+		return ErrSetupDone
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO auth(id, password_hash, set_at) VALUES(1, ?, ?)`, p.hash, p.now); err != nil {
 		return err
-	})
+	}
+	_, err := tx.ExecContext(ctx,
+		`INSERT INTO tokens(id, name, hash, sealed, created, last_used) VALUES(?, ?, ?, ?, ?, NULL)`,
+		accessTokenID, "access", p.digest, p.sealed, p.now)
+	return err
+}
+
+// SetPassword is setup's only write: it sets the password once and creates the access token, stored
+// encrypted under the key file. It fails with ErrSetupDone if a password already exists.
+func (a *Access) SetPassword(ctx context.Context, password string) error {
+	p, err := a.PreparePassword(ctx, password)
+	if err != nil {
+		return err
+	}
+	return a.db.Tx(ctx, func(tx *sql.Tx) error { return a.SetPasswordTx(ctx, tx, p) })
 }
 
 // CheckPassword is nil when password is the account's password.

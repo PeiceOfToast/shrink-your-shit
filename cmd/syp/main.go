@@ -18,8 +18,9 @@ import (
 	"github.com/PeiceOfToast/shrink-your-shit/internal/events"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/flow"
 	_ "github.com/PeiceOfToast/shrink-your-shit/internal/flow/steps"
+	"github.com/PeiceOfToast/shrink-your-shit/internal/fsx"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/jobs"
-	"github.com/PeiceOfToast/shrink-your-shit/internal/library" // also registers the libraries and files migration
+	"github.com/PeiceOfToast/shrink-your-shit/internal/library"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/media"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/safety"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/store"
@@ -85,7 +86,6 @@ func run(dataDir, listen string) error {
 		bus.Close(context.Background())
 		return err
 	}
-
 	flows := flow.Open(db)
 	q := jobs.New(jobs.Options{DB: db, Bus: bus})
 	srv.Jobs(q, library.NewCatalog(db), flows, bus)
@@ -106,7 +106,20 @@ func run(dataDir, listen string) error {
 		close(workerDone)
 	}()
 
-	srv.Ready(access, bus)
+	// Each job a scan enqueues wakes the worker, so the first encode starts before the scan has
+	// finished; the same Wake is what the api's setup uses after the first scan.
+	catalog := library.NewCatalog(db)
+	srv.Ready(api.Deps{
+		Access:    access,
+		Events:    bus,
+		DB:        db,
+		Workflows: flows,
+		Catalog:   catalog,
+		Jobs:      q,
+		Scanner:   newScanner(catalog, flows, q, bus, wk.Wake),
+		Wake:      wk.Wake,
+		DiskFree:  fsx.FreeBytes,
+	})
 	fmt.Fprintln(os.Stderr, "syp serving on", ln.Addr())
 
 	var runErr error
@@ -162,5 +175,61 @@ func workerEnv(flows *flow.Store, bus *events.Bus) flow.Env {
 			return r.Flow, err
 		},
 		Bus: bus, Now: time.Now, Sleep: time.Sleep, AppVersion: version,
+	}
+}
+
+// newScanner is the library scanner wired to the real world: ffprobe for the probe, the library's
+// workflow to decide, and the job queue to enqueue what should convert. A file is queued only when
+// the workflow has work for it; the reasons it is left alone are stored on the file's row. Each
+// queued job wakes the worker, so it starts before the scan has finished.
+func newScanner(catalog *library.Catalog, flows *flow.Store, queue *jobs.Queue, bus *events.Bus, wake func()) *library.Scanner {
+	return &library.Scanner{
+		Catalog: catalog,
+		Bus:     bus,
+		Prober:  media.MediaFuncs{ProbeFunc: media.Probe},
+		Decide: func(f library.File, info media.Info) (bool, string) {
+			ctx := context.Background()
+			lib, err := catalog.GetLibrary(ctx, f.LibraryID)
+			if err != nil || lib.WorkflowID == nil {
+				return false, "needs_workflow"
+			}
+			workflow, err := flows.Get(ctx, *lib.WorkflowID)
+			if err != nil || workflow.CurrentRev == 0 {
+				return false, "workflow_missing"
+			}
+			rev, err := flows.Revision(ctx, *lib.WorkflowID, workflow.CurrentRev)
+			if err != nil {
+				return false, "workflow_missing"
+			}
+			decisions, _, err := flow.PlanFile(rev, info, flow.Env{})
+			if err != nil {
+				return false, "plan_failed"
+			}
+			if !decisions.Work() {
+				return false, "nothing_to_do"
+			}
+			return true, ""
+		},
+		Enqueue: func(ctx context.Context, lib library.Library, f library.File) error {
+			if lib.WorkflowID == nil {
+				return errors.New("the library has no workflow")
+			}
+			fileID, err := catalog.SaveFile(ctx, f, library.Queued, "", f.Probe)
+			if err != nil {
+				return err
+			}
+			path := filepath.Join(lib.Path, filepath.FromSlash(f.RelPath))
+			_, open, err := queue.Enqueue(ctx, fileID, lib.ID, *lib.WorkflowID, path, "scan")
+			if err != nil {
+				return err
+			}
+			if open {
+				return library.ErrAlreadyQueued
+			}
+			if wake != nil {
+				wake()
+			}
+			return nil
+		},
 	}
 }

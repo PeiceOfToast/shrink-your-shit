@@ -198,7 +198,7 @@ func (s *Scanner) scan(ctx context.Context, lib Library) (ScanResult, error) {
 			}
 			if f.abs != "" {
 				out := File{LibraryID: lib.ID, RelPath: f.rel, Size: f.size, MTime: f.mtime, FileID: f.fileID}
-				if err := s.saveFile(ctx, lib, out, Skipped, f.refuse, nil); err != nil {
+				if err := s.saveFile(ctx, out, Skipped, f.refuse, nil); err != nil {
 					return res, err
 				}
 			}
@@ -427,7 +427,7 @@ func (s *Scanner) decide(ctx context.Context, lib Library, files []scanFile, res
 				reason = skipVanished
 			}
 			res.skip(reason)
-			if err := s.saveFile(ctx, lib, out, Skipped, reason, nil); err != nil {
+			if err := s.saveFile(ctx, out, Skipped, reason, nil); err != nil {
 				return err
 			}
 			if reason != skipVanished {
@@ -448,12 +448,12 @@ func (s *Scanner) decide(ctx context.Context, lib Library, files []scanFile, res
 				reason = "skipped"
 			}
 			res.skip(reason)
-			if err := s.saveFile(ctx, lib, out, Skipped, reason, &tracks); err != nil {
+			if err := s.saveFile(ctx, out, Skipped, reason, &tracks); err != nil {
 				return err
 			}
 		} else if err := s.Enqueue(ctx, lib, out); err != nil && !errors.Is(err, ErrAlreadyQueued) {
 			res.skip(skipEnqueue)
-			if err := s.saveFile(ctx, lib, out, Skipped, skipEnqueue, &tracks); err != nil {
+			if err := s.saveFile(ctx, out, Skipped, skipEnqueue, &tracks); err != nil {
 				return err
 			}
 			s.event(events.Event{
@@ -462,7 +462,7 @@ func (s *Scanner) decide(ctx context.Context, lib Library, files []scanFile, res
 			})
 		} else {
 			res.Queued++ // ErrAlreadyQueued is a success: L-SCAN-5 allows one open job per file
-			if err := s.saveFile(ctx, lib, out, Queued, "", &tracks); err != nil {
+			if err := s.saveFile(ctx, out, Queued, "", &tracks); err != nil {
 				return err
 			}
 		}
@@ -494,42 +494,14 @@ func (s *Scanner) renameRow(ctx context.Context, id int64, rel string) error {
 // saveStillChanging records a file whose two looks did not agree.
 func (s *Scanner) saveStillChanging(ctx context.Context, lib Library, f scanFile, reason string) error {
 	out := File{LibraryID: lib.ID, RelPath: f.rel, Size: f.size, MTime: f.mtime, FileID: f.fileID}
-	return s.saveFile(ctx, lib, out, StillChanging, reason, nil)
+	return s.saveFile(ctx, out, StillChanging, reason, nil)
 }
 
-// saveFile upserts one catalog row. A changed file's old probe is cleared: it described a version
-// that is no longer there.
-func (s *Scanner) saveFile(ctx context.Context, lib Library, f File, state State, reason string, probe *media.Tracks) error {
-	var probeJSON any
-	if probe != nil {
-		data, err := json.Marshal(probe)
-		if err != nil {
-			return fmt.Errorf("keep the probe of %s: %w", f.RelPath, err)
-		}
-		probeJSON = string(data)
-	}
-	settle, err := json.Marshal(map[string]any{
-		"size": f.Size, "mtime": f.MTime.UTC().UnixNano(), "seenAt": s.now().UTC().UnixMilli(),
-	})
-	if err != nil {
-		return err
-	}
-	err = s.Catalog.db.Tx(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx,
-			`INSERT INTO files(library_id, rel_path, size, mtime, file_id, settle, probe, state, skip_reason)
-			 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
-			 ON CONFLICT(library_id, rel_path) DO UPDATE SET
-			   size = excluded.size, mtime = excluded.mtime, file_id = excluded.file_id,
-			   settle = excluded.settle, probe = excluded.probe,
-			   state = excluded.state, skip_reason = excluded.skip_reason`,
-			lib.ID, f.RelPath, f.Size, f.MTime.UTC().UnixNano(), f.FileID,
-			string(settle), probeJSON, string(state), reason)
-		return err
-	})
-	if err != nil {
-		return fmt.Errorf("save %s: %w", f.RelPath, err)
-	}
-	return nil
+// saveFile upserts one catalog row through the catalog, which the job wiring also calls to get a
+// file's id before it enqueues it.
+func (s *Scanner) saveFile(ctx context.Context, f File, state State, reason string, probe *media.Tracks) error {
+	_, err := s.Catalog.SaveFile(ctx, f, state, reason, probe)
+	return err
 }
 
 // saveScan stores the counts and arms the next scan unless the library is paused. A library removed

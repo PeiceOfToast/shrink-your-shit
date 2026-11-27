@@ -406,6 +406,13 @@ export type Setup = { needsAccount: boolean; starting: boolean };
 export type SetupDone = { scanStarted: boolean };
 export type Health = { ok: boolean; starting: boolean; version?: string };
 
+// The first run's own reads: a starting workflow (page 05), the answers the guided page begins from,
+// and the languages the app offers. ScanAllDone is POST /libraries/scan's answer.
+export type Starter = { id: string; kind: string; name: string; line: string; icon: string; guided: boolean };
+export type StarterDetail = Starter & { answers: Record<string, unknown> };
+export type Language = { code: string; name: string };
+export type ScanAllDone = { ok: true };
+
 // Settings > Trash: an original kept after a conversion.
 export interface TrashItem {
   id: string;

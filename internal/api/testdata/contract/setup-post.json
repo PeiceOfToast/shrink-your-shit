@@ -1,6 +1,6 @@
 {
   "body": {
-    "scanStarted": false
+    "scanStarted": true
   },
   "method": "POST",
   "path": "/api/v2/setup",

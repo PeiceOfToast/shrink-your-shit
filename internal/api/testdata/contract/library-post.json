@@ -1,0 +1,21 @@
+{
+  "body": {
+    "files": 0,
+    "id": "2",
+    "lastScan": null,
+    "name": "More",
+    "nextScanAt": "2026-11-27T04:00:00Z",
+    "path": "$DIR/more",
+    "paused": false,
+    "savedBytes": 0,
+    "savedPct": 0,
+    "status": "needs_workflow",
+    "waiting": 0,
+    "watch": "daily",
+    "workflow": null
+  },
+  "method": "POST",
+  "path": "/api/v2/libraries",
+  "status": 201,
+  "type": "Library"
+}
