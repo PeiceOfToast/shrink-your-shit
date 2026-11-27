@@ -3,6 +3,7 @@
 package flow
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -58,7 +59,7 @@ func TestSidecarLinkedButStagedNameLeftCountsAsPlaced(t *testing.T) {
 		}
 		return &fsxErrNotRemoved{}
 	}
-	t.Cleanup(func() { renameSidecar = fsx.RenameNoReplace })
+	t.Cleanup(func() { renameSidecar = defaultRenameSidecar })
 
 	store := &listStore{}
 	e := &engine{in: RunInput{JobID: 7}, env: Env{Sidecars: store}}
@@ -110,7 +111,7 @@ func TestSidecarNameTakenAtTheRenameStopsWithoutOverwriting(t *testing.T) {
 		}
 		return fsx.RenameNoReplace(oldpath, newpath)
 	}
-	t.Cleanup(func() { renameSidecar = fsx.RenameNoReplace })
+	t.Cleanup(func() { renameSidecar = defaultRenameSidecar })
 
 	store := &listStore{}
 	e := &engine{in: RunInput{JobID: 7}, env: Env{Sidecars: store}}
@@ -130,6 +131,32 @@ func TestSidecarNameTakenAtTheRenameStopsWithoutOverwriting(t *testing.T) {
 	}
 	if len(store.recs) != 0 {
 		t.Errorf("records left for files never placed: %+v", store.recs)
+	}
+}
+
+// defaultRenameSidecar is renameSidecar as the test binary starts, before any test swaps the hook.
+var defaultRenameSidecar = renameSidecar
+
+// TestSidecarDefaultRenameRefusesAnExistingTarget pins the production hook: the race test swaps
+// renameSidecar, and an os.Rename default would pass it while silently overwriting a file. The
+// value is captured at start so another test's cleanup cannot put the right hook back first.
+func TestSidecarDefaultRenameRefusesAnExistingTarget(t *testing.T) {
+	dir := t.TempDir()
+	from, to := filepath.Join(dir, "from.srt"), filepath.Join(dir, "to.srt")
+	if err := os.WriteFile(from, []byte("ours"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(to, []byte("someone else's"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := defaultRenameSidecar(from, to); !errors.Is(err, os.ErrExist) {
+		t.Fatalf("err = %v, want a refusal that matches os.ErrExist", err)
+	}
+	if b, err := os.ReadFile(to); err != nil || string(b) != "someone else's" {
+		t.Errorf("the target was overwritten: %q %v", b, err)
+	}
+	if b, err := os.ReadFile(from); err != nil || string(b) != "ours" {
+		t.Errorf("the file to move was touched: %q %v", b, err)
 	}
 }
 

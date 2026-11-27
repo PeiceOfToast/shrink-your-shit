@@ -103,6 +103,14 @@ func TestSubtitlesMyLanguages(t *testing.T) {
 		t.Errorf("decision = %+v, want two subtitle drops", d)
 	}
 
+	// The subtitle list wins when both lists are set (L-AUD-20's precedence).
+	set.SubtitleLanguages = []string{"eng"}
+	set.Languages = []string{"ger"}
+	_, p = planSubs(t, set, info)
+	if got := dropIndexes(p); !sameInts(got, []int{4, 6}) {
+		t.Errorf("drops = %v, want the subtitle list to decide, not the audio's", got)
+	}
+
 	// The audio's languages are used when the subtitle list is empty (L-AUD-20's precedence).
 	set.SubtitleLanguages = nil
 	set.Languages = []string{"ger"}

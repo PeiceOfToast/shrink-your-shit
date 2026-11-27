@@ -92,8 +92,9 @@ func TestSubtitlesMP4LeftOutNoteIsSingular(t *testing.T) {
 }
 
 // TestSubtitlesWebMConvertsTextAndLeavesPicturesOut is L-AUD-28 for WebM: webvtt stays, every
-// other text form becomes webvtt, a kind it does not know is copied, and picture subtitles are
-// left out with the count.
+// other text form becomes webvtt, and anything that cannot become WebVTT (picture subtitles, a
+// kind it does not know such as TTML) is left out with the count. Copying one would make the
+// muxer refuse the whole file.
 func TestSubtitlesWebMConvertsTextAndLeavesPicturesOut(t *testing.T) {
 	info := subtitlesInfo(
 		media.SubtitleTrack{Index: 2, Codec: "webvtt"},
@@ -109,8 +110,8 @@ func TestSubtitlesWebMConvertsTextAndLeavesPicturesOut(t *testing.T) {
 	plan.Output = "out.webm"
 
 	res := buildOK(t, plan, info, cpuRung(CodecAV1))
-	if got := strings.Join(mapped(res.Argv), " "); got != "0:0 0:1 0:2 0:3 0:4 0:7" {
-		t.Errorf("maps = %q, want webvtt, the converted text and the unknown kind", got)
+	if got := strings.Join(mapped(res.Argv), " "); got != "0:0 0:1 0:2 0:3 0:4" {
+		t.Errorf("maps = %q, want only the text subtitles, WebVTT or converted", got)
 	}
 	if hasFlag(res.Argv, "-c:s:0") {
 		t.Errorf("argv = %v, want a webvtt subtitle copied", res.Argv)
@@ -120,8 +121,38 @@ func TestSubtitlesWebMConvertsTextAndLeavesPicturesOut(t *testing.T) {
 	}
 	wantNotes(t, res,
 		"Styled subtitles (ASS) became plain text: WebM can't keep their styling.",
-		"2 picture subtitles were left out: WebM can't hold them.",
+		"3 subtitles were left out: WebM can't hold them.",
 	)
+}
+
+// TestSubtitlesWebMTTMLIsLeftOut: a TTML subtitle is a kind this program does not convert, and
+// WebM cannot copy it, so it is left out and the note says "subtitles", not "picture subtitles".
+func TestSubtitlesWebMTTMLIsLeftOut(t *testing.T) {
+	info := subtitlesInfo(media.SubtitleTrack{Index: 2, Codec: "ttml"})
+	info.Audio = []media.AudioTrack{{Index: 1, Codec: "opus", Channels: 2}}
+	plan := basePlan(CodecAV1)
+	plan.Container = ContainerWebM
+	plan.Output = "out.webm"
+	res := buildOK(t, plan, info, cpuRung(CodecAV1))
+	if got := strings.Join(mapped(res.Argv), " "); got != "0:0 0:1" {
+		t.Errorf("maps = %q, want the TTML subtitle left out", got)
+	}
+	wantNotes(t, res, "1 subtitle was left out: WebM can't hold it.")
+}
+
+// TestSubtitlesWebMPicturesOnlyAreCalledPictures: when every subtitle left out is a picture, the
+// note says so.
+func TestSubtitlesWebMPicturesOnlyAreCalledPictures(t *testing.T) {
+	info := subtitlesInfo(
+		media.SubtitleTrack{Index: 2, Codec: "hdmv_pgs_subtitle"},
+		media.SubtitleTrack{Index: 3, Codec: "dvd_subtitle"},
+	)
+	info.Audio = []media.AudioTrack{{Index: 1, Codec: "opus", Channels: 2}}
+	plan := basePlan(CodecAV1)
+	plan.Container = ContainerWebM
+	plan.Output = "out.webm"
+	res := buildOK(t, plan, info, cpuRung(CodecAV1))
+	wantNotes(t, res, "2 picture subtitles were left out: WebM can't hold them.")
 }
 
 // TestSubtitlesDroppedByThePlanSayNothing: a subtitle the person chose to drop needs no note.

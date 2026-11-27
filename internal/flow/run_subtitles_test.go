@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/PeiceOfToast/shrink-your-shit/internal/events"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/flow"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/media"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/media/fake"
@@ -194,6 +195,36 @@ func TestRunSRTLateCollisionLeavesNoRecord(t *testing.T) {
 	}
 }
 
+// TestRunSRTSidecarsStayWhenTheSourceIsLeftBehind: Place's link fallback puts the new file in place
+// and reports ErrSourceLeftBehind. That is a success, so the .srt files stay beside it and the job
+// keeps their names; only a place that did not happen takes them back.
+func TestRunSRTSidecarsStayWhenTheSourceIsLeftBehind(t *testing.T) {
+	root, src, info, rev := srtRun(t)
+	out := filepath.Join(root, "clip-shrunk.mkv")
+	m := &srtWriting{Media: &fake.Media{Probes: map[string]media.Info{src: info}}}
+	sf := &fakeSafety{verify: safety.Verdict{OK: true}, placeLeftBehind: true}
+	journal := &fakeJournal{}
+	env := newEnv(m, sf, &recorder{}, rev, nil)
+	env.Sidecars = journal
+	res := flow.Run(context.Background(), runInput(t, root, src), env)
+
+	if res.Outcome != flow.OutcomeSmaller || res.Reason != "source.not_removed" || res.OutputPath != out {
+		t.Fatalf("result = %+v, want the new file placed with its source left behind", res)
+	}
+	if _, err := os.Stat(out); err != nil {
+		t.Errorf("the new file is not in place: %v", err)
+	}
+	for _, name := range []string{"clip-shrunk.eng.srt", "clip-shrunk.eng.2.srt"} {
+		if _, err := os.Stat(filepath.Join(root, name)); err != nil {
+			t.Errorf("%s must stay: the new file is in place", name)
+		}
+	}
+	if len(journal.recs) != 0 || len(journal.finished) != 1 || len(journal.dropped) != 0 {
+		t.Errorf("records = %+v finished = %v dropped = %v, want the job to keep the names",
+			journal.recs, journal.finished, journal.dropped)
+	}
+}
+
 // TestRunSRTSidecarsGoWithAFailedPlace: when the new file cannot be placed, the .srt files this run
 // put there go again, and so do their records.
 func TestRunSRTSidecarsGoWithAFailedPlace(t *testing.T) {
@@ -293,6 +324,42 @@ func TestRunSRTNamesFollowTheFilesRealName(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(earlier); string(b) != "an earlier output" {
 		t.Errorf("the file that was there changed: %q", b)
+	}
+}
+
+// TestRunSRTLateNameRaceWarnsAndKeepsTheSubtitlesOnTheChosenName: a file takes the new file's name
+// between FreeName and Place, so the new file becomes "name (2)". The job warns, and the .srt
+// files keep the base they were named for (the name chosen before the race).
+func TestRunSRTLateNameRaceWarnsAndKeepsTheSubtitlesOnTheChosenName(t *testing.T) {
+	root, src, info, rev := srtRun(t)
+	bumped := filepath.Join(root, "clip-shrunk (2).mkv")
+	m := &srtWriting{Media: &fake.Media{Probes: map[string]media.Info{src: info}}}
+	sf := &fakeSafety{verify: safety.Verdict{OK: true}, placeAs: bumped}
+	journal := &fakeJournal{}
+	bus := &recorder{}
+	env := newEnv(m, sf, bus, rev, nil)
+	env.Sidecars = journal
+	res := flow.Run(context.Background(), runInput(t, root, src), env)
+
+	if res.Outcome != flow.OutcomeSmaller || res.OutputPath != bumped {
+		t.Fatalf("result = %+v, want the new file at %s", res, bumped)
+	}
+	for _, name := range []string{"clip-shrunk.eng.srt", "clip-shrunk.eng.2.srt"} {
+		if _, err := os.Stat(filepath.Join(root, name)); err != nil {
+			t.Errorf("%s: %v, want the .srt on the name chosen before the race", name, err)
+		}
+	}
+	warned := false
+	for _, e := range bus.all() {
+		if e.Kind == events.KindWarning && strings.Contains(e.Message, "appeared meanwhile") {
+			warned = true
+		}
+	}
+	if !warned {
+		t.Errorf("no warning that a file with the new file's name appeared meanwhile: %+v", bus.all())
+	}
+	if len(journal.finished) != 1 || len(journal.dropped) != 0 {
+		t.Errorf("finished = %v dropped = %v, want the names kept", journal.finished, journal.dropped)
 	}
 }
 

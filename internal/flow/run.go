@@ -308,11 +308,14 @@ func (e *engine) run(ctx context.Context) (res Result) {
 	}
 	final, err := e.env.Safety.Place(ctx, staged, plan.Output)
 	if err != nil {
-		e.removeSidecars(sidecars) // the new file was not placed: our .srt files go again
 		if ctx.Err() != nil {
+			// Whether the new file went in is not known: the .srt records stay, and the next start
+			// removes the ones whose new file is not in place (RecoverSidecars).
 			return cancelled()
 		}
 		if errors.Is(err, safety.ErrSourceLeftBehind) {
+			// The new file is in place, so its subtitle files belong beside it and the job keeps
+			// their names.
 			e.move(staged.Path, final)
 			placed = true
 			e.finishSidecars()
@@ -322,6 +325,7 @@ func (e *engine) run(ctx context.Context) (res Result) {
 				Message: "The new file is in place, but the original could not be removed.", FailedStep: "save",
 			}
 		}
+		e.removeSidecars(sidecars) // the new file was not placed: our .srt files go again
 		return fatal("save.failed", err.Error(), "save", "Check the destination folder.")
 	}
 	placed = true

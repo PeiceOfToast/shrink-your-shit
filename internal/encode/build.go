@@ -189,8 +189,9 @@ func keptTracks(plan Plan, info media.Info) (audioKept []audioOut, subtitlesKept
 //   - MKV holds every subtitle, so each is copied, except mov_text, which becomes SRT text.
 //   - MP4 holds mov_text and dvd_subtitle as they are, and turns the text forms it cannot hold
 //     into mov_text (styling is lost); anything else is left out.
-//   - WebM holds webvtt, turns the other text forms into webvtt, copies a kind it does not know,
-//     and leaves picture subtitles out.
+//   - WebM holds WebVTT only: webvtt is copied, the other text forms become webvtt, and every
+//     other kind (picture subtitles, an unknown one such as TTML) is left out, since the muxer
+//     refuses the whole file if it is copied.
 //
 // The notes say what the person cannot see in the new file: styling that went, and how many
 // subtitles were left out. Extractions are not part of the new file at all (L-AUD-22's trap): only
@@ -201,7 +202,7 @@ func subtitleOutputs(plan Plan, info media.Info) (kept []subtitleOut, extracts [
 		return nil, nil, nil, err
 	}
 	styled := 0
-	leftOut := 0
+	leftOut, pictures := 0, 0
 	for _, s := range info.Subtitles {
 		switch actions[s.Index] {
 		case StreamDrop:
@@ -213,6 +214,9 @@ func subtitleOutputs(plan Plan, info media.Info) (kept []subtitleOut, extracts [
 		codec, fits, lostStyle := subtitleWrite(plan.Container, s)
 		if !fits {
 			leftOut++
+			if s.Kind() == media.SubtitleBitmap {
+				pictures++
+			}
 			continue
 		}
 		if lostStyle {
@@ -228,7 +232,7 @@ func subtitleOutputs(plan Plan, info media.Info) (kept []subtitleOut, extracts [
 		}
 	}
 	if leftOut > 0 {
-		notes = append(notes, leftOutNote(plan.Container, leftOut))
+		notes = append(notes, leftOutNote(plan.Container, leftOut, pictures))
 	}
 	return kept, extracts, notes, nil
 }
@@ -251,17 +255,15 @@ func subtitleWrite(container Container, s media.SubtitleTrack) (codec string, fi
 		}
 		return "", false, false
 	case ContainerWebM:
-		switch s.Kind() {
-		case media.SubtitleText:
+		// The WebM muxer takes WebVTT subtitles and nothing else: copying any other codec makes
+		// ffmpeg fail to write the file, so the track is left out instead (L-AUD-27).
+		if s.Kind() == media.SubtitleText {
 			if s.Codec == "webvtt" {
 				return "", true, false
 			}
 			return "webvtt", true, s.Codec == "ass" || s.Codec == "ssa"
-		case media.SubtitleBitmap:
-			return "", false, false
 		}
-		// A kind this program does not know is copied, not guessed at (L-AUD-21).
-		return "", true, false
+		return "", false, false
 	}
 	return "", true, false
 }
@@ -272,12 +274,17 @@ const (
 	styledSubsWebMNote = "Styled subtitles (ASS) became plain text: WebM can't keep their styling."
 )
 
-// leftOutNote says how many subtitles the file type could not hold (page 07, Save).
-func leftOutNote(container Container, n int) string {
+// leftOutNote says how many subtitles the file type could not hold (page 07, Save). pictures is
+// how many of the n left out are picture subtitles: WebM only calls them that when they all are,
+// since it also leaves out kinds it does not know (a TTML track).
+func leftOutNote(container Container, n, pictures int) string {
 	name := "MP4"
 	what := "subtitle"
 	if container == ContainerWebM {
-		name, what = "WebM", "picture subtitle"
+		name = "WebM"
+		if pictures == n {
+			what = "picture subtitle"
+		}
 	}
 	if n == 1 {
 		return fmt.Sprintf("1 %s was left out: %s can't hold it.", what, name)
