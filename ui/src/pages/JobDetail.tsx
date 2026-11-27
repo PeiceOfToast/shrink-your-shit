@@ -14,7 +14,7 @@ import { Icon } from "../ui/Icon.tsx";
 import { useKeys } from "../ui/useKeys.ts";
 import { Link, navigate, useLocation } from "../router.tsx";
 import { PILL } from "./Jobs.tsx";
-import { LEVEL_LABEL, copyText, saveText } from "./logParts.ts";
+import { LEVEL_LABEL, copyText, logsFromEvents, saveText } from "./logParts.ts";
 
 // The job panel over the Jobs list (page 03). Opens at /jobs/:id; /jobs/:id/log opens the Log tab.
 type Tab = "summary" | "log" | "steps" | "before" | "history";
@@ -73,7 +73,13 @@ export function JobDetail({ id, initialTab }: { id: string; initialTab: "summary
   const { query } = useLocation();
   const listState = query.get("state");
   const filterQs = listState ? `?state=${listState}` : "";
-  const detail = useApi(() => api.getJob(id), [id]);
+  // With the events group real, the log lines come from GET /jobs/{id}/events and the step blocks are built here.
+  // One loader, so a reload (and the live wire) fetches both.
+  const detail = useApi(async () => {
+    const job = await api.getJob(id);
+    if (!isReal("events")) return job;
+    return { ...job, logs: logsFromEvents(job.steps, await api.getJobEvents(id)) };
+  }, [id]);
   const nb = useApi(() => api.getJobNeighbours(id, listState ?? "all"), [id, listState]);
   // The tab the reader picked stays put while ‹ › walks the list. Until they pick one, failed and running jobs open on Log.
   const [picked, setPicked] = useState<Tab | null>(null);
