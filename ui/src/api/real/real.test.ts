@@ -5,7 +5,7 @@ import { request } from "../http.ts";
 import { ApiError } from "../errors.ts";
 import { getJobNeighbours, getJobs } from "./jobs.ts";
 import { getLibraries, createLibrary } from "./libraries.ts";
-import { getOverview } from "./overview.ts";
+import { getAttention, getOverview } from "./overview.ts";
 
 type Call = { url: string; init: RequestInit };
 const realFetch = globalThis.fetch;
@@ -53,6 +53,12 @@ test("neighbours take the state as a query value, and the overview is its own ro
   assert.equal(calls[0].url, "/api/v2/jobs/j-1/neighbours?state=done");
   stub(200, "{}");
   await getOverview();
+});
+
+test("needs attention is its own route, so the Dashboard never shows the mock's rows beside real data", async () => {
+  const calls = stub(200, "[]");
+  assert.deepEqual(await getAttention(), []);
+  assert.equal(calls[0].url, "/api/v2/attention");
 });
 
 test("an error envelope becomes an ApiError with its code, message and field", async () => {
