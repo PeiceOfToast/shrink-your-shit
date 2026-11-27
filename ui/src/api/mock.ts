@@ -7,6 +7,7 @@ import { getForcedState, respond } from "./mockState.ts";
 import { currentLibraries, reconnectShare } from "./mockLibraries.ts";
 import { setAllWorkers, workerName } from "./mockWorkers.ts";
 import { healthFailing } from "./mockSettings.ts";
+import { getSeenAt, getSeenSeq, newErrorCount } from "./mockLog.ts";
 
 // Mock implementation of the API. Route-named functions; shapes come from the page specs.
 // The dev state switcher sets a forced state (mockState.ts); pages see it only through these calls.
@@ -16,16 +17,20 @@ export * from "./mockLibraries.ts";
 export * from "./mockWorkflows.ts";
 export * from "./mockWorkers.ts";
 export * from "./mockSettings.ts";
+export * from "./mockLog.ts";
 
 // The status line reads this even when a page's own call is forced to fail, so it keeps its counts.
 export function getSummary(): Promise<Summary> {
   return respond(
     () => {
       const s = getForcedState();
-      // Error and running both show new errors, so the status line's "N new errors" link is reachable.
+      // New errors are error lines the System log hasn't been opened past yet (mockLog.ts).
       // Fresh install: no job has finished and no library is watched yet.
       const fresh = s === "fresh" ? { lastDoneAt: null, nextScanAt: null } : {};
-      return { ...SUMMARY, ...fresh, newErrors: s === "error" || s === "running" ? 2 : 0, healthFailing: healthFailing() };
+      // A fresh install has no log lines yet, so no new errors.
+      const none = s === "empty" || s === "fresh";
+      const seenAt = none ? null : getSeenAt();
+      return { ...SUMMARY, ...fresh, newErrors: none ? 0 : newErrorCount(), seenSeq: getSeenSeq(), seenAt, healthFailing: healthFailing() };
     },
     { failInError: false },
   );

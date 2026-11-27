@@ -285,7 +285,7 @@ export function LibraryPanel({ id, onChange }: { id: string; onChange?: () => vo
               </details>
 
               <p className="hint" style={{ margin: 0 }}>
-                <Link to={`/system-log?source=scanner&library=${id}`}>Show its lines in the system log</Link>
+                <Link to={`/settings/log?source=Scanner&library=${id}`}>Show its lines in the system log</Link>
               </p>
 
               <div className="danger">

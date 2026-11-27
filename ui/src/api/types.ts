@@ -172,6 +172,10 @@ export interface Summary {
   failed24h: number;
   workersOffline: number;
   newErrors: number;
+  // The last error line the System log was opened past (0 on a fresh install). newErrors counts errors above it.
+  seenSeq: number;
+  // RFC 3339 time of the line seenSeq names; null while seenSeq is 0 (and on a fresh install).
+  seenAt: string | null;
   healthFailing: boolean;
 }
 
@@ -536,4 +540,59 @@ export interface HealthCheck {
 export interface Doctor {
   ranAt: string;
   checks: HealthCheck[];
+}
+
+// System log (page 12 "Data and API"). Items are the app-wide events of system/logging.md §3, with the kinds of §6.1.
+export type LogLevel = "debug" | "info" | "warn" | "error";
+export type LogKind =
+  | "run_start" | "run_end" | "step_start" | "step_end" | "decision" | "command" | "probe" | "progress"
+  | "size" | "variable" | "move" | "warning" | "error" | "note"
+  | "queued" | "picked" | "retry" | "requeued" | "cancelled" | "notified" | "original";
+
+export interface LogEvent {
+  seq: number;
+  // RFC 3339 UTC, with milliseconds.
+  ts: string;
+  level: LogLevel;
+  kind: LogKind;
+  // Where it came from: Scanner, a worker by name, Web, Updates, Notifications, Health check.
+  source: string;
+  message: string;
+  jobId: string | null;
+  libraryId: string | null;
+  workerId: string | null;
+  // On an error or a failed run: what happens now or what the person can do.
+  nextAction?: string;
+  // Repeats folded by the server; count is every time this line happened.
+  repeat?: { count: number; firstAt: string; lastAt: string };
+}
+
+export interface LogCounts {
+  info: number;
+  warn: number;
+  error: number;
+}
+
+export interface LogPage {
+  // Oldest first; the newest line is last.
+  items: LogEvent[];
+  counts: LogCounts;
+}
+
+export interface LogParams {
+  level?: "info" | "warn" | "error";
+  source?: string;
+  library?: string;
+  worker?: string;
+  // RFC 3339 UTC.
+  from?: string;
+  to?: string;
+  q?: string;
+  // Returns the lines before this seq.
+  before?: number;
+  limit?: number;
+  // Shows debug lines.
+  detail?: boolean;
+  // Only lines with a seq above this.
+  since?: number;
 }

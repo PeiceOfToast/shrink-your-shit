@@ -7,4 +7,5 @@ export { setForcedState, getForcedState, onForcedStateChange } from "./mock.ts";
 export type * from "./types.ts";
 export { LOG_CHOICES } from "./mockSettings.ts";
 export { ApiError } from "./errors.ts";
+export { onSummaryChanged } from "./summaryBus.ts";
 export { formatCount, formatGB, formatBytes, formatPct } from "./format.ts";
