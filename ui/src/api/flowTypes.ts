@@ -53,6 +53,9 @@ export interface GuideField {
   // Rare settings: the guided page puts them under "More".
   more?: boolean;
   choices?: GuideChoice[];
+  // false greys the whole field with why until the app can act on it (the audio languages until item 7).
+  available?: boolean;
+  why?: string;
 }
 
 export interface GuidePart {

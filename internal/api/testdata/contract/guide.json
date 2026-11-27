@@ -15,7 +15,7 @@
       },
       {
         "always": false,
-        "available": true,
+        "available": false,
         "id": "keep_my_languages",
         "label": "Keep only my languages",
         "off": {
@@ -23,7 +23,8 @@
         },
         "on": {
           "allLanguages": false
-        }
+        },
+        "why": "Converting audio is not built yet; Copy is the only choice for now."
       },
       {
         "always": false,
@@ -206,9 +207,11 @@
             "type": "choice"
           },
           {
+            "available": false,
             "key": "languages",
             "label": "Keep these languages",
-            "type": "languages"
+            "type": "languages",
+            "why": "Converting audio is not built yet; Copy is the only choice for now."
           }
         ],
         "id": "audio",

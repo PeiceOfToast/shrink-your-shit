@@ -396,11 +396,13 @@ function FieldRow({ field, value, answers, languages, disabled, onChange }: { fi
   if (field.type === "languages") {
     const list = (value as string[] | undefined) ?? [];
     const toggle = (code: string) => onChange(list.includes(code) ? list.filter((c) => c !== code) : [...list, code]);
+    // A field the app cannot act on yet is greyed with its reason, the same as a greyed choice.
+    const greyed = field.available === false;
     return (
-      <Row label={field.label} full hint={list.length === 0 ? "None picked keeps every language." : undefined}>
-        <div className="wf-togs" role="group" aria-label={field.label}>
+      <Row label={field.label} full hint={greyed ? field.why : list.length === 0 ? "None picked keeps every language." : undefined}>
+        <div className="wf-togs" role="group" aria-label={field.label} aria-disabled={greyed || undefined}>
           {languages.map((code) => (
-            <button key={code} type="button" aria-pressed={list.includes(code)} onClick={() => toggle(code)}>
+            <button key={code} type="button" aria-pressed={list.includes(code)} title={greyed ? field.why : undefined} disabled={greyed} onClick={() => toggle(code)}>
               {languageName(code)}
             </button>
           ))}

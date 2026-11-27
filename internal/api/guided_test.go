@@ -3,6 +3,7 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -147,11 +148,11 @@ func TestGuidedAnswersRoutes(t *testing.T) {
 	}
 }
 
-// A guided save must not silently undo an editor save that came after the guide opened (lead,
-// 11-27 20:16Z). An editor draft the guide cannot say refuses the save with 409 changed_since and
-// its own sentence, whether or not the page sent baseRev; a baseRev that has moved on refuses the
-// editor route's way.
-func TestAGuidedSaveCannotUndoAnEditorDraft(t *testing.T) {
+// A guided save never overwrites an editor save silently when the page sends the revision it read:
+// a stale baseRev is refused with the draft's current rev. With the current revision the guide's
+// flow becomes the draft again, and its answers come back, even after an editor saved a flow the
+// guide cannot say (lead, 11-27 20:31Z: refusing that save blocked every stage 1 install).
+func TestAGuidedSaveOverAnEditorDraft(t *testing.T) {
 	e := newEnv(t, true)
 	cookie := e.setup()
 
@@ -207,28 +208,75 @@ func TestAGuidedSaveCannotUndoAnEditorDraft(t *testing.T) {
 		t.Fatalf("editor save = %d %s; want 200", rec.Code, rec.Body)
 	}
 
-	// The guided page's next save is refused, with or without the baseRev the page may not send
-	// yet, and it says an editor changed the workflow rather than that it was saved elsewhere.
-	for _, body := range []map[string]any{
-		{"answers": guidedBuildable(5)},
-		{"answers": guidedBuildable(5), "baseRev": 1},
-	} {
-		rec = e.do(http.MethodPut, "/api/v2/workflows/1/answers", mustJSON(t, body), write(withSession(cookie)), false)
-		if got := changedSince(t, rec); rec.Code != http.StatusConflict || got.Error.Code != "changed_since" ||
-			got.Rev != 3 || got.Error.Message != changedInEditor {
-			t.Fatalf("guided save over the editor draft = %d %+v; want 409 changed_since at rev 3", rec.Code, got)
-		}
+	// The guided page's save with the revision it read before the editor saved is refused, and the
+	// 409 carries the draft's current revision.
+	rec = e.do(http.MethodPut, "/api/v2/workflows/1/answers",
+		mustJSON(t, map[string]any{"answers": guidedBuildable(5), "baseRev": 1}), write(withSession(cookie)), false)
+	if got := changedSince(t, rec); rec.Code != http.StatusConflict || got.Error.Code != "changed_since" ||
+		got.Rev != 3 {
+		t.Fatalf("guided save over the editor draft = %d %+v; want 409 changed_since at rev 3", rec.Code, got)
 	}
 
-	// Nothing was saved: the editor's flow is still the draft, and it does not claim to fit.
+	// With the current revision the save is allowed: the person chose the guide's flow, so its flow
+	// and answers replace the editor's draft.
+	rec = e.do(http.MethodPut, "/api/v2/workflows/1/answers",
+		mustJSON(t, map[string]any{"answers": guidedBuildable(5), "baseRev": 3}), write(withSession(cookie)), false)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("guided save at the current rev = %d %s; want 200", rec.Code, rec.Body)
+	}
 	var after struct {
 		Flow       flow.Flow `json:"flow"`
 		FitsGuided bool      `json:"fitsGuided"`
 	}
 	get(t, e, cookie, "/api/v2/workflows/1", &after)
-	if after.FitsGuided || apiQualityOf(t, after.Flow) != 3 || string(after.Flow.Steps[1].Settings) != string(audio) {
-		t.Fatalf("workflow after the refused saves = quality %d fits %v audio %s; want the editor's flow",
-			apiQualityOf(t, after.Flow), after.FitsGuided, after.Flow.Steps[1].Settings)
+	if !after.FitsGuided || apiQualityOf(t, after.Flow) != 5 {
+		t.Fatalf("workflow after the guided save = quality %d fits %v; want the guide's flow, fitting",
+			apiQualityOf(t, after.Flow), after.FitsGuided)
+	}
+}
+
+// A stage 1 install wrote workflows without answers. The read computes them from the flow when the
+// guide can say it, so the workflow opens in the guide, and nothing is written back; a guided save
+// without baseRev then goes through.
+func TestAWorkflowWithoutStoredAnswersOpensInTheGuide(t *testing.T) {
+	e := newEnv(t, true)
+	cookie := e.setup()
+
+	// What a stage 1 install left behind on the setup workflow: the flow, no answers.
+	err := e.db.Tx(t.Context(), func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(t.Context(), `UPDATE workflows SET answers = NULL WHERE id = 1`)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("clear the answers: %v", err)
+	}
+
+	var got guideAnswers
+	get(t, e, cookie, "/api/v2/workflows/1/answers", &got)
+	starter, ok := flow.StarterByID("shrink-videos")
+	if !ok {
+		t.Fatal("no shrink-videos starter")
+	}
+	want, fits := flow.ToAnswers(starter.Flow)
+	if !fits || !got.FitsGuided || answersJSON(t, got.Answers) != answersJSON(t, want) {
+		t.Fatalf("answers = %+v; want the flow's own %+v, fitting", got, want)
+	}
+	if row := rowNamed(t, listWorkflowRows(t, e, cookie), "1"); !row.FitsGuided {
+		t.Error("the list says a workflow whose flow fits the guide does not fit it")
+	}
+	var stored sql.NullString
+	if err := e.db.Read().QueryRowContext(t.Context(),
+		`SELECT answers FROM workflows WHERE id = 1`).Scan(&stored); err != nil {
+		t.Fatalf("read the answers column: %v", err)
+	}
+	if stored.Valid {
+		t.Error("the answers read wrote them back; a read stays a read")
+	}
+
+	rec := e.do(http.MethodPut, "/api/v2/workflows/1/answers",
+		mustJSON(t, map[string]any{"answers": guidedBuildable(5)}), write(withSession(cookie)), false)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("guided save without baseRev = %d %s; want 200", rec.Code, rec.Body)
 	}
 }
 
@@ -339,11 +387,21 @@ func TestAFlowTheGuideCannotSayDoesNotFit(t *testing.T) {
 	if answers.FitsGuided || answersJSON(t, answers.Answers) != answersJSON(t, flow.DefaultAnswers()) {
 		t.Errorf("answers read = %+v; want the defaults with fitsGuided false", answers)
 	}
-	// The guide cannot write its own answers over that flow either: the save is the editor's 409.
+	// Saving the guide's answers is then the person's choice (the page sent them to the editor, and
+	// they came back to the guide): the save with no baseRev replaces the draft with the guide's
+	// flow and writes its answers.
 	rec = e.do(http.MethodPut, "/api/v2/workflows/"+made.ID+"/answers",
 		mustJSON(t, map[string]any{"answers": flow.DefaultAnswers()}), write(withSession(cookie)), false)
-	if conflict := changedSince(t, rec); rec.Code != http.StatusConflict ||
-		conflict.Error.Code != "changed_since" || conflict.Error.Message != changedInEditor || conflict.Rev != 1 {
-		t.Errorf("guided save over a flow the guide cannot say = %d %+v; want 409 changed_since", rec.Code, conflict)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("guided save over a flow the guide cannot say = %d %s; want 200", rec.Code, rec.Body)
+	}
+	var after struct {
+		Flow       flow.Flow `json:"flow"`
+		FitsGuided bool      `json:"fitsGuided"`
+	}
+	get(t, e, cookie, "/api/v2/workflows/"+made.ID, &after)
+	if !after.FitsGuided || apiQualityOf(t, after.Flow) != 3 {
+		t.Errorf("after the guided save the workflow = quality %d fits %v; want the guide's flow, fitting",
+			apiQualityOf(t, after.Flow), after.FitsGuided)
 	}
 }

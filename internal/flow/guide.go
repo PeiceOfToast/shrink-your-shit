@@ -45,6 +45,10 @@ type GuideField struct {
 	Type    string        `json:"type"`
 	More    bool          `json:"more,omitempty"`
 	Choices []GuideChoice `json:"choices,omitempty"`
+	// Available false greys the whole field with Why until the app can act on it (item 7 greys the
+	// audio languages). Nil is the ordinary field and is not served.
+	Available *bool  `json:"available,omitempty"`
+	Why       string `json:"why,omitempty"`
 }
 
 // GuideChoice is one answer of a choice field. Available false greys it; Why says why.
@@ -81,12 +85,19 @@ func DefaultAnswers() Answers {
 	}
 }
 
+// unavailable is a field's Available for one the engine cannot act on yet: the JSON carries
+// available false, while an ordinary field leaves the property out.
+func unavailable() *bool {
+	no := false
+	return &no
+}
+
 // Guide is the guided page's table as the API serves it.
 func Guide() GuideDoc {
 	return GuideDoc{
 		Chips: []GuideChip{
 			{ID: "shrink_hevc", Label: "Shrink to HEVC", On: Answers{"format": "hevc"}, Off: Answers{"format": "h264"}, Available: true},
-			{ID: "keep_my_languages", Label: "Keep only my languages", On: Answers{"allLanguages": false}, Off: Answers{"allLanguages": true}, Available: true},
+			{ID: "keep_my_languages", Label: "Keep only my languages", On: Answers{"allLanguages": false}, Off: Answers{"allLanguages": true}, Available: false, Why: AudioWhy},
 			{ID: "use_gpu", Label: "Use the graphics card (QSV)", On: Answers{"useGpu": true}, Off: Answers{"useGpu": false}, Available: true},
 			{ID: "never_worse", Label: "Never make anything worse", Always: true, On: Answers{}, Off: Answers{}, Available: true},
 			{ID: "hdr_kept", Label: "HDR kept, Dolby Vision left alone", Always: true, On: Answers{}, Off: Answers{}, Available: true},
@@ -125,7 +136,7 @@ func Guide() GuideDoc {
 						{Value: "stereo_opus", Label: "Stereo Opus", Available: false, Why: AudioWhy},
 						{Value: "as_is", Label: "Leave as it is", Available: true},
 					}},
-					{Key: "languages", Label: "Keep these languages", Type: "languages"},
+					{Key: "languages", Label: "Keep these languages", Type: "languages", Available: unavailable(), Why: AudioWhy},
 				},
 			},
 			{

@@ -31,6 +31,7 @@ export const DEFAULT_ANSWERS: Answers = {
 // 10. The server says the same sentences (internal/flow/answers.go); design's wording is "new file".
 const REPLACE_WHY = "Replacing the original comes in a later update; for now the new file is saved next to it.";
 const FOLDER_WHY = "Saving to a different folder comes in a later update; for now the new file is saved next to it.";
+const AUDIO_WHY = "Converting audio is not built yet; Copy is the only choice for now.";
 
 const FORMAT_LABEL: Record<string, string> = { hevc: "HEVC", h264: "H.264", av1: "AV1" };
 const CODEC_LABEL: Record<string, string> ={ aac: "AAC", opus: "Opus", ac3: "AC-3", eac3: "E-AC-3", flac: "FLAC", copy: "Same as the source" };
@@ -91,7 +92,7 @@ const LADDER: BitrateLadder = {
 const GUIDE: GuideDoc = {
   chips: [
     { id: "shrink_hevc", label: "Shrink to HEVC", always: false, on: { format: "hevc" }, off: { format: "h264" }, available: true },
-    { id: "keep_my_languages", label: "Keep only my languages", always: false, on: { allLanguages: false }, off: { allLanguages: true }, available: true },
+    { id: "keep_my_languages", label: "Keep only my languages", always: false, on: { allLanguages: false }, off: { allLanguages: true }, available: false, why: AUDIO_WHY },
     { id: "use_gpu", label: "Use the graphics card (QSV)", always: false, on: { useGpu: true }, off: { useGpu: false }, available: true },
     { id: "never_worse", label: "Never make anything worse", always: true, on: {}, off: {}, available: true },
     { id: "hdr_kept", label: "HDR kept, Dolby Vision left alone", always: true, on: {}, off: {}, available: true },
@@ -145,15 +146,15 @@ const GUIDE: GuideDoc = {
           label: "Audio",
           type: "choice",
           choices: [
-            { value: "stereo_aac", label: "Stereo AAC", available: true },
-            { value: "stereo_aac_surround", label: "AAC, same channels as the source", available: true },
-            { value: "eac3_surround", label: "E-AC-3, surround kept", available: true },
-            { value: "ac3_surround", label: "AC-3, surround kept", available: true },
-            { value: "stereo_opus", label: "Stereo Opus", available: true },
+            { value: "stereo_aac", label: "Stereo AAC", available: false, why: AUDIO_WHY },
+            { value: "stereo_aac_surround", label: "AAC, same channels as the source", available: false, why: AUDIO_WHY },
+            { value: "eac3_surround", label: "E-AC-3, surround kept", available: false, why: AUDIO_WHY },
+            { value: "ac3_surround", label: "AC-3, surround kept", available: false, why: AUDIO_WHY },
+            { value: "stereo_opus", label: "Stereo Opus", available: false, why: AUDIO_WHY },
             { value: "as_is", label: "Leave as it is", available: true },
           ],
         },
-        { key: "languages", label: "Keep these languages", type: "languages" },
+        { key: "languages", label: "Keep these languages", type: "languages", available: false, why: AUDIO_WHY },
       ],
     },
     {

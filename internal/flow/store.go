@@ -30,13 +30,6 @@ type ChangedSinceError struct{ Rev int }
 
 func (e *ChangedSinceError) Error() string { return "the workflow was saved somewhere else" }
 
-// NotGuidedError is the guided save's 409 when the draft no longer fits the guide: the answers
-// column is gone, because someone saved a flow the guide cannot say from the editor since the
-// guide opened. Rev is the draft's revision now, so the page can reload.
-type NotGuidedError struct{ Rev int }
-
-func (e *NotGuidedError) Error() string { return "the workflow was changed in the editor" }
-
 // PublishBlockedError is the editor's 409 has_problems: the check said no. Problem is the first
 // one, whose sentence the page shows after "Fix this first:".
 type PublishBlockedError struct{ Problem Problem }
@@ -85,7 +78,8 @@ type RevisionInfo struct {
 
 // DraftInfo is what GET /workflows/{id} serves: the flow the editor shows and the draft
 // revision the page holds and sends back as baseRev. Answers is the guided builder's answers for
-// this flow, nil when the guide cannot say the flow exactly (fitsGuided).
+// this flow, nil when the guide cannot say the flow exactly (fitsGuided). A row whose answers
+// column is empty (a stage 1 install wrote none) gets them from its flow on the read.
 type DraftInfo struct {
 	Flow    Flow
 	Rev     int
@@ -94,13 +88,14 @@ type DraftInfo struct {
 
 // ListItem is one row of GET /workflows before the check and the libraries are added. Flow is
 // the draft when there is one, else the published revision: the flow the check runs on. Answers is
-// nil when the flow does not fit the guide.
+// nil when the flow does not fit the guide; an empty answers column is filled from the flow.
 type ListItem struct {
 	Workflow
 	DraftAhead bool
 	Flow       Flow
 	Answers    Answers
 	draft      sql.NullString // the row's draft column, kept until the flows are read
+	answers    sql.NullString // the row's answers column, read with the flow
 }
 
 // CreateFromStarter writes a workflow and its published revision 1 from a starter, in one
@@ -247,24 +242,25 @@ func (s *Store) Draft(ctx context.Context, id int64) (DraftInfo, error) {
 		return DraftInfo{}, fmt.Errorf("read the draft of workflow %d: %w", id, err)
 	}
 	info := DraftInfo{Rev: rev}
-	if info.Answers, err = readAnswers(id, answers); err != nil {
-		return DraftInfo{}, err
-	}
-	if draft.Valid {
+	switch {
+	case draft.Valid:
 		if err := json.Unmarshal([]byte(draft.String), &info.Flow); err != nil {
 			return DraftInfo{}, fmt.Errorf("read the draft of workflow %d: %w", id, err)
 		}
-		return info, nil
-	}
-	if current.Valid && current.Int64 > 0 {
+	case current.Valid && current.Int64 > 0:
 		r, err := s.Revision(ctx, id, int(current.Int64))
 		if err != nil {
 			return DraftInfo{}, err
 		}
 		info.Flow = r.Flow
-		return info, nil
+	default:
+		return DraftInfo{}, fmt.Errorf("workflow %d has neither a draft nor a published revision", id)
 	}
-	return DraftInfo{}, fmt.Errorf("workflow %d has neither a draft nor a published revision", id)
+	// The flow is known before the answers are, because an empty column is filled from it.
+	if info.Answers, err = answersFor(id, info.Flow, answers); err != nil {
+		return DraftInfo{}, err
+	}
+	return info, nil
 }
 
 // SaveDraft writes the draft, if the page's baseRev is the draft's own revision now. A page that
@@ -314,31 +310,24 @@ func (s *Store) SaveDraft(ctx context.Context, id int64, f Flow, baseRev int) (r
 }
 
 // SaveGuidedDraft saves the flow the guided builder made from its answers as the draft. A guided
-// save must not undo an editor save that came after the guide opened: in the same transaction it
-// refuses when the draft no longer fits the guide (NotGuidedError, the answers are gone) and, when
-// the page sends the revision it read, when the draft moved on (ChangedSinceError). baseRev nil is
-// the page that has not sent one yet; the fits check still holds. An empty name or description
-// keeps the workflow's own, the way the mock's putAnswers does.
+// save must not undo an editor save that came after the guide opened, and the page's baseRev is
+// what says so: in the same transaction a stale revision is a ChangedSinceError. baseRev nil is
+// the page that has not sent one yet, and the save is allowed (a stage 1 workflow has no answers
+// to compare, and the person saving from the guide is choosing its flow). An empty name or
+// description keeps the workflow's own, the way the mock's putAnswers does.
 func (s *Store) SaveGuidedDraft(ctx context.Context, id int64, f Flow, baseRev *int) (rev int, err error) {
 	now := s.clock().UTC().UnixMilli()
 	err = s.db.Tx(ctx, func(tx *sql.Tx) error {
 		var have int
 		var name, description string
-		var held sql.NullString
 		err := tx.QueryRowContext(ctx,
-			`SELECT draft_rev, name, description, answers FROM workflows WHERE id = ? AND deleted_at IS NULL`, id).
-			Scan(&have, &name, &description, &held)
+			`SELECT draft_rev, name, description FROM workflows WHERE id = ? AND deleted_at IS NULL`, id).
+			Scan(&have, &name, &description)
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
 		if err != nil {
 			return fmt.Errorf("read workflow %d: %w", id, err)
-		}
-		// The editor's save of a flow the guide cannot say cleared the answers; the guide's save
-		// would put back the flow it opened on and hide that edit. BaseRev alone cannot say this:
-		// the page may not send one yet, and an editor save of a fitting flow keeps the answers.
-		if !held.Valid {
-			return &NotGuidedError{Rev: have}
 		}
 		if baseRev != nil && *baseRev != have {
 			return &ChangedSinceError{Rev: have}
@@ -478,36 +467,36 @@ func (s *Store) List(ctx context.Context) ([]ListItem, error) {
 			&draft, &answers, &created, &updated); err != nil {
 			return nil, fmt.Errorf("read a workflow: %w", err)
 		}
-		if it.Answers, err = readAnswers(it.ID, answers); err != nil {
-			return nil, err
-		}
 		it.CurrentRev = int(current.Int64)
 		it.CreatedAt = time.UnixMilli(created).UTC()
 		it.UpdatedAt = time.UnixMilli(updated).UTC()
 		it.DraftAhead = draft.Valid
 		it.draft = draft
+		it.answers = answers
 		items = append(items, it)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("read the workflows: %w", err)
 	}
-	// The published flows are read after the row loop closes, so a reader is never held open.
+	// The published flows are read after the row loop closes, so a reader is never held open. The
+	// answers follow the flow: an empty column is filled from it.
 	for i := range items {
 		it := &items[i]
-		if it.draft.Valid {
+		switch {
+		case it.draft.Valid:
 			if err := json.Unmarshal([]byte(it.draft.String), &it.Flow); err != nil {
 				return nil, fmt.Errorf("read the draft of workflow %d: %w", it.ID, err)
 			}
-			continue
+		case it.CurrentRev > 0:
+			r, err := s.Revision(ctx, it.ID, it.CurrentRev)
+			if err != nil {
+				return nil, err
+			}
+			it.Flow = r.Flow
 		}
-		if it.CurrentRev == 0 {
-			continue
-		}
-		r, err := s.Revision(ctx, it.ID, it.CurrentRev)
-		if err != nil {
+		if it.Answers, err = answersFor(it.ID, it.Flow, it.answers); err != nil {
 			return nil, err
 		}
-		it.Flow = r.Flow
 	}
 	return items, nil
 }
@@ -684,6 +673,21 @@ func answersColumn(f Flow) (any, error) {
 		return nil, fmt.Errorf("save the answers of workflow %q: %w", f.Name, err)
 	}
 	return string(raw), nil
+}
+
+// answersFor is the answers a read serves: the column when a save wrote them, else what the flow
+// itself makes when the guide can say it exactly. Stage 1 installs wrote no answers, and an editor
+// draft the guide can say needs none either, so the read fills them from the flow; the guide then
+// opens on the workflow's own answers. Nothing is written back: a read stays a read. nil is a flow
+// the guide cannot say (fitsGuided false).
+func answersFor(id int64, f Flow, raw sql.NullString) (Answers, error) {
+	if raw.Valid {
+		return readAnswers(id, raw)
+	}
+	if a, ok := ToAnswers(f); ok {
+		return a, nil
+	}
+	return nil, nil
 }
 
 // readAnswers reads a row's answers column; an empty one is no answers, not an empty object.

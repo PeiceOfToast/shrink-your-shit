@@ -374,6 +374,39 @@ func TestTheGuideGreysWhereItCannotSave(t *testing.T) {
 	}
 }
 
+// TestTheGuideGreysTheAudioLanguages: until item 7 can keep only some languages, the chip and the
+// languages field are greyed with AudioWhy, so the page cannot send an answer the check refuses
+// (review2 N3).
+func TestTheGuideGreysTheAudioLanguages(t *testing.T) {
+	guide := flow.Guide()
+	var chip *flow.GuideChip
+	for i := range guide.Chips {
+		if guide.Chips[i].ID == "keep_my_languages" {
+			chip = &guide.Chips[i]
+		}
+	}
+	if chip == nil {
+		t.Fatal("the guide has no keep_my_languages chip")
+	}
+	if chip.Available || chip.Why != flow.AudioWhy {
+		t.Errorf("chip = %+v; want greyed with %q", *chip, flow.AudioWhy)
+	}
+	var field *flow.GuideField
+	for _, part := range guide.Parts {
+		for i := range part.Fields {
+			if part.Fields[i].Key == "languages" {
+				field = &part.Fields[i]
+			}
+		}
+	}
+	if field == nil {
+		t.Fatal("the guide has no languages field")
+	}
+	if field.Available == nil || *field.Available || field.Why != flow.AudioWhy {
+		t.Errorf("languages field = %+v; want greyed with %q", *field, flow.AudioWhy)
+	}
+}
+
 // mergeJSON is a step's settings with the patch's fields added or replaced.
 func mergeJSON(t *testing.T, base json.RawMessage, patch string) json.RawMessage {
 	t.Helper()
