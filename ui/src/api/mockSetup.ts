@@ -3,7 +3,7 @@
 import { ApiError } from "./errors.ts";
 import { DELAY_MS, getForcedState, onForcedStateChange, respond, setFreshInstall } from "./mockState.ts";
 import { currentToken } from "./mockSettings.ts";
-import { clearLibraries } from "./mockLibraries.ts";
+import { clearLibraries, insertLibrary } from "./mockLibraries.ts";
 
 export type Setup = { needsAccount: boolean; starting: boolean };
 
@@ -64,7 +64,13 @@ export function postSetup(input: SetupInput): Promise<{ ok: true; scanStarted: b
       throw new ApiError("overlaps", "That folder is already in another library. Pick a different folder.", "library.path");
     }
     setFreshInstall(input.library === null);
-    if (input.library === null) clearLibraries();
+    clearLibraries();
+    if (input.library) {
+      insertLibrary(
+        { name: input.library.name, path: "path" in input.library ? input.library.path : undefined, shareId: "shareId" in input.library ? input.library.shareId : undefined },
+        input.starter?.id,
+      );
+    }
     setupDone = true;
     return { ok: true as const, scanStarted: input.library !== null };
   });

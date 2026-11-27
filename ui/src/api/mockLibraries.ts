@@ -1,7 +1,7 @@
 // Libraries, workflows and folders for the mock. Writes change an in-memory copy, so a session behaves like the app.
 import type { FolderCheck, FolderListing, Library, LibraryDetail, LibraryInput, LibraryPatch, Preview, Watch, WorkflowSummary } from "./types.ts";
 import { ApiError } from "./errors.ts";
-import { getForcedState, respond, setFreshInstall } from "./mockState.ts";
+import { getForcedState, noLibrariesYet, respond, setFreshInstall } from "./mockState.ts";
 import { FOLDERS, LIBRARIES, PREVIEW, SHARE_FOLDERS, WORKFLOW_SUMMARY } from "./fixtures/libraries.ts";
 import { WORKFLOW_ROWS } from "./fixtures/workflowRows.ts";
 import { nextScanFor } from "./schedule.ts";
@@ -44,7 +44,7 @@ export function currentLibraries(): Library[] {
 
 export function getLibraries(): Promise<Library[]> {
   return respond(() => {
-    if (getForcedState() === "empty") return [];
+    if (noLibrariesYet()) return [];
     if (getForcedState() === "running") return rows.map((l) => (l.id === "movies" ? { ...l, status: "scanning" as const, scanPct: 62 } : { ...l }));
     return currentLibraries();
   });
@@ -60,34 +60,40 @@ export function createLibrary(input: LibraryInput): Promise<Library> {
     if (!input.path && !input.shareId) throw new ApiError("path_required", "Pick the folder with the videos.", "path");
     if (input.watch !== undefined) checkWatching(input.watch);
     if (input.path && !FOLDERS[norm(input.path)]) throw new ApiError("folder_not_found", "That folder isn't on this server.", "path");
-    const hit = conflict(input.path ?? input.shareId ?? "");
-    if (hit) throw hit;
-    seq += 1;
-    const id = `${input.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${seq}`;
-    const videos = input.path ? (FOLDERS[norm(input.path)]?.videos ?? 0) : 0;
-    const lib: Library = {
-      id,
-      name: input.name.trim(),
-      path: input.path ?? input.shareId ?? "",
-      shareId: input.shareId,
-      workflow: null,
-      files: videos,
-      waiting: 0,
-      savedBytes: 0,
-      savedPct: 0,
-      lastScan: { at: new Date().toISOString(), found: videos, new: videos, changed: 0 },
-      status: "needs_workflow",
-      watch: input.watch ?? "daily",
-      paused: false,
-      nextScanAt: nextScanFor(input.watch ?? "daily"),
-    };
-    rows = [...rows, lib];
-    setFreshInstall(false);
-    return { ...lib };
+    return insertLibrary(input);
   });
 }
 
-// A first run finished with Skip has no library at all (the setup call does this).
+// Adds a library to the list. The first run uses it too, with the starter's workflow when there is one.
+export function insertLibrary(input: LibraryInput, workflowId?: string): Library {
+  const hit = conflict(input.path ?? input.shareId ?? "");
+  if (hit) throw hit;
+  seq += 1;
+  const id = `${input.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${seq}`;
+  const videos = input.path ? (FOLDERS[norm(input.path)]?.videos ?? 0) : 0;
+  const wf = WORKFLOW_ROWS.find((w) => w.id === workflowId);
+  const lib: Library = {
+    id,
+    name: input.name.trim(),
+    path: input.path ?? input.shareId ?? "",
+    shareId: input.shareId,
+    workflow: wf ? { id: wf.id, name: wf.name } : null,
+    files: videos,
+    waiting: wf ? videos : 0,
+    savedBytes: 0,
+    savedPct: 0,
+    lastScan: { at: new Date().toISOString(), found: videos, new: videos, changed: 0 },
+    status: wf ? "watching" : "needs_workflow",
+    watch: input.watch ?? "daily",
+    paused: false,
+    nextScanAt: nextScanFor(input.watch ?? "daily"),
+  };
+  rows = [...rows, lib];
+  setFreshInstall(false);
+  return { ...lib };
+}
+
+// No libraries at all: a first run finished with Skip, or the switcher's Fresh install state.
 export function clearLibraries(): void {
   rows = [];
 }

@@ -1,6 +1,6 @@
 // The mock System log (page 12 "Data and API"). Lines are the app-wide events of system/logging.md §3.
 import type { LogEvent, LogKind, LogLevel, LogPage, LogParams } from "./types.ts";
-import { getForcedState, onForcedStateChange, respond } from "./mockState.ts";
+import { noLibrariesYet, onForcedStateChange, respond } from "./mockState.ts";
 import { minsAgo } from "./fixtures/clock.ts";
 import { clockPrecise } from "../format/time.ts";
 import { notifySummaryChanged } from "./summaryBus.ts";
@@ -126,7 +126,7 @@ function keep(e: LogEvent, p: LogParams, skipLevel: boolean): boolean {
 
 export function getLog(params: LogParams = {}): Promise<LogPage> {
   return respond(() => {
-    if (getForcedState() === "empty" || getForcedState() === "fresh") return { items: [], counts: { info: 0, warn: 0, error: 0 } };
+    if (noLibrariesYet()) return { items: [], counts: { info: 0, warn: 0, error: 0 } };
     const counts = { info: 0, warn: 0, error: 0 };
     for (const e of all()) {
       if (keep(e, params, true) && e.level !== "debug") counts[e.level]++;

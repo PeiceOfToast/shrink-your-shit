@@ -14,9 +14,10 @@ export function setFreshInstall(v: boolean): void {
 export function isFreshInstall(): boolean {
   return freshInstall;
 }
-// No library yet: the dev "Empty" state, or a first run finished with Skip. The dashboard shows its first-run look.
+// No library yet: the dev "Empty" or "Fresh install" state, or a first run finished with Skip. Every screen reads this one check.
 export function noLibrariesYet(): boolean {
-  return getForcedState() === "empty" || freshInstall;
+  const s = getForcedState();
+  return s === "empty" || s === "fresh" || freshInstall;
 }
 
 export function setForcedState(state: ForcedState): void {
