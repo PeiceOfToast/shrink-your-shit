@@ -1,0 +1,45 @@
+{
+  "body": {
+    "fitsGuided": false,
+    "flow": {
+      "description": "Smaller HEVC files next to the originals.",
+      "name": "Shrink videos",
+      "steps": [
+        {
+          "id": "video",
+          "settings": {
+            "format": "hevc",
+            "ifGpuFails": "cpu",
+            "quality": 3,
+            "useGpu": false
+          },
+          "type": "video.convert",
+          "version": 1
+        },
+        {
+          "id": "audio",
+          "settings": {
+            "format": "copy"
+          },
+          "type": "audio.tracks",
+          "version": 1
+        },
+        {
+          "id": "save",
+          "settings": {
+            "container": "mkv",
+            "nameSuffix": "shrunk",
+            "where": "next_to"
+          },
+          "type": "file.save",
+          "version": 1
+        }
+      ]
+    },
+    "rev": 0
+  },
+  "method": "GET",
+  "path": "/api/v2/workflows/1",
+  "status": 200,
+  "type": "WorkflowDraft"
+}

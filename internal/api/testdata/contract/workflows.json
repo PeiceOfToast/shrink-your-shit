@@ -1,0 +1,26 @@
+{
+  "body": [
+    {
+      "description": "Smaller HEVC files next to the originals.",
+      "fitsGuided": false,
+      "id": "1",
+      "kind": "video",
+      "madeWith": "guided",
+      "name": "Shrink videos",
+      "problemCount": 0,
+      "state": "published",
+      "updatedAt": "2026-11-27T04:00:00.000Z",
+      "usedBy": [
+        {
+          "id": "1",
+          "name": "Clips",
+          "type": "library"
+        }
+      ]
+    }
+  ],
+  "method": "GET",
+  "path": "/api/v2/workflows",
+  "status": 200,
+  "type": "WorkflowRow[]"
+}

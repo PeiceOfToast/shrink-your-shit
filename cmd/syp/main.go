@@ -19,6 +19,10 @@ import (
 	"github.com/PeiceOfToast/shrink-your-shit/internal/flow"
 	_ "github.com/PeiceOfToast/shrink-your-shit/internal/flow/steps"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/fsx"
+	// The hardware detector's migration (7) is registered by this package's init. Nothing calls the
+	// detector until stage 3 item 3 wires it in, but the import must stay: without it a database
+	// that reached flow's migration 8 could never get 7.
+	_ "github.com/PeiceOfToast/shrink-your-shit/internal/hw"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/jobs"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/library"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/media"
@@ -227,7 +231,13 @@ func newScanner(catalog *library.Catalog, flows *flow.Store, queue *jobs.Queue, 
 				return err
 			}
 			path := filepath.Join(lib.Path, filepath.FromSlash(f.RelPath))
-			_, open, err := queue.Enqueue(ctx, fileID, lib.ID, *lib.WorkflowID, path, "scan")
+			// The published revision at this moment: the job keeps it even if the workflow is
+			// published again before the job runs.
+			rev := 0
+			if wf, err := flows.Get(ctx, *lib.WorkflowID); err == nil {
+				rev = wf.CurrentRev
+			}
+			_, open, err := queue.Enqueue(ctx, fileID, lib.ID, *lib.WorkflowID, rev, path, "scan")
 			if err != nil {
 				return err
 			}

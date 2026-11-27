@@ -385,7 +385,7 @@ func TestLibraryRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := e.queue.Enqueue(context.Background(), fileID, 1, 7, filepath.Join(clips, "one.mkv"), "scan"); err != nil {
+	if _, _, err := e.queue.Enqueue(context.Background(), fileID, 1, 7, 1, filepath.Join(clips, "one.mkv"), "scan"); err != nil {
 		t.Fatal(err)
 	}
 	var counted struct {
@@ -473,7 +473,7 @@ func TestSummaryAndAttention(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := e.queue.Enqueue(context.Background(), fileID, 1, 7, filepath.Join(clips, "one.mkv"), "scan"); err != nil {
+	if _, _, err := e.queue.Enqueue(context.Background(), fileID, 1, 7, 1, filepath.Join(clips, "one.mkv"), "scan"); err != nil {
 		t.Fatal(err)
 	}
 

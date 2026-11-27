@@ -68,7 +68,7 @@ func newJobsFixture(t *testing.T) *jobsFixture {
 	f := &jobsFixture{e: e, cookie: cookie, videos: videos, q: q}
 	var ids []int64
 	for i, name := range []string{"one.mkv", "two.mkv", "three.mkv"} {
-		id, _, err := q.Enqueue(ctx, fileIDs[i], lib.ID, wf, filepath.Join(videos, name), "test")
+		id, _, err := q.Enqueue(ctx, fileIDs[i], lib.ID, wf, 1, filepath.Join(videos, name), "test")
 		if err != nil {
 			t.Fatalf("enqueue %s: %v", name, err)
 		}

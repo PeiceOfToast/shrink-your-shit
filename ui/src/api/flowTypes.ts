@@ -78,6 +78,43 @@ export interface GuideDoc {
   languages: string[];
 }
 
+// The workflow routes the editor and the list use (pages 04 and 07).
+
+// GET /workflows/{id}: the flow the editor shows and the draft revision it holds as baseRev.
+export interface WorkflowDraft {
+  flow: Flow;
+  rev: number;
+  fitsGuided: boolean;
+}
+
+// POST /workflows: the new workflow's id and the draft revision the editor starts from.
+export interface WorkflowCreated {
+  id: string;
+  rev: number;
+}
+
+// PUT /workflows/{id}/draft: the draft's new revision, what the page sends back next time.
+export interface DraftSaved {
+  rev: number;
+}
+
+// POST /workflows/{id}/publish: the revision it became.
+export interface WorkflowPublished {
+  rev: number;
+  published: true;
+}
+
+// GET /workflows/{id}/revisions: one published revision.
+export interface WorkflowRevision {
+  rev: number;
+  createdAt: string;
+}
+
+// POST /workflows/{id}/revisions/{rev}/restore: the new revision the old flow was copied into.
+export interface WorkflowRestored {
+  rev: number;
+}
+
 export interface GuidePreview {
   sentences: string[];
   flow: Flow;

@@ -72,6 +72,9 @@ export interface WorkflowRow {
   fitsGuided: boolean;
 }
 
+// DELETE /workflows/{id}: deleted, or refused while a library uses it (the page names them).
+export type WorkflowDeleted = { ok: true } | { ok: false; code: "in_use"; usedBy: WorkflowUse[] };
+
 export interface WorkflowSummary {
   id: string;
   name: string;

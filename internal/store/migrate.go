@@ -57,6 +57,19 @@ func registered() []Migration {
 	return ms
 }
 
+// MigrationVersions is every registered migration's version, in order. A module registers its
+// migration from init, so the program's own wiring test reads this to check the binary registered a
+// contiguous set: a module it did not import leaves a hole, and a database that migrates past the
+// hole can never fill it.
+func MigrationVersions() []int {
+	ms := registered()
+	out := make([]int, len(ms))
+	for i, m := range ms {
+		out[i] = m.Version
+	}
+	return out
+}
+
 // newestVersion is the highest migration version, or 0 when there are none.
 func newestVersion(ms []Migration) int {
 	if len(ms) == 0 {

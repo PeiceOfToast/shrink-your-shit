@@ -5,6 +5,7 @@ package worker
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"io"
 	"path/filepath"
 	"strconv"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/PeiceOfToast/shrink-your-shit/internal/events"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/flow"
+	_ "github.com/PeiceOfToast/shrink-your-shit/internal/flow/steps"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/jobs"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/library"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/store"
@@ -80,7 +82,7 @@ func newStoredJobFor(t *testing.T, root, fid string, size, mtime int64, src stri
 		t.Fatalf("save workflow: %v", err)
 	}
 	q := jobs.New(jobs.Options{DB: db, Bus: bus})
-	jobID, _, err := q.Enqueue(ctx, fileID, lib.ID, wfID, src, "test")
+	jobID, _, err := q.Enqueue(ctx, fileID, lib.ID, wfID, 1, src, "test")
 	if err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
@@ -120,6 +122,58 @@ func TestBuiltinClaimBuildsTheRunFromTheStore(t *testing.T) {
 	}
 	if !in.MTime.Equal(time.Unix(0, mtime)) {
 		t.Errorf("mtime = %v, want %v", in.MTime, time.Unix(0, mtime))
+	}
+}
+
+// A job runs the revision it was queued with: publishing a new one while it waits does not change
+// it, and a job queued after the publish gets the new one.
+func TestBuiltinRunsTheRevisionTheJobWasQueuedWith(t *testing.T) {
+	s := newStoredJob(t, 1) // queued with revision 1
+	info, err := s.flows.Draft(s.ctx, s.wfID)
+	if err != nil {
+		t.Fatalf("read the workflow: %v", err)
+	}
+	published := info.Flow
+	published.Steps[0].Settings = json.RawMessage(`{"format":"hevc","quality":4,"useGpu":false,"ifGpuFails":"cpu"}`)
+	rev, err := s.flows.Publish(s.ctx, s.wfID, &published, flow.ValidateContext{})
+	if err != nil {
+		t.Fatalf("publish revision 2: %v", err)
+	}
+	var fileID int64
+	if err := s.db.Tx(s.ctx, func(tx *sql.Tx) error {
+		res, err := tx.Exec(`INSERT INTO files(library_id, rel_path, size, mtime, file_id)
+			VALUES(?, 'second.mkv', 10, 1, 'fid-2')`, s.libID)
+		if err != nil {
+			return err
+		}
+		fileID, err = res.LastInsertId()
+		return err
+	}); err != nil {
+		t.Fatalf("insert the second file: %v", err)
+	}
+	secondPath := filepath.Join(s.root, "second.mkv")
+	secondID, _, err := s.q.Enqueue(s.ctx, fileID, s.libID, s.wfID, rev, secondPath, "test")
+	if err != nil {
+		t.Fatalf("enqueue after the publish: %v", err)
+	}
+
+	b := Builtin{Queue: s.q, DB: s.db, Flows: s.flows}
+	revisions := map[int64]int{}
+	for i := 0; i < 2; i++ {
+		w, err := b.Claim(s.ctx, "local")
+		if err != nil || w == nil {
+			t.Fatalf("claim %d = %v, %v", i+1, w, err)
+		}
+		if w.Err != nil {
+			t.Fatalf("claim %d could not build the run: %v", i+1, w.Err)
+		}
+		revisions[w.Job.ID] = w.In.Revision
+	}
+	if got := revisions[s.jobID]; got != 1 {
+		t.Errorf("the job queued before the publish runs revision %d; want its own 1", got)
+	}
+	if got := revisions[secondID]; got != 2 {
+		t.Errorf("the job queued after the publish runs revision %d; want the new 2", got)
 	}
 }
 

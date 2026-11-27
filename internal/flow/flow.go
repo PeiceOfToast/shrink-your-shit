@@ -87,6 +87,16 @@ func Validate(f Flow, vc ValidateContext) Report {
 	return rep
 }
 
+// CheckShape refuses a flow that is not the three fixed steps (the 400 invalid_flow of POST
+// /workflows and PUT /workflows/{id}/draft). Settings are not checked here: a draft may hold a
+// "not yet" value, and the check is what blocks publishing it.
+func CheckShape(f Flow) error {
+	if problems := shapeProblems(f); len(problems) > 0 {
+		return errors.New(problems[0])
+	}
+	return nil
+}
+
 // shapeProblems is the flow-level check: the three steps, in order, with the types the ids name.
 func shapeProblems(f Flow) []string {
 	if len(f.Steps) != len(fixedSteps) {

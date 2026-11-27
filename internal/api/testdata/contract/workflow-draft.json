@@ -1,0 +1,9 @@
+{
+  "body": {
+    "rev": 2
+  },
+  "method": "PUT",
+  "path": "/api/v2/workflows/2/draft",
+  "status": 200,
+  "type": "DraftSaved"
+}

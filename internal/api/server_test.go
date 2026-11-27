@@ -141,6 +141,7 @@ func newEnv(t *testing.T, ready bool) *env {
 		t.Fatal(err)
 	}
 	e.flows = flow.Open(db)
+	e.flows.Now = e.clock.Now
 	e.catalog = library.NewCatalog(db)
 	e.catalog.Now = e.clock.Now
 	e.queue = jobs.New(jobs.Options{DB: db, Bus: e.bus, Clock: e.clock.Now})

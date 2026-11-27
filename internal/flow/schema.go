@@ -12,6 +12,15 @@ import (
 // published pointer, and the revisions, which are never changed once written.
 func init() {
 	store.Register(store.Migration{Version: 6, Name: "flow", Up: createFlowTables})
+	store.Register(store.Migration{Version: 8, Name: "flow-draft-rev", Up: addDraftRev})
+}
+
+// addDraftRev gives the draft its own revision: the number the editor holds and sends back as
+// baseRev, so a save from a page that has fallen behind is refused instead of quietly
+// overwriting a newer draft. It moves on with every draft save and every publish.
+func addDraftRev(tx *sql.Tx) error {
+	_, err := tx.Exec(`ALTER TABLE workflows ADD COLUMN draft_rev INTEGER NOT NULL DEFAULT 0`)
+	return err
 }
 
 func createFlowTables(tx *sql.Tx) error {

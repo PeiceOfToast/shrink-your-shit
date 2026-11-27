@@ -1,0 +1,9 @@
+{
+  "body": {
+    "rev": 2
+  },
+  "method": "POST",
+  "path": "/api/v2/workflows/2/revisions/1/restore",
+  "status": 200,
+  "type": "WorkflowRestored"
+}

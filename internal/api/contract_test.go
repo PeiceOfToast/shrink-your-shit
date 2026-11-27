@@ -113,10 +113,40 @@ func TestContractGoldens(t *testing.T) {
 		e.do(http.MethodGet, "/api/v2/step-definitions", "", withSession(cookie), false))
 
 	// The flow editor's check (S2-2): the starter's flow as page 07 sends it.
-	starter := flow.Starters()[0]
+	starter, ok := flow.StarterByID("shrink-videos")
+	if !ok {
+		t.Fatal("no shrink-videos starter")
+	}
 	writeGolden(t, "workflow-validate", "FlowCheck", http.MethodPost, "/api/v2/workflows/1/validate",
 		e.do(http.MethodPost, "/api/v2/workflows/1/validate",
 			mustJSON(t, map[string]any{"flow": starter.Flow}), write(withSession(cookie)), false))
+
+	// Workflows (S2-3): the list, the editor's document, create, save, publish, the history, restore,
+	// duplicate, and delete refused while a library uses the workflow.
+	editorFlow := starter.Flow
+	editorFlow.Name = "Holidays"
+	writeGolden(t, "workflows", "WorkflowRow[]", http.MethodGet, "/api/v2/workflows",
+		e.do(http.MethodGet, "/api/v2/workflows", "", withSession(cookie), false))
+	writeGolden(t, "workflow", "WorkflowDraft", http.MethodGet, "/api/v2/workflows/1",
+		e.do(http.MethodGet, "/api/v2/workflows/1", "", withSession(cookie), false))
+	rec = e.do(http.MethodPost, "/api/v2/workflows",
+		mustJSON(t, map[string]any{"name": "Holidays", "flow": editorFlow}), write(withSession(cookie)), false)
+	writeGolden(t, "workflow-create", "WorkflowCreated", http.MethodPost, "/api/v2/workflows", rec)
+	editorFlow.Steps[0].Settings = json.RawMessage(`{"format":"hevc","quality":4,"useGpu":false,"ifGpuFails":"cpu"}`)
+	writeGolden(t, "workflow-draft", "DraftSaved", http.MethodPut, "/api/v2/workflows/2/draft",
+		e.do(http.MethodPut, "/api/v2/workflows/2/draft",
+			mustJSON(t, map[string]any{"flow": editorFlow, "baseRev": 1}), write(withSession(cookie)), false))
+	writeGolden(t, "workflow-publish", "WorkflowPublished", http.MethodPost, "/api/v2/workflows/2/publish",
+		e.do(http.MethodPost, "/api/v2/workflows/2/publish",
+			mustJSON(t, map[string]any{"flow": editorFlow}), write(withSession(cookie)), false))
+	writeGolden(t, "workflow-revisions", "WorkflowRevision[]", http.MethodGet, "/api/v2/workflows/2/revisions",
+		e.do(http.MethodGet, "/api/v2/workflows/2/revisions", "", withSession(cookie), false))
+	writeGolden(t, "workflow-restore", "WorkflowRestored", http.MethodPost, "/api/v2/workflows/2/revisions/1/restore",
+		e.do(http.MethodPost, "/api/v2/workflows/2/revisions/1/restore", "", write(withSession(cookie)), false))
+	writeGolden(t, "workflow-duplicate", "WorkflowRow", http.MethodPost, "/api/v2/workflows/2/duplicate",
+		e.do(http.MethodPost, "/api/v2/workflows/2/duplicate", "", write(withSession(cookie)), false))
+	writeGolden(t, "workflow-delete", "WorkflowDeleted", http.MethodDelete, "/api/v2/workflows/1",
+		e.do(http.MethodDelete, "/api/v2/workflows/1", "", write(withSession(cookie)), false))
 
 	// Summary and attention (R1-9a).
 	writeGolden(t, "summary", "Summary", http.MethodGet, "/api/v2/summary",
