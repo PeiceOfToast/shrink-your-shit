@@ -231,16 +231,20 @@ const AUDIO_FROM_GUIDED: Record<string, { format: string; channels: string; code
 
 // The file types and what each can hold (page 07; dev's selectors.go). MKV and Keep the same take anything.
 // The rules are one table: a new rule goes here, not into the editor or the guide.
-const CONTAINER_RULES: Record<string, { why: string; ok: (video: string, audio: string) => boolean }> = {
-  mkv: { why: "", ok: () => true },
-  mp4: { why: "MP4 can't hold Opus audio.", ok: (_v, audio) => audio !== "opus" },
-  webm: { why: "WebM needs AV1 video and Opus audio.", ok: (video, audio) => video === "av1" && audio === "opus" },
-  keep: { why: "", ok: () => true },
+// The reason names what to pick; WebM gives the video reason first, then the audio one (page 07, the File type field).
+const CONTAINER_RULES: Record<string, { why: (video: string, audio: string) => string; ok: (video: string, audio: string) => boolean }> = {
+  mkv: { why: () => "", ok: () => true },
+  mp4: { why: () => "MP4 can't hold Opus audio.", ok: (_v, audio) => audio !== "opus" },
+  webm: {
+    why: (video) => (video !== "av1" ? "WebM needs AV1 video. Pick AV1 in Video to use it." : "WebM needs Opus audio. Pick Opus in Audio to use it."),
+    ok: (video, audio) => video === "av1" && audio === "opus",
+  },
+  keep: { why: () => "", ok: () => true },
 };
 
 // The audio codec the step will write: Advanced's codec when set, else the Format choice.
 function audioCodec(au: Record<string, unknown>): string {
-  return String(au.codec ?? au.format);
+  return String(au.codec || au.format);
 }
 
 function step(id: StepId, type: FlowStep["type"], settings: Record<string, unknown>): FlowStep {
@@ -353,9 +357,10 @@ export function checkFlow(flow: Flow): FlowCheck {
   for (const value of Object.keys(CONTAINER_RULES)) {
     const rule = CONTAINER_RULES[value];
     if (rule.ok(String(v.format), audioCodec(au))) continue;
-    disabled.push({ stepId: "save", field: "container", value, why: rule.why });
+    const why = rule.why(String(v.format), audioCodec(au));
+    disabled.push({ stepId: "save", field: "container", value, why });
     if (sv.container === value) {
-      problems.push({ stepId: "save", field: "container", code: "container_unsupported", message: `${rule.why} Pick another file type.` });
+      problems.push({ stepId: "save", field: "container", code: "container_unsupported", message: `${why} Or pick another file type.` });
     }
   }
 
@@ -369,7 +374,7 @@ export function checkFlow(flow: Flow): FlowCheck {
     : au.subtitles === "text_only" ? "text only"
     : au.subtitles === "my_languages" ? `subtitles: ${subLangs}`
     : "subtitles: keep all";
-  const audioSummary = `${CODEC_LABEL[String(au.codec ?? au.format)]} · ${CHANNEL_LABEL[String(au.channels)]} · ${langs} · ${subPart}`;
+  const audioSummary = `${CODEC_LABEL[String(au.codec || au.format)]} · ${CHANNEL_LABEL[String(au.channels)]} · ${langs} · ${subPart}`;
   // The file type, then where the result goes. The trash line is only for replacing the original.
   const where = String(sv.where);
   const placed = where === "replace"
@@ -396,7 +401,7 @@ function sentencesFor(flow: Flow, a: Answers): string[] {
     : "Keeps every subtitle.";
   const out = [
     `Converts video to ${FORMAT_LABEL[String(v.format)]} at quality ${v.quality}, ${v.size ? `at most ${String(v.size)}p` : "keeping the picture size"}${v.useGpu ? ", on the graphics card when it can" : ""}.`,
-    `Audio: ${CODEC_LABEL[String(au.codec ?? au.format)]}, ${CHANNEL_LABEL[String(au.channels)]}${list(au.languages) ? `, in ${list(au.languages)}` : ", every language"}.`,
+    `Audio: ${CODEC_LABEL[String(au.codec || au.format)]}, ${CHANNEL_LABEL[String(au.channels)]}${list(au.languages) ? `, in ${list(au.languages)}` : ", every language"}.`,
     subtitles,
     a.fileType === "keep" ? "The file keeps its container." : `Saves as ${({ mkv: "MKV", mp4: "MP4", webm: "WebM" } as Record<string, string>)[String(a.fileType)] ?? String(a.fileType)}.`,
   ];
@@ -567,7 +572,7 @@ export async function tryFlow(flow: Flow, file: string, signal?: AbortSignal): P
     return {
       lines: [
         { stepId: "video", text: `Video: ${FORMAT_LABEL[String(v.format)]} at quality ${v.quality}, about 42% of the original size.` },
-        { stepId: "audio", text: `Audio: ${CODEC_LABEL[String(au.codec ?? au.format)]}, ${CHANNEL_LABEL[String(au.channels)]}.` },
+        { stepId: "audio", text: `Audio: ${CODEC_LABEL[String(au.codec || au.format)]}, ${CHANNEL_LABEL[String(au.channels)]}.` },
         { stepId: "save", text: "Save: the check that the new file plays passes. Nothing is saved." },
       ],
     };

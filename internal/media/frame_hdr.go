@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"path/filepath"
 )
 
@@ -18,7 +17,7 @@ func ProbeFrameHDR(ctx context.Context, path string) (HDR, error) {
 	if err != nil {
 		arg = path
 	}
-	cmd := exec.CommandContext(ctx, tool("ffprobe"), "-v", "error", "-select_streams", "v:0",
+	cmd := toolCommand(ctx, "ffprobe", "-v", "error", "-select_streams", "v:0",
 		"-read_intervals", "%+#1", "-show_frames", "-print_format", "json", arg)
 	var out, stderr bytes.Buffer
 	cmd.Stdout = &out

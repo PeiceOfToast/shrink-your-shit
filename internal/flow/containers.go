@@ -19,13 +19,18 @@ type containerChoice interface{ ContainerChoice() string }
 // and Keep the same take anything, so they have no entry. A new rule goes here, not in a step.
 var containerRules = []struct {
 	Value string
-	Why   string
+	Why   func(video, audio string) string // names the one part to change (page 07, the File type field)
 	OK    func(video, audio string) bool
 }{
-	{Value: "mp4", Why: "MP4 can't hold Opus audio.", OK: func(_, audio string) bool {
+	{Value: "mp4", Why: func(_, _ string) string { return "MP4 can't hold Opus audio." }, OK: func(_, audio string) bool {
 		return audio != "opus"
 	}},
-	{Value: "webm", Why: "WebM needs AV1 video and Opus audio.", OK: func(video, audio string) bool {
+	{Value: "webm", Why: func(video, _ string) string {
+		if video != "av1" {
+			return "WebM needs AV1 video. Pick AV1 in Video to use it."
+		}
+		return "WebM needs Opus audio. Pick Opus in Audio to use it."
+	}, OK: func(video, audio string) bool {
 		return video == "av1" && audio == "opus"
 	}},
 }
@@ -58,7 +63,7 @@ func containerDisabled(settings []Settings) []Disabled {
 		if rule.OK(video, audio) {
 			continue
 		}
-		out = append(out, Disabled{StepID: "save", Field: "container", Value: rule.Value, Why: rule.Why})
+		out = append(out, Disabled{StepID: "save", Field: "container", Value: rule.Value, Why: rule.Why(video, audio)})
 	}
 	return out
 }
@@ -77,7 +82,7 @@ func containerProblems(settings []Settings) []Problem {
 		}
 		out = append(out, Problem{
 			StepID: "save", Field: "container", Code: "container_unsupported",
-			Message: rule.Why + " Pick another file type.",
+			Message: rule.Why(video, audio) + " Or pick another file type.",
 		})
 	}
 	return out

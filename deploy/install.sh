@@ -19,6 +19,19 @@ FFMPEG_AMD64_SHA256="cab6b5dd9cede8a8db8891e28f2fec2ddfd6401785328d139cbcfd23af9
 FFMPEG_ARM64_URL="https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2025-11-30-12-53/ffmpeg-n8.0.1-17-g27a297f186-linuxarm64-gpl-8.0.tar.xz"
 FFMPEG_ARM64_SHA256="1ccfba1f73a498694f32fa834c21bd74ba29cdb108265b886c6513020745e2e6"
 
+# libva 2.22, shipped beside ffmpeg (S3-1c). The pinned static ffmpeg 8 needs libva 2.22 at run time; Ubuntu 24.04
+# ships 2.20, which aborts every VAAPI and QSV encoder. These are Debian trixie's libva2 and libva-drm2 2.22.0-3
+# packages, from snapshot.debian.org by content hash (the live pool can move; the bytes cannot). The .deb is checked;
+# its libraries are extracted, not installed.
+LIBVA2_AMD64_URL="https://snapshot.debian.org/file/c5b976a61cf1857d1fde4c8efbf67e9fd7e2aed4"
+LIBVA2_AMD64_SHA256="b76bdd330de47a826698aaed10f53435b703e9a7d4415dd68269c97709f46a9b"
+LIBVADRM_AMD64_URL="https://snapshot.debian.org/file/2a6e89bd7812649824f83a53385a3dbeb0ff54f1"
+LIBVADRM_AMD64_SHA256="5dce5007ddc0ce87a61db4d71476ce1a5a135737b5185ce2e8b7067342fcafc6"
+LIBVA2_ARM64_URL="https://snapshot.debian.org/file/8632b4e2968a41f0891e9b8f4e45917f19c9aff1"
+LIBVA2_ARM64_SHA256="7a5e7cbaaddf1f39973c10f9daae6769b704e0d6d72fe752d64003929272cbcf"
+LIBVADRM_ARM64_URL="https://snapshot.debian.org/file/232c0c99171658ed064bb3fa8704ff5b1a4c7f18"
+LIBVADRM_ARM64_SHA256="18e556968a0f4bffd321d67b01fa5e445177c0849bef96a741aa7ed3a11dcc8b"
+
 MAX_BYTES=536870912 # 512 MiB: no download may be larger
 FFMPEG_DIR=/opt/syp/ffmpeg
 DATA_DIR=/var/lib/syp
@@ -138,16 +151,71 @@ else
   printf '%s\n' "$FF_SHA" > "$MARK"
 fi
 
-# GPU helpers: only packages the enabled sources already offer. A missing one is a note, not a failure.
+# libva 2.22 beside ffmpeg. Media starts ffmpeg and ffprobe with this folder on LD_LIBRARY_PATH, never the service.
+# The copies keep their symlinks, and the copyright notice goes with them. A re-run leaves them alone when the pins match.
+if [ "$ARCH" = amd64 ]; then
+  L2_URL="$LIBVA2_AMD64_URL"; L2_SHA="$LIBVA2_AMD64_SHA256"
+  LD_URL="$LIBVADRM_AMD64_URL"; LD_SHA="$LIBVADRM_AMD64_SHA256"
+else
+  L2_URL="$LIBVA2_ARM64_URL"; L2_SHA="$LIBVA2_ARM64_SHA256"
+  LD_URL="$LIBVADRM_ARM64_URL"; LD_SHA="$LIBVADRM_ARM64_SHA256"
+fi
+LIBDIR="$FFMPEG_DIR/lib"
+LIBMARK="$LIBDIR/.libva-sha256"
+LIBSET="$L2_SHA $LD_SHA"
+if [ -f "$LIBMARK" ] && [ "$(cat "$LIBMARK")" = "$LIBSET" ] && [ -e "$LIBDIR/libva.so.2" ] && [ -e "$LIBDIR/libva-drm.so.2" ]; then
+  say "libva 2.22 is already at the pinned build; leaving it alone."
+else
+  say "Fetching libva 2.22 (pinned Debian packages)"
+  fetch "$L2_URL" "$WORK/libva2.deb"
+  verify "$WORK/libva2.deb" "$L2_SHA" "libva2 2.22"
+  fetch "$LD_URL" "$WORK/libva-drm2.deb"
+  verify "$WORK/libva-drm2.deb" "$LD_SHA" "libva-drm2 2.22"
+  mkdir "$WORK/libva"
+  dpkg-deb -x "$WORK/libva2.deb" "$WORK/libva"
+  dpkg-deb -x "$WORK/libva-drm2.deb" "$WORK/libva"
+  install -d -m 0755 "$LIBDIR"
+  find "$WORK/libva/usr/lib" -name 'libva*.so*' -exec cp -P {} "$LIBDIR/" \;
+  if [ ! -e "$LIBDIR/libva.so.2" ] || [ ! -e "$LIBDIR/libva-drm.so.2" ]; then
+    die "the libva packages have no libva.so.2 and libva-drm.so.2"
+  fi
+  if [ -f "$WORK/libva/usr/share/doc/libva2/copyright" ]; then
+    cp "$WORK/libva/usr/share/doc/libva2/copyright" "$LIBDIR/LICENSE-libva"
+  fi
+  printf '%s\n' "$LIBSET" > "$LIBMARK"
+fi
+
+# GPU helpers: only packages the enabled sources already offer. Each is installed in its own call, so one that cannot
+# install (a conflict, a missing source) is a note and never takes the others with it. The free and the non-free Intel
+# iHD drivers conflict, so the free one is left out when the non-free one is offered. QSV on Ubuntu needs libmfx1 with
+# the non-free driver (L-HW-21); Debian 13 does not offer it, so it is skipped there.
 gpu_pkgs=""
-for p in intel-media-va-driver intel-media-va-driver-non-free mesa-va-drivers vainfo; do
+for p in intel-media-va-driver intel-media-va-driver-non-free libmfx1 mesa-va-drivers vainfo; do
   if apt-cache policy "$p" 2>/dev/null | grep -q 'Candidate: [^ (]'; then
     gpu_pkgs="$gpu_pkgs $p"
   fi
 done
+case "$gpu_pkgs" in
+  *intel-media-va-driver-non-free*)
+    kept=""
+    # shellcheck disable=SC2086
+    for p in $gpu_pkgs; do
+      [ "$p" = intel-media-va-driver ] || kept="$kept $p"
+    done
+    gpu_pkgs="$kept" ;;
+esac
 if [ -n "$gpu_pkgs" ]; then
-  # shellcheck disable=SC2086
-  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq $gpu_pkgs || say "note: GPU helper packages did not install; syp will use the processor."
+  for p in $gpu_pkgs; do
+    if DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$p" >/dev/null 2>&1; then
+      continue
+    fi
+    say "note: $p did not install; syp will use the processor for that card."
+    # The free Intel driver was left out for the non-free one. When that fails, the free one is the fallback, so a
+    # failure never leaves the Intel chip with no VA-API driver at all.
+    if [ "$p" = intel-media-va-driver-non-free ] && apt-cache policy intel-media-va-driver 2>/dev/null | grep -q 'Candidate: [^ (]'; then
+      DEBIAN_FRONTEND=noninteractive apt-get install -y -qq intel-media-va-driver >/dev/null 2>&1 || say "note: intel-media-va-driver did not install either; syp will use the processor for Intel."
+    fi
+  done
 else
   say "note: no GPU helper packages are offered by this system's enabled sources; syp will use the processor."
 fi

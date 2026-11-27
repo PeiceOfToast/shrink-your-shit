@@ -35,13 +35,7 @@ func TestEverySentenceIsPinned(t *testing.T) {
 	video := func(extra string) string { return base + extra + "}" }
 
 	cases := []wordingCase{
-		// Video's Advanced settings: each is a not_yet until item 6 or 8 builds it.
-		{name: "video size", video: video(`,"size":"1080"`),
-			problems: []string{`size|video.not_yet|Choosing the picture size is not built yet; each file keeps its own size.`}},
-		{name: "video width", video: video(`,"width":1280`),
-			problems: []string{`width|video.not_yet|Choosing the picture width is not built yet; each file keeps its own size.`}},
-		{name: "video height", video: video(`,"height":720`),
-			problems: []string{`height|video.not_yet|Choosing the picture height is not built yet; each file keeps its own size.`}},
+		// Video's Advanced settings: only two passes is still a not_yet (item 6).
 		{name: "video bitrate", video: video(`,"rateControl":"vbr"`),
 			disabled: []string{`video|quality||Not used: Advanced sets a bitrate instead.`}},
 		{name: "video VBR needs a format that offers it",
@@ -52,19 +46,15 @@ func TestEverySentenceIsPinned(t *testing.T) {
 			problems: []string{`avgMbps|video.no_bitrate|Type an average bitrate for Custom, or pick Low, Medium or High.`}},
 		{name: "video two passes", video: video(`,"twoPass":true`),
 			problems: []string{`twoPass|video.not_yet|Two passes are not built yet; the encode makes one pass.`}},
-		{name: "video speed", video: video(`,"preset":"slower"`),
-			problems: []string{`preset|video.not_yet|Choosing the encoder speed is not built yet; the processor picks its own speed.`}},
-		{name: "video frame rate", video: video(`,"fps":30`),
-			problems: []string{`fps|video.not_yet|Changing the frame rate is not built yet; each file keeps its frame rate.`}},
-		{name: "video colour depth", video: video(`,"bitDepth":10`),
-			problems: []string{`bitDepth|video.not_yet|Changing the colour depth is not built yet; each file keeps its own.`}},
-		{name: "video HDR", video: video(`,"hdr":"tonemap"`),
-			problems: []string{`hdr|video.not_yet|Converting HDR is not built yet; HDR files keep theirs.`}},
-		{name: "video Dolby Vision", video: video(`,"keepDolbyVision":true`),
-			problems: []string{`keepDolbyVision|video.not_yet|Keeping the Dolby Vision layer is not built yet.`}},
 		{name: "video Dolby Vision needs HEVC",
 			video:    video(`,"format":"h264","keepDolbyVision":true`),
 			disabled: []string{`video|keepDolbyVision||Only with HEVC.`}},
+
+		{name: "video colour depth on H.264", video: video(`,"format":"h264","bitDepth":10`),
+			problems: []string{`bitDepth|video.bitdepth_h264|10-bit H.264 plays on few devices, so it isn't offered. Pick HEVC or AV1 for 10-bit.`},
+			disabled: []string{`video|bitDepth|10|10-bit H.264 plays on few devices, so it isn't offered. Pick HEVC or AV1 for 10-bit.`}},
+		{name: "video Dolby Vision", video: video(`,"keepDolbyVision":true`),
+			disabled: []string{`video|keepDolbyVision||Keeping the Dolby Vision layer is not possible on the processor with this ffmpeg. Profiles 7 and 8 convert as their HDR10 base.`}},
 
 		// The card fields: greyed by the settings or by the server.
 		{name: "video no card, card not used", video: video(``),
@@ -120,21 +110,26 @@ func TestEverySentenceIsPinned(t *testing.T) {
 		{name: "save file type is not a choice", save: `{"container":"avi","where":"next_to"}`,
 			problems: []string{`settings|setting.invalid|file.save settings: File type must be MKV, MP4, WebM or Keep the same.`}},
 		{name: "container WebM", save: `{"container":"webm","where":"next_to"}`,
-			problems: []string{`container|container_unsupported|WebM needs AV1 video and Opus audio. Pick another file type.`},
-			disabled: []string{`save|container|webm|WebM needs AV1 video and Opus audio.`}},
+			problems: []string{`container|container_unsupported|WebM needs AV1 video. Pick AV1 in Video to use it. Or pick another file type.`},
+			disabled: []string{`save|container|webm|WebM needs AV1 video. Pick AV1 in Video to use it.`}},
+		{name: "container WebM with AV1", video: `{"format":"av1"}`, save: `{"container":"webm","where":"next_to"}`,
+			problems: []string{`container|container_unsupported|WebM needs Opus audio. Pick Opus in Audio to use it. Or pick another file type.`},
+			disabled: []string{`save|container|webm|WebM needs Opus audio. Pick Opus in Audio to use it.`}},
 		{name: "container MP4", audio: `{"format":"opus"}`, save: `{"container":"mp4","where":"next_to"}`,
-			problems: []string{`container|container_unsupported|MP4 can't hold Opus audio. Pick another file type.`},
+			problems: []string{`container|container_unsupported|MP4 can't hold Opus audio. Or pick another file type.`},
 			disabled: []string{`save|container|mp4|MP4 can't hold Opus audio.`}},
 	}
 
 	// Every problem code and every greyed sentence the check can carry, so a new one cannot arrive
 	// without its row here.
-	wantCodes := []string{"video.not_yet", "video.no_bitrate", "audio.not_yet", "audio.copy_conflict",
+	wantCodes := []string{"video.not_yet", "video.no_bitrate", "video.bitdepth_h264", "audio.not_yet", "audio.copy_conflict",
 		"save.not_yet", "save.folder_missing", "save.empty_suffix", "container_unsupported", "setting.invalid"}
 	wantWhys := []string{
 		"Not used: Advanced sets a bitrate instead.",
 		"Variable bitrate doesn't work with AV1 yet. Pick Constant bitrate or Quality, or another format.",
 		"Only with HEVC.",
+		"10-bit H.264 plays on few devices, so it isn't offered. Pick HEVC or AV1 for 10-bit.",
+		"Keeping the Dolby Vision layer is not possible on the processor with this ffmpeg. Profiles 7 and 8 convert as their HDR10 base.",
 		"The graphics card is not used.",
 		"No worker has a graphics card.",
 		"No worker can encode H.264: libx264 is not installed.",
@@ -144,7 +139,8 @@ func TestEverySentenceIsPinned(t *testing.T) {
 		"FLAC is lossless, so it has no bitrate to set.",
 		"Replacing the original comes in a later update; for now the new file is saved next to it.",
 		"Saving to a different folder comes in a later update; for now the new file is saved next to it.",
-		"WebM needs AV1 video and Opus audio.",
+		"WebM needs AV1 video. Pick AV1 in Video to use it.",
+		"WebM needs Opus audio. Pick Opus in Audio to use it.",
 		"MP4 can't hold Opus audio.",
 	}
 

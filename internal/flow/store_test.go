@@ -147,9 +147,9 @@ func TestSaveDraftRefusesAStaleBaseRev(t *testing.T) {
 func TestPublishIsBlockedByTheFirstProblem(t *testing.T) {
 	s, ctx := workflowStore(t)
 	f := flowWithQuality(t, "Holidays", 3)
-	// The size is a "not yet" problem: a valid choice the engine cannot act on.
+	// Two passes is a "not yet" problem: a valid choice the engine cannot act on.
 	settings, err := json.Marshal(map[string]any{
-		"format": "hevc", "quality": 3, "useGpu": false, "ifGpuFails": "cpu", "size": "1080",
+		"format": "hevc", "quality": 3, "useGpu": false, "ifGpuFails": "cpu", "twoPass": true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -164,8 +164,8 @@ func TestPublishIsBlockedByTheFirstProblem(t *testing.T) {
 	if !errors.As(err, &blocked) {
 		t.Fatalf("publish = %v; want a PublishBlockedError", err)
 	}
-	if !strings.Contains(blocked.Problem.Message, "picture size") {
-		t.Fatalf("blocked by %q; want the picture-size problem", blocked.Problem.Message)
+	if !strings.Contains(blocked.Problem.Message, "Two passes") {
+		t.Fatalf("blocked by %q; want the two-passes problem", blocked.Problem.Message)
 	}
 	w, err := s.Get(ctx, id)
 	if err != nil {

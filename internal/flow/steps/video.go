@@ -71,6 +71,10 @@ func (VideoStep) Def() flow.Definition {
 				Keep: events.KeepLog},
 			{Code: "video.no_bitrate", Level: events.LevelError, Text: "The bitrate is missing",
 				Keep: events.KeepLog},
+			{Code: "video.hdr_h264", Level: events.LevelError, Text: "H.264 isn't used for HDR",
+				Keep: events.KeepLog},
+			{Code: "video.hdr_skipped", Level: events.LevelInfo, Text: "Left alone: {hdr} is not converted",
+				Fields: []string{"hdr"}, Keep: events.KeepLog},
 		},
 	}
 }
@@ -92,10 +96,34 @@ func (VideoStep) Plan(s flow.Settings, in flow.PlanInput, p *encode.Plan) (flow.
 		}, nil
 	}
 
+	// HDR skip leaves an HDR file alone, with the reason in the job (L-HW-16); nothing is planned.
+	hdr := ""
+	if set.HDR != nil {
+		hdr = *set.HDR
+	}
+	if hdr == "skip" && main.HDRKind() != "SDR" {
+		return flow.Decision{
+			Work: false, Label: "Left alone: " + main.HDRKind(), Reason: "video.hdr_skipped",
+			Detail: flow.F{"hdr": main.HDRKind()},
+		}, nil
+	}
+
 	p.Video.Codec = want
-	p.Video.Preset = "normal"
-	p.Video.BitDepth = encode.DepthSource
+	p.Video.Preset = presetChoice(set)
+	if set.Size != nil {
+		p.Video.Scale = sizeBox(set)
+	}
+	p.Video.FPS = fpsAsked(set, main)
+	p.Video.BitDepth = bitDepthAsked(set)
 	p.Video.HDR = encode.HDRKeep
+	if hdr == "tonemap" && main.HDRKind() != "SDR" {
+		p.Video.HDR = encode.HDRTonemap
+	}
+	if want == encode.CodecH264 && p.Video.HDR == encode.HDRKeep && main.HDRKind() != "SDR" {
+		// H.264 is not used for HDR, by choice (#855): say so before the run, not as a failed job.
+		return flow.Decision{}, &flow.PlanError{Code: "video.hdr_h264",
+			Message: "H.264 isn't used for HDR, because few devices play it. Pick HEVC, or choose Convert to SDR."}
+	}
 	detail := flow.F{
 		"format": string(want), "from": main.Codec,
 		"useGpu": set.UseGpu, "ifGpuFails": set.IfGpuFails,
@@ -116,7 +144,7 @@ func (VideoStep) Plan(s flow.Settings, in flow.PlanInput, p *encode.Plan) (flow.
 			detail["maxMbps"] = rate.MaxMbps
 		}
 	} else {
-		row := resolutionRow(main)
+		row := ladderRow(main, p.Video.Scale)
 		crf := videoCRF(set.Format, set.Quality, row)
 		p.Video.CRF = &crf
 		detail["crf"] = crf
@@ -183,6 +211,61 @@ func rateControl(set VideoSettings, info media.Info, main media.VideoTrack, row 
 	return rc, nil
 }
 
+// presetChoice is the speed the person picked, "normal" when unset.
+func presetChoice(set VideoSettings) string {
+	if set.Preset == nil || *set.Preset == "" {
+		return "normal"
+	}
+	return *set.Preset
+}
+
+// sizeBox is the picture-size box the plan scales into (L-HW-16's size rules live in encode.Build:
+// the box is never grown). A preset height leaves the width free, so the shape is kept.
+func sizeBox(set VideoSettings) encode.Scale {
+	if set.Size == nil || *set.Size == "" {
+		return encode.Scale{}
+	}
+	if *set.Size == "custom" {
+		var box encode.Scale
+		if set.Width != nil {
+			box.Width = *set.Width
+		}
+		if set.Height != nil {
+			box.Height = *set.Height
+		}
+		return box
+	}
+	h, err := strconv.Atoi(*set.Size)
+	if err != nil {
+		return encode.Scale{}
+	}
+	return encode.Scale{Height: h}
+}
+
+// fpsAsked is the frame rate the person asked for, or zero to keep the file's own. A rate at or
+// above the source's is never asked for: the frame rate is only ever lowered.
+func fpsAsked(set VideoSettings, main media.VideoTrack) float64 {
+	if set.FPS == nil {
+		return 0
+	}
+	if src := main.FrameRate.Float(); src > 0 && *set.FPS >= src {
+		return 0
+	}
+	return *set.FPS
+}
+
+// bitDepthAsked is the colour depth the person asked for; unset keeps the source's.
+func bitDepthAsked(set VideoSettings) encode.BitDepth {
+	switch {
+	case set.BitDepth == nil:
+		return encode.DepthSource
+	case *set.BitDepth == 10:
+		return encode.Depth10
+	default:
+		return encode.Depth8
+	}
+}
+
 // sourceMbps is the source video's own rate, from its stream or, when the container does not say
 // (Matroska often does not), the file's overall rate. Zero when neither is known.
 func sourceMbps(info media.Info, main media.VideoTrack) float64 {
@@ -211,6 +294,11 @@ func (VideoStep) Validate(s flow.Settings, vc flow.ValidateContext) flow.Check {
 		})
 	}
 	c.Disabled = append(c.Disabled, tagDisabled(set)...)
+	if set.BitDepth != nil && *set.BitDepth == 10 && set.Format == "h264" {
+		// Greyed and a problem: a plan asking for ten-bit H.264 is refused rather than written as eight (#855).
+		c.Problems = append(c.Problems, flow.Problem{Field: "bitDepth", Code: "video.bitdepth_h264",
+			Message: "10-bit H.264 plays on few devices, so it isn't offered. Pick HEVC or AV1 for 10-bit."})
+	}
 	if !set.UseGpu {
 		c.Disabled = append(c.Disabled, flow.Disabled{Field: "ifGpuFails", Why: "The graphics card is not used."})
 	} else if vc.Env.CardFamily == "" {
@@ -267,41 +355,25 @@ func tagDisabled(set VideoSettings) []flow.Disabled {
 	}
 	if set.KeepDolbyVision && set.Format != "hevc" {
 		out = append(out, flow.Disabled{Field: "keepDolbyVision", Why: "Only with HEVC."})
+	} else if set.KeepDolbyVision {
+		// Not faked (S2-8): the processor path cannot carry the RPU with the pinned ffmpeg.
+		out = append(out, flow.Disabled{Field: "keepDolbyVision",
+			Why: "Keeping the Dolby Vision layer is not possible on the processor with this ffmpeg. Profiles 7 and 8 convert as their HDR10 base."})
+	}
+	if set.BitDepth != nil && *set.BitDepth == 10 && set.Format == "h264" {
+		out = append(out, flow.Disabled{Field: "bitDepth", Value: "10",
+			Why: "10-bit H.264 plays on few devices, so it isn't offered. Pick HEVC or AV1 for 10-bit."})
 	}
 	return out
 }
 
-// videoNotYet is every Advanced setting the engine cannot act on yet. Item 8 deletes these lines as
-// it builds the setting; two passes belong to item 6 but are not built, so they still report.
+// videoNotYet is every Advanced setting the engine cannot act on yet. Two passes belong to item 6
+// and are not built, so they still report.
 func videoNotYet(set VideoSettings) []flow.Problem {
 	var out []flow.Problem
-	add := func(field, message string) {
-		out = append(out, flow.Problem{Field: field, Code: "video.not_yet", Message: message})
-	}
-	if set.Size != nil {
-		add("size", "Choosing the picture size is not built yet; each file keeps its own size.") // item 8
-	} else if set.Width != nil {
-		add("width", "Choosing the picture width is not built yet; each file keeps its own size.") // item 8
-	} else if set.Height != nil {
-		add("height", "Choosing the picture height is not built yet; each file keeps its own size.") // item 8
-	}
 	if set.TwoPass {
-		add("twoPass", "Two passes are not built yet; the encode makes one pass.")
-	}
-	if set.Preset != nil && *set.Preset != "" && *set.Preset != "normal" {
-		add("preset", "Choosing the encoder speed is not built yet; the processor picks its own speed.") // item 8
-	}
-	if set.FPS != nil {
-		add("fps", "Changing the frame rate is not built yet; each file keeps its frame rate.") // item 8
-	}
-	if set.BitDepth != nil {
-		add("bitDepth", "Changing the colour depth is not built yet; each file keeps its own.") // item 8
-	}
-	if set.HDR != nil && *set.HDR != "" && *set.HDR != "keep" {
-		add("hdr", "Converting HDR is not built yet; HDR files keep theirs.") // item 8
-	}
-	if set.KeepDolbyVision {
-		add("keepDolbyVision", "Keeping the Dolby Vision layer is not built yet.") // item 8
+		out = append(out, flow.Problem{Field: "twoPass", Code: "video.not_yet",
+			Message: "Two passes are not built yet; the encode makes one pass."})
 	}
 	return out
 }

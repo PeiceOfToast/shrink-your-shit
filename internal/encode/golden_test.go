@@ -65,6 +65,11 @@ func goldenCases() []goldenCase {
 		for _, depth := range depths {
 			for _, scale := range scales {
 				for _, container := range containers {
+					// H.264 is not used for HDR, by choice (#855): those shapes are refused, not written, so they
+					// are tested as refusals in TestH264HDRIsRefusedInEveryShape, not as rows here.
+					if codec.codec == CodecH264 && (depth.name == "hdr10" || depth.name == "hlg") {
+						continue
+					}
 					plan := Plan{
 						Video: VideoPlan{
 							Codec: codec.codec, CRF: intp(22), Preset: "normal", Scale: scale.scale,

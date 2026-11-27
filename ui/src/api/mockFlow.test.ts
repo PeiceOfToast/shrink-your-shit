@@ -48,10 +48,12 @@ test("MP4 is greyed for Opus audio, with its reason", () => {
   assert.equal(disabledFor({ audio: "stereo_aac" }, "mp4"), undefined);
 });
 
-test("WebM needs AV1 video and Opus audio; with either missing it is greyed", () => {
-  const why = "WebM needs AV1 video and Opus audio.";
-  assert.equal(disabledFor({ format: "hevc", audio: "stereo_opus" }, "webm")?.why, why);
-  assert.equal(disabledFor({ format: "av1", audio: "stereo_aac" }, "webm")?.why, why);
+test("WebM needs AV1 video and Opus audio; the reason names the missing one", () => {
+  // Video first: any video that isn't AV1 gets the video sentence, whatever the audio is.
+  assert.equal(disabledFor({ format: "hevc", audio: "stereo_opus" }, "webm")?.why, "WebM needs AV1 video. Pick AV1 in Video to use it.");
+  assert.equal(disabledFor({ format: "hevc", audio: "stereo_aac" }, "webm")?.why, "WebM needs AV1 video. Pick AV1 in Video to use it.");
+  // AV1 video with audio that is not Opus (AAC here) gets the audio sentence.
+  assert.equal(disabledFor({ format: "av1", audio: "stereo_aac" }, "webm")?.why, "WebM needs Opus audio. Pick Opus in Audio to use it.");
   assert.equal(disabledFor({ format: "av1", audio: "stereo_opus" }, "webm"), undefined);
 });
 
@@ -60,6 +62,18 @@ test("a saved file type the rules rule out is a problem", () => {
   const p = check.problems.find((x) => x.code === "container_unsupported");
   assert.equal(p?.stepId, "save");
   assert.equal(p?.field, "container");
+  assert.equal(p?.message, "WebM needs AV1 video. Pick AV1 in Video to use it. Or pick another file type.");
+});
+
+// The server treats an empty audio codec as unset, so the Format answer is used.
+test("an empty audio codec is unset: opus format with an empty codec is not a WebM problem", () => {
+  const flow = answersToFlow(DEFAULT_ANSWERS, META);
+  flow.steps[0].settings = { ...flow.steps[0].settings, format: "av1" };
+  flow.steps[1].settings = { ...flow.steps[1].settings, format: "opus", codec: "" };
+  flow.steps[2].settings = { ...flow.steps[2].settings, container: "webm" };
+  const check = checkFlow(flow);
+  assert.equal(check.problems.find((x) => x.code === "container_unsupported"), undefined);
+  assert.equal(check.disabled.find((d) => d.field === "container" && d.value === "webm"), undefined);
 });
 
 test("the guided preview greys the file types the answers rule out, with the editor's reason", async () => {

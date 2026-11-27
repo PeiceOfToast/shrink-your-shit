@@ -222,7 +222,7 @@ func Probe(ctx context.Context, path string) (Info, error) {
 		"-show_chapters",
 		arg,
 	}
-	cmd := exec.CommandContext(ctx, tool("ffprobe"), args...)
+	cmd := toolCommand(ctx, "ffprobe", args...)
 	var out, stderr bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &stderr

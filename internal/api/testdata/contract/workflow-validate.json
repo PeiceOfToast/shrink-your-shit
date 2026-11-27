@@ -22,7 +22,7 @@
         "field": "container",
         "stepId": "save",
         "value": "webm",
-        "why": "WebM needs AV1 video and Opus audio."
+        "why": "WebM needs AV1 video. Pick AV1 in Video to use it."
       }
     ],
     "problems": [],

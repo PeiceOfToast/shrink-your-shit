@@ -327,12 +327,6 @@ func TestBuildRefusesLaterStageFields(t *testing.T) {
 		t.Errorf("two passes: error = %v, want ErrNotBuiltYet", err)
 	}
 
-	plan = basePlan(CodecHEVC)
-	plan.Video.HDR = HDRTonemap
-	if _, err := Build(plan, baseInfo(), cpuRung(CodecHEVC)); !errors.Is(err, ErrNotBuiltYet) {
-		t.Errorf("tonemap: error = %v, want ErrNotBuiltYet", err)
-	}
-
 }
 
 func TestBuildSkipsHDRTheFlowLeavesAlone(t *testing.T) {
