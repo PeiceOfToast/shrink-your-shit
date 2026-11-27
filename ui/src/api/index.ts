@@ -1,8 +1,20 @@
 // The one place that decides where data comes from. Pages import from here only.
-// Today it is always the mock. When the backend is ready, switch the module below to the real client.
+// Every group starts on the mock. A group whose flag is on (groups.ts) takes its real module over the mock.
 import * as mock from "./mock.ts";
+import * as realSummary from "./real/summary.ts";
+import { isReal, type Group } from "./groups.ts";
 
-export const api = mock;
+const realByGroup: Partial<Record<Group, object>> = { summary: realSummary };
+
+function build(): typeof mock {
+  const out: Record<string, unknown> = { ...mock };
+  for (const group of Object.keys(realByGroup) as Group[]) {
+    if (isReal(group)) Object.assign(out, realByGroup[group]);
+  }
+  return out as typeof mock;
+}
+
+export const api = build();
 export { setForcedState, getForcedState, onForcedStateChange } from "./mock.ts";
 export type * from "./types.ts";
 export type * from "./flowTypes.ts";

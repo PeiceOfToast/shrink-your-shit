@@ -42,6 +42,10 @@ jobs:
         working-directory: ui
         run: npm run build
 
+      - name: Contract
+        working-directory: ui
+        run: npm run contract
+
   go:
     runs-on: ubuntu-latest
     timeout-minutes: 10
