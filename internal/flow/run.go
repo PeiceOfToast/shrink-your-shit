@@ -182,7 +182,10 @@ func (e *engine) run(ctx context.Context) (res Result) {
 	if len(extracts) > 0 && !e.in.Try {
 		name, err := safety.FreeName(plan.Output)
 		if err != nil {
-			return fatal("save.name_failed", err.Error(), "save", "")
+			// Nothing has been written yet: the original is untouched and no new file exists.
+			return fatal("save.name_failed",
+				"The original was left as it is and no new file was made, because no free name for it could be found. ("+err.Error()+")",
+				"save", "")
 		}
 		plan.Output = name
 		// A subtitle file name taken already stops the run now, before anything is written: the
@@ -843,7 +846,11 @@ func (e *engine) placeSidecars(plan encode.Plan, extracts []encode.StreamPlan, s
 	}
 	if e.env.Sidecars != nil && e.in.JobID != 0 {
 		if err := e.env.Sidecars.AddSidecars(recs); err != nil {
-			return nil, fatal("subtitle.record_failed", "Could not record the subtitle files: "+err.Error(), "save", "retry")
+			// The records go in before any .srt is renamed into place and before Place: on this
+			// path nothing has changed.
+			return nil, fatal("subtitle.record_failed",
+				"The subtitle files could not be recorded, so nothing was changed. Press Retry. ("+err.Error()+")",
+				"save", "retry")
 		}
 	}
 	var placed []safety.Sidecar
