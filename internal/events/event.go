@@ -53,6 +53,12 @@ const (
 	KindScanStart    Kind = "scan.start"
 	KindScanProgress Kind = "scan.progress"
 	KindScanEnd      Kind = "scan.end"
+	// History kinds (logging.md §6.1): a job's life as the app saw it.
+	KindQueued    Kind = "queued"
+	KindPicked    Kind = "picked"
+	KindRetry     Kind = "retry"
+	KindRequeued  Kind = "requeued"
+	KindCancelled Kind = "cancelled"
 )
 
 var knownKinds = map[Kind]bool{
@@ -61,6 +67,7 @@ var knownKinds = map[Kind]bool{
 	KindSize: true, KindVariable: true, KindMove: true, KindWarning: true,
 	KindError: true, KindNote: true,
 	KindScanStart: true, KindScanProgress: true, KindScanEnd: true,
+	KindQueued: true, KindPicked: true, KindRetry: true, KindRequeued: true, KindCancelled: true,
 }
 
 // jobKinds are kept in the job's own record (keep "job") rather than only in the log.
@@ -68,9 +75,10 @@ var jobKinds = map[Kind]bool{
 	KindRunStart: true, KindRunEnd: true, KindStepEnd: true, KindProbe: true,
 }
 
-// historyKinds are the kinds that belong to a job's history. None exist yet; add them
-// here when the History work lands. They keep "job" like jobKinds.
-var historyKinds = map[Kind]bool{}
+// historyKinds are the kinds that belong to a job's history. They keep "job" like jobKinds.
+var historyKinds = map[Kind]bool{
+	KindQueued: true, KindPicked: true, KindRetry: true, KindRequeued: true, KindCancelled: true,
+}
 
 // Keep says where an event is kept long-term. Emit sets it from the kind.
 type Keep string
