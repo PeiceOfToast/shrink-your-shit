@@ -92,6 +92,7 @@ func newJobsFixture(t *testing.T) *jobsFixture {
 	}
 	if err := q.Finish(ctx, j.ID, j.Attempt, jobs.Result{
 		Verdict: jobs.VerdictFail, Reason: "the encoder stopped", FailedStep: "encode",
+		NextAction: "Try again; if it fails again, pick another workflow.",
 	}); err != nil {
 		t.Fatalf("finish failed: %v", err)
 	}
