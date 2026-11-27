@@ -42,10 +42,6 @@ func Build(plan Plan, info media.Info, rung Rung) (Result, error) {
 	if plan.RateControl != nil && plan.RateControl.TwoPass {
 		return res, fmt.Errorf("%w: two passes", ErrNotBuiltYet)
 	}
-	if plan.Video.HDR == HDRTonemap {
-		return res, fmt.Errorf("%w: tone-mapping", ErrNotBuiltYet)
-	}
-
 	main, ok := mainVideo(info)
 	if !ok {
 		return res, fmt.Errorf("%w: the file has no video stream", ErrInvalidPlan)
@@ -221,19 +217,25 @@ func videoOptions(plan Plan, main media.VideoTrack, encoder string, res *Result)
 		return nil, fmt.Errorf("%w: %s is left alone by this flow", ErrSkip, main.HDRKind())
 	}
 
-	keepHDR := false
+	// The source's transfer. A Dolby Vision stream whose transfer line is missing is still HDR, as
+	// its HDR10 base.
 	transfer := main.ColorTransfer
-	if plan.Video.HDR != HDRSkip {
-		switch main.ColorTransfer {
-		case "smpte2084", "arib-std-b67":
-			keepHDR = true
-		default:
-			if main.HDR.DolbyVision { // a DV stream whose transfer line is missing is still HDR
-				keepHDR = true
-				transfer = "smpte2084"
-			}
-		}
+	isHDR := transfer == "smpte2084" || transfer == "arib-std-b67"
+	if !isHDR && main.HDR.DolbyVision {
+		isHDR = true
+		transfer = "smpte2084"
 	}
+	primaries := main.ColorPrimaries
+	if primaries == "" {
+		primaries = "bt2020"
+	}
+	colorspace := main.ColorSpace
+	if colorspace == "" {
+		colorspace = "bt2020nc"
+	}
+	// tonemap converts an HDR picture to SDR BT.709 (L-HW-16); keep writes the HDR metadata through.
+	tonemapping := plan.Video.HDR == HDRTonemap && isHDR
+	keepHDR := isHDR && plan.Video.HDR != HDRSkip && !tonemapping
 
 	depth := 8
 	switch plan.Video.BitDepth {
@@ -251,6 +253,24 @@ func videoOptions(plan Plan, main media.VideoTrack, encoder string, res *Result)
 	if keepHDR {
 		// Ten-bit output on an HDR source is a fact, not a setting (L-HW-16).
 		depth = 10
+	}
+	if tonemapping && plan.Video.BitDepth == DepthSource {
+		// A tone-mapped picture is SDR: 8-bit unless the person asked for ten.
+		depth = 8
+	}
+	if plan.Video.Codec == CodecH264 {
+		// H.264 is 8-bit by choice (10-bit and HDR H.264 play on few devices): no ten-bit H.264 is offered, and HDR cannot be kept in it. A plan that asks
+		// for either is refused; a ten-bit SDR source is written as 8-bit, and the log says so (#855).
+		if keepHDR {
+			return nil, fmt.Errorf("%w: H.264 is not used for HDR", ErrInvalidPlan)
+		}
+		if plan.Video.BitDepth == Depth10 {
+			return nil, fmt.Errorf("%w: 10-bit H.264 is not offered", ErrInvalidPlan)
+		}
+		if depth == 10 {
+			depth = 8
+			res.Notes = append(res.Notes, "H.264 is written as 8-bit: 10-bit H.264 plays on few devices")
+		}
 	}
 
 	if plan.Video.FPS < 0 || math.IsNaN(plan.Video.FPS) || math.IsInf(plan.Video.FPS, 0) {
@@ -295,21 +315,23 @@ func videoOptions(plan Plan, main media.VideoTrack, encoder string, res *Result)
 	if plan.Video.Codec == CodecAV1 {
 		argv = append(argv, "-svtav1-params:v:0", "tune=0")
 	}
+	var filters []string
 	if scaleW > 0 && scaleH > 0 {
-		argv = append(argv, "-vf:v:0", fmt.Sprintf("scale=%d:%d", scaleW, scaleH))
+		filters = append(filters, fmt.Sprintf("scale=%d:%d", scaleW, scaleH))
+	}
+	if tonemapping {
+		filters = append(filters, tonemapChain(transfer, primaries, colorspace, pixelFormat))
+	}
+	if len(filters) > 0 {
+		argv = append(argv, "-vf:v:0", strings.Join(filters, ","))
 	}
 	if plan.Video.FPS > 0 {
 		argv = append(argv, "-r:v:0", frameRate(plan.Video.FPS))
 	}
+	if tonemapping {
+		argv = append(argv, "-color_primaries:v:0", "bt709", "-color_trc:v:0", "bt709", "-colorspace:v:0", "bt709")
+	}
 	if keepHDR {
-		primaries := main.ColorPrimaries
-		if primaries == "" {
-			primaries = "bt2020"
-		}
-		colorspace := main.ColorSpace
-		if colorspace == "" {
-			colorspace = "bt2020nc"
-		}
 		argv = append(argv,
 			"-color_primaries:v:0", primaries,
 			"-color_trc:v:0", transfer,
@@ -457,6 +479,22 @@ func evenRound(f float64) int {
 		n = 2
 	}
 	return n
+}
+
+// tonemapChain is the processor's HDR-to-SDR conversion (L-HW-16): the picture is read as the
+// source's transfer and primaries, made linear at 100 nits, converted to BT.709 primaries, tone
+// mapped with Hable, and written as BT.709 video range in the output's pixel format. The linear step
+// is float, so the tone curve does not band.
+func tonemapChain(transfer, primaries, colorspace, pixelFormat string) string {
+	// The source's HDR side data is deleted before anything else: libx265 writes frame mastering-display and
+	// content-light side data into the stream's codec header, so left in place it would describe an SDR picture as
+	// HDR (#855). A stream-level bitstream filter cannot reach that header; the frame filter can.
+	return "sidedata=mode=delete:type=MASTERING_DISPLAY_METADATA" +
+		",sidedata=mode=delete:type=CONTENT_LIGHT_LEVEL" +
+		",sidedata=mode=delete:type=DYNAMIC_HDR_PLUS" +
+		",zscale=tin=" + transfer + ":pin=" + primaries + ":min=" + colorspace + ":t=linear:npl=100" +
+		",format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0" +
+		",zscale=t=bt709:m=bt709:r=tv,format=" + pixelFormat
 }
 
 func frameRate(f float64) string {
