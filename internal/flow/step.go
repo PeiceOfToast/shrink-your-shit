@@ -82,19 +82,22 @@ type Check struct {
 }
 
 // Problem is one thing that blocks publishing. Field names the setting, when it is one setting's
-// fault, so the page can mark it.
+// fault, so the page can mark it. StepID is filled by flow.Validate: a step's own Problem leaves it
+// empty, and a problem about the whole flow has none.
 type Problem struct {
-	Field   string
-	Code    string
-	Message string
+	StepID  string `json:"stepId,omitempty"`
+	Field   string `json:"field,omitempty"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
 }
 
 // Disabled greys one field, or one choice of it, with the reason. Value empty means the whole
-// field.
+// field. StepID is filled by flow.Validate, like Problem's.
 type Disabled struct {
-	Field string
-	Value string
-	Why   string
+	StepID string `json:"stepId"`
+	Field  string `json:"field"`
+	Value  string `json:"value,omitempty"`
+	Why    string `json:"why"`
 }
 
 // ValidateContext is the whole flow as validated, and the server it is checked against.

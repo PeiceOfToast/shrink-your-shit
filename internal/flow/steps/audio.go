@@ -3,6 +3,8 @@
 package steps
 
 import (
+	"strings"
+
 	"github.com/PeiceOfToast/shrink-your-shit/internal/encode"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/events"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/flow"
@@ -37,6 +39,15 @@ func init() { flow.RegisterStep(AudioStep{}) }
 type AudioStep struct{}
 
 var _ flow.Step = AudioStep{}
+
+// AudioCodec is one of the settings facts the flow's container rules read (flow/containers.go):
+// Advanced's codec when it replaces Format, else the Format choice itself.
+func (set AudioSettings) AudioCodec() string {
+	if set.Codec != nil && *set.Codec != "" {
+		return *set.Codec
+	}
+	return set.Format
+}
 
 // Def is the step's own description.
 func (AudioStep) Def() flow.Definition {
@@ -147,19 +158,54 @@ func audioNotYet(set AudioSettings) []flow.Problem {
 	return out
 }
 
-// audioSummary is the closed card's line: the output format and channels, or the copy it is.
+// audioSummary is the closed card's line in page 07's words: the codec, the channels, the
+// languages to keep and the subtitles choice.
 func audioSummary(set AudioSettings) string {
-	name := ""
-	switch {
-	case set.Codec != nil && *set.Codec != "" && *set.Codec != "copy":
-		name = codecLabel(*set.Codec)
-	case set.Format != "" && set.Format != "copy":
-		name = codecLabel(set.Format)
+	langs := "my languages"
+	if len(set.Languages) > 0 {
+		langs = languageNames(set.Languages)
 	}
-	if name == "" {
-		return "Audio copied as is"
+	subLangs := langs
+	if len(set.SubtitleLanguages) > 0 {
+		subLangs = languageNames(set.SubtitleLanguages)
 	}
-	return name + " · " + channelsLabel(set.Channels)
+	subtitles := "subtitles: keep all"
+	switch set.Subtitles {
+	case "srt":
+		subtitles = "SRT files"
+	case "text_only":
+		subtitles = "text only"
+	case "my_languages":
+		subtitles = "subtitles: " + subLangs
+	}
+	return codecLabel(set.AudioCodec()) + " · " + channelsLabel(set.Channels) + " · " + langs + " · " + subtitles
+}
+
+// languageNames joins the names of the codes the way page 07 writes them, "English and German".
+func languageNames(codes []string) string {
+	names := make([]string, 0, len(codes))
+	for _, code := range codes {
+		names = append(names, languageName(code))
+	}
+	return strings.Join(names, " and ")
+}
+
+// languageName is the name a person reads for a code; the two special choices have their own
+// words, and an unknown code is left as typed.
+func languageName(code string) string {
+	c := strings.ToLower(strings.TrimSpace(code))
+	switch c {
+	case "orig":
+		return "Original language"
+	case "und":
+		return "Unknown"
+	}
+	for _, l := range flow.Languages() {
+		if l.Code == c {
+			return l.Name
+		}
+	}
+	return strings.TrimSpace(code)
 }
 
 // codecLabel is how the pages write an audio codec.
@@ -176,7 +222,7 @@ func codecLabel(codec string) string {
 	case "flac":
 		return "FLAC"
 	case "copy":
-		return "copy"
+		return "Same as the source"
 	}
 	return codec
 }
@@ -191,5 +237,5 @@ func channelsLabel(channels string) string {
 	case "5.1":
 		return "5.1"
 	}
-	return "same channels"
+	return "same channels as the source"
 }

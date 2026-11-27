@@ -144,7 +144,7 @@ func TestSaveValidate(t *testing.T) {
 	if len(check.Problems) != 0 {
 		t.Errorf("problems = %+v, want none", check.Problems)
 	}
-	if check.Summary != "MKV · next to the original · -shrunk" {
+	if check.Summary != "MKV · next to the original" {
 		t.Errorf("summary = %q", check.Summary)
 	}
 
@@ -161,11 +161,11 @@ func TestSaveValidate(t *testing.T) {
 	if check = (SaveStep{}).Validate(set, flow.ValidateContext{}); len(check.Problems) != 1 || check.Problems[0].Field != "where" {
 		t.Errorf("filled folder problems = %+v, want only the not-yet problem", check.Problems)
 	}
-	// WebM is refused until the cross-step rules can be checked (item 2) and audio can convert (item 7).
+	// WebM itself is not a problem here: what a file type can hold is the flow's cross-step rule
+	// (flow/containers.go), which knows Video's format and Audio's codec.
 	check = SaveStep{}.Validate(saveSettings("webm", "next_to", "shrunk"), flow.ValidateContext{})
-	if len(check.Problems) != 1 || check.Problems[0].Field != "container" ||
-		!strings.Contains(check.Problems[0].Message, "not built yet") {
-		t.Errorf("webm problems = %+v, want the not-yet problem", check.Problems)
+	if len(check.Problems) != 0 {
+		t.Errorf("webm problems = %+v, want the container rule to own it", check.Problems)
 	}
 
 	check = SaveStep{}.Validate(saveSettings("keep", "next_to", "///"), flow.ValidateContext{})

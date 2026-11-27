@@ -3,6 +3,7 @@
 package steps
 
 import (
+	"fmt"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -30,6 +31,10 @@ func init() { flow.RegisterStep(SaveStep{}) }
 type SaveStep struct{}
 
 var _ flow.Step = SaveStep{}
+
+// ContainerChoice is one of the settings facts the flow's container rules read
+// (flow/containers.go): the file type this step asks for.
+func (set SaveSettings) ContainerChoice() string { return set.Container }
 
 // Def is the step's own description.
 func (SaveStep) Def() flow.Definition {
@@ -101,14 +106,8 @@ func (SaveStep) Validate(s flow.Settings, vc flow.ValidateContext) flow.Check {
 			Message: "Choose the folder the new file goes in.",
 		})
 	}
-	// WebM needs AV1 video and Opus audio: a cross-step rule (item 2) once items 6-7 can make
-	// both, so for now the choice itself is refused. Item 2 deletes this problem.
-	if set.Container == "webm" {
-		c.Problems = append(c.Problems, flow.Problem{
-			Field: "container", Code: "save.not_yet",
-			Message: "Saving as WebM is not built yet; WebM needs AV1 video and Opus audio.",
-		})
-	}
+	// What the picked file type can hold is the flow's rule, not this step's
+	// (flow/containers.go): it needs Video's format and Audio's codec too.
 	// Only "keep" guarantees the output has the source's extension. With an explicit container the
 	// source may be another file type, so an empty suffix is not a problem by itself; Plan refuses
 	// the one source type whose name it would really take.
@@ -119,11 +118,19 @@ func (SaveStep) Validate(s flow.Settings, vc flow.ValidateContext) flow.Check {
 		})
 	}
 
-	c.Summary = containerLabel(set.Container) + " · " + whereText(set.Where)
-	if cleaned := cleanSuffix(set.NameSuffix); cleaned != "" {
-		c.Summary += " · -" + cleaned
-	}
+	c.Summary = saveSummary(set)
 	return c
+}
+
+// trashDays is how long a replaced original stays in the trash. Page 11's
+// processing.keepOriginalsDays is the app-wide setting; until that page feeds the check, the
+// summary carries the page's own number.
+const trashDays = 7
+
+// saveSummary is the closed card's line in page 07's words: the file type, then where the result
+// goes. It starts with the file type, as the page draws it.
+func saveSummary(set SaveSettings) string {
+	return containerLabel(set.Container) + " · " + whereText(set.Where, set.Folder)
 }
 
 // containerFor resolves the file-type choice; "keep" is the source's own container.
@@ -190,16 +197,23 @@ func containerLabel(choice string) string {
 		return "MKV"
 	case "mp4":
 		return "MP4"
+	case "webm":
+		return "WebM"
+	case "keep":
+		return "Keep the same"
 	}
-	return "Same file type"
+	return choice
 }
 
-func whereText(where string) string {
+func whereText(where, folder string) string {
 	switch where {
 	case "replace":
-		return "replacing the original"
+		return fmt.Sprintf("replace the original · old file in the trash %d days", trashDays)
 	case "folder":
-		return "in a chosen folder"
+		if folder != "" {
+			return "a different folder: " + folder
+		}
+		return "a different folder"
 	}
 	return "next to the original"
 }

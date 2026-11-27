@@ -5,6 +5,7 @@ package steps
 import (
 	"fmt"
 	"slices"
+	"strconv"
 
 	"github.com/PeiceOfToast/shrink-your-shit/internal/encode"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/events"
@@ -43,6 +44,10 @@ func init() { flow.RegisterStep(VideoStep{}) }
 type VideoStep struct{}
 
 var _ flow.Step = VideoStep{}
+
+// VideoFormat is one of the settings facts the flow's container rules read (flow/containers.go):
+// the format this step will write.
+func (set VideoSettings) VideoFormat() string { return set.Format }
 
 // Def is the step's own description.
 func (VideoStep) Def() flow.Definition {
@@ -126,18 +131,31 @@ func (VideoStep) Validate(s flow.Settings, vc flow.ValidateContext) flow.Check {
 		c.Disabled = append(c.Disabled, flow.Disabled{Field: "useGpu", Why: "No worker has a graphics card."})
 	}
 	c.Problems = append(c.Problems, videoNotYet(set)...)
-
-	gpu := "processor only"
-	if set.UseGpu && vc.Env.CardFamily != "" {
-		gpu = "graphics card automatic"
-	}
-	c.Summary = fmt.Sprintf("%s · quality %d · %s", codecName(encode.Codec(set.Format)), set.Quality, gpu)
-	for _, text := range []string{rateText(set), sizeText(set)} {
-		if text != "" {
-			c.Summary += " · " + text
-		}
-	}
+	c.Summary = videoSummary(set)
 	return c
+}
+
+// videoSummary is the closed card's line in page 07's words: the format, the quality and the
+// graphics card, or the bitrate when Advanced sets one (then it names the bitrate, not the
+// quality).
+func videoSummary(set VideoSettings) string {
+	name := codecName(encode.Codec(set.Format))
+	if set.RateControl == nil {
+		card := "off"
+		if set.UseGpu {
+			card = "automatic"
+		}
+		return fmt.Sprintf("%s · quality %d · graphics card %s", name, set.Quality, card)
+	}
+	rate := "variable"
+	if *set.RateControl == "cbr" {
+		rate = "constant"
+	}
+	// A level's number comes from the ladder (item 6); a typed average is named now.
+	if set.BitrateLevel == "custom" && set.AvgMbps != nil {
+		return fmt.Sprintf("%s · %s bitrate about %s Mb/s", name, rate, strconv.FormatFloat(*set.AvgMbps, 'f', -1, 64))
+	}
+	return name + " · " + rate + " bitrate"
 }
 
 // tagDisabled is the greying the settings mean on their own, whatever the server: a bitrate
@@ -206,33 +224,6 @@ func videoNotYet(set VideoSettings) []flow.Problem {
 		add("keepDolbyVision", "Keeping the Dolby Vision layer is not built yet.") // item 8
 	}
 	return out
-}
-
-// rateText and sizeText add to the closed card's line what Advanced was set to.
-func rateText(set VideoSettings) string {
-	if set.RateControl == nil {
-		return ""
-	}
-	switch *set.RateControl {
-	case "vbr":
-		return "variable bitrate"
-	case "cbr":
-		return "constant bitrate"
-	}
-	return ""
-}
-
-func sizeText(set VideoSettings) string {
-	if set.Size == nil || *set.Size == "" {
-		return ""
-	}
-	if *set.Size == "custom" {
-		if set.Width != nil && set.Height != nil {
-			return fmt.Sprintf("%d × %d", *set.Width, *set.Height)
-		}
-		return "custom size"
-	}
-	return *set.Size + "p"
 }
 
 // The Quality slider, page 07's numbers at 1080p on the processor: each position's x265 CRF and

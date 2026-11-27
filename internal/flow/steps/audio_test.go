@@ -44,8 +44,9 @@ func TestAudioValidate(t *testing.T) {
 	if len(check.Problems) != 0 {
 		t.Errorf("copy problems = %+v, want none", check.Problems)
 	}
-	if check.Summary != "Audio copied as is" {
-		t.Errorf("summary = %q", check.Summary)
+	// The closed card's line, page 07's words: codec, channels, languages, subtitles.
+	if want := "Same as the source · same channels as the source · my languages · subtitles: keep all"; check.Summary != want {
+		t.Errorf("summary = %q, want %q", check.Summary, want)
 	}
 	for _, format := range []string{"aac", "opus"} {
 		set := audioDefaults()
