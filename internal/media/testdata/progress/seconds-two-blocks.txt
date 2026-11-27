@@ -1,0 +1,12 @@
+frame=25
+fps=25.00
+total_size=1000
+out_time=00:00:01.000000
+speed=1.00x
+progress=continue
+frame=50
+fps=25.00
+total_size=2000
+out_time=00:00:02.000000
+speed=1.00x
+progress=end
