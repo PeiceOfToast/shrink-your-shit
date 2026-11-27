@@ -155,10 +155,16 @@ func TestSaveValidate(t *testing.T) {
 		}
 	}
 
-	check = SaveStep{}.Validate(saveSettings("mkv", "next_to", "///"), flow.ValidateContext{})
+	check = SaveStep{}.Validate(saveSettings("keep", "next_to", "///"), flow.ValidateContext{})
 	if len(check.Problems) != 1 || check.Problems[0].Field != "nameSuffix" ||
 		check.Problems[0].Code != "save.empty_suffix" {
 		t.Errorf("problems = %+v, want the empty-suffix problem", check.Problems)
+	}
+	// An explicit container may change the extension, so an empty suffix is not a problem by itself;
+	// the plan refuses the one source type whose name it would really take (an MKV source, here).
+	check = SaveStep{}.Validate(saveSettings("mkv", "next_to", "///"), flow.ValidateContext{})
+	if len(check.Problems) != 0 {
+		t.Errorf("problems = %+v, want none for an explicit container", check.Problems)
 	}
 
 	// An unknown file type is the tag's business.

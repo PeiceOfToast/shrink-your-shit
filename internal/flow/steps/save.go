@@ -94,7 +94,10 @@ func (SaveStep) Validate(s flow.Settings, vc flow.ValidateContext) flow.Check {
 			Message: "Saving somewhere else is not built yet; next to the original is the only choice for now.",
 		})
 	}
-	if set.NameSuffix != "" && cleanSuffix(set.NameSuffix) == "" {
+	// Only "keep" guarantees the output has the source's extension. With an explicit container the
+	// source may be another file type, so an empty suffix is not a problem by itself; Plan refuses
+	// the one source type whose name it would really take.
+	if set.Container == "keep" && set.NameSuffix != "" && cleanSuffix(set.NameSuffix) == "" {
 		c.Problems = append(c.Problems, flow.Problem{
 			Field: "nameSuffix", Code: "save.empty_suffix",
 			Message: "The suffix has no characters a file name can keep, so the new file would take the original's name.",
