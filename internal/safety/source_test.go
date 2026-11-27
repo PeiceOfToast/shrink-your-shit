@@ -166,17 +166,46 @@ func TestSourceCheckCountsFramesTheDecoderNeverDelivered(t *testing.T) {
 	}
 }
 
-// TestSourceCheckDoesNotCountTheContainerDurationAsLostPictures: the container's duration includes
-// any audio that runs past the video, so it cannot prove a picture is missing (review2 B1 on #861:
-// a 2.023 s container against 60 decoded pictures and no decode error was called damaged).
-func TestSourceCheckDoesNotCountTheContainerDurationAsLostPictures(t *testing.T) {
+// TestSourceCheckAllowsAnAudioTailPastThePicture: the container's duration includes any audio that
+// runs past the video, so with no stream duration the first max(2 s, 1 %) of the gap between the
+// pictures decoded and the container's length is a tail, not damage (review2 B1 on #861: a 2.023 s
+// container against 60 decoded pictures and no decode error was called damaged).
+func TestSourceCheckAllowsAnAudioTailPastThePicture(t *testing.T) {
 	info := sourceInfo(20 * time.Second)
 	info.Video[0].Duration = 0 // an MKV often carries no stream duration
-	info.Format.Duration = 25 * time.Second
+	info.Format.Duration = 20*time.Second + 600*time.Millisecond
 	m := &fake.Media{Captures: []fake.CaptureScript{{Stderr: []byte(report(0, 500, 500))}}}
 	v, err := SourceCheck(context.Background(), m, Recorder{}, "/original.mkv", info, time.Minute)
 	if err != nil || !v.OK {
-		t.Fatalf("verdict = %+v, %v; want the audio tail's extra seconds ignored", v, err)
+		t.Fatalf("verdict = %+v, %v; want the 0.6 s audio tail ignored", v, err)
+	}
+}
+
+// TestSourceCheckKeepsPicturesLostBeyondTheAudioTail: 500 pictures are 20 s of a 25 s container, so
+// five seconds of picture are missing with no decoder error line. That is past the max(2 s, 1 %) a
+// tail can explain, so the original is kept (re-review on #861: a silently truncated MKV must not
+// pass just because it carries no stream duration).
+func TestSourceCheckKeepsPicturesLostBeyondTheAudioTail(t *testing.T) {
+	info := sourceInfo(20 * time.Second)
+	info.Video[0].Duration = 0
+	info.Format.Duration = 25 * time.Second
+	m := &fake.Media{Captures: []fake.CaptureScript{{Stderr: []byte(report(0, 500, 500))}}}
+	v, err := SourceCheck(context.Background(), m, Recorder{}, "/original.mkv", info, time.Minute)
+	if err != nil || v.OK || v.Code != CodeOriginalDamaged {
+		t.Fatalf("verdict = %+v, %v; want the original kept for five seconds of lost pictures", v, err)
+	}
+}
+
+// TestSourceCheckAllowsATailWithinTheDamageBudget: on a long file the 1 % budget is bigger than 2 s,
+// so pictures may stop that much short of the container (re-review on #861: max(2 s, 1 %)).
+func TestSourceCheckAllowsATailWithinTheDamageBudget(t *testing.T) {
+	info := sourceInfo(10 * time.Minute) // 15 000 pictures
+	info.Video[0].Duration = 0
+	info.Format.Duration = 10*time.Minute + 5*time.Second // 1 % is 6.05 s
+	m := &fake.Media{Captures: []fake.CaptureScript{{Stderr: []byte(report(0, 15000, 15000))}}}
+	v, err := SourceCheck(context.Background(), m, Recorder{}, "/original.mkv", info, time.Minute)
+	if err != nil || !v.OK {
+		t.Fatalf("verdict = %+v, %v; want a five second tail inside the one percent budget", v, err)
 	}
 }
 

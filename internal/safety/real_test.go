@@ -140,6 +140,67 @@ func TestRealSourceCheckPassesAnMKVWithAudioPastTheVideo(t *testing.T) {
 	}
 }
 
+// TestRealSourceCheckPassesAnMKVWithALongAudioTail: 1.5 s of audio past the picture is still inside
+// the max(2 s, 1 %) tail a container's length may add, so a pristine file passes (re-review on
+// #861).
+func TestRealSourceCheckPassesAnMKVWithALongAudioTail(t *testing.T) {
+	requireFFmpeg(t)
+	dir := t.TempDir()
+	src := filepath.Join(dir, "tail15.mkv")
+	runFFmpeg(t, "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=30:duration=2",
+		"-f", "lavfi", "-i", "sine=frequency=440:duration=3.5",
+		"-c:v", "libx264", "-preset", "ultrafast", "-b:v", "6M", "-pix_fmt", "yuv420p",
+		"-c:a", "aac", src)
+	info, err := media.Probe(context.Background(), src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v := info.MainVideo(); v == nil || v.Duration != 0 || info.Format.Duration <= 3*time.Second {
+		t.Fatalf("info = %+v; want an MKV with no stream duration and a 1.5 s audio tail", info)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	v, err := SourceCheck(ctx, media.MediaFuncs{CaptureFunc: media.Capture}, Recorder{}, src, info, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !v.OK {
+		t.Fatalf("verdict = %+v; want a 1.5 s tail to pass", v)
+	}
+}
+
+// TestRealSourceCheckKeepsAMKVWhosePicturesStopShortOfTheContainer: the picture ends at 2 s while
+// the audio runs to 6 s, so the container's own length promises four seconds of video that never
+// arrives, and no decoder line explains it. Byte-truncating an MKV instead prints "File ended
+// prematurely", which the file-level rule already refuses; this is the silent form the container
+// duration is the only count for (re-review on #861).
+func TestRealSourceCheckKeepsAMKVWhosePicturesStopShortOfTheContainer(t *testing.T) {
+	requireFFmpeg(t)
+	dir := t.TempDir()
+	src := filepath.Join(dir, "short.mkv")
+	runFFmpeg(t, "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=30:duration=2",
+		"-f", "lavfi", "-i", "sine=frequency=440:duration=6",
+		"-c:v", "libx264", "-preset", "ultrafast", "-b:v", "6M", "-pix_fmt", "yuv420p",
+		"-c:a", "aac", src)
+	info, err := media.Probe(context.Background(), src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The premise: no stream duration, so only the container's length speaks for the picture.
+	if v := info.MainVideo(); v == nil || v.Duration != 0 || info.Format.Duration <= 5*time.Second {
+		t.Fatalf("info = %+v; want an MKV with no stream duration and four seconds of missing picture", info)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	v, err := SourceCheck(ctx, media.MediaFuncs{CaptureFunc: media.Capture}, Recorder{}, src, info, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.OK || v.Code != CodeOriginalDamaged {
+		t.Fatalf("verdict = %+v; want the original kept for four seconds of lost pictures", v)
+	}
+}
+
 // TestRealSourceCheckKeepsALargeHole: 300 kB zeroed in the middle of the video (6 % of the file)
 // loses pictures; the original is kept.
 func TestRealSourceCheckKeepsALargeHole(t *testing.T) {

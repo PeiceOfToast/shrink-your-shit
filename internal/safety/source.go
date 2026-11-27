@@ -62,19 +62,21 @@ func SourceCheck(ctx context.Context, c media.Capturer, rec Recorder, path strin
 	if st, ok := media.InputStreamStats(string(res.Stderr), 0, main.Index); ok {
 		decoded = st.Frames
 	}
-	// A picture can only be called missing against the video stream's own count. The container's
-	// duration includes any audio that runs past the video, so a pristine MKV would read as
-	// damaged (review2 B1 on #861: 61 expected from a 2.023 s container, 60 decoded, no decode
-	// error). Without an exact count the decode's own error lines still count normally.
-	if exact {
-		rep = withLostFrames(rep, frames, decoded)
-	}
-
-	// The share of damage is measured against the pictures that exist: the stream's own count when
-	// it has one, else the number the decoder delivered. The container's duration includes an audio
-	// tail, so it is only a last resort (review2 B1 on #861).
+	// Lost pictures are measured against the count the file itself promises. The stream's own
+	// duration is the exact count. With none (an MKV usually has none), the container's length is
+	// the only count there is: it includes any audio that runs past the picture, so the first
+	// max(2 s, the 1 % damage budget) of the gap is that tail and only a longer gap is lost
+	// pictures — a silently truncated file has exactly that shape and prints no decoder line
+	// (review2 B1, then the re-review on #861).
 	count := frames
-	if !exact && decoded >= 0 {
+	switch {
+	case exact:
+		rep = withLostFrames(rep, frames, decoded)
+	case decoded >= 0 && picturesStopEarly(src, frames, decoded):
+		rep = withLostFrames(rep, frames, decoded)
+	case decoded >= 0:
+		// The share of damage is measured against the pictures that exist: the decoder's own count
+		// when the container's length promises no more than a tail's worth.
 		count = decoded
 	}
 	if !rep.Found() || damageTolerated(rep, count) {
@@ -148,9 +150,10 @@ func damageTolerated(rep sourceDamageReport, frames int64) bool {
 
 // withLostFrames counts frames that never came out of the decoder as damaged pictures. A stretch
 // can lose frames with no decoder message (470 of 500 decoded, no error line for the lost 30).
-// frames must be the video stream's own picture count (sourceFrameCount's exact answer): only that
-// count can prove a frame is missing. decoded is the frame count the run reported; -1 means it did
-// not say, and then nothing is added.
+// frames is the count the loss is measured against: the video stream's own picture count
+// (sourceFrameCount's exact answer) when it has one, else the container's count once the gap is
+// past an audio tail (picturesStopEarly). decoded is the frame count the run reported; -1 means it
+// did not say, and then nothing is added.
 func withLostFrames(rep sourceDamageReport, frames, decoded int64) sourceDamageReport {
 	if frames <= 0 || decoded < 0 || decoded >= frames {
 		return rep
@@ -167,6 +170,31 @@ func withLostFrames(rep sourceDamageReport, frames, decoded int64) sourceDamageR
 	}
 	rep.Lines = append(rep.Lines, line)
 	return rep
+}
+
+// tailTolerance is how far past the decoded picture a container's own length may run before the
+// difference is lost pictures rather than audio: max(2 s, the 1 % damage budget of that length)
+// (re-review on #861). Two seconds covers an ordinary audio track that outlasts the picture; on a
+// long file the budget the check already uses is the bigger allowance.
+func tailTolerance(container time.Duration) time.Duration {
+	t := container / 100
+	if t < 2*time.Second {
+		t = 2 * time.Second
+	}
+	return t
+}
+
+// picturesStopEarly is whether the decoder delivered fewer pictures than the container's length
+// promises by more than an audio tail can explain. frames is that container count (sourceFrameCount
+// with no stream duration) and decoded what the run reported; the frame rate turns the missing
+// pictures into the seconds the tolerance is measured in.
+func picturesStopEarly(src media.Info, frames, decoded int64) bool {
+	main := src.MainVideo()
+	if main == nil || main.FrameRate.Float() <= 0 || frames <= decoded {
+		return false
+	}
+	gap := time.Duration(float64(frames-decoded) / main.FrameRate.Float() * float64(time.Second))
+	return gap > tailTolerance(src.Format.Duration)
 }
 
 // benignRe matches ffmpeg messages that appear on perfectly usable files (a broadcast recording
