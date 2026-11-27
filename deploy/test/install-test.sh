@@ -145,21 +145,36 @@ fi
 
 # --- the container ---------------------------------------------------------------------------------
 step "Container $VMID from $VOLID"
-if pve-api5 GET "/nodes/$NODE/lxc/$VMID" >/dev/null 2>&1; then
+# The trap deletes the container, so it must only ever run for one this script created. The existence probe
+# decides that: a clear "does not exist" (the API's 22 with that message) means create; anything else — an
+# existing container, or an answer we cannot read — aborts before anything is touched. CREATED=1 is set only
+# after the create call itself succeeds.
+probe_rc=0
+probe=$(pve-api5 GET "/nodes/$NODE/lxc/$VMID" 2>&1) || probe_rc=$?
+if [ "$probe_rc" -eq 0 ]; then
   fail "container $VMID already exists on $NODE; refusing to reuse it"
   exit 1
 fi
-CREATED=1
+case "$probe" in
+  *"does not exist"*)
+    [ "$probe_rc" -eq 22 ] || { fail "the API's not-found answer came with status $probe_rc, not 22: $probe"; exit 1; } ;;
+  *)
+    fail "could not ask the API whether $VMID exists (its answer: $probe); nothing was touched"
+    exit 1 ;;
+esac
 # The values with "=" or spaces go as --data-urlencode: a bare -d for net0 makes Proxmox read only the first
 # key=value pair ("invalid format - value without key").
-pve-api5 POST "/nodes/$NODE/lxc" \
+if ! pve-api5 POST "/nodes/$NODE/lxc" \
   -d vmid="$VMID" -d ostemplate="$VOLID" -d hostname="$CT_HOSTNAME" \
   -d memory=2048 -d cores=2 -d swap=512 -d rootfs=local-lvm:8 \
   --data-urlencode "net0=name=eth0,bridge=vmbr0,ip=$IP/20,gw=10.10.0.1" \
   -d unprivileged=1 -d start=1 -d tags=syp-test -d pool=syp-test \
   --data-urlencode "description=R1-11 install test; deleted by deploy/test/install-test.sh" \
-  --data-urlencode "ssh-public-keys=$(cat "$KEY.pub")" >>"$LOG_TMP" 2>&1 \
-  || { fail "the create call failed (the API's answer is in $LOG_TMP)"; exit 1; }
+  --data-urlencode "ssh-public-keys=$(cat "$KEY.pub")" >>"$LOG_TMP" 2>&1; then
+  fail "the create call failed (the API's answer is in $LOG_TMP); if container $VMID exists now, it was not deleted — remove it with: pve-api5 DELETE '/nodes/$NODE/lxc/$VMID?purge=1'"
+  exit 1
+fi
+CREATED=1
 # The API's answer has no trailing newline; without one the first PASS lands on the same line in the log.
 printf '\n' >>"$LOG_TMP"
 i=0

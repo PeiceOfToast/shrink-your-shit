@@ -114,8 +114,8 @@ jobs:
           if grep -qE '^[[:space:]]*--- SKIP: TestReal' real.log; then echo "a real test was skipped"; exit 1; fi
 
   # The real path in a real browser: the built interface against a server on a temp data folder, the way
-  # pages 01-03 are walked after a fresh install (contract section 6). Until ui-shop's spec merges
-  # (ui/e2e/real.spec.ts), deploy/test/e2e's minimal spec runs here: switch the command, not the job.
+  # pages 01-03 are walked after a fresh install (contract section 6). Runs ui/e2e/real.spec.ts through the
+  # interface's own script (npm run e2e:real), both tests in one run on fresh data.
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -126,9 +126,7 @@ jobs:
         with:
           node-version-file: ui/.nvmrc
           cache: npm
-          cache-dependency-path: |
-            ui/package-lock.json
-            deploy/test/e2e/package-lock.json
+          cache-dependency-path: ui/package-lock.json
 
       - uses: actions/setup-go@v5
         with:
@@ -181,20 +179,19 @@ jobs:
           echo "syp did not answer health" >&2
           exit 1
 
+      # ui's npm ci ran in the build step above; this adds the browser revision @playwright/test expects.
       - name: Playwright
-        working-directory: deploy/test/e2e
-        run: |
-          npm ci --no-audit --no-fund
-          npx playwright install --with-deps chromium
+        working-directory: ui
+        run: npx playwright install --with-deps chromium
 
       - name: Run the real path
-        working-directory: deploy/test/e2e
+        working-directory: ui
         env:
           BASE_URL: http://127.0.0.1:18484
           E2E_LIBRARY: ${{ runner.temp }}/clips
           E2E_PASSWORD: e2e-password-1
           E2E_CONVERT: "1"
-        run: npx playwright test real.spec.ts
+        run: npm run e2e:real -- --trace retain-on-failure
 
       # The pid this job started, never a pattern: someone else's syp can be on the runner.
       - name: Stop syp
@@ -206,7 +203,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: e2e-trace
-          path: deploy/test/e2e/test-results
+          path: ui/test-results
           if-no-files-found: ignore
 
   go-build:
