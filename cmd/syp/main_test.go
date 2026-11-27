@@ -264,3 +264,73 @@ func TestTheStartupSweepClearsOlderTriesOnly(t *testing.T) {
 		t.Errorf("a missing temp folder was reported: %s", message)
 	})
 }
+
+// TestAnInstallAtSchemaNineUpgradesToTen: an install at schema 9 (the subtitles change) upgrades through the program's
+// own open-and-migrate path to 10, with the replace journal made and the data kept (review #865 add-on).
+func TestAnInstallAtSchemaNineUpgradesToTen(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	db, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Migrate(); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	flows := flow.Open(db)
+	wfID, _, err := flows.CreateFromStarter(ctx, "shrink-videos", "Everyday")
+	if err != nil {
+		db.Close()
+		t.Fatalf("create the workflow: %v", err)
+	}
+	catalog := library.NewCatalog(db)
+	if _, err := catalog.AddLibrary(ctx, library.NewLibrary{Name: "Clips", Path: t.TempDir(), WorkflowID: &wfID}); err != nil {
+		db.Close()
+		t.Fatalf("add the library: %v", err)
+	}
+
+	// Take the schema back to 9: remove what migration 10 adds and say the database is at 9.
+	if err := db.Tx(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.Exec(`DROP TABLE IF EXISTS replace_journal`); err != nil {
+			return err
+		}
+		_, err := tx.Exec(`PRAGMA user_version = 9`)
+		return err
+	}); err != nil {
+		db.Close()
+		t.Fatalf("make the database a schema 9 install: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err = store.Open(dir)
+	if err != nil {
+		t.Fatalf("open the schema 9 install: %v", err)
+	}
+	defer db.Close()
+	if err := db.Migrate(); err != nil {
+		t.Fatalf("upgrade the schema 9 install: %v", err)
+	}
+
+	var version, journal int
+	if err := db.Read().QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version != 10 {
+		t.Errorf("schema version after the upgrade = %d, want 10", version)
+	}
+	if err := db.Read().QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'replace_journal'`).
+		Scan(&journal); err != nil {
+		t.Fatal(err)
+	}
+	if journal != 1 {
+		t.Errorf("replace_journal tables = %d, want 1", journal)
+	}
+	libs, err := library.NewCatalog(db).ListLibraries(ctx)
+	if err != nil || len(libs) != 1 {
+		t.Errorf("libraries after the upgrade = %d (%v), want the one kept", len(libs), err)
+	}
+}
