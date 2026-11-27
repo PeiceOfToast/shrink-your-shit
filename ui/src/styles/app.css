@@ -163,3 +163,7 @@ table.tbl.wkr td.wk-sub{display:none}
 /* A greyed segment or radio row is disabled the same way as a button: the page's background, muted text and border. */
 .seg button:disabled{cursor:not-allowed;background:var(--bg);color:var(--strong);border-color:var(--border)}
 .hc .set-row{border-bottom:0}
+
+/* At 600px and below, the status line's links are inline-flex (panels.css), which drops the space between a label and
+   its value ("converting2 of 3 workers"). A gap between the link's parts keeps it. */
+@media (max-width:600px){.statusbar a{gap:5px}}
