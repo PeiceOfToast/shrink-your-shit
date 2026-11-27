@@ -95,13 +95,23 @@ func (c *Catalog) Overlaps(ctx context.Context) ([]Overlap, error) {
 	for i, lib := range libs {
 		folders[i] = identifyFolder(lib.Path)
 	}
+	// An install can hold two mounts of one network share, which the identity misses: the same share compare the
+	// checks use reports those too (S2-10a). No readable mount table skips it.
+	mounts := readMounts()
+	shares := make([]Share, len(libs))
+	onShare := make([]bool, len(libs))
+	for i := range libs {
+		shares[i], onShare[i] = ShareOf(mounts, folders[i].real)
+	}
 	var out []Overlap
 	for i := 0; i < len(libs); i++ {
 		for j := i + 1; j < len(libs); j++ {
+			sameShare := onShare[i] && onShare[j]
 			switch {
-			case folders[i].same(folders[j]):
+			case folders[i].same(folders[j]), sameShare && shares[i].same(shares[j]):
 				out = append(out, Overlap{First: libs[i], Second: libs[j], Same: true})
-			case folders[i].inside(folders[j]), folders[j].inside(folders[i]):
+			case folders[i].inside(folders[j]), folders[j].inside(folders[i]),
+				sameShare && (shares[i].inside(shares[j]) || shares[j].inside(shares[i])):
 				out = append(out, Overlap{First: libs[i], Second: libs[j]})
 			}
 		}
