@@ -136,7 +136,8 @@ func TestBuildFaststartOnlyOnMP4(t *testing.T) {
 }
 
 // TestBuildConvertsATrackMP4CannotHold is L-AUD-10: audio a container cannot hold is converted,
-// never dropped, and the note says which codec it became. Subtitles are still dropped.
+// never dropped, and the note says which codec it became. A picture subtitle MP4 cannot hold is
+// left out and the log says how many (page 07, Save).
 func TestBuildConvertsATrackMP4CannotHold(t *testing.T) {
 	info := baseInfo()
 	info.Audio = []media.AudioTrack{{Index: 1, Codec: "opus"}, {Index: 4, Codec: "aac"}}
@@ -160,12 +161,12 @@ func TestBuildConvertsATrackMP4CannotHold(t *testing.T) {
 	}
 	wantNotes(t, res,
 		"audio stream #1 (opus) is converted to eac3: MP4 cannot hold Opus",
-		"dropped subtitle stream #2 (hdmv_pgs_subtitle): MP4 cannot hold it",
+		"1 subtitle was left out: MP4 can't hold it.",
 	)
 }
 
 // TestBuildConvertsToOpusForWebM is L-AUD-8: WebM gets libopus at 128 kbps, and audio is not
-// dropped. The titles are still dropped, since WebM holds only WebVTT.
+// dropped. A text subtitle WebM cannot hold as it is becomes WebVTT (L-AUD-28).
 func TestBuildConvertsToOpusForWebM(t *testing.T) {
 	info := baseInfo()
 	info.Audio = []media.AudioTrack{{Index: 1, Codec: "aac"}, {Index: 4, Codec: "opus"}}
@@ -178,8 +179,8 @@ func TestBuildConvertsToOpusForWebM(t *testing.T) {
 	plan.Output = "out.webm"
 
 	res := buildOK(t, plan, info, cpuRung(CodecAV1))
-	if got := mapped(res.Argv); strings.Join(got, " ") != "0:0 0:1 0:4 0:3" {
-		t.Errorf("maps = %v, want both audio tracks and the WebVTT subtitle", got)
+	if got := mapped(res.Argv); strings.Join(got, " ") != "0:0 0:1 0:4 0:2 0:3" {
+		t.Errorf("maps = %v, want both audio tracks and both subtitles", got)
 	}
 	if v, _ := flagValue(res.Argv, "-c:a:0"); v != "libopus" {
 		t.Errorf("first audio codec = %q, want libopus", v)
@@ -187,10 +188,10 @@ func TestBuildConvertsToOpusForWebM(t *testing.T) {
 	if v, _ := flagValue(res.Argv, "-b:a:0"); v != "128k" {
 		t.Errorf("first audio bitrate = %q, want 128k", v)
 	}
-	wantNotes(t, res,
-		"audio stream #1 (aac) is converted to opus: WebM needs Opus or Vorbis audio",
-		"dropped subtitle stream #2 (subrip): WebM cannot hold it",
-	)
+	if v, _ := flagValue(res.Argv, "-c:s:0"); v != "webvtt" {
+		t.Errorf("first subtitle codec = %q, want webvtt", v)
+	}
+	wantNotes(t, res, "audio stream #1 (aac) is converted to opus: WebM needs Opus or Vorbis audio")
 }
 
 func TestBuildTenBitSDRStaysTenBit(t *testing.T) {

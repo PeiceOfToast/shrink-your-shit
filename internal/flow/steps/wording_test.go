@@ -102,10 +102,6 @@ func TestEverySentenceIsPinned(t *testing.T) {
 			}},
 		{name: "audio keep original", audio: `{"format":"copy","keepOriginal":true}`,
 			problems: []string{`keepOriginal|audio.not_yet|Keeping the original track as well is not built yet.`}},
-		{name: "audio subtitles choice", audio: `{"format":"copy","subtitles":"srt"}`,
-			problems: []string{`subtitles|audio.not_yet|Choosing which subtitles to keep is not built yet; every subtitle is kept.`}},
-		{name: "audio subtitle languages", audio: `{"format":"copy","subtitleLanguages":["eng"]}`,
-			problems: []string{`subtitleLanguages|audio.not_yet|Keeping only some subtitle languages is not built yet; every subtitle is kept.`}},
 
 		// Save's own rules and the file types the flow rules out.
 		{name: "save replace", save: `{"container":"mkv","where":"replace"}`,

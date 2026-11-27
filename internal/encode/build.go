@@ -5,6 +5,7 @@ package encode
 import (
 	"fmt"
 	"math"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -100,22 +101,31 @@ func Build(plan Plan, info media.Info, rung Rung) (Result, error) {
 		res.Notes = append(res.Notes, fmt.Sprintf("dropped video stream #%d (%s): only one video stream is converted", v.Index, v.Codec))
 	}
 
-	audioKept, subtitlesKept, notes, err := keptTracks(plan, info)
+	audioKept, subtitlesKept, extracts, notes, err := keptTracks(plan, info)
 	if err != nil {
 		return res, err
 	}
 	res.Notes = append(res.Notes, notes...)
+	if len(extracts) > 0 && plan.SidecarDir == "" {
+		return res, fmt.Errorf("%w: the plan extracts subtitles but has no sidecar folder", ErrInvalidPlan)
+	}
 
 	argv := []string{
 		"-y", "-nostdin", "-progress", "pipe:1", "-nostats", "-loglevel", "error",
 		"-i", info.Path,
-		"-map", "0:" + strconv.Itoa(main.Index),
 	}
+	// An extracted subtitle is an output of its own, written before the new file so a name it
+	// cannot take stops the job before anything is placed. The new file's own options follow the
+	// extracts, so ffmpeg still binds them to the new file.
+	for k, x := range extracts {
+		argv = append(argv, "-map", "0:"+strconv.Itoa(x.Index), "-c:s", "srt", StagedSidecar(plan.SidecarDir, k))
+	}
+	argv = append(argv, "-map", "0:"+strconv.Itoa(main.Index))
 	for _, a := range audioKept {
 		argv = append(argv, "-map", "0:"+strconv.Itoa(a.track.Index))
 	}
 	for _, s := range subtitlesKept {
-		argv = append(argv, "-map", "0:"+strconv.Itoa(s.Index))
+		argv = append(argv, "-map", "0:"+strconv.Itoa(s.track.Index))
 	}
 
 	if encoding {
@@ -129,6 +139,11 @@ func Build(plan Plan, info media.Info, rung Rung) (Result, error) {
 	}
 
 	argv = append(argv, "-c:a", "copy", "-c:s", "copy")
+	for i, s := range subtitlesKept {
+		if s.codec != "" {
+			argv = append(argv, "-c:s:"+strconv.Itoa(i), s.codec)
+		}
+	}
 	for i, a := range audioKept {
 		argv = append(argv, audioArgs(i, a)...)
 	}
@@ -143,37 +158,160 @@ func Build(plan Plan, info media.Info, rung Rung) (Result, error) {
 	return res, nil
 }
 
-// keptTracks is the one rule for which input streams reach the output: the plan does not drop
-// them, and the container can hold them. Build maps exactly these, and KeptStreams reports them.
-// Audio is never dropped for the container's sake (L-AUD-10): audioOutputs converts what it cannot
-// hold, and the note says so.
-func keptTracks(plan Plan, info media.Info) (audioKept []audioOut, subtitlesKept []media.SubtitleTrack, notes []string, err error) {
-	audioKept, audioNotes, err := audioOutputs(plan, info)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	notes = append(notes, audioNotes...)
-	subtitleActions, err := namedActions(plan.Subtitles, subtitleIndexes(info.Subtitles))
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	for _, s := range info.Subtitles {
-		if subtitleActions[s.Index] == StreamDrop {
-			continue
-		}
-		if why := subtitleFits(plan.Container, s.Codec); why != "" {
-			notes = append(notes, fmt.Sprintf("dropped subtitle stream #%d (%s): %s", s.Index, s.Codec, why))
-			continue
-		}
-		subtitlesKept = append(subtitlesKept, s)
-	}
-	return audioKept, subtitlesKept, notes, nil
+// subtitleOut is one subtitle's place in the new file: the input stream, and the codec it is
+// written as ("" copies it as it is).
+type subtitleOut struct {
+	track media.SubtitleTrack
+	codec string
 }
 
-// KeptStreams lists the audio and subtitle stream indexes the output keeps, by ffprobe index.
+// keptTracks is the one rule for which input streams reach the output: the plan does not drop or
+// extract them, and the container can hold them. Build maps exactly these, and KeptStreams reports
+// them. Audio is never dropped for the container's sake (L-AUD-10): audioOutputs converts what it
+// cannot hold, and the note says so. Subtitles are converted where the file type can hold the
+// text, and left out with a count where it cannot (L-AUD-27, L-AUD-28).
+func keptTracks(plan Plan, info media.Info) (audioKept []audioOut, subtitlesKept []subtitleOut, extracts []StreamPlan, notes []string, err error) {
+	audioKept, audioNotes, err := audioOutputs(plan, info)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	notes = append(notes, audioNotes...)
+	subtitlesKept, extracts, subtitleNotes, err := subtitleOutputs(plan, info)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	notes = append(notes, subtitleNotes...)
+	return audioKept, subtitlesKept, extracts, notes, nil
+}
+
+// subtitleOutputs applies the file type's rule to every subtitle the plan does not drop:
+//
+//   - MKV holds every subtitle, so each is copied, except mov_text, which becomes SRT text.
+//   - MP4 holds mov_text and dvd_subtitle as they are, and turns the text forms it cannot hold
+//     into mov_text (styling is lost); anything else is left out.
+//   - WebM holds webvtt, turns the other text forms into webvtt, copies a kind it does not know,
+//     and leaves picture subtitles out.
+//
+// The notes say what the person cannot see in the new file: styling that went, and how many
+// subtitles were left out. Extractions are not part of the new file at all (L-AUD-22's trap): only
+// the streams the plan names are written to their own files.
+func subtitleOutputs(plan Plan, info media.Info) (kept []subtitleOut, extracts []StreamPlan, notes []string, err error) {
+	actions, parts, err := subtitleActions(plan, info)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	styled := 0
+	leftOut := 0
+	for _, s := range info.Subtitles {
+		switch actions[s.Index] {
+		case StreamDrop:
+			continue
+		case StreamExtract:
+			extracts = append(extracts, StreamPlan{Index: s.Index, Action: StreamExtract, Part: parts[s.Index]})
+			continue
+		}
+		codec, fits, lostStyle := subtitleWrite(plan.Container, s)
+		if !fits {
+			leftOut++
+			continue
+		}
+		if lostStyle {
+			styled++
+		}
+		kept = append(kept, subtitleOut{track: s, codec: codec})
+	}
+	if styled > 0 {
+		if plan.Container == ContainerWebM {
+			notes = append(notes, styledSubsWebMNote)
+		} else {
+			notes = append(notes, styledSubsNote)
+		}
+	}
+	if leftOut > 0 {
+		notes = append(notes, leftOutNote(plan.Container, leftOut))
+	}
+	return kept, extracts, notes, nil
+}
+
+// subtitleWrite is the file type's answer for one subtitle: the codec it is written as ("" copies
+// it), whether the file type can hold it at all, and whether converting it loses ASS styling.
+func subtitleWrite(container Container, s media.SubtitleTrack) (codec string, fits, lostStyle bool) {
+	switch container {
+	case ContainerMKV:
+		if s.Codec == "mov_text" {
+			return "srt", true, false
+		}
+		return "", true, false
+	case ContainerMP4:
+		switch s.Codec {
+		case "mov_text", "dvd_subtitle":
+			return "", true, false
+		case "subrip", "ass", "ssa", "webvtt", "text":
+			return "mov_text", true, s.Codec == "ass" || s.Codec == "ssa"
+		}
+		return "", false, false
+	case ContainerWebM:
+		switch s.Kind() {
+		case media.SubtitleText:
+			if s.Codec == "webvtt" {
+				return "", true, false
+			}
+			return "webvtt", true, s.Codec == "ass" || s.Codec == "ssa"
+		case media.SubtitleBitmap:
+			return "", false, false
+		}
+		// A kind this program does not know is copied, not guessed at (L-AUD-21).
+		return "", true, false
+	}
+	return "", true, false
+}
+
+// The job log's sentences for subtitle conversions the file type forces.
+const (
+	styledSubsNote     = "Styled subtitles (ASS) became plain text: MP4 can't keep their styling."
+	styledSubsWebMNote = "Styled subtitles (ASS) became plain text: WebM can't keep their styling."
+)
+
+// leftOutNote says how many subtitles the file type could not hold (page 07, Save).
+func leftOutNote(container Container, n int) string {
+	name := "MP4"
+	what := "subtitle"
+	if container == ContainerWebM {
+		name, what = "WebM", "picture subtitle"
+	}
+	if n == 1 {
+		return fmt.Sprintf("1 %s was left out: %s can't hold it.", what, name)
+	}
+	return fmt.Sprintf("%d %ss were left out: %s can't hold them.", n, what, name)
+}
+
+// Extracts lists the subtitles the plan writes to their own files, in the order their files are
+// written (the order of the streams in the file), each with its name part.
+func Extracts(plan Plan, info media.Info) ([]StreamPlan, error) {
+	_, extracts, _, err := subtitleOutputs(plan, info)
+	return extracts, err
+}
+
+// SrtName is the name an extracted subtitle gets beside the new file final ("Film.mkv" with part
+// "eng" is "Film.eng.srt"; with no part it is "Film.srt", L-AUD-22).
+func SrtName(final, part string) string {
+	base := strings.TrimSuffix(final, filepath.Ext(final))
+	if part == "" {
+		return base + ".srt"
+	}
+	return base + "." + part + ".srt"
+}
+
+// StagedSidecar is where ffmpeg writes the k-th extracted subtitle: a .srt in the staging folder,
+// named for its place in the plan (L-AUD-25).
+func StagedSidecar(dir string, k int) string {
+	return filepath.Join(dir, "sub."+strconv.Itoa(k)+".srt")
+}
+
+// KeptStreams lists the audio and subtitle stream indexes the new file keeps, by ffprobe index.
 // The flow engine asks for this list so its result check expects exactly the streams Build mapped.
 func KeptStreams(plan Plan, info media.Info) (audio, subtitles []int, err error) {
-	a, s, _, err := keptTracks(plan, info)
+	a, s, _, _, err := keptTracks(plan, info)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -181,7 +319,7 @@ func KeptStreams(plan Plan, info media.Info) (audio, subtitles []int, err error)
 		audio = append(audio, t.track.Index)
 	}
 	for _, t := range s {
-		subtitles = append(subtitles, t.Index)
+		subtitles = append(subtitles, t.track.Index)
 	}
 	return audio, subtitles, nil
 }
@@ -477,28 +615,43 @@ func presetName(codec Codec, choice string) (string, error) {
 	return name, nil
 }
 
-// namedActions turns the plan's stream list into a map from input index to action. A stream the
-// plan does not name is copied; a duplicate or an index the file does not have is a plan error,
-// because it means the plan was built against another file.
-func namedActions(parts []StreamPlan, exists map[int]bool) (map[int]StreamAction, error) {
-	out := make(map[int]StreamAction, len(parts))
-	for _, part := range parts {
+// subtitleActions turns the plan's subtitle list into a map from input index to action, and the
+// part each extracted one is named with. A stream the plan does not name is copied; a duplicate,
+// an index the file does not have, an extraction of something that is not text, or a name part on
+// another action is a plan error, because it means the plan was built against another file.
+func subtitleActions(plan Plan, info media.Info) (map[int]StreamAction, map[int]string, error) {
+	exists := subtitleIndexes(info.Subtitles)
+	kinds := make(map[int]media.SubtitleKind, len(info.Subtitles))
+	for _, s := range info.Subtitles {
+		kinds[s.Index] = s.Kind()
+	}
+	out := make(map[int]StreamAction, len(plan.Subtitles))
+	parts := make(map[int]string)
+	for _, part := range plan.Subtitles {
 		if !exists[part.Index] {
-			return nil, fmt.Errorf("%w: stream %d is not in the file", ErrInvalidPlan, part.Index)
+			return nil, nil, fmt.Errorf("%w: stream %d is not in the file", ErrInvalidPlan, part.Index)
 		}
 		if _, dup := out[part.Index]; dup {
-			return nil, fmt.Errorf("%w: stream %d is named twice", ErrInvalidPlan, part.Index)
+			return nil, nil, fmt.Errorf("%w: stream %d is named twice", ErrInvalidPlan, part.Index)
 		}
 		switch part.Action {
 		case StreamCopy, StreamDrop:
+			if part.Part != "" {
+				return nil, nil, fmt.Errorf("%w: stream %d has a name part but is not extracted", ErrInvalidPlan, part.Index)
+			}
+		case StreamExtract:
+			if kinds[part.Index] != media.SubtitleText {
+				return nil, nil, fmt.Errorf("%w: stream %d is not a text subtitle, so it cannot be saved as an .srt file", ErrInvalidPlan, part.Index)
+			}
+			parts[part.Index] = part.Part
 		case StreamConvert:
-			return nil, fmt.Errorf("%w: converting stream %d", ErrNotBuiltYet, part.Index)
+			return nil, nil, fmt.Errorf("%w: converting stream %d", ErrNotBuiltYet, part.Index)
 		default:
-			return nil, fmt.Errorf("%w: action %q on stream %d", ErrInvalidPlan, part.Action, part.Index)
+			return nil, nil, fmt.Errorf("%w: action %q on stream %d", ErrInvalidPlan, part.Action, part.Index)
 		}
 		out[part.Index] = part.Action
 	}
-	return out, nil
+	return out, parts, nil
 }
 
 func audioIndexes(tracks []media.AudioTrack) map[int]bool {
@@ -528,20 +681,6 @@ func audioFits(container Container, codec string) string {
 	case ContainerWebM:
 		if codec != "opus" && codec != "vorbis" {
 			return "WebM needs Opus or Vorbis audio"
-		}
-	}
-	return ""
-}
-
-func subtitleFits(container Container, codec string) string {
-	switch container {
-	case ContainerMP4:
-		if codec != "mov_text" {
-			return "MP4 cannot hold it"
-		}
-	case ContainerWebM:
-		if codec != "webvtt" {
-			return "WebM cannot hold it"
 		}
 	}
 	return ""
