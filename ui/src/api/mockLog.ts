@@ -163,7 +163,9 @@ export function subscribeAppEvents(cb: (e: LogEvent) => void): () => void {
 }
 
 // POST /api/v2/log/seen {seq}: opening the page clears the status line's new errors up to that seq.
-let seenSeq = 0;
+// The seen line starts at the 22:08 health line (seq 13), so the fixture errors after it (22:28 on) are the new ones.
+const START_SEEN = 13;
+let seenSeq = START_SEEN;
 export function getSeenSeq(): number {
   return seenSeq;
 }
@@ -187,5 +189,5 @@ export function newErrorCount(): number {
 }
 
 onForcedStateChange(() => {
-  seenSeq = 0;
+  seenSeq = START_SEEN;
 });

@@ -790,6 +790,15 @@
 .syslog .rep-span {
   color: var(--text2);
 }
+/* The fold sits on its own line under the message. */
+.syslog .rep {
+  display: block;
+  margin-top: 2px;
+}
+/* The level word sits on the message's first line (rows are top-aligned; .log .ln .lv centres it). */
+.syslog .ln .lv {
+  align-self: start;
+}
 /* Copy is an icon at the row's right end, on the time line. Hover or focus shows it on desktop; touch shows it always. */
 .syslog .btn.copy {
   opacity: 0;

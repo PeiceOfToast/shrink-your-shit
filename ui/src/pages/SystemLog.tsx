@@ -75,12 +75,12 @@ function Repeat({ e }: { e: LogEvent }) {
   const [show, setShow] = useState(false);
   if (!e.repeat) return null;
   const more = e.repeat.count - 1;
+  // A muted line under the message. Show gives the first and last times; Hide folds them away again.
   return (
     <span className="rep">
-      {" "}
-      the same {more} more {more === 1 ? "time" : "times"} ·{" "}
+      The same line {more} more {more === 1 ? "time" : "times"}, {clock(e.repeat.firstAt)} to {clock(e.repeat.lastAt)} ·{" "}
       <button type="button" className="syslog-link" aria-expanded={show} onClick={() => setShow((s) => !s)}>
-        {show ? "hide" : "show"}
+        {show ? "Hide" : "Show"}
       </button>
       {show && (
         <span className="rep-span">
