@@ -235,7 +235,7 @@ export function Dashboard() {
             </div>
             <div className="kpi">
               <span className="l">Failed 24 h</span>
-              <span className="v bad">{o.failed24h.count}</span>
+              <span className={o.failed24h.count > 0 ? "v bad" : "v "}>{o.failed24h.count}</span>
               <span className="d">{o.failed24h.pct} %</span>
             </div>
             <div className="kpi">
