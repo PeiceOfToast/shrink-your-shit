@@ -130,7 +130,7 @@ function ConvertingRow({ j }: { j: Job }) {
           Running · {j.progress?.pct ?? 0}%
         </span>
       </div>
-      <div className="lbar bar">
+      <div className="lbar bar ok">
         <i style={{ width: `${j.progress?.pct ?? 0}%` }}></i>
       </div>
     </li>
@@ -260,7 +260,7 @@ export function Dashboard() {
                   {o.freed.nextReleaseBytes != null && o.freed.nextReleaseAt && (
                     <>{sizeText(o.freed.nextReleaseBytes)} more on {dayOf(o.freed.nextReleaseAt)}, when originals leave the trash · </>
                   )}
-                  <Link to="/settings/processing">{formatBytes(o.freed.inTrashBytes)} in the trash</Link>
+                  <Link to="/settings/processing"><span className="trash-t">{formatBytes(o.freed.inTrashBytes)} in the trash</span></Link>
                 </span>
                 <span>
                   New files are <b>{o.avgShrink.pct}% smaller</b> on average

@@ -170,6 +170,7 @@ table.tbl.wkr td.wk-sub{display:none}
 @media (max-width:600px){.statusbar a{gap:5px}}
 /* The trash series on the dashboard: a neutral blue-grey, never the accent or a status hue. */
 :root{--trash:#7C93AD}
+.trash-t{color:var(--trash)}
 :root[data-theme="light"]{--trash:#4F6480}
 @media (prefers-color-scheme:light){:root:not([data-theme]){--trash:#4F6480}}
 
