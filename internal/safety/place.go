@@ -34,8 +34,8 @@ var (
 // before the move and the folder after it. EINVAL and ENOTSUP from fsync are ignored, and the folder sync is
 // skipped on Windows (L-SAFE-12).
 func Place(ctx context.Context, st Staged, final string) (string, error) {
-	fi, err := os.Lstat(st.Path)
-	if err != nil || !os.SameFile(fi, st.info) {
+	id, err := fsx.FileID(st.Path)
+	if err != nil || id != st.id {
 		return "", ErrIdentityChanged
 	}
 	if err := syncPath(st.Path); err != nil {

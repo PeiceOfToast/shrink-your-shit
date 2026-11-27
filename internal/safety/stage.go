@@ -7,14 +7,16 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/PeiceOfToast/shrink-your-shit/internal/fsx"
 )
 
 // Staged is a private output file that has not been placed yet. Folder holds only the file; Path is where the
-// encoder writes; info is the file's identity, checked again before the move (L-SAFE-12).
+// encoder writes; id is the file's identity (fsx.FileID), checked again before the move (L-SAFE-12).
 type Staged struct {
 	Folder string
 	Path   string
-	info   os.FileInfo
+	id     string
 }
 
 // Stage makes a private folder next to dst and creates the output file in it, exclusively, mode 0600. Nothing
@@ -39,10 +41,10 @@ func Stage(dst string) (Staged, error) {
 		os.RemoveAll(folder)
 		return Staged{}, fmt.Errorf("stage %s: %w", dst, err)
 	}
-	info, err := os.Lstat(path)
+	id, err := fsx.FileID(path)
 	if err != nil {
 		os.RemoveAll(folder)
 		return Staged{}, fmt.Errorf("stage %s: %w", dst, err)
 	}
-	return Staged{Folder: folder, Path: path, info: info}, nil
+	return Staged{Folder: folder, Path: path, id: id}, nil
 }
