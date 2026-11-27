@@ -93,3 +93,17 @@ test("originalText builds the Summary's Original line from action and until", ()
   assert.equal(originalText({ action: "not_yet", until: null }), "Not touched yet");
   assert.equal(originalText({ action: "not_touched", until: null }), "Left where it was");
 });
+
+// A check kept the original (no size to compare): the reason shows, not a percentage.
+test("jobResultText: a size-kept job keeps its percentage", () => {
+  assert.equal(jobResultText(job({ result: result({ sizeAfter: 10.8 * GB, outcome: "bigger_kept" }) })), "8% bigger · original kept");
+});
+
+test("jobResultText: a check-kept job shows its reason, not a percentage", () => {
+  const reason = "The playback test of the new file played nothing from its sample, so the original is kept.";
+  assert.equal(jobResultText(job({ result: result({ sizeAfter: null, outcome: "bigger_kept", reason }) })), reason);
+});
+
+test("jobResultText: a check-kept job with no reason says Original kept", () => {
+  assert.equal(jobResultText(job({ result: result({ sizeAfter: null, outcome: "bigger_kept" }) })), "Original kept");
+});
