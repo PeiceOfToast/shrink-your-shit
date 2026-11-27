@@ -185,18 +185,37 @@ else
   printf '%s\n' "$LIBSET" > "$LIBMARK"
 fi
 
-# What cards this machine has, from the PCI bus: a display-class device, by vendor (0x8086 Intel, 0x1002 AMD,
-# 0x10de NVIDIA). The probe decides later what actually works; these notes only say what is here and what a person
-# can do about it.
+# What cards this machine has, from the device nodes it was given: inside a container /sys shows the host's PCI
+# devices, so /sys is only read to name the driver behind a render node. NVIDIA's driver makes /dev/nvidia*, and
+# /dev/dri/renderD* is Intel or AMD by its DRM driver (i915/xe, amdgpu/radeon) or, when that is unreadable, its
+# vendor id. The probe decides later what actually works; these notes only say what is here and what a person can
+# do about it.
 gpu_vendors=""
-for d in /sys/bus/pci/devices/*; do
-  case "$(cat "$d/class" 2>/dev/null)" in 0x030*) ;; *) continue ;; esac
-  case "$(cat "$d/vendor" 2>/dev/null)" in
-    0x8086) gpu_vendors="$gpu_vendors intel" ;;
-    0x1002) gpu_vendors="$gpu_vendors amd" ;;
-    0x10de) gpu_vendors="$gpu_vendors nvidia" ;;
+add_gpu() { case " $gpu_vendors " in *" $1 "*) ;; *) gpu_vendors="$gpu_vendors $1" ;; esac; }
+for n in /dev/nvidia0 /dev/nvidiactl; do
+  [ -e "$n" ] && add_gpu nvidia
+done
+for r in /dev/dri/renderD*; do
+  [ -e "$r" ] || continue
+  node="$(basename "$r")"
+  drv="$(sed -n 's/^DRIVER=//p' "/sys/class/drm/$node/device/uevent" 2>/dev/null)"
+  vendor="$(cat "/sys/class/drm/$node/device/vendor" 2>/dev/null)"
+  case "$drv:$vendor" in
+    i915:*|xe:*|*:0x8086) add_gpu intel ;;
+    amdgpu:*|radeon:*|*:0x1002) add_gpu amd ;;
   esac
 done
+# An NVIDIA card is only usable once its driver is installed, and this script never installs one. The PCI bus is
+# how a card with no driver is still found, so the person is told there is one to give a driver to.
+pci_nvidia=no
+for d in /sys/bus/pci/devices/*; do
+  case "$(cat "$d/class" 2>/dev/null)" in 0x030*) ;; *) continue ;; esac
+  [ "$(cat "$d/vendor" 2>/dev/null)" = 0x10de ] && pci_nvidia=yes
+done
+# In a container the PCI bus shows the host's cards, which this machine cannot be given by a driver; that note is
+# only for a machine of its own.
+in_container=no
+if [ -e /.dockerenv ] || [ -e /run/systemd/container ]; then in_container=yes; fi
 has_gpu() { case " $gpu_vendors " in *" $1 "*) return 0 ;; esac; return 1; }
 
 # Intel's generation from its Core name: i7-1165G7 is 11th, i7-6700K is 6th. A name the numbering does not read
@@ -279,14 +298,23 @@ if has_gpu intel && [ "${ID:-}" = debian ] && [ "${VERSION_ID:-}" = 13 ]; then
   fi
 fi
 if has_gpu nvidia; then
+  nv=""
   if [ -r /proc/driver/nvidia/version ]; then
-    nv="$(sed -n 's/.*Kernel Module  *\([0-9][^ ]*\).*/\1/p' /proc/driver/nvidia/version | head -n 1)"
-    say "note: NVIDIA card found; driver ${nv:-installed} is loaded, and syp will use the card's encoder through it."
+    nv="$(sed -n 's/.*[[:space:]]\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9.]*\)[[:space:]].*/\1/p' /proc/driver/nvidia/version | head -n 1)"
+  fi
+  if [ -z "$nv" ] && command -v nvidia-smi >/dev/null 2>&1; then
+    nv="$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -n 1)"
+  fi
+  if [ -n "$nv" ]; then
+    say "note: NVIDIA card found; driver $nv is loaded, and syp will use the card's encoder through it."
     say "      This script never installs a driver."
   else
-    say "note: NVIDIA card found but no driver is loaded; syp will use the processor for it. This script never installs"
-    say "      a driver; install one from your distribution's driver packages if you want the card used."
+    say "note: NVIDIA card found and its driver is loaded; syp will use the card's encoder through it. This script"
+    say "      never installs a driver."
   fi
+elif [ "$pci_nvidia" = yes ] && [ "$in_container" = no ]; then
+  say "note: an NVIDIA card is present but no driver is loaded; syp will use the processor for it. This script never"
+  say "      installs a driver; install one from your distribution's driver packages if you want the card used."
 fi
 if has_gpu amd; then
   say "note: AMD card found; its encoder comes through mesa (mesa-va-drivers), and the Intel media driver is not"
