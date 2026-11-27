@@ -59,17 +59,18 @@ func TestDropSidecarForgetsOne(t *testing.T) {
 	e.addLibrary(t, 1, false)
 	id := e.enqueue(t, 1, 1)
 	j := SidecarJournal{DB: e.db}
+	a, b := filepath.Join("/media", "a.srt"), filepath.Join("/media", "b.srt")
 	if err := j.AddSidecars([]safety.Sidecar{
-		{JobID: id, Path: filepath.Join("/media", "a.srt"), Hash: "h"},
-		{JobID: id, Path: filepath.Join("/media", "b.srt"), Hash: "h"},
+		{JobID: id, Path: a, Hash: "h"},
+		{JobID: id, Path: b, Hash: "h"},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := j.DropSidecar(id, "/media/a.srt"); err != nil {
+	if err := j.DropSidecar(id, a); err != nil {
 		t.Fatal(err)
 	}
 	left, _ := j.Sidecars()
-	if len(left) != 1 || left[0].Path != "/media/b.srt" {
+	if len(left) != 1 || left[0].Path != b {
 		t.Errorf("records = %+v, want only b.srt", left)
 	}
 }

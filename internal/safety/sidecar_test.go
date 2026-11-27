@@ -225,6 +225,83 @@ func TestSrtUncheckableKeepsTheRecord(t *testing.T) {
 	}
 }
 
+// TestSrtQuarantineKeepsAFileThatTakesTheName: a file that takes the recorded name in the instant
+// our file is moved aside is not the file deleted; ours goes and the newcomer stays.
+func TestSrtQuarantineKeepsAFileThatTakesTheName(t *testing.T) {
+	dir := t.TempDir()
+	srt := writeFile(t, dir, "movie.eng.srt", "subtitles")
+	c := record(t, 7, srt, filepath.Join(dir, "movie.mkv"))
+	sidecarRename = func(oldpath, newpath string) error {
+		if err := fsx.RenameNoReplace(oldpath, newpath); err != nil {
+			return err
+		}
+		// Another program takes the name the moment our file is moved aside.
+		return os.WriteFile(oldpath, []byte("the newcomer"), 0o644)
+	}
+	t.Cleanup(func() { sidecarRename = fsx.RenameNoReplace })
+
+	removed, err := RemoveSidecarIfOurs(c)
+	if err != nil || !removed {
+		t.Fatalf("removed = %v, %v; want our file moved aside and deleted", removed, err)
+	}
+	if b, err := os.ReadFile(srt); err != nil || string(b) != "the newcomer" {
+		t.Errorf("the file that took the name was removed or changed: %q %v", b, err)
+	}
+	if _, err := os.Stat(srt + ".syp-quarantine-1"); err == nil {
+		t.Error("the quarantine name was left behind after our file was deleted")
+	}
+}
+
+// TestSrtQuarantineSkipsTakenNames: the move aside never goes over a file, even one left by an
+// earlier removal.
+func TestSrtQuarantineSkipsTakenNames(t *testing.T) {
+	dir := t.TempDir()
+	srt := writeFile(t, dir, "movie.eng.srt", "subtitles")
+	c := record(t, 7, srt, filepath.Join(dir, "movie.mkv"))
+	writeFile(t, dir, "movie.eng.srt.syp-quarantine-1", "an older file")
+	removed, err := RemoveSidecarIfOurs(c)
+	if err != nil || !removed {
+		t.Fatalf("removed = %v, %v; want our file moved aside and deleted", removed, err)
+	}
+	if b, _ := os.ReadFile(srt + ".syp-quarantine-1"); string(b) != "an older file" {
+		t.Errorf("the file already at a quarantine name was removed or changed: %q", b)
+	}
+}
+
+// TestSrtPutBackWhenTheNameIsTaken: a file that is not ours is put back at its name; when another
+// file took that name meanwhile, it stays under the quarantine name and the record stays, so
+// nothing that is not ours is ever deleted.
+func TestSrtPutBackWhenTheNameIsTaken(t *testing.T) {
+	dir := t.TempDir()
+	srt := writeFile(t, dir, "movie.eng.srt", "subtitles")
+	c := record(t, 7, srt, filepath.Join(dir, "movie.mkv"))
+	if err := os.WriteFile(srt, []byte("someone else's subtitles"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sidecarRename = func(oldpath, newpath string) error {
+		if err := fsx.RenameNoReplace(oldpath, newpath); err != nil {
+			return err
+		}
+		if oldpath == srt {
+			return os.WriteFile(oldpath, []byte("the newcomer"), 0o644)
+		}
+		return nil
+	}
+	t.Cleanup(func() { sidecarRename = fsx.RenameNoReplace })
+
+	store := &fakeStore{list: []Sidecar{c}}
+	said := RecoverSidecars(store)
+	if len(store.list) != 1 || !strings.Contains(strings.Join(said, ";"), "could not be put back") {
+		t.Fatalf("the record must stay when the file cannot go back: %+v %v", store.list, said)
+	}
+	if b, _ := os.ReadFile(srt); string(b) != "the newcomer" {
+		t.Errorf("the file that took the name was removed or changed: %q", b)
+	}
+	if b, err := os.ReadFile(srt + ".syp-quarantine-1"); err != nil || string(b) != "someone else's subtitles" {
+		t.Errorf("the file moved aside must be kept where it is: %q %v", b, err)
+	}
+}
+
 // TestSrtRecordsUnreadableIsSaid: a store that cannot be read is reported, not silently ignored.
 func TestSrtRecordsUnreadableIsSaid(t *testing.T) {
 	said := RecoverSidecars(&fakeStore{readErr: errors.New("database is busy")})

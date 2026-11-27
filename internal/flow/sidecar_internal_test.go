@@ -5,6 +5,7 @@ package flow
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/PeiceOfToast/shrink-your-shit/internal/encode"
@@ -72,6 +73,63 @@ func TestSidecarLinkedButStagedNameLeftCountsAsPlaced(t *testing.T) {
 	}
 	if _, err := os.Stat(encode.SrtName(plan.Output, "eng")); err != nil {
 		t.Errorf("the linked .srt should be in place: %v", err)
+	}
+}
+
+// TestSidecarNameTakenAtTheRenameStopsWithoutOverwriting is L-AUD-25's never-overwrite rule at the
+// last instant: a file appears at a .srt name after every check and just before the move. The move
+// refuses, the file that appeared is left exactly as it was, the .srt placed before it comes back
+// again, and no record stays for a file never placed.
+func TestSidecarNameTakenAtTheRenameStopsWithoutOverwriting(t *testing.T) {
+	dir := t.TempDir()
+	stage := filepath.Join(dir, ".movie.syp-tmp")
+	if err := os.Mkdir(stage, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for k := 0; k < 2; k++ {
+		if err := os.WriteFile(encode.StagedSidecar(stage, k), []byte("subtitles"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	video := filepath.Join(dir, "out.mkv")
+	if err := os.WriteFile(video, []byte("the new file"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	plan := encode.Plan{Output: filepath.Join(dir, "movie-shrunk.mkv"), SidecarDir: stage}
+	extracts := []encode.StreamPlan{
+		{Index: 3, Action: encode.StreamExtract, Part: "eng"},
+		{Index: 4, Action: encode.StreamExtract, Part: "ger"},
+	}
+	taken := encode.SrtName(plan.Output, "ger")
+	renameSidecar = func(oldpath, newpath string) error {
+		if newpath == taken {
+			// Someone else's file takes the name in the instant before the move.
+			if err := os.WriteFile(newpath, []byte("someone else's subtitles"), 0o644); err != nil {
+				return err
+			}
+		}
+		return fsx.RenameNoReplace(oldpath, newpath)
+	}
+	t.Cleanup(func() { renameSidecar = fsx.RenameNoReplace })
+
+	store := &listStore{}
+	e := &engine{in: RunInput{JobID: 7}, env: Env{Sidecars: store}}
+	placed, res := e.placeSidecars(plan, extracts, safety.Staged{Folder: stage, Path: video})
+
+	if res.Outcome != OutcomeFatal || res.Reason != "save.srt_exists" || !strings.Contains(res.Message, "is already there") {
+		t.Fatalf("result = %+v, want the taken-name refusal", res)
+	}
+	if len(placed) != 0 {
+		t.Errorf("placed = %+v, want none", placed)
+	}
+	if b, err := os.ReadFile(taken); err != nil || string(b) != "someone else's subtitles" {
+		t.Errorf("the file that appeared was removed or changed: %q %v", b, err)
+	}
+	if _, err := os.Stat(encode.SrtName(plan.Output, "eng")); err == nil {
+		t.Error("the .srt placed before the failure was left beside a file that was not placed")
+	}
+	if len(store.recs) != 0 {
+		t.Errorf("records left for files never placed: %+v", store.recs)
 	}
 }
 

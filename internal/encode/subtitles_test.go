@@ -4,6 +4,7 @@ package encode
 
 import (
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -173,7 +174,7 @@ func TestSubtitlesExtractedAreTheirOwnOutputs(t *testing.T) {
 	if i < 0 || i+2 >= len(argv) || argv[i+1] != "-map" || argv[i+2] != "0:3" {
 		t.Fatalf("argv = %v, want the second extract right after the first", argv)
 	}
-	if got, want := StagedSidecar(plan.SidecarDir, 1), "/library/.film-shrunk.syp-tmp/s0/sub.1.srt"; got != want {
+	if got, want := StagedSidecar(plan.SidecarDir, 1), filepath.Join("/library", ".film-shrunk.syp-tmp", "s0", "sub.1.srt"); got != want {
 		t.Errorf("second extract = %q, want %q", got, want)
 	}
 	// The only subtitle left in the file is index 4: it converts, and it is the first output one.
@@ -255,7 +256,7 @@ func TestSrtNames(t *testing.T) {
 			t.Errorf("part %q: name = %q, want %q", part, got, want)
 		}
 	}
-	if got, want := StagedSidecar("/tmp/stage", 3), "/tmp/stage/sub.3.srt"; got != want {
+	if got, want := StagedSidecar("/tmp/stage", 3), filepath.Join("/tmp/stage", "sub.3.srt"); got != want {
 		t.Errorf("staged = %q, want %q", got, want)
 	}
 }

@@ -38,12 +38,16 @@ type SidecarStore interface {
 	Sidecars() ([]Sidecar, error)
 }
 
-// Hooks for tests: the check and the removal a recovery makes.
+// Hooks for tests: the moves, the check and the removal a recovery makes.
 var (
 	sidecarLstat  = os.Lstat
 	sidecarHash   = fsx.SHA256
 	sidecarRemove = os.Remove
+	sidecarRename = fsx.RenameNoReplace
 )
+
+// maxQuarantineNames bounds the names RemoveSidecarIfOurs tries beside one file.
+const maxQuarantineNames = 100
 
 // sidecarOwner is what sidecarIsOurs found out about a recorded .srt file.
 type sidecarOwner int
@@ -54,9 +58,10 @@ const (
 	sidecarUnknown                     // could not check (Lstat or reading failed): keep the record
 )
 
-// sidecarIsOurs compares c's file with what we wrote: regular file, size, time and full SHA-256.
-func sidecarIsOurs(c Sidecar) (sidecarOwner, error) {
-	st, err := sidecarLstat(c.Path)
+// sidecarIsOurs compares the file at path with what we wrote: regular file, size, time and full
+// SHA-256.
+func sidecarIsOurs(c Sidecar, path string) (sidecarOwner, error) {
+	st, err := sidecarLstat(path)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		return sidecarNotOurs, nil
@@ -65,7 +70,7 @@ func sidecarIsOurs(c Sidecar) (sidecarOwner, error) {
 	case !st.Mode().IsRegular() || st.Size() != c.Bytes || st.ModTime().UnixNano() != c.MTime:
 		return sidecarNotOurs, nil
 	}
-	h, err := sidecarHash(c.Path)
+	h, err := sidecarHash(path)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		return sidecarNotOurs, nil
@@ -77,21 +82,73 @@ func sidecarIsOurs(c Sidecar) (sidecarOwner, error) {
 	return sidecarOurs, nil
 }
 
-// RemoveSidecarIfOurs removes c's file if it is still exactly ours. removed says it was; a nil
-// error means the record can go (the file is gone, someone else's, or removed). When we could not
-// tell whether the file is ours, it is left alone and the error keeps the record, so a later start
-// checks again.
+// RemoveSidecarIfOurs removes c's file if it is still exactly ours. The file is first moved to a
+// free quarantine name beside it (never over another file), and it is checked there, so a file that
+// appears at c's own name in between is never deleted: ours is deleted, one that is not is put
+// back, and one whose name was taken meanwhile stays under the quarantine name. removed says the
+// file was ours and is gone; a nil error means the record can go (it is gone, someone else's, or
+// removed). When we could not tell whether it is ours, it is put back and the error keeps the
+// record, so a later start checks again.
 func RemoveSidecarIfOurs(c Sidecar) (removed bool, err error) {
-	switch o, err := sidecarIsOurs(c); o {
-	case sidecarUnknown:
-		return false, fmt.Errorf("could not tell whether it is ours: %w", err)
-	case sidecarNotOurs:
-		return false, nil
+	q, err := quarantine(c.Path)
+	if err != nil {
+		return false, fmt.Errorf("could not move it aside to check it: %w", err)
 	}
-	if err := sidecarRemove(c.Path); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return false, err
+	if q == "" {
+		return false, nil // already gone
 	}
-	return true, nil
+	o, checkErr := sidecarIsOurs(c, q)
+	if o == sidecarOurs {
+		if err := sidecarRemove(q); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			if back := putBack(q, c.Path); back != nil {
+				return false, fmt.Errorf("could not remove %s: %v; %v", q, err, back)
+			}
+			return false, fmt.Errorf("could not remove %s: %w", q, err)
+		}
+		return true, nil
+	}
+	// Not ours, or we could not tell: give the file its name back and leave it alone.
+	if back := putBack(q, c.Path); back != nil {
+		return false, back
+	}
+	if o == sidecarUnknown {
+		return false, fmt.Errorf("could not tell whether it is ours: %w", checkErr)
+	}
+	return false, nil
+}
+
+// quarantine moves path to a free name beside it with a no-replace rename and returns that name.
+// It returns ("", nil) when the file is already gone.
+func quarantine(path string) (string, error) {
+	for n := 1; n <= maxQuarantineNames; n++ {
+		q := fmt.Sprintf("%s.syp-quarantine-%d", path, n)
+		err := sidecarRename(path, q)
+		switch {
+		case err == nil:
+			return q, nil
+		case errors.Is(err, fsx.ErrNotRemoved):
+			// The link fallback made q but could not remove path: q is an extra link, so it is
+			// taken back and nothing is decided here.
+			_ = sidecarRemove(q)
+			return "", err
+		case errors.Is(err, os.ErrExist):
+			continue // that name is taken; try the next
+		case errors.Is(err, fs.ErrNotExist):
+			return "", nil
+		default:
+			return "", err
+		}
+	}
+	return "", fmt.Errorf("no free name beside %s in %d tries", path, maxQuarantineNames)
+}
+
+// putBack moves a quarantined file to its recorded name again. A name taken meanwhile fails the
+// no-replace rename, and the error says where the file is now.
+func putBack(q, path string) error {
+	if err := sidecarRename(q, path); err != nil {
+		return fmt.Errorf("it was moved aside to %s and could not be put back at %s: %w", q, path, err)
+	}
+	return nil
 }
 
 // RecoverSidecars ends what a crash left between putting .srt files beside a new file and placing
