@@ -382,6 +382,110 @@ func TestRateControlOnACardIsRefused(t *testing.T) {
 	}
 }
 
+// TestNvencProfileMatchesTheSwitches: the ten-bit pixel format, the main10 profile and the rate
+// control are one switch set; eight bits carries none of the profile (L-HW-10).
+func TestNvencProfileMatchesTheSwitches(t *testing.T) {
+	ten := baseInfo()
+	ten.Video[0].BitDepth = 10
+	res := buildOK(t, basePlan(CodecHEVC), ten, cardRung(FamilyNVENC, CodecHEVC, ""))
+	for flag, want := range map[string]string{
+		"-pix_fmt:v:0": "p010le", "-profile:v:0": "main10",
+		"-rc:v:0": "vbr", "-cq:v:0": "22",
+	} {
+		if v, ok := flagValue(res.Argv, flag); !ok || v != want {
+			t.Errorf("ten bits: %s = %q (found %v), want %q", flag, v, ok, want)
+		}
+	}
+	res = buildOK(t, basePlan(CodecHEVC), baseInfo(), cardRung(FamilyNVENC, CodecHEVC, ""))
+	if v, _ := flagValue(res.Argv, "-pix_fmt:v:0"); v != "yuv420p" {
+		t.Errorf("eight bits: pix_fmt = %q, want yuv420p", v)
+	}
+	if _, ok := flagValue(res.Argv, "-profile:v:0"); ok {
+		t.Errorf("eight bits: a profile is written with no main10 to ask for: %v", res.Argv)
+	}
+}
+
+// TestCardCRFCarriesOnlyMeasured: only QSV HEVC has an offset, so NVENC and VA-API carry the CRF
+// unchanged at every slider position (L-HW-12).
+func TestCardCRFCarriesOnlyMeasured(t *testing.T) {
+	for _, f := range []struct {
+		name string
+		rung Rung
+		flag string
+	}{
+		{"vaapi", cardRung(FamilyVAAPI, CodecHEVC, renderNode), "-qp:v:0"},
+		{"nvenc", cardRung(FamilyNVENC, CodecHEVC, ""), "-cq:v:0"},
+	} {
+		for quality := 1; quality <= 5; quality++ {
+			plan := basePlan(CodecHEVC)
+			plan.Video.Quality = quality
+			res := buildOK(t, plan, baseInfo(), f.rung)
+			if v, _ := flagValue(res.Argv, f.flag); v != "22" {
+				t.Errorf("%s quality %d: %s = %q, want the CRF unchanged at 22 (no measured offset)",
+					f.name, quality, f.flag, v)
+			}
+		}
+	}
+}
+
+// TestCompiledCardCRFIsHEVCOnly: the offset table is read for QSV HEVC alone, and a plan that does
+// not say its slider position gets no offset (L-HW-12).
+func TestCompiledCardCRFIsHEVCOnly(t *testing.T) {
+	for _, c := range []struct {
+		family Family
+		codec  Codec
+	}{
+		{FamilyQSV, CodecH264}, {FamilyQSV, CodecAV1},
+		{FamilyVAAPI, CodecHEVC}, {FamilyNVENC, CodecHEVC}, {FamilyCPU, CodecHEVC},
+	} {
+		for quality := 1; quality <= 5; quality++ {
+			if got := cardQualityOffset(c.family, c.codec, quality); got != 0 {
+				t.Errorf("%s/%s quality %d: offset %d, want 0", c.family, c.codec, quality, got)
+			}
+		}
+	}
+	if got := cardQualityOffset(FamilyQSV, CodecHEVC, 0); got != 0 {
+		t.Errorf("quality 0 (unset): offset %d, want 0", got)
+	}
+	if got := cardQualityOffset(FamilyQSV, CodecHEVC, 6); got != 0 {
+		t.Errorf("quality 6 (out of range): offset %d, want 0", got)
+	}
+}
+
+// TestAV1PlanDropsSVTParamsOnTheGraphicsEncoder: -svtav1-params belongs to libsvtav1, so a card's
+// AV1 rung does not carry it (L-HW-13).
+func TestAV1PlanDropsSVTParamsOnTheGraphicsEncoder(t *testing.T) {
+	cpu := buildOK(t, basePlan(CodecAV1), baseInfo(), cpuRung(CodecAV1))
+	if v, ok := flagValue(cpu.Argv, "-svtav1-params:v:0"); !ok || v != "tune=0" {
+		t.Fatalf("cpu av1: svt params = %q (found %v), want tune=0", v, ok)
+	}
+	for _, f := range cardFamilies {
+		res := buildOK(t, basePlan(CodecAV1), baseInfo(), cardRung(f.family, CodecAV1, f.device))
+		if v, ok := flagValue(res.Argv, "-svtav1-params:v:0"); ok {
+			t.Errorf("%s av1: carries SVT parameters (%q); the card's encoder has no such option", f.name, v)
+		}
+		want, _ := CardEncoder(f.family, CodecAV1)
+		if v, _ := flagValue(res.Argv, "-c:v:0"); v != want {
+			t.Errorf("%s av1: encoder = %q, want %q", f.name, v, want)
+		}
+	}
+}
+
+// TestH264PlanUsesTheGraphicsEncoder: H.264 on a card is the card's own encoder, never libx264
+// (L-HW-13).
+func TestH264PlanUsesTheGraphicsEncoder(t *testing.T) {
+	for _, f := range cardFamilies {
+		res := buildOK(t, basePlan(CodecH264), baseInfo(), cardRung(f.family, CodecH264, f.device))
+		want, _ := CardEncoder(f.family, CodecH264)
+		if v, _ := flagValue(res.Argv, "-c:v:0"); v != want {
+			t.Errorf("%s: encoder = %q, want %q", f.name, v, want)
+		}
+		if v, _ := flagValue(res.Argv, "-tag:v:0"); v != "avc1" {
+			t.Errorf("%s: tag = %q, want avc1", f.name, v)
+		}
+	}
+}
+
 // TestVAAPIPresetIsSaidOutLoud: VA-API has no speed setting, so the choice is a note; the other
 // families write -preset (L-HW-13).
 func TestVAAPIPresetIsSaidOutLoud(t *testing.T) {
