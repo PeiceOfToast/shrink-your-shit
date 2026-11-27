@@ -17,7 +17,9 @@ type Safety interface {
 	// Stage makes a private folder for dst. An empty base means beside dst; otherwise the folder
 	// is made in base (a try stages in the app's own temp folder, never in the library).
 	Stage(base, dst string) (safety.Staged, error)
-	Verify(ctx context.Context, p media.Prober, rec safety.Recorder, st safety.Staged, src media.Info, want safety.Want, timeout time.Duration) (safety.Verdict, error)
+	Verify(ctx context.Context, c safety.Checker, rec safety.Recorder, st safety.Staged, src media.Info, want safety.Want, timeout time.Duration) (safety.Verdict, error)
+	// CheckSource decodes the original before it is converted (L-SAFE-4).
+	CheckSource(ctx context.Context, c safety.Checker, rec safety.Recorder, path string, src media.Info, timeout time.Duration) (safety.Verdict, error)
 	Place(ctx context.Context, st safety.Staged, final string) (string, error)
 }
 
@@ -31,8 +33,12 @@ func (RealSafety) Stage(base, dst string) (safety.Staged, error) {
 	return safety.StageIn(base, dst)
 }
 
-func (RealSafety) Verify(ctx context.Context, p media.Prober, rec safety.Recorder, st safety.Staged, src media.Info, want safety.Want, timeout time.Duration) (safety.Verdict, error) {
-	return safety.Verify(ctx, p, rec, st, src, want, timeout)
+func (RealSafety) Verify(ctx context.Context, c safety.Checker, rec safety.Recorder, st safety.Staged, src media.Info, want safety.Want, timeout time.Duration) (safety.Verdict, error) {
+	return safety.Verify(ctx, c, rec, st, src, want, timeout)
+}
+
+func (RealSafety) CheckSource(ctx context.Context, c safety.Checker, rec safety.Recorder, path string, src media.Info, timeout time.Duration) (safety.Verdict, error) {
+	return safety.SourceCheck(ctx, c, rec, path, src, timeout)
 }
 
 func (RealSafety) Place(ctx context.Context, st safety.Staged, final string) (string, error) {

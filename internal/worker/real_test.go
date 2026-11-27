@@ -56,7 +56,7 @@ func TestRealWorkerRunsAClipToItsResult(t *testing.T) {
 		LibraryRoot: root, Source: src, Size: st.Size(), MTime: st.ModTime(), FileID: id,
 	}
 	env := flow.Env{
-		Media:  media.MediaFuncs{ProbeFunc: media.Probe, RunFunc: media.Run},
+		Media:  media.MediaFuncs{ProbeFunc: media.Probe, RunFunc: media.Run, CaptureFunc: media.Capture},
 		Safety: flow.RealSafety{}, Pick: flow.ProcessorPick,
 		LoadRevision: func(ctx context.Context, id int64, r int) (flow.Flow, error) { return starter.Flow, nil },
 		Now:          time.Now, Sleep: time.Sleep, AppVersion: "test",

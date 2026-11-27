@@ -68,7 +68,7 @@ func TestRealTryOnAFile(t *testing.T) {
 			}
 
 			env := flow.Env{
-				Media:      media.MediaFuncs{ProbeFunc: media.Probe, RunFunc: media.Run},
+				Media:      media.MediaFuncs{ProbeFunc: media.Probe, RunFunc: media.Run, CaptureFunc: media.Capture},
 				Safety:     flow.RealSafety{},
 				Pick:       flow.ProcessorPick,
 				Now:        time.Now,

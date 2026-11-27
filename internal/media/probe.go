@@ -89,6 +89,36 @@ type VideoTrack struct {
 	AttachedPicture bool
 	Language        string
 	Title           string
+	// StartTime is when the stream's first frame plays on the file's timeline. It can be negative
+	// (an MP4 edit list) and differs between an original and its re-encode: the result check puts
+	// both pictures on one timeline by it.
+	StartTime time.Duration
+	// Duration is the stream's own length. The picture check counts its frames from it: an edit
+	// list keeps frames in the stream that ffmpeg never outputs, so the stream's duration is the
+	// count that matches what a decoder sees.
+	Duration time.Duration
+}
+
+// MainVideo is the main video track: the first one that is not cover art, or nil. An attached
+// picture is a video stream in some containers but is never the picture a player shows.
+func (i Info) MainVideo() *VideoTrack {
+	for k := range i.Video {
+		if !i.Video[k].AttachedPicture {
+			return &i.Video[k]
+		}
+	}
+	return nil
+}
+
+// MainVideoOrdinal is MainVideo's place among the file's video streams (the N of "0:v:N"), or -1
+// when the file has no main video.
+func (i Info) MainVideoOrdinal() int {
+	for k := range i.Video {
+		if !i.Video[k].AttachedPicture {
+			return k
+		}
+	}
+	return -1
 }
 
 // HDR is the HDR side data found on a video stream. Metadata only: whether the picture really is
@@ -293,6 +323,8 @@ type probeStream struct {
 	SampleRate       flexInt          `json:"sample_rate"`
 	Channels         flexInt          `json:"channels"`
 	ChannelLayout    string           `json:"channel_layout"`
+	StartTime        flexFloat        `json:"start_time"`
+	Duration         flexFloat        `json:"duration"`
 	Disposition      probeDisposition `json:"disposition"`
 	Tags             wireTags         `json:"tags"`
 	SideDataList     []probeSideData  `json:"side_data_list"`
@@ -428,6 +460,8 @@ func videoTrack(s *probeStream) VideoTrack {
 		Language:        s.Tags.Strings()["language"],
 		Title:           s.Tags.Strings()["title"],
 		Encoder:         tagFold(s.Tags.Strings(), "encoder"),
+		StartTime:       seconds(s.StartTime),
+		Duration:        seconds(s.Duration),
 	}
 	for _, sd := range s.SideDataList {
 		switch sd.Type {

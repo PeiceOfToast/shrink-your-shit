@@ -156,6 +156,12 @@ func (e *engine) run(ctx context.Context) (res Result) {
 		return skip("flow.nothing", strings.Join(labels, "; "))
 	}
 
+	// 3a. Decode the original before anything is written (L-SAFE-4): a damaged file is kept with its
+	// reason, never converted, and its damage is never blamed on the encoder. Light damage converts.
+	if res = e.sourceCheck(ctx, info); res.Outcome != "" {
+		return res
+	}
+
 	// 3b. Measure the loudness of every track whose loudness will be evened out (L-AUD-15). The
 	// measurement only feeds Build's filter, so it happens after the steps have agreed there is
 	// work and before the command is written.
@@ -541,12 +547,77 @@ func (e *engine) verifyWant(plan encode.Plan, info media.Info) (safety.Want, err
 	for _, i := range subtitles {
 		want.SubtitleLanguages = append(want.SubtitleLanguages, subByIndex[i].Language)
 	}
+	want.Video = wantedVideo(plan, info)
 	return want, nil
+}
+
+// wantedVideo is the picture the plan writes (L-SAFE-3, K4): the upright size, and the colour
+// description Build writes for it. A copied video has no new picture, so its zero value compares
+// nothing.
+func wantedVideo(plan encode.Plan, info media.Info) safety.WantedVideo {
+	if plan.Video.Codec == encode.CodecCopy {
+		return safety.WantedVideo{}
+	}
+	main := info.MainVideo()
+	if main == nil {
+		return safety.WantedVideo{}
+	}
+	w, h := encode.OutputSize(*main, plan.Video.Scale)
+	want := safety.WantedVideo{Compare: true, Width: w, Height: h}
+	switch {
+	case plan.Video.HDR == encode.HDRTonemap:
+		// A tone-mapped picture is described as BT.709. Build refuses tone-mapping for now, so this
+		// is the expectation for when it lands.
+		want.ColorPrimaries, want.ColorTransfer, want.ColorSpace = "bt709", "bt709", "bt709"
+	case main.HDRKind() != "SDR":
+		// Keeping HDR: Build writes the source's description, with HDR10's defaults where the
+		// probe found none.
+		want.ColorPrimaries = orDefault(main.ColorPrimaries, "bt2020")
+		want.ColorTransfer = orDefault(main.ColorTransfer, "smpte2084")
+		want.ColorSpace = orDefault(main.ColorSpace, "bt2020nc")
+	default:
+		// An SDR picture keeps the source's description. Empty means the probe found none, and
+		// then that tag is not compared.
+		want.ColorPrimaries, want.ColorTransfer, want.ColorSpace = main.ColorPrimaries, main.ColorTransfer, main.ColorSpace
+	}
+	return want
+}
+
+// orDefault is value, or fallback when value is empty.
+func orDefault(value, fallback string) string {
+	if value == "" {
+		return fallback
+	}
+	return value
 }
 
 // loudnessBudget is L-AUD-15's cap on the whole analysis: ten minutes across every track. Past it,
 // every track is left un-normalized rather than half-normalized.
 const loudnessBudget = 10 * time.Minute
+
+// sourceCheck decodes the original before anything is written (L-SAFE-4). A damaged original is kept
+// with its reason and never converted; light damage converts. A check that could not run is not a
+// "no" (L-SAFE-1).
+func (e *engine) sourceCheck(ctx context.Context, info media.Info) Result {
+	verdict, err := e.env.Safety.CheckSource(ctx, e.env.Media, e.env.SafetyLog, info.Path, info, 0)
+	if err != nil {
+		if ctx.Err() != nil {
+			return cancelled()
+		}
+		return Result{
+			Outcome: OutcomeMayPass, Reason: "check.unavailable",
+			Message:    fmt.Sprintf("The original file could not be checked: %v", err),
+			SizeBefore: e.in.Size, NextAction: "retry",
+		}
+	}
+	if !verdict.OK {
+		return Result{
+			Outcome: OutcomeBiggerKept, SizeBefore: e.in.Size, Reason: verdict.Code,
+			Message: verdict.Message, NextAction: verdict.NextAction,
+		}
+	}
+	return Result{}
+}
 
 // measureLoudness fills in each converting track's loudness before Build writes the filter. A
 // failed measurement leaves that track as it is; running past the budget drops them all.

@@ -59,9 +59,14 @@ func (f *trySafety) Stage(base, dst string) (safety.Staged, error) {
 	return safety.Staged{Folder: folder, Path: path}, nil
 }
 
-func (f *trySafety) Verify(ctx context.Context, p media.Prober, rec safety.Recorder, st safety.Staged, src media.Info, want safety.Want, timeout time.Duration) (safety.Verdict, error) {
+func (f *trySafety) Verify(ctx context.Context, c safety.Checker, rec safety.Recorder, st safety.Staged, src media.Info, want safety.Want, timeout time.Duration) (safety.Verdict, error) {
 	f.gotSrc = src
 	return f.verify, f.verifyErr
+}
+
+// CheckSource passes: these tests are about what a try does with a good original.
+func (f *trySafety) CheckSource(ctx context.Context, c safety.Checker, rec safety.Recorder, path string, src media.Info, timeout time.Duration) (safety.Verdict, error) {
+	return safety.Verdict{OK: true}, nil
 }
 
 func (f *trySafety) Place(ctx context.Context, st safety.Staged, final string) (string, error) {

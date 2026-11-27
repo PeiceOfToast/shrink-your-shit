@@ -48,6 +48,10 @@ func (r *recorder) all() []events.Event {
 type fakeSafety struct {
 	verify  safety.Verdict
 	verifyE error
+	// source answers CheckSource. Its zero value passes: a fake that says nothing about the
+	// original does not refuse it.
+	source  safety.Verdict
+	sourceE error
 	stageE  error
 	placeE  error
 	// placeLeftBehind makes Place behave like the link fallback: the final name exists (a hard link),
@@ -64,6 +68,8 @@ type fakeSafety struct {
 	gotRecorder safety.Recorder
 	staged      []safety.Staged
 	placedTo    string
+	sourceCalls int
+	gotSource   media.Info
 }
 
 func (f *fakeSafety) Stage(base, dst string) (safety.Staged, error) {
@@ -88,10 +94,23 @@ func (f *fakeSafety) Stage(base, dst string) (safety.Staged, error) {
 	return st, nil
 }
 
-func (f *fakeSafety) Verify(ctx context.Context, p media.Prober, rec safety.Recorder, st safety.Staged, src media.Info, want safety.Want, timeout time.Duration) (safety.Verdict, error) {
+func (f *fakeSafety) Verify(ctx context.Context, c safety.Checker, rec safety.Recorder, st safety.Staged, src media.Info, want safety.Want, timeout time.Duration) (safety.Verdict, error) {
 	f.gotRecorder = rec
 	f.gotWant = want
 	return f.verify, f.verifyE
+}
+
+func (f *fakeSafety) CheckSource(ctx context.Context, c safety.Checker, rec safety.Recorder, path string, src media.Info, timeout time.Duration) (safety.Verdict, error) {
+	f.sourceCalls++
+	f.gotSource = src
+	f.gotRecorder = rec
+	if f.sourceE != nil {
+		return safety.Verdict{}, f.sourceE
+	}
+	if !f.source.OK && f.source.Code == "" {
+		return safety.Verdict{OK: true}, nil
+	}
+	return f.source, nil
 }
 
 func (f *fakeSafety) Place(ctx context.Context, st safety.Staged, final string) (string, error) {
@@ -315,6 +334,9 @@ func TestRunSkipsWhenEveryStepSaysNothing(t *testing.T) {
 	if len(m.Argvs()) != 0 {
 		t.Errorf("ran ffmpeg for a file with nothing to do")
 	}
+	if sf.sourceCalls != 0 {
+		t.Errorf("source check ran %d times for a file with no work", sf.sourceCalls)
+	}
 }
 
 func TestRunRechecksTheFile(t *testing.T) {
@@ -482,12 +504,27 @@ func TestRunKeepsTheOriginalWhenTheResultIsNotSmaller(t *testing.T) {
 	in.Size = 1
 	m := &fake.Media{Probes: map[string]media.Info{src: info}}
 	sf := &fakeSafety{verify: safety.Verdict{OK: true}}
-	res := flow.Run(context.Background(), in, newEnv(m, sf, &recorder{}, starterFlow(t), nil))
+	bus := &recorder{}
+	res := flow.Run(context.Background(), in, newEnv(m, sf, bus, starterFlow(t), nil))
 	if res.Outcome != flow.OutcomeBiggerKept || res.Reason != "size.not_smaller" {
 		t.Fatalf("result = %+v, want bigger_kept size.not_smaller", res)
 	}
 	if sf.placedTo != "" {
 		t.Errorf("placed %q although the result was not smaller", sf.placedTo)
+	}
+	// L-SAFE-7: the job log says both sizes, so the drawer can show why the original stayed.
+	var size *events.Event
+	for _, e := range bus.all() {
+		if e.Kind == events.KindSize {
+			e := e
+			size = &e
+		}
+	}
+	if size == nil {
+		t.Fatal("no size event; the log must say how big the result was")
+	}
+	if size.SizeBefore != 1 || size.SizeAfter != 7 || !strings.Contains(size.Message, "1 B") || !strings.Contains(size.Message, "7 B") {
+		t.Errorf("size event = %+v; want both sizes, 1 B and 7 B", *size)
 	}
 }
 

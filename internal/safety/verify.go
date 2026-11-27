@@ -20,6 +20,9 @@ type Verdict struct {
 	Code       string
 	Message    string
 	NextAction string
+	// Detail is the technical evidence for the job log (ffmpeg's lines, how far playback got): a
+	// "no" is shown to the person as Message, and Detail is there for the drawer and Settings.
+	Detail []string
 }
 
 // Codes of the "no" verdicts, one per check.
@@ -32,10 +35,26 @@ const (
 	CodeAudioLanguage   = "check.audio_language"
 	CodeAudioChannels   = "check.audio_channels"
 	CodeSubtitleMissing = "check.subtitle_missing"
+	// CodeOriginalDamaged is the source check's "no" (L-SAFE-4): the original is damaged, so it is
+	// kept and not converted.
+	CodeOriginalDamaged = "check.original_damaged"
+	// CodePlayback is the playback check's "no" (L-SAFE-2): the result does not decode cleanly.
+	CodePlayback = "check.playback"
+	// CodePicture is the picture check's "no" (L-SAFE-3): the result's picture differs too much
+	// from the original's.
+	CodePicture = "check.picture"
+	// CodePictureSize is the picture size the plan writes not being the size the result has.
+	CodePictureSize = "check.picture_size"
+	// CodeColor is the colour description the result carries not being the one the plan writes.
+	CodeColor = "check.color"
 
 	// NextKeepOriginal is what every "no" tells the job.
 	NextKeepOriginal = "keep_original"
 )
+
+// MaxAudioChannels is the bound check 3 gives a track whose planned channel count is unknown: a
+// real track has at least one channel and no more than eight (#850).
+const MaxAudioChannels = 8
 
 // The duration rule. The plan names no number, so these are workshop's 11-27 choice: a result may differ from the
 // source by the larger of one second and 0.5 %.
@@ -68,9 +87,19 @@ func (r Recorder) log(check string, v Verdict) Verdict {
 		e.Code = v.Code
 		e.Message = check + ": " + v.Message
 		e.NextAction = v.NextAction
+		if len(v.Detail) > 0 {
+			e.Data = map[string]any{"detail": v.Detail}
+		}
 	}
 	_ = r.Bus.Emit(e)
 	return v
+}
+
+// Checker is what the checks need from the media package: ffprobe, and one ffmpeg run whose whole
+// output is kept.
+type Checker interface {
+	media.Prober
+	media.Capturer
 }
 
 // Want is what the plan asked for. Flow fills it in; safety never imports encode.
@@ -79,6 +108,23 @@ type Want struct {
 	Audio []WantedAudio
 	// SubtitleLanguages has one entry per subtitle track the container can hold.
 	SubtitleLanguages []string
+	// Video says what the picture must be. Its zero value means the video is copied, so there is no
+	// new picture to compare.
+	Video WantedVideo
+}
+
+// WantedVideo is the plan's picture. The result check compares the decoded frame size and the
+// colour description against these, then compares the pictures themselves (K4).
+type WantedVideo struct {
+	// Compare is false when the video was copied: the picture is the original's bytes.
+	Compare bool
+	// Width and Height are the upright picture the plan writes: the source's own when it scales
+	// nothing, else the box it fits in. An encoder may pad the coded size (an AMD VAAPI encoder
+	// writes 1920x1088 for a 1080p picture), so the check allows alignment padding.
+	Width, Height int
+	// ColorPrimaries, ColorTransfer and ColorSpace are the tags the plan's output should carry; ""
+	// means the plan does not say, and that tag is not compared. A tone-mapped result is bt709.
+	ColorPrimaries, ColorTransfer, ColorSpace string
 }
 
 // WantedAudio is one kept audio track: the language the output must still carry ("" for unknown)
@@ -89,24 +135,25 @@ type WantedAudio struct {
 	Channels int
 }
 
-// Verify runs checks 1-3 of backend-plan §7.1 in order and stops at the first "no". Checks 4-5 (playback decode,
-// picture comparison, L-SAFE-2 and L-SAFE-3) come in stage 2.
+// Verify runs the result checks of backend-plan §7.1 in order and stops at the first "no": complete,
+// duration, streams, playback decode (L-SAFE-2) and the picture comparison (L-SAFE-3, K4).
 //
-// The error is for a check that could not run: a timeout, a cancelled context, or ffprobe missing or crashing. The
-// worker treats that as may-pass. A file ffprobe cannot read is a "no", not an error.
-func Verify(ctx context.Context, p media.Prober, rec Recorder, st Staged, src media.Info, want Want, timeout time.Duration) (Verdict, error) {
+// The error is for a check that could not run: a timeout, a cancelled context, or ffmpeg/ffprobe
+// missing or crashing. The worker treats that as may-pass. A file ffmpeg cannot read is a "no", not
+// an error.
+func Verify(ctx context.Context, c Checker, rec Recorder, st Staged, src media.Info, want Want, timeout time.Duration) (Verdict, error) {
 	if timeout <= 0 {
 		timeout = DefaultVerifyTimeout
 	}
 
 	// 1. Complete: the size holds across a stat, an fsync and another stat, and the probe reads the file.
-	if v, err := checkComplete(ctx, p, st, timeout); v != nil || err != nil {
+	if v, err := checkComplete(ctx, c, st, timeout); v != nil || err != nil {
 		if err != nil {
 			return Verdict{}, err
 		}
 		return rec.log("complete", *v), nil
 	}
-	out, err := probe(ctx, p, st.Path, timeout)
+	out, err := probe(ctx, c, st.Path, timeout)
 	if err != nil {
 		return Verdict{}, err
 	}
@@ -126,6 +173,26 @@ func Verify(ctx context.Context, p media.Prober, rec Recorder, st Staged, src me
 		return rec.log("streams", *v), nil
 	}
 	rec.log("streams", Verdict{OK: true})
+
+	// 4. Playback decode: the result must play from its first picture to its last.
+	if v, err := playbackCheck(ctx, c, *out, st.Path); v != nil || err != nil {
+		if err != nil {
+			return Verdict{}, err
+		}
+		return rec.log("playback", *v), nil
+	}
+	rec.log("playback", Verdict{OK: true})
+
+	// 5. Picture: the size and colour the plan writes, then the pictures themselves.
+	if want.Video.Compare {
+		if v, err := pictureCheck(ctx, c, src, *out, want.Video); v != nil || err != nil {
+			if err != nil {
+				return Verdict{}, err
+			}
+			return rec.log("picture", *v), nil
+		}
+		rec.log("picture", Verdict{OK: true})
+	}
 
 	return Verdict{OK: true}, nil
 }
@@ -202,26 +269,41 @@ func checkStreams(out media.Info, want Want) *Verdict {
 		got = append(got, a.Language)
 	}
 	wantLanguages := make([]string, 0, len(want.Audio))
-	var wantChannels []int
 	for _, a := range want.Audio {
 		wantLanguages = append(wantLanguages, a.Language)
-		if a.Channels > 0 {
-			wantChannels = append(wantChannels, a.Channels)
-		}
 	}
 	if !sameMultiset(got, wantLanguages) {
 		v := noVerdict(CodeAudioLanguage, fmt.Sprintf("audio languages are %v, planned %v", got, wantLanguages))
 		return &v
 	}
-	gotChannels := make([]int, 0, len(out.Audio))
+	// Channels are paired by language. A planned count that is known must be matched exactly. One
+	// whose source never reported a count is compared against a bound instead of nothing (#850): a
+	// real track has 1 to MaxAudioChannels channels, and more is an upmix or a broken write.
+	byLanguage := map[string][]int{}
 	for _, a := range out.Audio {
-		if a.Channels > 0 {
-			gotChannels = append(gotChannels, a.Channels)
-		}
+		byLanguage[a.Language] = append(byLanguage[a.Language], a.Channels)
 	}
-	if !sameIntMultiset(gotChannels, wantChannels) {
-		v := noVerdict(CodeAudioChannels, fmt.Sprintf("audio channels are %v, planned %v", gotChannels, wantChannels))
-		return &v
+	for _, a := range want.Audio {
+		got := byLanguage[a.Language]
+		if len(got) == 0 {
+			continue // its language is missing, and that is named above
+		}
+		channels := got[0]
+		byLanguage[a.Language] = got[1:]
+		if a.Channels > 0 {
+			if channels != a.Channels {
+				v := noVerdict(CodeAudioChannels, fmt.Sprintf(
+					"an audio track has %d channels, and %d were planned", channels, a.Channels))
+				return &v
+			}
+			continue
+		}
+		if channels < 1 || channels > MaxAudioChannels {
+			v := noVerdict(CodeAudioChannels, fmt.Sprintf(
+				"an audio track has %d channels, and a real track has 1 to %d (its planned count was unknown)",
+				channels, MaxAudioChannels))
+			return &v
+		}
 	}
 	subs := make([]string, 0, len(out.Subtitles))
 	for _, s := range out.Subtitles {
@@ -246,21 +328,6 @@ func sorted(s []string) []string {
 
 func sameMultiset(a, b []string) bool {
 	x, y := sorted(a), sorted(b)
-	if len(x) != len(y) {
-		return false
-	}
-	for i := range x {
-		if x[i] != y[i] {
-			return false
-		}
-	}
-	return true
-}
-
-func sameIntMultiset(a, b []int) bool {
-	x, y := append([]int(nil), a...), append([]int(nil), b...)
-	sort.Ints(x)
-	sort.Ints(y)
 	if len(x) != len(y) {
 		return false
 	}
