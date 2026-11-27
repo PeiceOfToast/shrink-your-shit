@@ -39,7 +39,7 @@
       "state": "done",
       "step": null,
       "tookMs": 0,
-      "worker": "",
+      "worker": "local",
       "workflow": "Shrink"
     },
     "logs": [],
@@ -57,7 +57,7 @@
     "steps": [],
     "timeLeftMs": null,
     "tookMs": 0,
-    "worker": "",
+    "worker": "local",
     "workflow": "Shrink",
     "writtenAt": "2026-11-27T04:00:00.000Z"
   },
