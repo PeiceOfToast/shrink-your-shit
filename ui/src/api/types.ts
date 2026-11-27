@@ -1,4 +1,3 @@
-import type { IconName } from "../ui/icon-paths.ts";
 
 // Response shapes for the routes in each page's "Data and API" section (Plan/pages).
 
@@ -149,14 +148,18 @@ export interface DaySeries {
   failed: number | null;
 }
 
+// GET /api/v2/attention (page 08). what, means and action.label are server sentences shown as they are;
+// count and latestAt are values the UI formats. action is null when the row has no button; body, when present,
+// is sent as JSON as it is.
 export interface Attention {
   id: string;
-  tile: { icon: IconName; tone: "bad" | "warn" | "" } | { lines: string[] };
-  title: string;
-  titleHref?: string;
-  chips?: { icon?: IconName; label: string }[];
-  hint?: { text: string; link?: { label: string; href?: string; action?: "test-encoders" } };
-  side: { text?: { label: string; tone: "bad" | "" }; pill: { label: string; tone: "bad" | "warn" | "ok" | ""; icon?: IconName } };
+  level: "warn" | "error";
+  what: string;
+  means: string;
+  count: number;
+  latestAt: string;
+  action: { label: string; method: string; path: string; body?: unknown } | null;
+  link: string | null;
 }
 
 export interface Summary {

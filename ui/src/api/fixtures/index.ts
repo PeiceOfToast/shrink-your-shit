@@ -4,6 +4,7 @@ import { minsAgo, plus, trashUntil } from "./clock.ts";
 import { nextScanFor } from "../schedule.ts";
 import { clock } from "../../format/time.ts";
 import { JOBS } from "./jobs.ts";
+import { HOME_VIDEOS_SHARE } from "./libraries.ts";
 
 // Numbers from draft-b/dashboard.html and draft-b/jobs.html (the status line, KPIs, cards and table).
 // series.json holds the chart heights: saved[0] freed and saved[1] in the trash (GB), converted[0..2] done, skipped, failed.
@@ -46,26 +47,33 @@ export const OVERVIEW: Overview = {
 export const ATTENTION: Attention[] = [
   {
     id: "enc",
-    tile: { icon: "alert", tone: "bad" },
-    title: "This computer's graphics encoder failed 3 times today",
-    hint: { text: `It converts on the processor until ${clock(plus(minsAgo(0), 2 * 60 * 60_000))}, which is slower.`, link: { label: "Test the encoders", action: "test-encoders" } },
-    side: { pill: { label: "Slower", tone: "warn" } },
+    level: "error",
+    what: "This computer's graphics encoder failed 3 times today",
+    means: `It converts on the processor until ${clock(plus(minsAgo(0), 2 * 60 * 60_000))}, which is slower.`,
+    count: 3,
+    latestAt: minsAgo(20),
+    action: { label: "Test the encoders", method: "POST", path: "/api/v2/workers/this-computer/capabilities/test" },
+    link: "/workers/this-computer",
   },
   {
     id: "bear",
-    tile: { lines: ["HEVC", "1080p"] },
-    title: "The.Bear.S03E02.1080p.WEB-DL.mkv",
-    titleHref: "/jobs?state=failed",
-    chips: [{ icon: "folder", label: "TV Shows" }, { icon: "flow", label: "Shrink videos" }],
-    side: { text: { label: "The new file was shorter than the original", tone: "bad" }, pill: { label: "Failed", tone: "bad", icon: "alert" } },
+    level: "error",
+    what: "The.Bear.S03E02.1080p.WEB-DL.mkv failed",
+    means: "The new file was shorter than the original.",
+    count: 1,
+    latestAt: minsAgo(95),
+    action: { label: "Retry", method: "POST", path: "/api/v2/jobs/actions", body: { action: "retry", ids: ["j11"] } },
+    link: "/jobs?state=failed",
   },
   {
     id: "share",
-    tile: { icon: "lib", tone: "warn" },
-    title: "Home videos",
-    titleHref: "/libraries",
-    hint: { text: `Share not connected since ${clock(minsAgo(40))}. Nothing from it converts until it is.` },
-    side: { pill: { label: "Share not connected", tone: "warn" } },
+    level: "warn",
+    what: "The Home videos share isn't connected",
+    means: `Nothing from it converts until it is connected. Not connected since ${clock(minsAgo(40))}.`,
+    count: 1,
+    latestAt: minsAgo(40),
+    action: { label: "Reconnect the share", method: "POST", path: `/api/v2/shares/${HOME_VIDEOS_SHARE}/reconnect` },
+    link: "/libraries",
   },
 ];
 

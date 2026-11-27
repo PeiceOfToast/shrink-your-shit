@@ -1,7 +1,7 @@
 import { jobHint, sizeText } from "../format/job.ts";
 import { clock, dayClock, dayOf } from "../format/time.ts";
 import { Fragment, useEffect, useState, type MouseEvent } from "react";
-import { api, formatBytes, formatCount, formatGB, type Attention, type Job, type Library } from "../api/index.ts";
+import { ApiError, api, formatBytes, formatCount, formatGB, type Attention, type Job, type Library } from "../api/index.ts";
 import type { DaySeries, Series } from "../api/types.ts";
 import { useApi } from "../api/useApi.ts";
 import { Bars } from "../ui/Bars.tsx";
@@ -41,76 +41,57 @@ function Lines({ lines }: { lines: string[] }) {
   );
 }
 
-type EncoderTest = { s: "idle" } | { s: "testing" } | { s: "done"; line: string } | { s: "failed" };
+type ActionState = { s: "idle" } | { s: "busy" } | { s: "done"; line?: string } | { s: "failed"; message: string };
 
-// "Test the encoders" runs in place: Testing…, then one line and a link to the worker on Workers (page 08).
-function EncoderTestLink({ state, onRun }: { state: EncoderTest; onRun: () => void }) {
-  if (state.s === "testing") return <>Testing…</>;
-  if (state.s === "done")
-    return (
-      <>
-        {state.line} <Link to="/workers/this-computer">See on Workers</Link>
-      </>
+// A Needs attention row shows the server's sentences as they are. Its level sets the tile and pill tone, and its
+// action runs through the method and path the server named.
+function AttentionRow({ a }: { a: Attention }) {
+  const [state, setState] = useState<ActionState>({ s: "idle" });
+  const tone = a.level === "error" ? "bad" : "warn";
+  const run = () => {
+    const act = a.action;
+    if (!act) return;
+    setState({ s: "busy" });
+    api.runAction(act.method, act.path, act.body).then(
+      (r) => setState({ s: "done", line: r.line }),
+      (e: unknown) => setState({ s: "failed", message: e instanceof ApiError ? e.message : "Couldn't do that." }),
     );
-  return (
-    <>
-      {state.s === "failed" && "Couldn't run the test. "}
-      <button type="button" className="linklike" onClick={onRun}>
-        {state.s === "failed" ? "Try again" : "Test the encoders"}
-      </button>
-    </>
-  );
-}
-
-function AttentionRow({ a, encoder, onTestEncoders }: { a: Attention; encoder: EncoderTest; onTestEncoders: () => void }) {
-  const tile = a.tile;
+  };
+  const pill = a.count > 1 ? `${a.count} times · ${clock(a.latestAt)}` : clock(a.latestAt);
   return (
     <li>
-      <span className={"icon" in tile ? `tile ${tile.tone}` : "tile"}>
-        {"icon" in tile ? <Icon name={tile.icon} /> : <Lines lines={tile.lines} />}
+      <span className={`tile ${tone}`}>
+        <Icon name="alert" />
       </span>
       <div className="main">
-        {a.titleHref ? (
-          <Link className="name" to={a.titleHref}>
-            {a.title}
+        {a.link ? (
+          <Link className="name" to={a.link}>
+            {a.what}
           </Link>
         ) : (
-          <span className="name">{a.title}</span>
+          <span className="name">{a.what}</span>
         )}
-        {a.chips && (
-          <div className="chips">
-            {a.chips.map((c) => (
-              <span key={c.label}>
-                {c.icon && <Icon name={c.icon} />}
-                {c.label}
-              </span>
+        <span className="hint">
+          {a.means}{" "}
+          {state.s === "busy" && (a.action?.path.endsWith("/capabilities/test") ? "Testing…" : "Working…")}
+          {state.s === "done" &&
+            (state.line ? (
+              <>
+                {state.line} {a.link && <Link to={a.link}>See on Workers</Link>}
+              </>
+            ) : (
+              "Started."
             ))}
-          </div>
-        )}
-        {a.hint && (
-          <span className="hint">
-            {a.hint.text}
-            {a.hint.link?.action === "test-encoders" && (
-              <>
-                {" "}
-                <EncoderTestLink state={encoder} onRun={onTestEncoders} />
-              </>
-            )}
-            {a.hint.link && !a.hint.link.action && (
-              <>
-                {" "}
-                <a href={a.hint.link.href}>{a.hint.link.label}</a>
-              </>
-            )}
-          </span>
-        )}
+          {(state.s === "idle" || state.s === "failed") && a.action && (
+            <button type="button" className="linklike" onClick={run}>
+              {a.action.label}
+            </button>
+          )}
+          {state.s === "failed" && <> {state.message}</>}
+        </span>
       </div>
       <div className="side">
-        {a.side.text && <span className={a.side.text.tone}>{a.side.text.label}</span>}
-        <span className={`pill ${a.side.pill.tone}`}>
-          {a.side.pill.icon && <Icon name={a.side.pill.icon} />}
-          {a.side.pill.label}
-        </span>
+        <span className={`pill ${tone}`}>{pill}</span>
       </div>
     </li>
   );
@@ -187,15 +168,6 @@ export function Dashboard() {
   const workersOn = workersOverride ?? known ?? false;
   const down = !!overview.error;
   const UNREACHABLE = "Can't change this while the server can't be reached";
-  const [encoder, setEncoder] = useState<EncoderTest>({ s: "idle" });
-  const testEncoders = () => {
-    setEncoder({ s: "testing" });
-    api.testEncoders("this-computer").then(
-      (r) => setEncoder({ s: "done", line: r.line }),
-      () => setEncoder({ s: "failed" }),
-    );
-  };
-
   const toggleWorkers = () => {
     const next = !workersOn;
     setWorkersOverride(next);
@@ -283,7 +255,7 @@ export function Dashboard() {
               {attention.data && attention.data.length > 0 && (
                 <ul className="rows">
                   {attention.data.map((a) => (
-                    <AttentionRow key={a.id} a={a} encoder={encoder} onTestEncoders={testEncoders} />
+                    <AttentionRow key={a.id} a={a} />
                   ))}
                 </ul>
               )}
