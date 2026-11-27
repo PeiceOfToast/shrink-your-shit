@@ -1,8 +1,10 @@
 // The workflow mock no longer carries "if a step fails" or flow variables: not in the flow, not in the guide, not in the summary.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { answersToFlow, checkFlow, DEFAULT_ANSWERS, getGuide, guidePreview } from "./mockFlow.ts";
+import { answersToFlow, checkFlow, createDraft, DEFAULT_ANSWERS, getFlow, getGuide, guidePreview } from "./mockFlow.ts";
 import type { Answers } from "./flowTypes.ts";
+import { exportWorkflow, importWorkflow } from "./mockWorkflows.ts";
+import { ApiError } from "./errors.ts";
 
 test("a flow from the guided answers has no failure rule or variables", () => {
   const flow = answersToFlow(DEFAULT_ANSWERS, { name: "Shrink videos", description: "" });
@@ -85,4 +87,37 @@ test("the closed Save card names the file type and where the result goes", () =>
 test("with AAC audio, MP4 is not greyed; with Opus it is", () => {
   assert.equal(disabledFor({ audio: "stereo_aac" }, "mp4"), undefined);
   assert.ok(disabledFor({ audio: "stereo_opus" }, "mp4"));
+});
+
+test("create from answers returns an id and rev 1, and the flow opens", async () => {
+  const made = await createDraft({ name: "Shrink videos", answers: DEFAULT_ANSWERS });
+  assert.equal(made.rev, 1);
+  assert.ok(made.id);
+  assert.equal((await getFlow(made.id)).flow.steps.length, 3);
+});
+
+test("create from a flow keeps that flow, and a bad flow is refused with invalid_flow", async () => {
+  const flow = answersToFlow(DEFAULT_ANSWERS, { name: "From the editor", description: "" });
+  const made = await createDraft({ name: "From the editor", flow });
+  assert.equal(made.rev, 1);
+  assert.deepEqual((await getFlow(made.id)).flow.steps, flow.steps);
+  const bad = { ...flow, steps: flow.steps.slice(0, 2) };
+  await assert.rejects(createDraft({ name: "Bad", flow: bad }), (e: unknown) => e instanceof ApiError && e.code === "invalid_flow");
+});
+
+test("an export then an import opens the same flow", async () => {
+  const made = await createDraft({ name: "Round trip", answers: DEFAULT_ANSWERS });
+  const file = JSON.stringify(await exportWorkflow(made.id));
+  const data = JSON.parse(file);
+  assert.equal(data.format, "syp-workflow");
+  assert.equal(data.formatVersion, 1);
+  assert.equal(typeof data.appVersion, "string");
+  const back = await importWorkflow(file);
+  assert.notEqual(back.id, made.id);
+  assert.deepEqual((await getFlow(back.id)).flow, (await getFlow(made.id)).flow);
+});
+
+test("the old app's format is refused as not_a_workflow", async () => {
+  const old = JSON.stringify({ format: "shrink-your-shit.workflow", version: 1, name: "Old", description: "", kind: "video", madeWith: "editor" });
+  await assert.rejects(importWorkflow(old), (e: unknown) => e instanceof ApiError && e.code === "not_a_workflow");
 });

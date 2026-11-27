@@ -298,11 +298,17 @@ function bitrateFor(s: Record<string, unknown>): number {
 }
 
 // The check (page 07 "Data and API"): the problems, the greyed fields and the closed cards' one-liners.
-export function checkFlow(flow: Flow): FlowCheck {
+// A flow is exactly the three steps, Video, Audio and Save the result. Returns the steps by id.
+export function assertThreeSteps(flow: Flow): Record<StepId, FlowStep> {
   const byId = Object.fromEntries(flow.steps.map((s) => [s.id, s])) as Partial<Record<StepId, FlowStep>>;
   if (flow.steps.length !== 3 || !byId.video || !byId.audio || !byId.save) {
     throw new ApiError("invalid_flow", "A flow has three steps: Video, Audio and Save the result.");
   }
+  return byId as Record<StepId, FlowStep>;
+}
+
+export function checkFlow(flow: Flow): FlowCheck {
+  const byId = assertThreeSteps(flow);
   const v = byId.video.settings;
   const au = byId.audio.settings;
   const sv = byId.save.settings;
@@ -488,16 +494,19 @@ export function publishFlow(id: string, flow: Flow): Promise<{ rev: number; publ
   });
 }
 
-// The first save of a new workflow (the picker's Start, then Save as a draft): makes the row and returns its id.
-export function createDraft(input: { name: string; description?: string; answers?: Answers; flow?: Flow }): Promise<{ id: string }> {
+// The first save of a new workflow (the picker's Start, then Save as a draft): makes the row and returns its id and rev 1.
+// Route: POST /api/v2/workflows with {name, description?, answers} (the guide) or {name, description?, flow} (the editor).
+// A flow that isn't the three steps is refused with invalid_flow.
+export function createDraft(input: { name: string; description?: string; answers?: Answers; flow?: Flow }): Promise<{ id: string; rev: number }> {
   return respond(() => {
+    if (input.flow) assertThreeSteps(input.flow);
     const name = input.name.trim() || "New workflow";
     const description = input.description ?? "";
     const id = createWorkflowRow({ name, description, madeWith: input.answers ? "guided" : "editor" });
     const answers = input.answers ?? { ...DEFAULT_ANSWERS };
     const flow = input.flow ?? answersToFlow(answers, { name, description });
     DOCS.set(id, { flow: { ...flow, name, description }, answers, rev: 1, fitsGuided: !!input.answers });
-    return { id };
+    return { id, rev: 1 };
   });
 }
 
