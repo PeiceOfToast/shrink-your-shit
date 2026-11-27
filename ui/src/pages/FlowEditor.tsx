@@ -5,28 +5,69 @@ import { useApi } from "../api/useApi.ts";
 import { ChoiceField, QUALITY_NAMES, Row, Seg, qualityMeaning, toErr, type Err } from "./flowParts.tsx";
 import { languageName, normalizeLanguage } from "../format/language.ts";
 
-// Languages as chips: a picked one is removed by its chip, and "+ Add" offers the rest of the list. No free text.
+// The two choices the list from the API doesn't include. Their codes are final: orig and und.
+const SPECIAL_LANGUAGES = [
+  { code: "orig", name: "Original language" },
+  { code: "und", name: "Unknown" },
+];
+
+// Languages as chips: a picked one is removed by its chip; "+ Add" opens a search over the rest. No free text.
 function LanguageChips({ label, value, onChange }: { label: string; value: string[]; onChange: (v: string[]) => void }) {
   const all = useApi(() => api.getLanguages(), []);
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
   const picked = value.map(normalizeLanguage);
-  const rest = (all.data ?? []).filter((l) => !picked.includes(l.code));
+  const options = [...SPECIAL_LANGUAGES, ...(all.data ?? [])].filter((l) => !picked.includes(l.code));
+  const needle = query.trim().toLowerCase();
+  const shown = needle ? options.filter((l) => l.name.toLowerCase().includes(needle)) : options;
+  const close = () => {
+    setOpen(false);
+    setQuery("");
+  };
   return (
-    <Row label={label} full hint={picked.length === 0 ? "None picked keeps every language." : undefined}>
+    <Row
+      label={label}
+      full
+      hint={
+        picked.length === 0
+          ? "None picked keeps every language."
+          : "Other tracks are removed; if none match, the main track stays. Original language keeps the film's own language, whatever it is."
+      }
+    >
       <div className="wf-togs" role="group" aria-label={label}>
         {picked.map((code) => (
           <button key={code} type="button" aria-label={`Remove ${languageName(code)}`} onClick={() => onChange(picked.filter((c) => c !== code))}>
             {languageName(code)} ×
           </button>
         ))}
-        <select className="sel" aria-label="Add a language" value="" onChange={(e) => e.target.value && onChange([...picked, e.target.value])}>
-          <option value="">+ Add</option>
-          {rest.map((l) => (
-            <option key={l.code} value={l.code}>
-              {l.name}
-            </option>
-          ))}
-        </select>
+        <button type="button" className="btn sm" aria-expanded={open} onClick={() => (open ? close() : setOpen(true))}>
+          + Add
+        </button>
       </div>
+      {open && (
+        <div className="wf-lang-search" onKeyDown={(e) => e.key === "Escape" && close()}>
+          <input className="inp" type="search" aria-label="Search languages" placeholder="Search languages" autoFocus value={query} onChange={(e) => setQuery(e.target.value)} />
+          {shown.length === 0 ? (
+            <p className="hint">No language matches “{query.trim()}”.</p>
+          ) : (
+            <ul className="wf-lang-list">
+              {shown.map((l) => (
+                <li key={l.code}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onChange([...picked, l.code]);
+                      close();
+                    }}
+                  >
+                    {l.name}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
     </Row>
   );
 }
@@ -258,8 +299,18 @@ function Editor({ id, initial }: { id: string; initial: Loaded }) {
           <select className="sel" aria-label="Channels" value={String(audio.channels ?? "stereo")} onChange={(e) => set("audio", { channels: e.target.value })}>
             <option value="stereo">Stereo</option>
             <option value="source">Same as the source</option>
+            <option value="mono">Mono</option>
+            <option value="5.1">5.1</option>
           </select>
         </Row>
+        {audio.channels === "5.1" && (
+          <div className="note" style={{ margin: "0 0 8px" }}>
+            <span className="ic" aria-hidden="true">!</span>
+            <p className="hint" style={{ margin: 0 }}>
+              5.1 can't be made from stereo or mono. Files with stereo or mono sound keep the channels they have; only files with 5.1 or more come out as 5.1.
+            </p>
+          </div>
+        )}
         <LanguageChips label="Languages" value={(audio.languages as string[] | undefined) ?? []} onChange={(languages) => set("audio", { languages })} />
         <Advanced summary="Advanced" description="Codec, bitrate, downmix, loudness, commentary, original track">
           <AudioAdvanced s={audio} set={(patch) => set("audio", patch)} />

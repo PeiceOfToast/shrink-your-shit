@@ -32,8 +32,11 @@ export function normalizeLanguage(input: string): string {
 }
 
 // The name a person reads. Unknown codes fall back to what was typed.
+// orig and und are audio-only choices: the film's own language, and an unlabelled track.
 export function languageName(input: string): string {
   const code = normalizeLanguage(input);
+  if (code === "orig") return "Original language";
+  if (code === "und") return "Unknown";
   return LANGUAGES.find((l) => l.code === code)?.name ?? input.trim();
 }
 

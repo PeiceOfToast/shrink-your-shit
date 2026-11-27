@@ -84,7 +84,7 @@
 .wf-step-of { font-size: 13px; color: var(--text2); }
 .wf-step-nav .btn.primary { margin-left: auto; }
 .wf-settings summary .hint { margin-left: 8px; font-weight: 400; }
-.wf-col { max-width: 860px; }
+.wf-col { max-width: 860px; margin: 0 auto; }
 .wf-col .wf-row { grid-template-columns: minmax(0, 1fr); gap: 6px; }
 .wf-col .wf-row > .hint, .wf-col .wf-hint { grid-column: 1; }
 .wf-back { background: none; border: 0; color: var(--text2); padding: 0; cursor: pointer; font-size: 14px; }
@@ -116,3 +116,10 @@
   .wf-part { padding: 14px; }
 }
 .wf-step-right { display: flex; align-items: center; gap: 10px; }
+
+/* "+ Add" language search: a small panel under the chips, the list scrolls. */
+.wf-lang-search { display: grid; gap: 6px; max-width: 320px; margin-top: 8px; padding: 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.wf-lang-search p { margin: 0; }
+.wf-lang-list { list-style: none; margin: 0; padding: 0; max-height: 240px; overflow: auto; }
+.wf-lang-list button { width: 100%; text-align: left; background: none; border: 0; color: var(--text); padding: 6px 8px; border-radius: var(--radius); font: inherit; cursor: pointer; }
+.wf-lang-list button:hover, .wf-lang-list button:focus-visible { background: var(--raised); }
