@@ -28,7 +28,7 @@ function activeKey(pathname: string): string {
 // An item goes to a route, or runs its own action (sign out ends the session first).
 type MenuItem = { label: string; to?: string; onSelect?: () => void };
 
-function Menu({ label, icon, primary, items }: { label: string; icon?: IconName; primary?: boolean; items: MenuItem[] }) {
+function Menu({ label, icon, primary, items, className }: { label: string; icon?: IconName; primary?: boolean; items: MenuItem[]; className?: string }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -47,7 +47,7 @@ function Menu({ label, icon, primary, items }: { label: string; icon?: IconName;
     };
   }, [open]);
   return (
-    <div className="menu" ref={ref}>
+    <div className={`menu${className ? ` ${className}` : ""}`} ref={ref}>
       <button type="button" className={`btn sm ${primary ? "primary" : "ghost"}`} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
         {icon && <Icon name={icon} />}
         {label}
@@ -186,6 +186,7 @@ export function Shell({ children }: { children: ReactNode }) {
         />
         <Menu
           label="Account"
+          className="acct"
           items={[
             { label: "Your access tokens", to: "/settings/access" },
             {
@@ -209,16 +210,6 @@ export function Shell({ children }: { children: ReactNode }) {
       </header>
       <StatusLine summary={summary.data} ok={ok} />
       <main className="main-col">
-        <div className="phonebar">
-          <b>syp</b>
-          <span className="sp"></span>
-          <Menu label="New" icon="plus" primary items={[
-            { label: "Add library", to: "/libraries?add=1" },
-            { label: "New workflow", to: "/workflows/new" },
-            { label: "Process one file now", to: "/process" },
-            { label: "Add worker", to: "/workers?add=1" },
-          ]} />
-        </div>
         {children}
         <nav className="bottomnav" aria-label="Main">
           {SECTIONS.map((s) => (

@@ -37,7 +37,7 @@
   .savebar{bottom:64px}
   .gsw .long{display:none}
   .gsw .short{display:inline}
-  .topbar .menu{display:none}
+  .topbar .menu.acct{display:none}
   .kpis > .kpi:last-child{grid-column:1 / -1}
   .seg button:last-child{border-right:1px solid var(--border)}
   .statusbar .lg-only{display:none}

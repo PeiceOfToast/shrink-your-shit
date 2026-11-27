@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { drainAllWorkers, getWorkers, getWorker, pauseWorker, startAllWorkers, workersSwitch } from "./mockWorkers.ts";
+import { drainAllWorkers, FINISH_MS, getWorkers, getWorker, pauseWorker, startAllWorkers, workersSwitch } from "./mockWorkers.ts";
 import { getSummary } from "./mock.ts";
 import { SUMMARY } from "./fixtures/index.ts";
 
@@ -26,6 +26,15 @@ test("starting the switch again clears the finishing count and resumes every wor
   const s = await getSummary();
   assert.equal(s.workers.paused, false);
   assert.equal(s.workers.finishing, 0);
+});
+
+test("when the finishing files are done, no worker still shows a file in Now", async () => {
+  assert.ok((await getWorkers()).some((w) => w.now), "the mock has a worker on a file");
+  await drainAllWorkers();
+  assert.ok((await getWorkers()).some((w) => w.now), "still finishing: the files show");
+  await new Promise((resolve) => setTimeout(resolve, FINISH_MS + 200));
+  assert.equal((await getWorkers()).filter((w) => w.now).length, 0);
+  await startAllWorkers();
 });
 
 test("a worker paused by hand stays paused through a global drain and start", async () => {

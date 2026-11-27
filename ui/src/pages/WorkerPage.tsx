@@ -175,7 +175,13 @@ export function WorkerPage({ id }: { id: string }) {
           </button>
         )}
         {w.state === "paused" && (
-          <button type="button" className="btn sm" onClick={() => run(() => api.resumeWorker(id), reloadAll)} disabled={busy}>
+          <button
+            type="button"
+            className={`btn sm${w.pausedGlobally ? " dis" : ""}`}
+            onClick={() => run(() => api.resumeWorker(id), reloadAll)}
+            disabled={busy || w.pausedGlobally}
+            title={w.pausedGlobally ? "Paused for all workers" : undefined}
+          >
             Resume
           </button>
         )}

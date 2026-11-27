@@ -56,7 +56,7 @@ function find(id: string): WorkerDetail {
 
 // The all-workers switch. Off starts no new jobs; the files already running finish (finishing counts them, then 0).
 // A worker keeps its own state, so when the switch goes back on each worker is as it was.
-const FINISH_MS = 8000;
+export const FINISH_MS = 8000;
 let globalPaused = false;
 let finishing = 0;
 let finishTimer: ReturnType<typeof setTimeout> | undefined;
@@ -73,6 +73,10 @@ export function drainAllWorkers(): Promise<Worker[]> {
     clearTimeout(finishTimer);
     finishTimer = setTimeout(() => {
       finishing = 0;
+      // The finishing files are done, so no worker still shows a file on the Now column.
+      rows.forEach((r) => {
+        r.now = null;
+      });
     }, FINISH_MS);
     return rows.map(summary);
   });
