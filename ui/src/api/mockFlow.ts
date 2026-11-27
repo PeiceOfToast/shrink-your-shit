@@ -238,7 +238,7 @@ function step(id: StepId, type: FlowStep["type"], settings: Record<string, unkno
 
 export function answersToFlow(a: Answers, meta: { name: string; description: string }): Flow {
   const audio = AUDIO_FROM_GUIDED[String(a.audio ?? "stereo_aac")] ?? AUDIO_FROM_GUIDED.stereo_aac;
-  const original = String(a.original ?? "replace");
+  const original = String(a.original ?? "next_to_original");
   const where = original === "replace" ? "replace" : original === "one_folder" ? "folder" : "next_to";
   const size = a.resolution && a.resolution !== "keep" ? String(a.resolution) : null;
   return {
