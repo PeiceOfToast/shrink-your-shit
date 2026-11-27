@@ -33,4 +33,6 @@ export type * from "./flowTypes.ts";
 export { LOG_CHOICES } from "./mockSettings.ts";
 export { ApiError } from "./errors.ts";
 export { onSummaryChanged } from "./summaryBus.ts";
+export { isReal } from "./groups.ts";
+export { startLiveWire, startJobWire } from "./live.ts";
 export { formatCount, formatGB, formatBytes, formatPct } from "./format.ts";

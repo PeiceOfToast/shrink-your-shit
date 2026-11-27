@@ -1,6 +1,6 @@
 import { ago, dayClock } from "../format/time.ts";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { api, formatBytes, formatCount, onSummaryChanged, type Summary } from "../api/index.ts";
+import { api, formatBytes, formatCount, isReal, onSummaryChanged, startLiveWire, type Summary } from "../api/index.ts";
 import { useApi } from "../api/useApi.ts";
 import { useConnectionOk } from "../api/connection.ts";
 import { Icon } from "../ui/Icon.tsx";
@@ -140,6 +140,14 @@ export function Shell({ children }: { children: ReactNode }) {
       offLog();
     };
   }, [reloadSummary]);
+
+  // Live updates, behind the events flag: one stream for the shell. Off with the flag, the status line reads as before.
+  const reloadSummaryRef = useRef(reloadSummary);
+  reloadSummaryRef.current = reloadSummary;
+  useEffect(() => {
+    if (!isReal("events")) return;
+    return startLiveWire({ reloadSummary: () => reloadSummaryRef.current() });
+  }, []);
 
   // While files finish after the switch goes off, the count is read again so the label clears on its own.
   const finishingNow = summary.data?.workers.finishing ?? 0;
