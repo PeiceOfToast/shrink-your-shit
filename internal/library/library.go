@@ -28,20 +28,27 @@ var ErrPathAlreadyWatched = errors.New("another library already watches this fol
 // belong to one library only, and with replace mode two jobs would swap out the same original.
 var ErrPathNested = errors.New("the folder overlaps another library's folder")
 
-// NestedError is the refusal of a nested folder; it names the library the folder overlaps so the
-// page can say which one.
+// NestedError is the refusal of a nested folder; it names the library the folder overlaps and which
+// way the overlap runs, so the page says which one.
 type NestedError struct {
 	Path    string
 	Library string
+	// Contains is true when the refused folder holds the library's folder, rather than sitting
+	// inside it.
+	Contains bool
 }
 
 func (e *NestedError) Error() string {
 	return fmt.Sprintf("%s: %s overlaps the library %q", ErrPathNested, e.Path, e.Library)
 }
 
-// Sentence is what the pages show for this refusal, in ui-shop's words.
+// Sentence is what the pages show for this refusal, in ui-shop's words: it names the direction of
+// the overlap, not just that there is one.
 func (e *NestedError) Sentence() string {
-	return fmt.Sprintf("This folder is inside the library %q (or contains it). A file can belong to one library only.", e.Library)
+	if e.Contains {
+		return fmt.Sprintf("This folder contains the library %q. A file can belong to one library only.", e.Library)
+	}
+	return fmt.Sprintf("This folder is inside the library %q. A file can belong to one library only.", e.Library)
 }
 
 func (e *NestedError) Unwrap() error { return ErrPathNested }
@@ -518,8 +525,10 @@ func (c *Catalog) refuseWatched(ctx context.Context, path string, exceptID int64
 		switch {
 		case candidate.same(other):
 			return fmt.Errorf("%w: %s", ErrPathAlreadyWatched, path)
-		case candidate.inside(other), other.inside(candidate):
+		case candidate.inside(other):
 			return &NestedError{Path: path, Library: lib.Name}
+		case other.inside(candidate):
+			return &NestedError{Path: path, Library: lib.Name, Contains: true}
 		}
 	}
 	return nil

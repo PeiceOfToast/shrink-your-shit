@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -71,9 +72,9 @@ func TestAddLibraryRefusesAFolderInsideAWatchedFolder(t *testing.T) {
 	if len(check.Problems) != 1 || check.Problems[0].Code != ProblemNestedFolder {
 		t.Fatalf("problems = %+v, want one %s", check.Problems, ProblemNestedFolder)
 	}
-	message := check.Problems[0].Message
-	if !strings.Contains(message, lib.Name) || !strings.Contains(message, "A file can belong to one library only.") {
-		t.Errorf("message = %q, want the library's name and the one-library sentence", message)
+	want := fmt.Sprintf("This folder is inside the library %q. A file can belong to one library only.", lib.Name)
+	if message := check.Problems[0].Message; message != want {
+		t.Errorf("message = %q, want %q", message, want)
 	}
 }
 
@@ -85,11 +86,15 @@ func TestAddLibraryRefusesAFolderContainingAWatchedFolder(t *testing.T) {
 	if err := os.MkdirAll(inner, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	addLibrary(t, c, inner)
+	lib := addLibrary(t, c, inner)
 
 	_, err := c.AddLibrary(context.Background(), NewLibrary{Path: dir})
-	if !errors.Is(err, ErrPathNested) {
+	var nested *NestedError
+	if !errors.Is(err, ErrPathNested) || !errors.As(err, &nested) {
 		t.Fatalf("error = %v, want the nested-folder refusal", err)
+	}
+	if !nested.Contains {
+		t.Errorf("the refusal does not say the folder contains the library")
 	}
 
 	check, err := c.CheckFolder(context.Background(), dir)
@@ -98,6 +103,10 @@ func TestAddLibraryRefusesAFolderContainingAWatchedFolder(t *testing.T) {
 	}
 	if len(check.Problems) != 1 || check.Problems[0].Code != ProblemNestedFolder {
 		t.Fatalf("problems = %+v, want one %s", check.Problems, ProblemNestedFolder)
+	}
+	want := fmt.Sprintf("This folder contains the library %q. A file can belong to one library only.", lib.Name)
+	if message := check.Problems[0].Message; message != want {
+		t.Errorf("message = %q, want %q", message, want)
 	}
 }
 
