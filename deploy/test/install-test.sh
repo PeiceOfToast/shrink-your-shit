@@ -85,12 +85,23 @@ finish() {
       say "Deleting container $VMID"
       pve-api5 POST "/nodes/$NODE/lxc/$VMID/status/stop" >/dev/null 2>&1 || true
       i=0
-      while [ "$i" -lt 30 ]; do
+      while [ "$i" -lt 120 ]; do
         pve-api5 GET "/nodes/$NODE/lxc/$VMID/status/current" 2>/dev/null | grep -q '"status":"running"' || break
         i=$((i + 1))
         sleep 1
       done
-      pve-api5 DELETE "/nodes/$NODE/lxc/$VMID?purge=1" >/dev/null 2>&1 || say "note: the delete answered an error; check container $VMID on Host05"
+      # The DELETE can still lose a race with the shutdown: Ubuntu 24.04 was once still stopping when it was
+      # tried, the call errored, and the container was left behind. Retry it, and make a surviving container a
+      # failure of this run rather than a note, so a green run never hides a container someone has to delete.
+      i=0
+      while [ "$i" -lt 3 ]; do
+        pve-api5 DELETE "/nodes/$NODE/lxc/$VMID?purge=1" >/dev/null 2>&1 && break
+        i=$((i + 1))
+        sleep 5
+      done
+      if [ "$i" -ge 3 ]; then
+        fail "container $VMID could not be deleted; delete it with: pve-api5 DELETE '/nodes/$NODE/lxc/$VMID?purge=1'"
+      fi
     fi
   fi
   # The log must never carry a sign-in token or a session cookie.
