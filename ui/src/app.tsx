@@ -13,6 +13,9 @@ import { SignIn } from "./pages/SignIn.tsx";
 import { Workers } from "./pages/Workers.tsx";
 import { WorkerPage } from "./pages/WorkerPage.tsx";
 import { Workflows } from "./pages/Workflows.tsx";
+import { NewWorkflow } from "./pages/NewWorkflow.tsx";
+import { Guided } from "./pages/Guided.tsx";
+import { FlowEditor } from "./pages/FlowEditor.tsx";
 import { api } from "./api/index.ts";
 import { useApi } from "./api/useApi.ts";
 import { navigate, resolve, useLocation } from "./router.tsx";
@@ -89,9 +92,14 @@ export function App() {
     case "workflows":
       page = <Workflows />;
       break;
-    // The editor (pages 05-07) is on hold: a row, Edit, New workflow and an import all land here.
+    case "workflowPicker":
+      page = <NewWorkflow />;
+      break;
+    case "workflowGuided":
+      page = <Guided id={route.id} />;
+      break;
     case "workflowEditor":
-      page = <Placeholder title="Workflows" note="The workflow editor is being redesigned." back={{ to: "/workflows", label: "Back to Workflows" }} />;
+      page = <FlowEditor id={route.id} />;
       break;
     case "libraries":
       page = <Libraries />;
