@@ -146,7 +146,7 @@ func TestWorkflowLifecycle(t *testing.T) {
 	// A flow with a problem is not published, and the page is told the first sentence.
 	bad := apiFlow(t, "Holidays", 4)
 	badSettings, err := json.Marshal(map[string]any{
-		"format": "hevc", "quality": 4, "useGpu": false, "ifGpuFails": "cpu", "size": "1080",
+		"format": "hevc", "quality": 4, "useGpu": false, "ifGpuFails": "cpu", "twoPass": true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -158,8 +158,8 @@ func TestWorkflowLifecycle(t *testing.T) {
 	if rec.Code != http.StatusConflict || code != "has_problems" || !strings.HasPrefix(message, "Fix this first: ") {
 		t.Fatalf("blocked publish = %d %q %q", rec.Code, code, message)
 	}
-	if !strings.Contains(message, "picture size") {
-		t.Fatalf("blocked publish says %q; want the picture-size problem", message)
+	if !strings.Contains(message, "Two passes") {
+		t.Fatalf("blocked publish says %q; want the two-passes problem", message)
 	}
 
 	// The stored draft publishes as revision 1.

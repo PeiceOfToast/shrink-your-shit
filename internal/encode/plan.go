@@ -56,7 +56,7 @@ const (
 
 // HDRMode is page 07's HDR choice. The zero value keeps the source's metadata; skip is the step's
 // "leave HDR files alone" and reaches Build only as the backstop, where an HDR source is refused;
-// tonemap belongs to a later stage.
+// tonemap converts an HDR picture to SDR BT.709 (zscale and tonemap on the processor).
 type HDRMode string
 
 const (

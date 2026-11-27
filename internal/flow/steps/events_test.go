@@ -30,6 +30,10 @@ func codeCases() []codeCase {
 	noAverage := videoSettings("hevc", 3)
 	noAverage.RateControl = ptr("cbr")
 	noAverage.BitrateLevel = "custom"
+	hdrSkip := videoSettings("hevc", 3)
+	hdrSkip.HDR = ptr("skip")
+	hdrInfo := probeInfo("h264", 1920, 1080)
+	hdrInfo.Video[0].ColorTransfer = "smpte2084"
 	loud := probeInfo("h264", 1920, 1080)
 	loud.Audio[0].BitRate = 640_000
 	return []codeCase{
@@ -37,6 +41,7 @@ func codeCases() []codeCase {
 		{name: "video already target", step: VideoStep{}, set: videoSettings("hevc", 3), info: probeInfo("hevc", 1920, 1080), want: "video.already_target"},
 		{name: "video no picture", step: VideoStep{}, set: videoSettings("hevc", 3),
 			info: media.Info{Path: "/library/a.mkv"}, want: "video.no_video", isErr: true},
+		{name: "video HDR left alone", step: VideoStep{}, set: hdrSkip, info: hdrInfo, want: "video.hdr_skipped"},
 		{name: "video bitrate missing", step: VideoStep{}, set: noAverage,
 			info: probeInfo("h264", 1920, 1080), want: "video.no_bitrate", isErr: true},
 		{name: "audio as is", step: AudioStep{}, set: AudioSettings{Format: "copy"}, info: probeInfo("h264", 1920, 1080), want: "audio.as_is"},
