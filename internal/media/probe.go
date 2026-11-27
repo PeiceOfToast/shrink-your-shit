@@ -198,7 +198,7 @@ func Probe(ctx context.Context, path string) (Info, error) {
 		return Info{}, fmt.Errorf("probe %s: %w", path, err)
 	}
 	file.Close()
-	if _, err := exec.LookPath("ffprobe"); err != nil {
+	if _, err := exec.LookPath(tool("ffprobe")); err != nil {
 		return Info{}, fmt.Errorf("probe %s: %w: %v", path, ErrFFprobeMissing, err)
 	}
 	arg := path
@@ -213,7 +213,7 @@ func Probe(ctx context.Context, path string) (Info, error) {
 		"-show_chapters",
 		arg,
 	}
-	cmd := exec.CommandContext(ctx, "ffprobe", args...)
+	cmd := exec.CommandContext(ctx, tool("ffprobe"), args...)
 	var out, stderr bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &stderr

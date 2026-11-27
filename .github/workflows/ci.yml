@@ -119,3 +119,12 @@ jobs:
 
       - name: Test
         run: go test ./...
+
+  shellcheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint the deploy scripts
+        run: shellcheck deploy/*.sh
