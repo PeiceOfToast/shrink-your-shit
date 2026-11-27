@@ -1,0 +1,24 @@
+{
+  "body": {
+    "files": 0,
+    "id": "1",
+    "lastScan": null,
+    "name": "Clips",
+    "nextScanAt": "2026-11-27T04:00:00Z",
+    "path": "$DIR/clips",
+    "paused": false,
+    "savedBytes": 0,
+    "savedPct": 0,
+    "status": "watching",
+    "waiting": 0,
+    "watch": "daily",
+    "workflow": {
+      "id": "1",
+      "name": "Shrink videos"
+    }
+  },
+  "method": "GET",
+  "path": "/api/v2/libraries/1",
+  "status": 200,
+  "type": "Library"
+}

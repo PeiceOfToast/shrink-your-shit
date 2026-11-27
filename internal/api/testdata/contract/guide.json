@@ -1,0 +1,328 @@
+{
+  "body": {
+    "chips": [
+      {
+        "always": false,
+        "available": true,
+        "id": "shrink_hevc",
+        "label": "Shrink to HEVC",
+        "off": {
+          "format": "h264"
+        },
+        "on": {
+          "format": "hevc"
+        }
+      },
+      {
+        "always": false,
+        "available": true,
+        "id": "keep_my_languages",
+        "label": "Keep only my languages",
+        "off": {
+          "allLanguages": true
+        },
+        "on": {
+          "allLanguages": false
+        }
+      },
+      {
+        "always": false,
+        "available": true,
+        "id": "use_gpu",
+        "label": "Use the graphics card (QSV)",
+        "off": {
+          "useGpu": false
+        },
+        "on": {
+          "useGpu": true
+        }
+      },
+      {
+        "always": true,
+        "available": true,
+        "id": "never_worse",
+        "label": "Never make anything worse",
+        "off": {},
+        "on": {}
+      },
+      {
+        "always": true,
+        "available": true,
+        "id": "hdr_kept",
+        "label": "HDR kept, Dolby Vision left alone",
+        "off": {},
+        "on": {}
+      }
+    ],
+    "defaults": {
+      "allLanguages": false,
+      "audio": "stereo_aac",
+      "fileType": "mkv",
+      "folder": "",
+      "format": "hevc",
+      "ifGpuFails": "cpu",
+      "includeDolbyVision": false,
+      "languages": [
+        "eng",
+        "ger"
+      ],
+      "languagesEverywhere": false,
+      "original": "replace",
+      "quality": 3,
+      "resolution": "keep",
+      "slower": false,
+      "subtitleLanguages": [
+        "eng",
+        "ger"
+      ],
+      "subtitles": "keep_all",
+      "useGpu": true
+    },
+    "languages": [
+      "eng",
+      "ger"
+    ],
+    "parts": [
+      {
+        "fields": [
+          {
+            "choices": [
+              {
+                "available": true,
+                "label": "HEVC",
+                "value": "hevc"
+              },
+              {
+                "available": true,
+                "label": "H.264",
+                "value": "h264"
+              },
+              {
+                "available": true,
+                "label": "AV1",
+                "value": "av1"
+              }
+            ],
+            "key": "format",
+            "label": "Format",
+            "type": "choice"
+          },
+          {
+            "key": "quality",
+            "label": "Quality",
+            "type": "number"
+          },
+          {
+            "key": "useGpu",
+            "label": "Use the graphics card",
+            "more": true,
+            "type": "yesno"
+          },
+          {
+            "choices": [
+              {
+                "available": true,
+                "label": "Use the processor",
+                "value": "cpu"
+              },
+              {
+                "available": true,
+                "label": "Stop and tell me",
+                "value": "stop"
+              }
+            ],
+            "key": "ifGpuFails",
+            "label": "If the graphics card can't do it",
+            "more": true,
+            "type": "choice"
+          },
+          {
+            "choices": [
+              {
+                "available": true,
+                "label": "Same as the source",
+                "value": "keep"
+              },
+              {
+                "available": true,
+                "label": "1080p",
+                "value": "1080"
+              },
+              {
+                "available": true,
+                "label": "720p",
+                "value": "720"
+              },
+              {
+                "available": true,
+                "label": "480p",
+                "value": "480"
+              }
+            ],
+            "key": "resolution",
+            "label": "Picture size",
+            "type": "choice"
+          }
+        ],
+        "id": "video",
+        "label": "Video"
+      },
+      {
+        "fields": [
+          {
+            "choices": [
+              {
+                "available": true,
+                "label": "Stereo AAC",
+                "value": "stereo_aac"
+              },
+              {
+                "available": true,
+                "label": "AAC, same channels as the source",
+                "value": "stereo_aac_surround"
+              },
+              {
+                "available": true,
+                "label": "E-AC-3, surround kept",
+                "value": "eac3_surround"
+              },
+              {
+                "available": true,
+                "label": "AC-3, surround kept",
+                "value": "ac3_surround"
+              },
+              {
+                "available": true,
+                "label": "Stereo Opus",
+                "value": "stereo_opus"
+              },
+              {
+                "available": true,
+                "label": "Leave as it is",
+                "value": "as_is"
+              }
+            ],
+            "key": "audio",
+            "label": "Audio",
+            "type": "choice"
+          },
+          {
+            "key": "languages",
+            "label": "Keep these languages",
+            "type": "languages"
+          }
+        ],
+        "id": "audio",
+        "label": "Audio"
+      },
+      {
+        "fields": [
+          {
+            "choices": [
+              {
+                "available": true,
+                "label": "Keep all",
+                "value": "keep_all"
+              },
+              {
+                "available": true,
+                "label": "Keep my languages",
+                "value": "my_languages"
+              },
+              {
+                "available": true,
+                "label": "Text only",
+                "value": "text_only"
+              },
+              {
+                "available": true,
+                "label": "Make SRT files",
+                "value": "srt"
+              }
+            ],
+            "key": "subtitles",
+            "label": "Subtitles",
+            "type": "choice"
+          },
+          {
+            "key": "subtitleLanguages",
+            "label": "Subtitle languages",
+            "type": "languages"
+          }
+        ],
+        "id": "subtitles",
+        "label": "Subtitles"
+      },
+      {
+        "fields": [
+          {
+            "choices": [
+              {
+                "available": true,
+                "label": "MKV",
+                "value": "mkv"
+              },
+              {
+                "available": true,
+                "label": "MP4",
+                "value": "mp4"
+              },
+              {
+                "available": true,
+                "label": "WebM",
+                "value": "webm"
+              },
+              {
+                "available": true,
+                "label": "Keep the same",
+                "value": "keep"
+              }
+            ],
+            "key": "fileType",
+            "label": "File type",
+            "type": "choice"
+          }
+        ],
+        "id": "file_type",
+        "label": "File type"
+      },
+      {
+        "fields": [
+          {
+            "choices": [
+              {
+                "available": true,
+                "label": "Replace the original",
+                "value": "replace"
+              },
+              {
+                "available": true,
+                "label": "Next to the original",
+                "value": "next_to_original"
+              },
+              {
+                "available": true,
+                "label": "A different folder",
+                "value": "one_folder"
+              }
+            ],
+            "key": "original",
+            "label": "Where the new file goes",
+            "type": "choice"
+          },
+          {
+            "key": "folder",
+            "label": "Folder",
+            "type": "folder"
+          }
+        ],
+        "id": "original",
+        "label": "The original"
+      }
+    ]
+  },
+  "method": "GET",
+  "path": "/api/v2/workflows/guide",
+  "status": 200,
+  "type": "GuideDoc"
+}

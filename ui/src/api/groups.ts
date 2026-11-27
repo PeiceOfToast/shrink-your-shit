@@ -1,11 +1,11 @@
 // The switch: one flag per route group (contract section 1). A group uses its real module only when its flag is on.
 // Workshop's api PR flips a flag in the same PR that adds the routes. ?api=real or ?api=mock sets every group for this tab.
 export const REAL = {
-  access: false,
-  libraries: false,
+  access: true,
+  libraries: true,
   jobs: true,
   events: true,
-  summary: false,
+  summary: true,
   overview: false,
 } as const;
 

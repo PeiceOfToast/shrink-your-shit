@@ -1,15 +1,13 @@
 // First run and sign in (page 13). Shapes come from page 13 and page 05 (starters). The guide's chips (page 06) are not mocked yet,
 // so a starter's answers are empty here (a gap in the handback).
 import { ApiError } from "./errors.ts";
-import type { Health, Setup, SetupDone } from "./types.ts";
+import type { Health, Setup, SetupDone, Starter, StarterDetail } from "./types.ts";
 import { DELAY_MS, getForcedState, onForcedStateChange, respond, setFreshInstall } from "./mockState.ts";
 import { currentToken } from "./mockSettings.ts";
 import { clearLibraries, insertLibrary } from "./mockLibraries.ts";
 
 
-export type Starter = { id: string; kind: string; name: string; line: string; icon: string; guided: boolean };
-
-export type StarterDetail = Starter & { answers: Record<string, string> };
+export type { Starter, StarterDetail };
 
 export type SetupInput = {
   account: { password: string };

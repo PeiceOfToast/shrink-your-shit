@@ -1,4 +1,4 @@
-import type { Attention, HistoryLine, Job, JobDetail, JobNeighbours, JobsPage, JobsParams, LogEvent, Overview, Summary } from "./types.ts";
+import type { Attention, HistoryLine, Job, JobDetail, JobNeighbours, JobsPage, JobsParams, Language, LogEvent, Overview, ScanAllDone, Summary } from "./types.ts";
 import { ATTENTION, OVERVIEW, SUMMARY } from "./fixtures/index.ts";
 import { JOBS } from "./fixtures/jobs.ts";
 import { jobDetail } from "./fixtures/jobDetail.ts";
@@ -26,7 +26,7 @@ export * from "./mockTrash.ts";
 // The status line reads this even when a page's own call is forced to fail, so it keeps its counts.
 // With no libraries nothing converts, queues or fails, and the log is empty.
 // The languages the app offers, as workshop's GET /api/v2/languages gives them: [{code, name}], three-letter codes.
-export function getLanguages(): Promise<{ code: string; name: string }[]> {
+export function getLanguages(): Promise<Language[]> {
   return Promise.resolve(LANGUAGES);
 }
 
@@ -127,7 +127,7 @@ export function runJobsAction(action: "retry" | "cancel" | "top", ids: string[])
   return respond(() => ({ done: ids.length, refused: [] }));
 }
 
-export function scanAllLibraries(): Promise<{ ok: true }> {
+export function scanAllLibraries(): Promise<ScanAllDone> {
   return respond(() => ({ ok: true as const }));
 }
 

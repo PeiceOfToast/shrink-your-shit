@@ -1,0 +1,16 @@
+{
+  "body": {
+    "folders": [
+      {
+        "name": "Family",
+        "path": "$DIR/clips/Family"
+      }
+    ],
+    "parent": "$DIR",
+    "path": "$DIR/clips"
+  },
+  "method": "GET",
+  "path": "/api/v2/folders?path=$DIR/clips",
+  "status": 200,
+  "type": "FolderListing"
+}

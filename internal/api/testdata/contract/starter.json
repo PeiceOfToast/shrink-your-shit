@@ -1,0 +1,38 @@
+{
+  "body": {
+    "answers": {
+      "allLanguages": false,
+      "audio": "stereo_aac",
+      "fileType": "mkv",
+      "folder": "",
+      "format": "hevc",
+      "ifGpuFails": "cpu",
+      "includeDolbyVision": false,
+      "languages": [
+        "eng",
+        "ger"
+      ],
+      "languagesEverywhere": false,
+      "original": "replace",
+      "quality": 3,
+      "resolution": "keep",
+      "slower": false,
+      "subtitleLanguages": [
+        "eng",
+        "ger"
+      ],
+      "subtitles": "keep_all",
+      "useGpu": true
+    },
+    "guided": true,
+    "icon": "flow",
+    "id": "shrink-videos",
+    "kind": "video",
+    "line": "Answer a few plain questions. The steps are set for you, and you can open them in the editor later.",
+    "name": "Shrink videos"
+  },
+  "method": "GET",
+  "path": "/api/v2/workflows/starters/shrink-videos",
+  "status": 200,
+  "type": "StarterDetail"
+}

@@ -180,12 +180,22 @@ func (c *Catalog) clock() time.Time {
 	return time.Now()
 }
 
-// AddLibrary checks the folder, stores the library and answers it due at once: the caller starts
-// its first scan (page 09 Add).
-func (c *Catalog) AddLibrary(ctx context.Context, in NewLibrary) (Library, error) {
+// PreparedLibrary is AddLibrary's checks and its row, ready to write: the folder's absolute path, the
+// name, the watch and the first scan time. AddLibraryTx writes it.
+type PreparedLibrary struct {
+	Name       string
+	Path       string
+	WorkflowID *int64
+	Watch      Watch
+	NextScanAt time.Time
+}
+
+// PrepareLibrary checks a new library's folder and reads everything its row needs, before any
+// transaction: setup does this before it opens the one transaction for the account and the workflow.
+func (c *Catalog) PrepareLibrary(ctx context.Context, in NewLibrary) (PreparedLibrary, error) {
 	path, err := c.checkPath(in.Path)
 	if err != nil {
-		return Library{}, err
+		return PreparedLibrary{}, err
 	}
 	name := strings.TrimSpace(in.Name)
 	if name == "" {
@@ -193,25 +203,45 @@ func (c *Catalog) AddLibrary(ctx context.Context, in NewLibrary) (Library, error
 	}
 	watch, err := ParseWatch(string(in.Watch))
 	if err != nil {
-		return Library{}, err
+		return PreparedLibrary{}, err
 	}
-	now := c.clock().UTC().Truncate(time.Millisecond)
 	if err := c.refuseWatched(ctx, path, 0); err != nil {
+		return PreparedLibrary{}, err
+	}
+	return PreparedLibrary{
+		Name: name, Path: path, WorkflowID: in.WorkflowID, Watch: watch,
+		// Due at once: the caller starts its first scan (page 09 Add).
+		NextScanAt: c.clock().UTC().Truncate(time.Millisecond),
+	}, nil
+}
+
+// AddLibraryTx writes a prepared library on the caller's transaction, so setup can add the folder in
+// the same all-or-nothing call as the account and the workflow.
+func (c *Catalog) AddLibraryTx(ctx context.Context, tx *sql.Tx, p PreparedLibrary) (int64, error) {
+	res, err := tx.ExecContext(ctx,
+		`INSERT INTO libraries(name, path, workflow_id, watch, paused, next_scan_at) VALUES(?, ?, ?, ?, 0, ?)`,
+		p.Name, p.Path, p.WorkflowID, string(p.Watch), p.NextScanAt.UnixMilli())
+	if err != nil {
+		return 0, fmt.Errorf("add the library %s: %w", p.Path, err)
+	}
+	return res.LastInsertId()
+}
+
+// AddLibrary checks the folder, stores the library and answers it due at once: the caller starts
+// its first scan (page 09 Add).
+func (c *Catalog) AddLibrary(ctx context.Context, in NewLibrary) (Library, error) {
+	p, err := c.PrepareLibrary(ctx, in)
+	if err != nil {
 		return Library{}, err
 	}
 	var id int64
 	err = c.db.Tx(ctx, func(tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx,
-			`INSERT INTO libraries(name, path, workflow_id, watch, paused, next_scan_at) VALUES(?, ?, ?, ?, 0, ?)`,
-			name, path, in.WorkflowID, string(watch), now.UnixMilli())
-		if err != nil {
-			return err
-		}
-		id, err = res.LastInsertId()
+		var err error
+		id, err = c.AddLibraryTx(ctx, tx, p)
 		return err
 	})
 	if err != nil {
-		return Library{}, fmt.Errorf("add the library %s: %w", path, err)
+		return Library{}, err
 	}
 	return c.GetLibrary(ctx, id)
 }
@@ -358,6 +388,64 @@ func (c *Catalog) Files(ctx context.Context, libraryID int64) ([]File, error) {
 			return nil, err
 		}
 		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
+// SaveFile upserts one catalog row and answers its id, so a caller can take a file the scan found
+// straight to the job queue. A changed file's old probe is cleared: it described a version that is
+// no longer there.
+func (c *Catalog) SaveFile(ctx context.Context, f File, state State, reason string, probe *media.Tracks) (int64, error) {
+	var probeJSON any
+	if probe != nil {
+		data, err := json.Marshal(probe)
+		if err != nil {
+			return 0, fmt.Errorf("keep the probe of %s: %w", f.RelPath, err)
+		}
+		probeJSON = string(data)
+	}
+	settle, err := json.Marshal(map[string]any{
+		"size": f.Size, "mtime": f.MTime.UTC().UnixNano(), "seenAt": c.clock().UTC().UnixMilli(),
+	})
+	if err != nil {
+		return 0, err
+	}
+	var id int64
+	err = c.db.Tx(ctx, func(tx *sql.Tx) error {
+		return tx.QueryRowContext(ctx,
+			`INSERT INTO files(library_id, rel_path, size, mtime, file_id, settle, probe, state, skip_reason)
+			 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 ON CONFLICT(library_id, rel_path) DO UPDATE SET
+			   size = excluded.size, mtime = excluded.mtime, file_id = excluded.file_id,
+			   settle = excluded.settle, probe = excluded.probe,
+			   state = excluded.state, skip_reason = excluded.skip_reason
+			 RETURNING id`,
+			f.LibraryID, f.RelPath, f.Size, f.MTime.UTC().UnixNano(), f.FileID,
+			string(settle), probeJSON, string(state), reason).Scan(&id)
+	})
+	if err != nil {
+		return 0, fmt.Errorf("save %s: %w", f.RelPath, err)
+	}
+	return id, nil
+}
+
+// CountFiles is how many catalogued files each library has, by library id. Files marked gone are
+// not counted.
+func (c *Catalog) CountFiles(ctx context.Context) (map[int64]int, error) {
+	rows, err := c.db.Read().QueryContext(ctx,
+		`SELECT library_id, COUNT(*) FROM files WHERE state <> 'gone' GROUP BY library_id`)
+	if err != nil {
+		return nil, fmt.Errorf("count the catalogued files: %w", err)
+	}
+	defer rows.Close()
+	out := map[int64]int{}
+	for rows.Next() {
+		var id int64
+		var n int
+		if err := rows.Scan(&id, &n); err != nil {
+			return nil, err
+		}
+		out[id] = n
 	}
 	return out, rows.Err()
 }
