@@ -199,10 +199,14 @@ func TestRunGoodRunEventFrame(t *testing.T) {
 		t.Errorf("verify want = %+v, want eng/ger audio and eng subtitles", sf.gotWant)
 	}
 
-	// The command is the built argv with ffmpeg in front, and the staged folder is gone.
+	// The command is the built argv with ffmpeg in front, writing the staged file rather than the
+	// destination; the staged folder is gone once it is placed.
 	run := m.Argvs()
-	if len(run) != 1 || run[0][0] != "ffmpeg" || run[0][len(run[0])-1] != want {
-		t.Errorf("argv = %v", run)
+	if len(run) != 1 || run[0][0] != "ffmpeg" || run[0][len(run[0])-1] != sf.staged[0].Path {
+		t.Errorf("argv = %v, want the staged file last", run)
+	}
+	if !strings.Contains(sf.staged[0].Path, ".syp-tmp") {
+		t.Errorf("staged path = %q, want a staging folder", sf.staged[0].Path)
 	}
 	if _, err := os.Stat(sf.staged[0].Folder); !os.IsNotExist(err) {
 		t.Errorf("staging folder %s still there", sf.staged[0].Folder)

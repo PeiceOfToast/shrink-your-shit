@@ -158,9 +158,9 @@ func (e *engine) run(ctx context.Context) (res Result) {
 		return fatal("encode.plan_failed", err.Error(), e.encodeOwner(decisions), "")
 	}
 	argv := append([]string{"ffmpeg"}, built.Argv...)
-	e.command(argv)
 
-	// 5. Stage the output beside its destination.
+	// 5. Stage the output beside its destination. The encoder writes the staged file, not the
+	// destination, so nothing appears there until Place has checked the result.
 	if res = ctxStop(ctx); res.Outcome != "" {
 		return res
 	}
@@ -174,6 +174,12 @@ func (e *engine) run(ctx context.Context) (res Result) {
 			os.RemoveAll(staged.Folder)
 		}
 	}()
+	// Build always ends the command with the plan's destination; the run writes the staged file.
+	if argv[len(argv)-1] != plan.Output {
+		return fatal("encode.plan_failed", "the command does not end in the output path", e.encodeOwner(decisions), "")
+	}
+	argv[len(argv)-1] = staged.Path
+	e.command(argv)
 
 	run, err := e.env.Media.Run(ctx, argv, e.env.Progress)
 	e.writeRaw(run)
