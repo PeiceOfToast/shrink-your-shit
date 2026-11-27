@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { navigate } from "../router.tsx";
+import { navigate, useLocation } from "../router.tsx";
 import { api, type Answers, type FlowDisabled, type GuideChoice, type GuideDoc, type GuideField, type GuidePart, type GuidePreview } from "../api/index.ts";
 import { languageName } from "../format/language.ts";
 import { useApi } from "../api/useApi.ts";
@@ -47,16 +47,26 @@ interface Loaded {
 }
 
 export function Guided({ id }: { id: string }) {
+  // A new workflow picked from a starter (?starter=) starts from that starter's answers over the defaults.
+  const starter = useLocation().query.get("starter");
   const loaded = useApi<Loaded>(
     async () => {
-      const [guide, a, rows] = await Promise.all([api.getGuide(), api.getGuideAnswers(id), api.listWorkflows()]);
+      const [guide, a, rows, st] = await Promise.all([
+        api.getGuide(),
+        api.getGuideAnswers(id),
+        api.listWorkflows(),
+        id === "new" && starter ? api.getStarter(starter) : null,
+      ]);
       const row = rows.find((r) => r.id === id);
-      return { guide, answers: a.answers, fitsGuided: a.fitsGuided, rev: a.rev, name: row?.name ?? "New workflow" };
+      const answers = st ? { ...a.answers, ...st.answers } : a.answers;
+      return { guide, answers, fitsGuided: a.fitsGuided, rev: a.rev, name: row?.name ?? "New workflow" };
     },
-    [id],
+    [id, starter],
   );
 
   if (loaded.error && !loaded.data) {
+    // A starter that doesn't exist says so (the server's not_found message); other failures use the generic line.
+    if (loaded.code === "not_found") return <p className="bad">{loaded.error}</p>;
     return <p className="bad">Can't load this workflow. <button type="button" className="btn ghost sm" onClick={loaded.reload}>Try now</button></p>;
   }
   if (!loaded.data) return <p className="muted">Loading…</p>;
