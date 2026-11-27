@@ -15,3 +15,9 @@ test("a golden with an extra key fails, and the key is named", () => {
   assert.notEqual(r.status, 0);
   assert.match(r.stdout + r.stderr, /bogusExtraKey/);
 });
+
+test("a status-only golden with a body fails", () => {
+  const r = run("src/api/contract-fixtures/bad-none");
+  assert.notEqual(r.status, 0);
+  assert.match(r.stdout + r.stderr, /needs a null body/);
+});

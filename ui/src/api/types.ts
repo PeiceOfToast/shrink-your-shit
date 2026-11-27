@@ -395,6 +395,11 @@ export interface JoinRequest {
 
 export type SettingsSection = "general" | "appearance" | "processing" | "trash" | "connections" | "notifications" | "backup" | "health" | "access";
 
+// First run and sign-in shapes (the server's goldens, workshop 4a59822c).
+export type Setup = { needsAccount: boolean; starting: boolean };
+export type SetupDone = { scanStarted: boolean };
+export type Health = { ok: boolean; starting: boolean; version?: string };
+
 // Settings > Trash: an original kept after a conversion.
 export interface TrashItem {
   id: string;

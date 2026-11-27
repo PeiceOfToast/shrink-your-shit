@@ -16,5 +16,6 @@ export const getStarter: typeof mock.getStarter = (id) =>
 export const getGuide: typeof mock.getGuide = () => request<Out<typeof mock.getGuide>>("GET", "/workflows/guide");
 export const getFolders: typeof mock.getFolders = (path) =>
   request<Out<typeof mock.getFolders>>("GET", "/folders" + query({ path }));
+export const getHealth: typeof mock.getHealth = () => request<Out<typeof mock.getHealth>>("GET", "/health");
 export const checkFolder: typeof mock.checkFolder = (target) =>
   request<Out<typeof mock.checkFolder>>("POST", "/libraries/check", target);
