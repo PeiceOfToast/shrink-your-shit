@@ -1,7 +1,7 @@
 // The dev state switcher's forced state, and the delay every mock call waits. Shared by the mock modules.
 import { ApiError } from "./errors.ts";
 
-export type ForcedState = "none" | "empty" | "loading" | "error" | "running" | "fresh" | "setup" | "starting";
+export type ForcedState = "none" | "empty" | "loading" | "error" | "running" | "fresh" | "setup" | "starting" | "update";
 
 let forced: ForcedState = "none";
 const listeners = new Set<() => void>();

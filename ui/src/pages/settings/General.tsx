@@ -41,8 +41,16 @@ export function General() {
           <option value="MM/DD/YYYY">11/26/2026</option>
         </select>
       </Row>
-      <Row label="Check for updates" hint={g.updateAvailable ? `Version ${g.updateAvailable} is available.` : "Look for new versions of this app."}>
+      <Row label="Check for updates" hint="Look for new versions of this app.">
         <Switch label="Check for updates" on={g.checkForUpdates} onChange={(checkForUpdates) => set({ checkForUpdates })} />
+        <p className="muted sm version-line">
+          Version {g.version}
+          {g.updateAvailable && (
+            <>
+              {" · "}Update available: {g.updateAvailable.version} · <a href={g.updateAvailable.notesUrl} target="_blank" rel="noopener noreferrer">Release notes</a>
+            </>
+          )}
+        </p>
       </Row>
       <SaveBar dirty={f.dirty} busy={f.busy} saved={f.saved} text={f.text} onSave={f.save} onUndo={f.undo} />
     </>

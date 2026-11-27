@@ -34,6 +34,7 @@ let settings: SettingsData = {
     timeFormat: "24h",
     dateFormat: "YYYY-MM-DD",
     checkForUpdates: true,
+    version: "0.9.4",
     updateAvailable: null,
     languages: ["eng", "ger"],
   },
@@ -59,6 +60,8 @@ const KNOWN: Record<string, string[]> = {
   processing: ["parallelJobs", "gpuJobsSeparate", "scanSchedule", "queueOrder", "lowPriority", "keepOriginalsDays", "lowSpaceGB", "workflowsMayRunCommands"],
   logs: ["jobDays", "systemDays", "rawDays"],
 };
+
+const READ_ONLY_GENERAL = ["version", "updateAvailable"] as const;
 
 const bad = (field: string, message: string) => new ApiError("invalid_setting", message, field);
 const inRange = (v: unknown, min: number, max: number) => typeof v === "number" && Number.isInteger(v) && v >= min && v <= max;
@@ -86,8 +89,15 @@ function validate(next: SettingsData) {
   if (!inRange(next.backupKeep, 1, 50)) throw bad("backupKeep", "Keep from 1 to 50 backups.");
 }
 
+// The dev state "Update available" shows a newer release; the default is up to date.
 export function getSettings(): Promise<SettingsData> {
-  return respond(() => clone(settings));
+  return respond(() => {
+    const s = clone(settings);
+    if (getForcedState() === "update") {
+      s.general.updateAvailable = { version: "0.9.5", notesUrl: "https://example.com/releases/0.9.5", checkedAt: "2026-11-27T03:00:00Z" };
+    }
+    return s;
+  });
 }
 
 export function patchSettings(patch: SettingsPatch): Promise<SettingsData> {
@@ -99,6 +109,12 @@ export function patchSettings(patch: SettingsPatch): Promise<SettingsData> {
       if (group === "backupKeep") {
         next.backupKeep = values as number;
         continue;
+      }
+      // Version and the update check are read-only: the server answers 400 read_only.
+      for (const key of Object.keys(values as object)) {
+        if (group === "general" && (READ_ONLY_GENERAL as readonly string[]).includes(key)) {
+          throw new ApiError("read_only", "That setting is read-only.", `general.${key}`);
+        }
       }
       const allowed = KNOWN[group];
       if (!allowed) throw new ApiError("unknown_setting", "That setting doesn't exist.");
