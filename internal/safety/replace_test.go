@@ -401,9 +401,10 @@ func TestRecoveryNeverOverwritesTheOldName(t *testing.T) {
 // crashSteps is the number of numbered steps in a swap; a kill after each one is a case.
 const crashSteps = 7
 
-// TestCrashAtEveryStepRecovers is the kill test (L-SAFE-8): the swap runs in a child process that kills itself after
-// each step. Recovery then leaves the original and the new file each in one valid place: the original at its name
-// or in the trash, the new file at the name or staged. Never neither, never overwritten.
+// TestCrashAtEveryStepRecovers is the kill test (L-SAFE-8): the swap runs in a child process that writes a step marker
+// at each crash point and then waits. The parent reads the marker for the step it wants and kills the child. The
+// marker, not the kill's exit status, is what the test checks, so it reads the same on every OS (review #865). Recovery
+// then leaves the original and the new file each in one valid place: never neither, never overwritten.
 func TestCrashAtEveryStepRecovers(t *testing.T) {
 	if os.Getenv(crashChildEnv) != "" {
 		t.Skip("this is the child process")
@@ -411,10 +412,12 @@ func TestCrashAtEveryStepRecovers(t *testing.T) {
 	for step := 1; step <= crashSteps; step++ {
 		t.Run("kill after step "+strconv.Itoa(step), func(t *testing.T) {
 			f := newSwapFixture(t, "")
+			mark := filepath.Join(t.TempDir(), "step")
 			cmd := exec.Command(os.Args[0], "-test.run=^TestSwapCrashChild$")
 			cmd.Env = append(os.Environ(),
 				crashChildEnv+"=1",
 				"SYP_CRASH_STEP="+strconv.Itoa(step),
+				"SYP_CRASH_MARK="+mark,
 				"SYP_CRASH_DB="+f.dbDir,
 				"SYP_CRASH_ORIGINAL="+f.original,
 				"SYP_CRASH_STAGED="+f.staged,
@@ -424,13 +427,14 @@ func TestCrashAtEveryStepRecovers(t *testing.T) {
 			cmd.Stdout, cmd.Stderr = &out, &out
 			// The child opens the same store, so the parent lets go of it first (the store is one writer).
 			_ = f.j.db.Close()
-			err := cmd.Run()
-			var exited bool
-			if ee, ok := err.(*exec.ExitError); ok && !ee.Exited() {
-				exited = true // killed by a signal, which is the point of the test
+			if err := cmd.Start(); err != nil {
+				t.Fatalf("start the child: %v", err)
 			}
-			if !exited {
-				t.Fatalf("the child was not killed at step %d (err %v):\n%s", step, err, out.String())
+			reached := waitForMarker(mark, strconv.Itoa(step), 60*time.Second)
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+			if !reached {
+				t.Fatalf("the child did not reach step %d:\n%s", step, out.String())
 			}
 
 			db := openStore(t, f.dbDir)
@@ -441,6 +445,18 @@ func TestCrashAtEveryStepRecovers(t *testing.T) {
 			assertOneOfEach(t, f, step)
 		})
 	}
+}
+
+// waitForMarker polls the marker file until it holds want, or the time runs out.
+func waitForMarker(path, want string, limit time.Duration) bool {
+	deadline := time.Now().Add(limit)
+	for time.Now().Before(deadline) {
+		if b, err := os.ReadFile(path); err == nil && string(b) == want {
+			return true
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return false
 }
 
 // assertOneOfEach checks the two files after recovery: the original is in one of its two places and the new file in
@@ -495,12 +511,10 @@ func TestSwapCrashChild(t *testing.T) {
 	}
 	crashHook = func(s int) {
 		if s == step {
-			p, err := os.FindProcess(os.Getpid())
-			if err != nil {
+			if err := os.WriteFile(os.Getenv("SYP_CRASH_MARK"), []byte(strconv.Itoa(s)), 0o644); err != nil {
 				os.Exit(3)
 			}
-			_ = p.Kill()
-			time.Sleep(5 * time.Second) // the kill is delivered before this returns
+			time.Sleep(time.Minute) // the parent kills this process while it waits here
 			os.Exit(4)
 		}
 	}
@@ -509,4 +523,39 @@ func TestSwapCrashChild(t *testing.T) {
 		Final: os.Getenv("SYP_CRASH_FINAL"), KeepDays: 1}
 	_, err = Swap(context.Background(), NewJournal(db), plan)
 	fmt.Fprintf(os.Stderr, "swap returned %v before the kill at step %d\n", err, step)
+}
+
+// TestAStrangerAtTheNameIsNotLost: a file put at the original's name in the window between the source check and the
+// move is not the original. It is moved, identified as a stranger after the move, put back with a no-replace rename,
+// and the row waits for a person; nothing is replaced or lost (review #865).
+func TestAStrangerAtTheNameIsNotLost(t *testing.T) {
+	f := newSwapFixture(t, "")
+	aside := f.original + ".aside"
+	hookBeforeOriginalMove = func() {
+		// Our original leaves the name, and a stranger takes it, both in the window the check does not cover.
+		if err := os.Rename(f.original, aside); err != nil {
+			t.Fatalf("move the original aside in the test: %v", err)
+		}
+		if err := os.WriteFile(f.original, []byte("STRANGER"), 0o644); err != nil {
+			t.Fatalf("write the stranger in the test: %v", err)
+		}
+	}
+	t.Cleanup(func() { hookBeforeOriginalMove = func() {} })
+	_, err := Swap(context.Background(), f.j, f.plan(13, 1))
+	if !errors.Is(err, ErrSourceChanged) {
+		t.Fatalf("error = %v, want ErrSourceChanged for a stranger at the name", err)
+	}
+	if got := readFile(t, f.original); got != "STRANGER" {
+		t.Errorf("the stranger at the name = %q, want it put back and kept", got)
+	}
+	if got := readFile(t, aside); got != origBytes {
+		t.Errorf("the original set aside = %q, want it untouched", got)
+	}
+	if _, err := os.Lstat(filepath.Join(f.lib, TrashDir, "movie.13.mkv")); !os.IsNotExist(err) {
+		t.Errorf("the stranger is still in the trash: %v", err)
+	}
+	rows, _ := f.j.Moving(context.Background())
+	if len(rows) != 0 {
+		t.Errorf("a row is still moving: %+v", rows)
+	}
 }

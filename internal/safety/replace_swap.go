@@ -43,6 +43,10 @@ var crashHook func(step int)
 // window between two moves.
 var hookAfterOriginalMoved = func() {}
 
+// hookBeforeOriginalMove is a test hook that runs after the source check and before the move, the window in which a
+// stranger's file could take the name (review #865).
+var hookBeforeOriginalMove = func() {}
+
 func crashPoint(step int) {
 	if crashHook != nil {
 		crashHook(step)
@@ -92,9 +96,21 @@ func Swap(ctx context.Context, j *Journal, p SwapPlan) (SwapResult, error) {
 		_ = j.SetState(ctx, id, StateRolledBack)
 		return SwapResult{}, err
 	}
+	hookBeforeOriginalMove()
 	if err := fsx.RenameNoReplace(p.Original, trash); err != nil {
 		_ = j.SetState(ctx, id, StateRolledBack)
 		return SwapResult{}, fmt.Errorf("move the original to the trash: %w", err)
+	}
+	// The check above ran on the path, so a file put at the name in the window before the move would be the one
+	// moved. The trash copy is identified against the recorded original: a mismatch is put back (no-replace) and the
+	// row waits for a person. The stranger is never lost or replaced (review #865).
+	if got, err := identify(trash); err != nil || !sameIdent(got, origID) {
+		if rerr := fsx.RenameNoReplace(trash, p.Original); rerr != nil {
+			_ = j.SetState(ctx, id, StateAttention)
+			return SwapResult{}, fmt.Errorf("%w: the file at the name was not the original, and it could not be put back to the name (%v)", ErrPutBackFailed, rerr)
+		}
+		_ = j.SetState(ctx, id, StateAttention)
+		return SwapResult{}, ErrSourceChanged
 	}
 	hookAfterOriginalMoved()
 	crashPoint(5)
@@ -146,4 +162,9 @@ func restoreOriginal(ctx context.Context, j *Journal, id int64, row Row, newPlac
 	}
 	_ = j.SetState(ctx, id, StateRolledBack)
 	return cause
+}
+
+// sameIdent is the recorded identity of a file: the same file, size, mtime and sample hash.
+func sameIdent(got, want Ident) bool {
+	return got.FileID == want.FileID && got.Size == want.Size && got.MTime == want.MTime && got.Hash == want.Hash
 }
