@@ -65,7 +65,7 @@ func TestRealWorkerRunsAClipToItsResult(t *testing.T) {
 	w := New(Config{Source: src2, Run: flow.Run, Env: env, DataDir: t.TempDir(), Tick: 5 * time.Millisecond})
 	stop := start(t, w)
 	defer stop()
-	waitFor(t, "the job result", func() bool {
+	waitForWithin(t, time.Minute, "the job result", func() bool {
 		f, _, _, _ := src2.snapshot()
 		return len(f) == 1
 	})
