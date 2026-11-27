@@ -21,6 +21,8 @@ func TestHardwareInventoryOnTheMachine(t *testing.T) {
 	if os.Getenv("SYP_HW_INVENTORY") != "1" {
 		t.Skip("set SYP_HW_INVENTORY=1 on a machine with a GPU to print the inventory")
 	}
+	// The same tool folder syp uses: an installed machine's /opt/syp/ffmpeg, with its lib folder (S3-1c).
+	media.SetToolDir(os.Getenv("SYP_FFMPEG_DIR"))
 	m := media.MediaFuncs{ProbeFunc: media.Probe, RunFunc: media.Run}
 	dir := t.TempDir()
 	nodes := ReadRenderNodes("/sys/class/drm", "/dev/dri")
