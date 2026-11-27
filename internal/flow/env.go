@@ -10,6 +10,7 @@ import (
 	"github.com/PeiceOfToast/shrink-your-shit/internal/encode"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/events"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/media"
+	"github.com/PeiceOfToast/shrink-your-shit/internal/safety"
 )
 
 // Emitter is the event bus as flow uses it; *events.Bus has this shape.
@@ -41,6 +42,9 @@ type Env struct {
 	Raw io.Writer
 	// Bus receives the job's events. nil sends none.
 	Bus Emitter
+	// SafetyLog receives one decision line per result check the safety check runs. A zero value
+	// writes nothing, which is what a test wants.
+	SafetyLog safety.Recorder
 	// Now and Sleep are the clock; tests set them.
 	Now   func() time.Time
 	Sleep func(time.Duration)

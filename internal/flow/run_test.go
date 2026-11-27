@@ -51,9 +51,10 @@ type fakeSafety struct {
 	stageE  error
 	placeE  error
 
-	gotWant  safety.Want
-	staged   []safety.Staged
-	placedTo string
+	gotWant     safety.Want
+	gotRecorder safety.Recorder
+	staged      []safety.Staged
+	placedTo    string
 }
 
 func (f *fakeSafety) Stage(dst string) (safety.Staged, error) {
@@ -74,7 +75,8 @@ func (f *fakeSafety) Stage(dst string) (safety.Staged, error) {
 	return st, nil
 }
 
-func (f *fakeSafety) Verify(ctx context.Context, p media.Prober, st safety.Staged, src media.Info, want safety.Want, timeout time.Duration) (safety.Verdict, error) {
+func (f *fakeSafety) Verify(ctx context.Context, p media.Prober, rec safety.Recorder, st safety.Staged, src media.Info, want safety.Want, timeout time.Duration) (safety.Verdict, error) {
+	f.gotRecorder = rec
 	f.gotWant = want
 	return f.verify, f.verifyE
 }
@@ -171,8 +173,9 @@ func TestRunGoodRunEventFrame(t *testing.T) {
 	sf := &fakeSafety{verify: safety.Verdict{OK: true}}
 	bus := &recorder{}
 	var raw bytes.Buffer
-	res := flow.Run(context.Background(), runInput(t, root, src),
-		newEnv(m, sf, bus, starterFlow(t), &raw))
+	env := newEnv(m, sf, bus, starterFlow(t), &raw)
+	env.SafetyLog = safety.Recorder{JobID: 42} // the engine must hand it to the check
+	res := flow.Run(context.Background(), runInput(t, root, src), env)
 
 	if res.Outcome != flow.OutcomeSmaller {
 		t.Fatalf("outcome = %q (%s: %s), want smaller", res.Outcome, res.Reason, res.Message)
@@ -193,6 +196,9 @@ func TestRunGoodRunEventFrame(t *testing.T) {
 	}
 	if got := frameKinds(bus.all()); strings.Join(got, ",") != strings.Join(expected, ",") {
 		t.Errorf("event frame =\n%v\nwant\n%v", got, expected)
+	}
+	if sf.gotRecorder.JobID != 42 {
+		t.Errorf("check recorder = %+v, want the job's", sf.gotRecorder)
 	}
 	if sf.gotWant.AudioLanguages[0] != "eng" || sf.gotWant.AudioLanguages[1] != "ger" ||
 		sf.gotWant.SubtitleLanguages[0] != "eng" || len(sf.gotWant.SubtitleLanguages) != 1 {

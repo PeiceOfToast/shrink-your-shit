@@ -198,7 +198,7 @@ func (e *engine) run(ctx context.Context) (res Result) {
 	if err != nil {
 		return fatal("encode.plan_failed", err.Error(), "save", "")
 	}
-	verdict, err := e.env.Safety.Verify(ctx, e.env.Media, staged, info, want, safety.DefaultVerifyTimeout)
+	verdict, err := e.env.Safety.Verify(ctx, e.env.Media, e.env.SafetyLog, staged, info, want, safety.DefaultVerifyTimeout)
 	if err != nil {
 		if ctx.Err() != nil {
 			return cancelled()
