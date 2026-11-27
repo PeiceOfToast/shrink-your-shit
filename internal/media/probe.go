@@ -217,6 +217,7 @@ func Probe(ctx context.Context, path string) (Info, error) {
 		arg,
 	}
 	cmd := exec.CommandContext(ctx, tool("ffprobe"), args...)
+	cmd.Env = toolEnv("ffprobe")
 	var out, stderr bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &stderr

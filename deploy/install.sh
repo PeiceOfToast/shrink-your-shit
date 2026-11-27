@@ -19,6 +19,18 @@ FFMPEG_AMD64_SHA256="cab6b5dd9cede8a8db8891e28f2fec2ddfd6401785328d139cbcfd23af9
 FFMPEG_ARM64_URL="https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2025-11-30-12-53/ffmpeg-n8.0.1-17-g27a297f186-linuxarm64-gpl-8.0.tar.xz"
 FFMPEG_ARM64_SHA256="1ccfba1f73a498694f32fa834c21bd74ba29cdb108265b886c6513020745e2e6"
 
+# libva 2.22, shipped beside ffmpeg (S3-1c). The pinned static ffmpeg 8 needs libva 2.22 at run time; Ubuntu 24.04
+# ships 2.20, which aborts every VAAPI and QSV encoder. These are Debian trixie's libva2 and libva-drm2 2.22.0-3
+# packages (the .deb is the file that is checked; its libraries are extracted, not installed).
+LIBVA2_AMD64_URL="https://deb.debian.org/debian/pool/main/libv/libva/libva2_2.22.0-3_amd64.deb"
+LIBVA2_AMD64_SHA256="b76bdd330de47a826698aaed10f53435b703e9a7d4415dd68269c97709f46a9b"
+LIBVADRM_AMD64_URL="https://deb.debian.org/debian/pool/main/libv/libva/libva-drm2_2.22.0-3_amd64.deb"
+LIBVADRM_AMD64_SHA256="5dce5007ddc0ce87a61db4d71476ce1a5a135737b5185ce2e8b7067342fcafc6"
+LIBVA2_ARM64_URL="https://deb.debian.org/debian/pool/main/libv/libva/libva2_2.22.0-3_arm64.deb"
+LIBVA2_ARM64_SHA256="7a5e7cbaaddf1f39973c10f9daae6769b704e0d6d72fe752d64003929272cbcf"
+LIBVADRM_ARM64_URL="https://deb.debian.org/debian/pool/main/libv/libva/libva-drm2_2.22.0-3_arm64.deb"
+LIBVADRM_ARM64_SHA256="18e556968a0f4bffd321d67b01fa5e445177c0849bef96a741aa7ed3a11dcc8b"
+
 MAX_BYTES=536870912 # 512 MiB: no download may be larger
 FFMPEG_DIR=/opt/syp/ffmpeg
 DATA_DIR=/var/lib/syp
@@ -136,6 +148,38 @@ else
   mv -f "$FFMPEG_DIR/ffmpeg.new" "$FFMPEG_DIR/ffmpeg"
   mv -f "$FFMPEG_DIR/ffprobe.new" "$FFMPEG_DIR/ffprobe"
   printf '%s\n' "$FF_SHA" > "$MARK"
+fi
+
+# libva 2.22 beside ffmpeg. Media starts ffmpeg and ffprobe with this folder on LD_LIBRARY_PATH, never the service.
+# The copies keep their symlinks, and the copyright notice goes with them. A re-run leaves them alone when the pins match.
+if [ "$ARCH" = amd64 ]; then
+  L2_URL="$LIBVA2_AMD64_URL"; L2_SHA="$LIBVA2_AMD64_SHA256"
+  LD_URL="$LIBVADRM_AMD64_URL"; LD_SHA="$LIBVADRM_AMD64_SHA256"
+else
+  L2_URL="$LIBVA2_ARM64_URL"; L2_SHA="$LIBVA2_ARM64_SHA256"
+  LD_URL="$LIBVADRM_ARM64_URL"; LD_SHA="$LIBVADRM_ARM64_SHA256"
+fi
+LIBDIR="$FFMPEG_DIR/lib"
+LIBMARK="$LIBDIR/.libva-sha256"
+LIBSET="$L2_SHA $LD_SHA"
+if [ -f "$LIBMARK" ] && [ "$(cat "$LIBMARK")" = "$LIBSET" ] && [ -e "$LIBDIR/libva.so.2" ]; then
+  say "libva 2.22 is already at the pinned build; leaving it alone."
+else
+  say "Fetching libva 2.22 (pinned Debian packages)"
+  fetch "$L2_URL" "$WORK/libva2.deb"
+  verify "$WORK/libva2.deb" "$L2_SHA" "libva2 2.22"
+  fetch "$LD_URL" "$WORK/libva-drm2.deb"
+  verify "$WORK/libva-drm2.deb" "$LD_SHA" "libva-drm2 2.22"
+  mkdir "$WORK/libva"
+  dpkg-deb -x "$WORK/libva2.deb" "$WORK/libva"
+  dpkg-deb -x "$WORK/libva-drm2.deb" "$WORK/libva"
+  install -d -m 0755 "$LIBDIR"
+  find "$WORK/libva/usr/lib" -name 'libva*.so*' -exec cp -P {} "$LIBDIR/" \;
+  [ -e "$LIBDIR/libva.so.2" ] || die "the libva packages have no libva.so.2"
+  if [ -f "$WORK/libva/usr/share/doc/libva2/copyright" ]; then
+    cp "$WORK/libva/usr/share/doc/libva2/copyright" "$LIBDIR/LICENSE-libva"
+  fi
+  printf '%s\n' "$LIBSET" > "$LIBMARK"
 fi
 
 # GPU helpers: only packages the enabled sources already offer. A missing one is a note, not a failure.
