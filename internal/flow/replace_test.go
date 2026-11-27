@@ -110,6 +110,11 @@ func TestRunReplaceRefusalsKeepTheOriginal(t *testing.T) {
 			if res.Outcome != c.want || res.Reason != c.why {
 				t.Fatalf("result = %+v, want %s %s", res, c.want, c.why)
 			}
+			// The page shows NextAction as the action and a retry is accepted only for a code it knows: a human
+			// sentence there gives no action (review #865 add-on).
+			if c.want != flow.OutcomeSkip && res.NextAction != "retry" {
+				t.Errorf("next action = %q, want the code retry", res.NextAction)
+			}
 			if _, err := os.Stat(src); err != nil {
 				t.Errorf("the original is gone: %v", err)
 			}
