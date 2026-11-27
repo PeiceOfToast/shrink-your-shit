@@ -70,7 +70,7 @@ func Probe(ctx context.Context, m media.Media, dir string, c Candidate) DeviceRe
 	defer os.Remove(scaled)
 	if rec.Decode {
 		if _, err := m.Run(pctx, append([]string{"ffmpeg"}, scaleArgs(c, clip, scaled)...), nil); err != nil {
-			rec.Reasons["scale"] = "can't scale on this card: " + plainReason(err)
+			rec.Reasons["scale"] = stepFailure(pctx, c, err, "can't scale on this card: ")
 		} else if info, err := m.Probe(pctx, scaled); err != nil || !height240(info) {
 			rec.Reasons["scale"] = "can't scale on this card: the output is not 240p"
 		} else {
@@ -84,7 +84,7 @@ func Probe(ctx context.Context, m media.Media, dir string, c Candidate) DeviceRe
 	defer os.Remove(tenBit)
 	if rec.Decode {
 		if _, err := m.Run(pctx, append([]string{"ffmpeg"}, encode10Args(c, clip, tenBit)...), nil); err != nil {
-			rec.Reasons["encode10"] = plainReason(err)
+			rec.Reasons["encode10"] = stepFailure(pctx, c, err, "")
 		} else if info, err := m.Probe(pctx, tenBit); err != nil || !namedBy(movieEncoder(info), c.Encoder) {
 			rec.Reasons["encode10"] = "the 10-bit output was not written by " + c.Encoder
 		} else {
@@ -95,7 +95,7 @@ func Probe(ctx context.Context, m media.Media, dir string, c Candidate) DeviceRe
 	}
 	if rec.Encode10 {
 		if _, err := m.Run(pctx, append([]string{"ffmpeg"}, decode10Args(c, tenBit)...), nil); err != nil {
-			rec.Reasons["decode10"] = plainReason(err)
+			rec.Reasons["decode10"] = stepFailure(pctx, c, err, "")
 		} else {
 			rec.Decode10 = true
 		}
@@ -112,7 +112,7 @@ func Probe(ctx context.Context, m media.Media, dir string, c Candidate) DeviceRe
 		if err := makeHDRClip(pctx, m, hdrSrc); err != nil {
 			rec.Reasons["hdr"] = "the HDR test source could not be made"
 		} else if _, err := m.Run(pctx, append([]string{"ffmpeg"}, hdrEncodeArgs(c, hdrSrc, hdrOut)...), nil); err != nil {
-			rec.Reasons["hdr"] = plainReason(err)
+			rec.Reasons["hdr"] = stepFailure(pctx, c, err, "")
 		} else if h, err := frameHDR(pctx, hdrOut); err != nil {
 			rec.Reasons["hdr"] = "the HDR output could not be read"
 		} else if !h.MasteringDisplay || !h.ContentLight {
@@ -149,7 +149,7 @@ func stepReason(pctx, sctx context.Context, err error, limit time.Duration) stri
 	if pctx.Err() != nil {
 		return fmt.Sprintf("the device probe ran out of its %d s", int(ProbeBudget.Seconds()))
 	}
-	return plainReason(err)
+	return plainReason(Candidate{}, err)
 }
 
 func height240(info media.Info) bool {
@@ -238,4 +238,13 @@ func uploadFilter(c Candidate, fmtName string) string {
 		return "format=" + fmtName + ",hwupload=extra_hw_frames=64"
 	}
 	return "format=" + fmtName
+}
+
+// stepFailure is the reason a probe step failed. A step cut short by the whole probe's budget says so, on every step,
+// so a timeout never reads as the driver refusing (prefix is added only when the step failed on its own).
+func stepFailure(pctx context.Context, c Candidate, err error, prefix string) string {
+	if pctx.Err() != nil {
+		return fmt.Sprintf("the device probe ran out of its %d s at this step", int(ProbeBudget.Seconds()))
+	}
+	return prefix + plainReason(c, err)
 }
