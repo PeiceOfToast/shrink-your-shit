@@ -235,7 +235,7 @@ export function Dashboard() {
             </div>
             <div className="kpi">
               <span className="l">Failed 24 h</span>
-              <span className="v bad">{o.failed24h.count}</span>
+              <span className={o.failed24h.count > 0 ? "v bad" : "v "}>{o.failed24h.count}</span>
               <span className="d">{o.failed24h.pct} %</span>
             </div>
             <div className="kpi">
@@ -245,6 +245,17 @@ export function Dashboard() {
             </div>
           </div>
 
+          {o.libraries.length === 0 ? (
+            // First run (no libraries): page 08 leads with this card; the other cards have nothing to show yet.
+            <section className="card wide">
+              <h2>Add a library to start</h2>
+              <p>
+                <Link className="btn primary" to="/libraries?add=1">
+                  Add library
+                </Link>
+              </p>
+            </section>
+          ) : (
           <div className="grid2">
             <section className="card wide">
               <h2>
@@ -357,11 +368,7 @@ export function Dashboard() {
                 Libraries
                 <Link className="more" to="/libraries">libraries →</Link>
               </h2>
-              {o.libraries.length === 0 ? (
-                <p className="muted">
-                  No libraries yet. <Link to="/libraries?add=1">Add a library</Link>
-                </p>
-              ) : (
+              {o.libraries.length > 0 && (
                 <table className="tbl">
                   <thead>
                     <tr>
@@ -382,6 +389,7 @@ export function Dashboard() {
               )}
             </section>
           </div>
+          )}
         </>
       )}
     </>

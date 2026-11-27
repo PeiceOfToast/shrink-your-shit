@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { api, ApiError, formatBytes, formatCount, type FolderCheck, type Library, type Watch } from "../api/index.ts";
 import { useKeys } from "../ui/useKeys.ts";
-import { FolderBrowser } from "./FolderBrowser.tsx";
+import { LibrarySource, NO_SOURCE, baseName, toProblem, type Problem, type Source } from "./LibrarySource.tsx";
 
 // Add library, a side panel (draft A, drafts/add-library/a-side-panel.html#open). No workflow here: the new library's
 // panel opens after Add so one can be picked.
@@ -12,26 +12,8 @@ const WATCH: { value: Watch; label: string }[] = [
   { value: "weekly", label: "Weekly" },
 ];
 
-type Problem = { field?: string; message: string };
-
-function toProblem(e: unknown): Problem {
-  if (e instanceof ApiError) return { field: e.field, message: e.message };
-  return { message: e instanceof Error ? e.message : String(e) };
-}
-
-function baseName(p: string): string {
-  return p.replace(/\/+$/, "").split("/").pop() ?? "";
-}
-
 export function AddLibrary({ onClose, onAdded }: { onClose: () => void; onAdded: (l: Library) => void }) {
-  const [where, setWhere] = useState<"local" | "share">("local");
-  const [path, setPath] = useState("");
-  const [browsing, setBrowsing] = useState(false);
-  const [address, setAddress] = useState("");
-  const [user, setUser] = useState("");
-  const [password, setPassword] = useState("");
-  const [shareId, setShareId] = useState<string | null>(null);
-  const [testRes, setTestRes] = useState<string | null>(null);
+  const [src, setSrc] = useState<Source>(NO_SOURCE);
   const [name, setName] = useState("");
   const [nameTouched, setNameTouched] = useState(false);
   const [watch, setWatch] = useState<Watch>("daily");
@@ -43,28 +25,13 @@ export function AddLibrary({ onClose, onAdded }: { onClose: () => void; onAdded:
     if (e.key === "Escape") onClose();
   });
 
-  // Choosing a folder fills the name from it, unless the person has typed one.
-  const pick = (p: string) => {
-    setPath(p);
-    if (!nameTouched) setName(baseName(p));
-    setCheck(null);
-    setProblem(null);
-  };
-
-  const test = async () => {
-    setBusy(true);
-    setProblem(null);
-    try {
-      const r = await api.testShare({ address, user: user || undefined, password: password || undefined });
-      const created = await api.createShare({ address, user: user || undefined, password: password || undefined });
-      setShareId(created.id);
-      setTestRes(`Connected · ${r.folders.length} folders`);
-    } catch (e) {
-      setShareId(null);
-      setTestRes(null);
-      setProblem(toProblem(e));
-    } finally {
-      setBusy(false);
+  // Changing the folder fills the name from it, unless the person has typed one, and clears the last check.
+  const change = (patch: Partial<Source>) => {
+    setSrc((s) => ({ ...s, ...patch }));
+    if (patch.path !== undefined) {
+      if (!nameTouched) setName(baseName(patch.path));
+      setCheck(null);
+      setProblem(null);
     }
   };
 
@@ -72,8 +39,8 @@ export function AddLibrary({ onClose, onAdded }: { onClose: () => void; onAdded:
     setBusy(true);
     setProblem(null);
     try {
-      if (where === "local") setCheck(await api.checkFolder({ path: path.trim() }));
-      else if (shareId) setCheck(await api.checkFolder({ shareId }));
+      if (src.where === "local") setCheck(await api.checkFolder({ path: src.path.trim() }));
+      else if (src.shareId) setCheck(await api.checkFolder({ shareId: src.shareId }));
       else throw new ApiError("share_untested", "Test the connection first.");
     } catch (e) {
       setProblem(toProblem(e));
@@ -87,11 +54,11 @@ export function AddLibrary({ onClose, onAdded }: { onClose: () => void; onAdded:
     setProblem(null);
     try {
       if (!name.trim()) throw new ApiError("name_required", "Give the library a name.", "name");
-      if (where === "share" && !shareId) throw new ApiError("share_untested", "Test the connection first.");
+      if (src.where === "share" && !src.shareId) throw new ApiError("share_untested", "Test the connection first.");
       const lib = await api.createLibrary({
         name: name.trim(),
-        path: where === "local" ? path.trim() : undefined,
-        shareId: where === "share" ? shareId! : undefined,
+        path: src.where === "local" ? src.path.trim() : undefined,
+        shareId: src.where === "share" ? src.shareId! : undefined,
         watch,
       });
       onAdded(lib);
@@ -117,67 +84,7 @@ export function AddLibrary({ onClose, onAdded }: { onClose: () => void; onAdded:
         <div className="ovb">
           {problem && <p className="err" role="alert">{problem.message}</p>}
 
-          <div className="field">
-            <span className="lbl" id="where-lbl">Where the videos are</span>
-            <div className="seg" role="group" aria-labelledby="where-lbl">
-              <button type="button" aria-pressed={where === "local"} onClick={() => setWhere("local")}>On this server</button>
-              <button type="button" aria-pressed={where === "share"} onClick={() => setWhere("share")}>Network share</button>
-            </div>
-          </div>
-
-          {where === "local" ? (
-            <div className="field">
-              <span className="lbl">Folder</span>
-              <div className="row">
-                <input
-                  className="inp mono"
-                  value={path}
-                  onChange={(e) => pick(e.target.value)}
-                  placeholder="/media/…"
-                  aria-label="Folder"
-                />
-                <button type="button" className="btn sm" onClick={() => setBrowsing((b) => !b)}>Browse</button>
-              </div>
-              {browsing && (
-                <FolderBrowser
-                  start={path || undefined}
-                  onPick={(p) => {
-                    pick(p);
-                    setBrowsing(false);
-                  }}
-                />
-              )}
-            </div>
-          ) : (
-            <div className="field">
-              <input
-                className="inp mono"
-                value={address}
-                onChange={(e) => {
-                  setAddress(e.target.value);
-                  setShareId(null);
-                  setTestRes(null);
-                }}
-                placeholder="//nas/videos or smb://nas/videos"
-                aria-label="Share address"
-              />
-              <div className="row">
-                <input className="inp" value={user} onChange={(e) => setUser(e.target.value)} placeholder="User name" aria-label="User name" />
-                <input
-                  className="inp"
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Password"
-                  aria-label="Password"
-                />
-              </div>
-              <div className="row">
-                <button type="button" className="btn sm" onClick={test} disabled={busy || !address.trim()}>Test connection</button>
-                <span className="hint">{testRes}</span>
-              </div>
-            </div>
-          )}
+          <LibrarySource value={src} onChange={change} onProblem={setProblem} onBusy={setBusy} />
 
           <div className="field">
             <span className="lbl">Name</span>

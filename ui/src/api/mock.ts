@@ -3,7 +3,7 @@ import { ATTENTION, OVERVIEW, SUMMARY } from "./fixtures/index.ts";
 import { JOBS } from "./fixtures/jobs.ts";
 import { jobDetail } from "./fixtures/jobDetail.ts";
 import { ApiError } from "./errors.ts";
-import { getForcedState, respond } from "./mockState.ts";
+import { getForcedState, noLibrariesYet, respond } from "./mockState.ts";
 import { currentLibraries, reconnectShare } from "./mockLibraries.ts";
 import { setAllWorkers, workerName } from "./mockWorkers.ts";
 import { healthFailing } from "./mockSettings.ts";
@@ -18,19 +18,29 @@ export * from "./mockWorkflows.ts";
 export * from "./mockWorkers.ts";
 export * from "./mockSettings.ts";
 export * from "./mockLog.ts";
+export * from "./mockSetup.ts";
 
 // The status line reads this even when a page's own call is forced to fail, so it keeps its counts.
+// With no libraries nothing converts, queues or fails, and the log is empty.
 export function getSummary(): Promise<Summary> {
   return respond(
     () => {
-      const s = getForcedState();
-      // New errors are error lines the System log hasn't been opened past yet (mockLog.ts).
-      // Fresh install: no job has finished and no library is watched yet.
-      const fresh = s === "fresh" ? { lastDoneAt: null, nextScanAt: null } : {};
-      // A fresh install has no log lines yet, so no new errors.
-      const none = s === "empty" || s === "fresh";
-      const seenAt = none ? null : getSeenAt();
-      return { ...SUMMARY, ...fresh, newErrors: none ? 0 : newErrorCount(), seenSeq: getSeenSeq(), seenAt, healthFailing: healthFailing() };
+      if (noLibrariesYet()) {
+        return {
+          ...SUMMARY,
+          converting: { running: 0, workers: SUMMARY.converting.workers },
+          queue: 0,
+          lastDoneAt: null,
+          nextScanAt: null,
+          failed24h: 0,
+          workersOffline: 0,
+          newErrors: 0,
+          seenSeq: getSeenSeq(),
+          seenAt: null,
+          healthFailing: healthFailing(),
+        };
+      }
+      return { ...SUMMARY, newErrors: newErrorCount(), seenSeq: getSeenSeq(), seenAt: getSeenAt(), healthFailing: healthFailing() };
     },
     { failInError: false },
   );
@@ -38,13 +48,17 @@ export function getSummary(): Promise<Summary> {
 
 export function getOverview(): Promise<Overview> {
   return respond(() => {
-    if (getForcedState() === "empty") {
+    if (noLibrariesYet()) {
       return {
         ...OVERVIEW,
+        freed: { ...OVERVIEW.freed, totalBytes: 0, todayBytes: 0, nextReleaseBytes: 0, inTrashBytes: 0 },
         converted: { ...OVERVIEW.converted, total: 0, perDay: 0 },
-        waiting: { ...OVERVIEW.waiting, count: 0 },
+        waiting: { ...OVERVIEW.waiting, count: 0, nextScanAt: null },
+        avgShrink: { pct: 0, secPerGB: 0 },
+        series: { days: [] },
         running: [],
-        failed24h: { ...OVERVIEW.failed24h, count: 0 },
+        failed24h: { ...OVERVIEW.failed24h, count: 0, pct: 0 },
+        last24h: { done: 0, skipped: 0, failed: 0 },
         libraries: [],
       };
     }
@@ -53,7 +67,7 @@ export function getOverview(): Promise<Overview> {
 }
 
 export function getAttention(): Promise<Attention[]> {
-  return respond(() => (getForcedState() === "empty" ? [] : ATTENTION));
+  return respond(() => (noLibrariesYet() ? [] : ATTENTION));
 }
 
 export function getJobs(params: JobsParams = {}): Promise<JobsPage> {

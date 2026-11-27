@@ -14,7 +14,7 @@ import type {
   WorkflowVariable,
 } from "./types.ts";
 import { ApiError } from "./errors.ts";
-import { getForcedState, respond } from "./mockState.ts";
+import { getForcedState, noLibrariesYet, respond } from "./mockState.ts";
 
 const clone = <T>(v: T): T => structuredClone(v);
 const hoursAgo = (h: number) => new Date(Date.parse("2026-11-26T23:00:00Z") - h * 3600_000).toISOString();
@@ -442,10 +442,16 @@ let doctor: Doctor = {
   ],
 };
 
+// A fresh install (no library yet, or the First run state) has run no check that could fail: its health list has no bad rows.
+function freshNow(): boolean {
+  return noLibrariesYet() || getForcedState() === "setup";
+}
+
 export function getDoctor(retest = false): Promise<Doctor> {
   return respond(() => {
     if (retest) doctor = { ...doctor, ranAt: "2026-11-26T23:32:00Z" };
-    return clone(doctor);
+    const checks = freshNow() ? doctor.checks.filter((c) => c.status !== "bad") : doctor.checks;
+    return clone({ ...doctor, checks });
   });
 }
 
@@ -461,12 +467,17 @@ export function runHealthFix(path: string): Promise<Doctor> {
 
 // True when a check is failing. The shell's red dot reads this.
 export function healthFailing(): boolean {
-  return doctor.checks.some((c) => c.status === "bad");
+  return !freshNow() && doctor.checks.some((c) => c.status === "bad");
 }
 
 // ---- Access (one sign-in, decision A1)
 
 let token: string | null = "syp_7Hk2mQ9xR4vL0pZa8Wb3nJ6tF1cE5dG";
+
+// The access token the sign-in link carries (sign-in checks it synchronously in the mock).
+export function currentToken(): string | null {
+  return token;
+}
 
 export function changePassword(password: string): Promise<void> {
   return respond(() => {

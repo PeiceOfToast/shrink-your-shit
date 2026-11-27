@@ -9,6 +9,8 @@ const STATES: { key: ForcedState; label: string }[] = [
   { key: "error", label: "Error" },
   { key: "running", label: "Running" },
   { key: "fresh", label: "Fresh install" },
+  { key: "setup", label: "First run" },
+  { key: "starting", label: "Starting up" },
 ];
 
 // ?states=0 hides the switcher; in dev it shows, or in a preview with ?states=1.
