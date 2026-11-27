@@ -66,6 +66,9 @@ func (r Rational) String() string {
 // VideoTrack is one video stream. AttachedPicture marks cover art, which is a video stream in some
 // containers but must never be mistaken for the main video.
 type VideoTrack struct {
+	// Encoder is the ENCODER tag the encoder wrote into the stream (for example hevc_qsv). Muxers write it in upper case, so
+	// the lookup ignores case. "" when the file has none.
+	Encoder        string
 	Index          int
 	Codec          string
 	Tag            string // the container codec tag ("hvc1", "avc1", "hev1"); "" when unset
@@ -417,6 +420,7 @@ func videoTrack(s *probeStream) VideoTrack {
 		AttachedPicture: s.Disposition.AttachedPic != 0,
 		Language:        s.Tags.Strings()["language"],
 		Title:           s.Tags.Strings()["title"],
+		Encoder:         tagFold(s.Tags.Strings(), "encoder"),
 	}
 	for _, sd := range s.SideDataList {
 		switch sd.Type {
@@ -495,4 +499,14 @@ func bitDepth(rawSample int, pixelFormat string) int {
 
 func seconds(f flexFloat) time.Duration {
 	return time.Duration(math.Round(float64(f) * float64(time.Second)))
+}
+
+// tagFold returns the value of a tag whatever the case of its key: ffprobe reports MKV's ENCODER in upper case.
+func tagFold(tags map[string]string, key string) string {
+	for k, v := range tags {
+		if strings.EqualFold(k, key) {
+			return v
+		}
+	}
+	return ""
 }

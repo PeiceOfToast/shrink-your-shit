@@ -48,6 +48,7 @@ var exceptions = map[string]bool{
 	"internal/flow/steps -> internal/flow":  true,
 	"internal/flow -> internal/flow/steps":  true,
 	"internal/media/fake -> internal/media": true,
+	"internal/hw -> internal/encode":        true, // the S3-1 plan lists hw as a user of the encode plan
 }
 
 // TestPackageLayers reads the module's own source with go/parser rather than running `go list`. The test cache
