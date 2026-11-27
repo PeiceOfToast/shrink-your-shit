@@ -39,16 +39,16 @@ type NestedError struct {
 }
 
 func (e *NestedError) Error() string {
-	return fmt.Sprintf("%s: %s overlaps the library %q", ErrPathNested, e.Path, e.Library)
+	return fmt.Sprintf("%s: %s overlaps the library \"%s\"", ErrPathNested, e.Path, e.Library)
 }
 
 // Sentence is what the pages show for this refusal, in ui-shop's words: it names the direction of
 // the overlap, not just that there is one.
 func (e *NestedError) Sentence() string {
 	if e.Contains {
-		return fmt.Sprintf("This folder contains the library %q. A file can belong to one library only.", e.Library)
+		return fmt.Sprintf("This folder contains the library \"%s\". A file can belong to one library only.", e.Library)
 	}
-	return fmt.Sprintf("This folder is inside the library %q. A file can belong to one library only.", e.Library)
+	return fmt.Sprintf("This folder is inside the library \"%s\". A file can belong to one library only.", e.Library)
 }
 
 func (e *NestedError) Unwrap() error { return ErrPathNested }
@@ -517,6 +517,10 @@ func (c *Catalog) refuseWatched(ctx context.Context, path string, exceptID int64
 		return fmt.Errorf("check the library paths: %w", err)
 	}
 	candidate := identifyFolder(path)
+	// A network share mounted twice has two device numbers, so the identity misses it: the mount table places
+	// each folder on its share and compares those (S2-10a). Without a readable table this check is skipped.
+	mounts := readMounts()
+	candShare, candOnShare := ShareOf(mounts, candidate.real)
 	for _, lib := range libs {
 		if lib.ID == exceptID {
 			continue
@@ -529,6 +533,16 @@ func (c *Catalog) refuseWatched(ctx context.Context, path string, exceptID int64
 			return &NestedError{Path: path, Library: lib.Name}
 		case other.inside(candidate):
 			return &NestedError{Path: path, Library: lib.Name, Contains: true}
+		}
+		if otherShare, ok := ShareOf(mounts, other.real); ok && candOnShare {
+			switch {
+			case candShare.same(otherShare):
+				return fmt.Errorf("%w: %s", ErrPathAlreadyWatched, path)
+			case candShare.inside(otherShare):
+				return &NestedError{Path: path, Library: lib.Name}
+			case otherShare.inside(candShare):
+				return &NestedError{Path: path, Library: lib.Name, Contains: true}
+			}
 		}
 	}
 	return nil
