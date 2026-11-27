@@ -416,7 +416,8 @@ export function guidePreview(answers: Answers): Promise<GuidePreview> {
   return respond(() => {
     checkQuality(answers);
     const flow = answersToFlow(answers, { name: "", description: "" });
-    return { sentences: sentencesFor(flow, answers), flow, problems: checkFlow(flow).problems };
+    const check = checkFlow(flow);
+    return { sentences: sentencesFor(flow, answers), flow, problems: check.problems, disabled: check.disabled };
   });
 }
 

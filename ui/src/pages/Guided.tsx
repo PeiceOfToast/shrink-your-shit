@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { navigate } from "../router.tsx";
-import { api, type Answers, type GuideDoc, type GuideField, type GuidePart, type GuidePreview, type TryLine } from "../api/index.ts";
+import { api, type Answers, type FlowDisabled, type GuideChoice, type GuideDoc, type GuideField, type GuidePart, type GuidePreview, type TryLine } from "../api/index.ts";
 import { languageName } from "../format/language.ts";
 import { useApi } from "../api/useApi.ts";
 import { ChoiceField, QUALITY_NAMES, Row, qualityMeaning, toErr, useBitrateLadder, type Err } from "./flowParts.tsx";
@@ -239,7 +239,7 @@ function GuidedForm({ id, initial }: { id: string; initial: Loaded }) {
             <ChipRow chips={initial.guide.chips} answers={answers} onToggle={toggleChip} />
           </section>
           {initial.guide.parts.map((p) => (
-            <PartCard key={p.id} part={p} answers={answers} languages={initial.guide.languages} setAnswer={setAnswer} />
+            <PartCard key={p.id} part={p} answers={answers} languages={initial.guide.languages} setAnswer={setAnswer} disabled={preview?.disabled ?? []} />
           ))}
         </div>
 
@@ -322,10 +322,10 @@ function ChipRow({ chips, answers, onToggle }: { chips: GuideDoc["chips"]; answe
   );
 }
 
-function PartCard({ part, answers, languages, setAnswer }: { part: GuidePart; answers: Answers; languages: string[]; setAnswer: (key: string, v: unknown) => void }) {
+function PartCard({ part, answers, languages, setAnswer, disabled }: { part: GuidePart; answers: Answers; languages: string[]; setAnswer: (key: string, v: unknown) => void; disabled: FlowDisabled[] }) {
   const shown = part.fields.filter((f) => (f.type !== "folder" || answers.original === "one_folder") && (f.key !== "subtitleLanguages" || answers.subtitles === "my_languages"));
   const field = (f: GuideField) => (
-    <FieldRow key={f.key} field={f} value={answers[f.key]} answers={answers} languages={languages} onChange={(v) => setAnswer(f.key, v)} />
+    <FieldRow key={f.key} field={f} value={answers[f.key]} answers={answers} languages={languages} disabled={disabled} onChange={(v) => setAnswer(f.key, v)} />
   );
   const rare = shown.filter((f) => f.more);
   return (
@@ -345,12 +345,20 @@ function PartCard({ part, answers, languages, setAnswer }: { part: GuidePart; an
   );
 }
 
-function FieldRow({ field, value, answers, languages, onChange }: { field: GuideField; value: unknown; answers: Answers; languages: string[]; onChange: (v: unknown) => void }) {
+// A file type the answers rule out is greyed with the same reason the editor shows (the check's disabled list).
+function greyFileTypes(choices: GuideChoice[], disabled: FlowDisabled[]): GuideChoice[] {
+  return choices.map((c) => {
+    const why = disabled.find((d) => d.field === "container" && d.value === c.value)?.why;
+    return why ? { ...c, available: false, why } : c;
+  });
+}
+
+function FieldRow({ field, value, answers, languages, disabled, onChange }: { field: GuideField; value: unknown; answers: Answers; languages: string[]; disabled: FlowDisabled[]; onChange: (v: unknown) => void }) {
   const ladder = useBitrateLadder();
   if (field.type === "choice" && field.choices) {
     return (
       <>
-        <ChoiceField label={field.label} value={String(value ?? "")} choices={field.choices} onChange={onChange} full={field.key === "subtitles" || field.key === "original"} />
+        <ChoiceField label={field.label} value={String(value ?? "")} choices={field.key === "fileType" ? greyFileTypes(field.choices, disabled) : field.choices} onChange={onChange} full={field.key === "subtitles" || field.key === "original"} />
         {field.key === "original" && value === "replace" && <p className="hint wf-full">The original goes to the trash and is kept 7 days.</p>}
       </>
     );

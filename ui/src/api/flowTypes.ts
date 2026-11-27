@@ -82,6 +82,7 @@ export interface GuidePreview {
   sentences: string[];
   flow: Flow;
   problems: FlowProblem[];
+  disabled: FlowDisabled[];
 }
 
 export interface TryLine {

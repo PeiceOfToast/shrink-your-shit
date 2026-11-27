@@ -59,3 +59,10 @@ test("a saved file type the rules rule out is a problem", () => {
   assert.equal(p?.stepId, "save");
   assert.equal(p?.field, "container");
 });
+
+test("the guided preview greys the file types the answers rule out, with the editor's reason", async () => {
+  const p = await guidePreview({ ...DEFAULT_ANSWERS, audio: "stereo_opus" } as Answers);
+  const mp4 = p.disabled.find((d) => d.field === "container" && d.value === "mp4");
+  assert.equal(mp4?.why, "MP4 can't hold Opus audio.");
+  assert.equal(p.disabled.find((d) => d.field === "container" && d.value === "mkv"), undefined);
+});

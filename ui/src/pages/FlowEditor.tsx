@@ -24,6 +24,18 @@ const SUBTITLE_HINT: Record<string, string> = {
   text_only: "Only text subtitles are kept; picture subtitles are dropped.",
   srt: "Subtitles are made into SRT files.",
 };
+// The File type hint: what each file type keeps, then why a greyed type is ruled out.
+const FILE_TYPE_HINT = "MKV holds every track and subtitle. MP4 plays on more devices but drops some subtitles.";
+function fileTypeHint(whyValue: (stepId: StepId, field: string, value: string) => string | undefined): string {
+  const reasons = CONTAINERS.map((o) => whyValue("save", "container", o.value)).filter((w): w is string => Boolean(w));
+  return [FILE_TYPE_HINT, ...reasons].join(" ");
+}
+// The name example follows the file type: Keep the same keeps the source's own extension.
+function nameExample(container: string, suffix: string): string {
+  const after = suffix || "…";
+  if (container === "keep") return `Keeps the file's own extension: media.mov becomes media-${after}.mov. Empty keeps the name.`;
+  return `media.${container} becomes media-${after}.${container}. Empty keeps the name.`;
+}
 const STEP_NAME: Record<StepId, string> = { video: "Video", audio: "Audio", save: "Save the result" };
 const FORMAT_NAME: Record<string, string> = { hevc: "HEVC", h264: "H.264", av1: "AV1" };
 const ROW_FOR_SIZE: Record<string, string> = { "2160": "2160", "1440": "1440", "1080": "1080", "720": "720", "480": "sd" };
@@ -298,39 +310,25 @@ function Editor({ id, initial }: { id: string; initial: Loaded }) {
     save: (
       <>
         <p className="hint" style={{ marginTop: 0 }}>Every result is checked first: it must play and not be broken. A broken result is never saved, and the original stays as it was.</p>
-        <Row label="File type" full>
-          <div className="wf-save-options" role="radiogroup" aria-label="File type">
-            {CONTAINERS.map((o) => {
-              const off = whyValue("save", "container", o.value);
-              return (
-                <label key={o.value}>
-                  <input
-                    type="radio"
-                    name={`container-${draftId}`}
-                    checked={(save_.container ?? "mkv") === o.value}
-                    disabled={off !== undefined}
-                    onChange={() => set("save", { container: o.value })}
-                  />
-                  {o.label}
-                  {off && <span className="hint">{off}</span>}
-                </label>
-              );
-            })}
-          </div>
+        <Row label="File type" full hint={fileTypeHint(whyValue)}>
+          <Seg
+            label="File type"
+            value={String(save_.container ?? "mkv")}
+            options={CONTAINERS.map((o) => ({ value: o.value, label: o.label, disabled: whyValue("save", "container", o.value) !== undefined, title: whyValue("save", "container", o.value) }))}
+            onChange={(v) => set("save", { container: v })}
+          />
         </Row>
         <Row label="Where the result goes">
-          <div className="wf-save-options" role="radiogroup" aria-label="Where the result goes">
-            {[
+          <Seg
+            label="Where the result goes"
+            value={String(save_.where ?? "replace")}
+            options={[
               { value: "replace", label: "Replace the original" },
               { value: "next_to", label: "Next to the original" },
               { value: "folder", label: "A different folder" },
-            ].map((o) => (
-              <label key={o.value}>
-                <input type="radio" name={`where-${draftId}`} checked={save_.where === o.value} onChange={() => set("save", { where: o.value })} />
-                {o.label}
-              </label>
-            ))}
-          </div>
+            ]}
+            onChange={(v) => set("save", { where: v })}
+          />
         </Row>
         {save_.where === "folder" && (
           <Row label="Folder" hint="Sub-folders of the library are kept.">
@@ -340,7 +338,7 @@ function Editor({ id, initial }: { id: string; initial: Loaded }) {
         {save_.where === "replace" && (
           <p className="hint" style={{ margin: "0 0 8px" }}>The original goes to the trash and is kept 7 days. How long is set for all workflows in Settings › Processing.</p>
         )}
-        <Row label="Add to the file name" hint={`media.mp4 becomes media-${save_.nameSuffix || "…"}.mp4. Empty keeps the name.`}>
+        <Row label="Add to the file name" hint={nameExample(String(save_.container ?? "mkv"), String(save_.nameSuffix ?? ""))}>
           <input className="inp" aria-label="Add to the file name" value={String(save_.nameSuffix ?? "")} onChange={(e) => set("save", { nameSuffix: e.target.value })} />
         </Row>
       </>
