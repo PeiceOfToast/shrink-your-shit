@@ -7,12 +7,11 @@ import { getForcedState, respond } from "./mockState.ts";
 import { currentLibraries } from "./mockLibraries.ts";
 import { setAllWorkers, workerName } from "./mockWorkers.ts";
 import { healthFailing } from "./mockSettings.ts";
-import { getSeenSeq, newErrorCount } from "./mockLog.ts";
+import { getSeenAt, getSeenSeq, newErrorCount } from "./mockLog.ts";
 
 // Mock implementation of the API. Route-named functions; shapes come from the page specs.
 // The dev state switcher sets a forced state (mockState.ts); pages see it only through these calls.
 export { setForcedState, getForcedState, onForcedStateChange } from "./mockState.ts";
-export { getLogLineTime } from "./mockLog.ts";
 export type { ForcedState } from "./mockState.ts";
 export * from "./mockLibraries.ts";
 export * from "./mockWorkflows.ts";
@@ -30,7 +29,8 @@ export function getSummary(): Promise<Summary> {
       const fresh = s === "fresh" ? { lastDoneAt: null, nextScanAt: null } : {};
       // A fresh install has no log lines yet, so no new errors.
       const none = s === "empty" || s === "fresh";
-      return { ...SUMMARY, ...fresh, newErrors: none ? 0 : newErrorCount(), seenSeq: getSeenSeq(), healthFailing: healthFailing() };
+      const seenAt = none ? null : getSeenAt();
+      return { ...SUMMARY, ...fresh, newErrors: none ? 0 : newErrorCount(), seenSeq: getSeenSeq(), seenAt, healthFailing: healthFailing() };
     },
     { failInError: false },
   );

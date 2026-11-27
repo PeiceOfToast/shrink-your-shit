@@ -175,9 +175,10 @@ export function markLogSeen(seq: number): Promise<{ ok: true }> {
   });
 }
 
-// The time of one line, for "New errors since HH:MM". Null when no line has that seq.
-export function getLogLineTime(seq: number): string | null {
-  return all().find((e) => e.seq === seq)?.ts ?? null;
+// The time of the line the log was last opened past (Summary.seenAt). Null while seenSeq is 0.
+export function getSeenAt(): string | null {
+  const seq = getSeenSeq();
+  return seq ? all().find((e) => e.seq === seq)?.ts ?? null : null;
 }
 
 // The status line's "N new errors": error lines after the last seen seq.

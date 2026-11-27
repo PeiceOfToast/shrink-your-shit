@@ -79,5 +79,6 @@ export const SUMMARY: Summary = {
   workersOffline: 1,
   newErrors: 0,
   seenSeq: 0,
+  seenAt: null,
   healthFailing: false,
 };

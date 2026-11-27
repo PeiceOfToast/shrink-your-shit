@@ -139,8 +139,9 @@ export function SystemLog() {
   const to = query.get("to") ?? "";
   const q = query.get("q") ?? "";
   const since = query.get("since") ?? "";
-  // The time of the last line the person saw, for the "New errors since" hint.
-  const sinceAt = since ? api.getLogLineTime(Number(since)) : null;
+  // The time of the last line the person saw, for the "New errors since" hint (Summary.seenAt).
+  const summary = useApi(() => api.getSummary(), []);
+  const sinceAt = since ? summary.data?.seenAt ?? null : null;
   const detail = query.get("detail") === "1";
   const paramKey = query.toString();
 

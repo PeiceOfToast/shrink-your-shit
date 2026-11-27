@@ -171,6 +171,8 @@ export interface Summary {
   newErrors: number;
   // The last error line the System log was opened past (0 on a fresh install). newErrors counts errors above it.
   seenSeq: number;
+  // RFC 3339 time of the line seenSeq names; null while seenSeq is 0 (and on a fresh install).
+  seenAt: string | null;
   healthFailing: boolean;
 }
 
