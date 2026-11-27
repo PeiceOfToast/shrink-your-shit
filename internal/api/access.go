@@ -91,6 +91,17 @@ func (s *Server) getFolders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	abs = filepath.Clean(abs)
+	info, err := os.Stat(abs)
+	if err != nil {
+		writeFolderProblem(w, err)
+		return
+	}
+	// Say what is wrong before listing: on Windows ReadDir on a file answers "path not found", which
+	// would read as a missing folder instead of a file.
+	if !info.IsDir() {
+		writeError(w, http.StatusBadRequest, "invalid_request", "That is not a folder. Choose a folder.", "path", 0)
+		return
+	}
 	entries, err := os.ReadDir(abs)
 	if err != nil {
 		writeFolderProblem(w, err)

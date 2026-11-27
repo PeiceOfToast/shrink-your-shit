@@ -214,6 +214,27 @@ func write(extra map[string]string) map[string]string {
 // page always sends.
 const setupNoLibrary = `{"account":{"password":"` + testPassword + `"},"library":null,"starter":{"id":"shrink-videos","answers":{}}}`
 
+// mustJSON marshals a request body. A body carrying a folder path must go through it rather than
+// string concatenation, or a Windows path's backslashes make the JSON invalid.
+func mustJSON(t *testing.T, v any) string {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal a request body: %v", err)
+	}
+	return string(b)
+}
+
+// setupWith is page 13's call with a library (nil sends none), marshalled for the same reason.
+func setupWith(t *testing.T, library any) string {
+	t.Helper()
+	return mustJSON(t, map[string]any{
+		"account": map[string]any{"password": testPassword},
+		"library": library,
+		"starter": map[string]any{"id": "shrink-videos", "answers": map[string]any{}},
+	})
+}
+
 // setup sets the password through the api and returns the session cookie it was signed in with.
 func (e *env) setup() *http.Cookie {
 	e.t.Helper()
@@ -395,7 +416,7 @@ func TestSetupRulesAndCookie(t *testing.T) {
 	}
 
 	// A folder inside the app's own data folder is refused too.
-	rec = post(`{"account":{"password":"` + testPassword + `"},"library":{"name":"x","path":"` + e.dir + `"},"starter":{"id":"shrink-videos","answers":{}}}`)
+	rec = post(setupWith(t, map[string]any{"name": "x", "path": e.dir}))
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("inside data: %d, want 400", rec.Code)
 	}
@@ -410,7 +431,7 @@ func TestSetupRulesAndCookie(t *testing.T) {
 		t.Fatalf("a refused setup must not add a library: %v", libs)
 	}
 
-	rec = post(`{"account":{"password":"` + testPassword + `"},"library":{"name":"Clips","path":"` + clips + `"},"starter":{"id":"shrink-videos","answers":{}}}`)
+	rec = post(setupWith(t, map[string]any{"name": "Clips", "path": clips}))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("setup: %d %s", rec.Code, rec.Body)
 	}
@@ -460,7 +481,7 @@ func TestSetupAllOrNothing(t *testing.T) {
 	e.srv.Ready(deps)
 
 	rec := e.do(http.MethodPost, "/api/v2/setup",
-		`{"account":{"password":"`+testPassword+`"},"library":{"name":"Clips","path":"`+clips+`"},"starter":{"id":"shrink-videos","answers":{}}}`,
+		setupWith(t, map[string]any{"name": "Clips", "path": clips}),
 		write(nil), false)
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("broken workflow step: %d %s, want 500", rec.Code, rec.Body)
@@ -486,7 +507,7 @@ func TestSetupAllOrNothing(t *testing.T) {
 
 	e.ready()
 	rec = e.do(http.MethodPost, "/api/v2/setup",
-		`{"account":{"password":"`+testPassword+`"},"library":{"name":"Clips","path":"`+clips+`"},"starter":{"id":"shrink-videos","answers":{}}}`,
+		setupWith(t, map[string]any{"name": "Clips", "path": clips}),
 		write(nil), false)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("retried setup: %d %s", rec.Code, rec.Body)

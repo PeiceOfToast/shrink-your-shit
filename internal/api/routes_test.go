@@ -39,7 +39,7 @@ func TestSetupAllowListBeforeAndAfter(t *testing.T) {
 		{http.MethodGet, "/api/v2/workflows/starters/shrink-videos", ""},
 		{http.MethodGet, "/api/v2/workflows/guide", ""},
 		{http.MethodGet, "/api/v2/folders?path=" + clips, ""},
-		{http.MethodPost, "/api/v2/libraries/check", `{"path":"` + clips + `"}`},
+		{http.MethodPost, "/api/v2/libraries/check", mustJSON(t, map[string]any{"path": clips})},
 	}
 	for _, r := range routes {
 		rec := e.do(r.method, r.path, r.body, write(nil), false)
@@ -184,7 +184,7 @@ func TestCheckLibraryFolder(t *testing.T) {
 		SizeBytes int64 `json:"sizeBytes"`
 		Problems  []struct{ Code, Message string }
 	}
-	rec := e.do(http.MethodPost, "/api/v2/libraries/check", `{"path":"`+root+`"}`, write(withSession(cookie)), false)
+	rec := e.do(http.MethodPost, "/api/v2/libraries/check", mustJSON(t, map[string]any{"path": root}), write(withSession(cookie)), false)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("check: %d %s", rec.Code, rec.Body)
 	}
@@ -198,7 +198,7 @@ func TestCheckLibraryFolder(t *testing.T) {
 	if _, err := e.catalog.AddLibrary(context.Background(), library.NewLibrary{Name: "Clips", Path: root}); err != nil {
 		t.Fatal(err)
 	}
-	rec = e.do(http.MethodPost, "/api/v2/libraries/check", `{"path":"`+root+`"}`, write(withSession(cookie)), false)
+	rec = e.do(http.MethodPost, "/api/v2/libraries/check", mustJSON(t, map[string]any{"path": root}), write(withSession(cookie)), false)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("watched check: %d %s", rec.Code, rec.Body)
 	}
@@ -280,7 +280,7 @@ func TestLibraryRoutes(t *testing.T) {
 		t.Fatalf("fresh libraries %v", empty)
 	}
 
-	rec := e.do(http.MethodPost, "/api/v2/libraries", `{"name":"Clips","path":"`+clips+`"}`, write(withSession(cookie)), false)
+	rec := e.do(http.MethodPost, "/api/v2/libraries", mustJSON(t, map[string]any{"name": "Clips", "path": clips}), write(withSession(cookie)), false)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("add: %d %s", rec.Code, rec.Body)
 	}
@@ -349,7 +349,7 @@ func TestLibraryRoutes(t *testing.T) {
 	if code, _, env := errorBody(t, rec); code != "invalid_request" || env["field"] != "shareId" {
 		t.Fatalf("share: %v", env)
 	}
-	rec = e.do(http.MethodPost, "/api/v2/libraries", `{"name":"Watch","path":"`+t.TempDir()+`","watch":"sometimes"}`, write(withSession(cookie)), false)
+	rec = e.do(http.MethodPost, "/api/v2/libraries", mustJSON(t, map[string]any{"name": "Watch", "path": t.TempDir(), "watch": "sometimes"}), write(withSession(cookie)), false)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("bad watch: %d, want 400", rec.Code)
 	}

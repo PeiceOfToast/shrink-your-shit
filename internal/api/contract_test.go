@@ -67,7 +67,7 @@ func TestContractGoldens(t *testing.T) {
 	writeGolden(t, "setup-get", "Setup", http.MethodGet, "/api/v2/setup",
 		e.do(http.MethodGet, "/api/v2/setup", "", nil, false))
 	rec := e.do(http.MethodPost, "/api/v2/setup",
-		`{"account":{"password":"`+testPassword+`"},"library":{"name":"Clips","path":"`+clips+`"},"starter":{"id":"shrink-videos","answers":{}}}`,
+		setupWith(t, map[string]any{"name": "Clips", "path": clips}),
 		write(nil), false)
 	cookie := cookieNamed(t, rec, sessionCookie)
 	writeGolden(t, "setup-post", "SetupDone", http.MethodPost, "/api/v2/setup", rec)
@@ -90,7 +90,7 @@ func TestContractGoldens(t *testing.T) {
 	writeGolden(t, "folders", "FolderListing", http.MethodGet, "/api/v2/folders?path=$DIR/clips",
 		e.do(http.MethodGet, "/api/v2/folders?path="+clips, "", withSession(cookie), false), dir)
 	writeGolden(t, "libraries-check", "FolderCheck", http.MethodPost, "/api/v2/libraries/check",
-		e.do(http.MethodPost, "/api/v2/libraries/check", `{"path":"`+clips+`"}`, write(withSession(cookie)), false), dir)
+		e.do(http.MethodPost, "/api/v2/libraries/check", mustJSON(t, map[string]any{"path": clips}), write(withSession(cookie)), false), dir)
 
 	// Libraries (R1-9a).
 	writeGolden(t, "libraries", "Library[]", http.MethodGet, "/api/v2/libraries",
@@ -98,7 +98,7 @@ func TestContractGoldens(t *testing.T) {
 	writeGolden(t, "library", "Library", http.MethodGet, "/api/v2/libraries/1",
 		e.do(http.MethodGet, "/api/v2/libraries/1", "", withSession(cookie), false), dir)
 	writeGolden(t, "library-post", "Library", http.MethodPost, "/api/v2/libraries",
-		e.do(http.MethodPost, "/api/v2/libraries", `{"name":"More","path":"`+more+`"}`, write(withSession(cookie)), false), dir)
+		e.do(http.MethodPost, "/api/v2/libraries", mustJSON(t, map[string]any{"name": "More", "path": more}), write(withSession(cookie)), false), dir)
 	writeGolden(t, "library-scan", "Library", http.MethodPost, "/api/v2/libraries/1/scan",
 		e.do(http.MethodPost, "/api/v2/libraries/1/scan", "", write(withSession(cookie)), false), dir)
 	writeGolden(t, "libraries-scan", "ScanAllDone", http.MethodPost, "/api/v2/libraries/scan",
