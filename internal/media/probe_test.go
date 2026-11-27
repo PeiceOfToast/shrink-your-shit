@@ -119,6 +119,34 @@ func TestParseProbeHDR10SideData(t *testing.T) {
 	}
 }
 
+// TestParseProbeCodecTagAndDolbyVisionProfile covers the two stream facts the encoder needs: the
+// container tag it should write, and which Dolby Vision profile a stream carries (5 has no HDR10
+// base and is not converted; 7 and 8 are).
+func TestParseProbeCodecTagAndDolbyVisionProfile(t *testing.T) {
+	const answer = `{
+	  "format": {"format_name": "matroska,webm"},
+	  "streams": [
+	    {"index": 0, "codec_type": "video", "codec_name": "hevc", "codec_tag_string": "hvc1",
+	     "pix_fmt": "yuv420p10le", "color_transfer": "smpte2084",
+	     "side_data_list": [{"side_data_type": "DOVI configuration record", "dv_profile": 5}]}
+	  ]
+	}`
+	info, err := ParseProbe([]byte(answer))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	v := info.Video[0]
+	if v.Tag != "hvc1" {
+		t.Errorf("tag = %q, want hvc1", v.Tag)
+	}
+	if !v.HDR.DolbyVision || v.HDR.DVProfile != 5 {
+		t.Errorf("HDR = %+v, want Dolby Vision profile 5", v.HDR)
+	}
+	if v.HDRKind() != "Dolby Vision" {
+		t.Errorf("HDR kind = %q, want Dolby Vision", v.HDRKind())
+	}
+}
+
 func TestParseProbeLanguagesAndSubtitles(t *testing.T) {
 	info := loadProbe(t, "mkv-chapters.json")
 

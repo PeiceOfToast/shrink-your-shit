@@ -68,6 +68,7 @@ func (r Rational) String() string {
 type VideoTrack struct {
 	Index           int
 	Codec           string
+	Tag             string // the container codec tag ("hvc1", "avc1", "hev1"); "" when unset
 	Profile         string
 	Width, Height   int
 	FrameRate       Rational
@@ -90,6 +91,7 @@ type HDR struct {
 	MasteringDisplay bool // "Mastering display metadata" side data (HDR10)
 	ContentLight     bool // "Content light level metadata" side data
 	DolbyVision      bool // "DOVI configuration record" side data
+	DVProfile        int  // the profile in that record (5, 7, 8); 0 when the record does not say
 }
 
 // HDRKind names what the stream carries, for the summary and later the pages: "SDR", "HDR10",
@@ -262,6 +264,7 @@ type probeFormat struct {
 type probeStream struct {
 	Index            int              `json:"index"`
 	CodecName        string           `json:"codec_name"`
+	CodecTag         string           `json:"codec_tag_string"`
 	CodecType        string           `json:"codec_type"`
 	Profile          string           `json:"profile"`
 	Width            flexInt          `json:"width"`
@@ -291,7 +294,8 @@ type probeDisposition struct {
 }
 
 type probeSideData struct {
-	Type string `json:"side_data_type"`
+	Type      string  `json:"side_data_type"`
+	DVProfile flexInt `json:"dv_profile"`
 }
 
 type probeChapter struct {
@@ -394,6 +398,7 @@ func videoTrack(s *probeStream) VideoTrack {
 	v := VideoTrack{
 		Index:           s.Index,
 		Codec:           s.CodecName,
+		Tag:             s.CodecTag,
 		Profile:         s.Profile,
 		Width:           int(s.Width),
 		Height:          int(s.Height),
@@ -417,6 +422,7 @@ func videoTrack(s *probeStream) VideoTrack {
 			v.HDR.ContentLight = true
 		case "DOVI configuration record":
 			v.HDR.DolbyVision = true
+			v.HDR.DVProfile = int(sd.DVProfile)
 		}
 	}
 	return v
