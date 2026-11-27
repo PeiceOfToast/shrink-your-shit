@@ -122,6 +122,9 @@ func dbURI(path, query string) string {
 	return "file:" + escaped + "?" + query
 }
 
+// Dir is the data folder this database was opened in.
+func (db *DB) Dir() string { return db.dir }
+
 // Read is the read pool: queries only, up to four at a time, beside the writer.
 func (db *DB) Read() *sql.DB { return db.read }
 
