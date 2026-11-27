@@ -8,6 +8,7 @@ import { Backup } from "./Backup.tsx";
 import { Connections } from "./Connections.tsx";
 import { Appearance } from "./Appearance.tsx";
 import { General } from "./General.tsx";
+import { Trash } from "./Trash.tsx";
 import { Health } from "./Health.tsx";
 import { Notifications } from "./Notifications.tsx";
 import { Processing } from "./Processing.tsx";
@@ -16,6 +17,7 @@ const SECTIONS: { key: SettingsSection; label: string }[] = [
   { key: "general", label: "General" },
   { key: "appearance", label: "Appearance" },
   { key: "processing", label: "Processing" },
+  { key: "trash", label: "Trash" },
   { key: "connections", label: "Connections" },
   { key: "notifications", label: "Notifications" },
   { key: "backup", label: "Backup" },
@@ -28,6 +30,7 @@ function Body({ section }: { section: SettingsSection }) {
     case "general": return <General />;
     case "appearance": return <Appearance />;
     case "processing": return <Processing />;
+    case "trash": return <Trash />;
     case "connections": return <Connections />;
     case "notifications": return <Notifications />;
     case "backup": return <Backup />;
