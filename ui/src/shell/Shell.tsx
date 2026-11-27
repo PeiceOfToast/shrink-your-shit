@@ -6,7 +6,7 @@ import { useConnectionOk } from "../api/connection.ts";
 import { Icon } from "../ui/Icon.tsx";
 import type { IconName } from "../ui/icon-paths.ts";
 import { Link, navigate, useLocation } from "../router.tsx";
-import { Search } from "./Search.tsx";
+import { WorkersSwitch } from "./WorkersSwitch.tsx";
 import { applyTheme, nextTheme, readTheme, type ThemeMode } from "./theme.ts";
 
 // Main sections in the order decided 11-26 (Dashboard · Libraries · Workflows · Jobs · Workers · Settings).
@@ -28,7 +28,7 @@ function activeKey(pathname: string): string {
 // An item goes to a route, or runs its own action (sign out ends the session first).
 type MenuItem = { label: string; to?: string; onSelect?: () => void };
 
-function Menu({ label, icon, primary, items }: { label: string; icon?: IconName; primary?: boolean; items: MenuItem[] }) {
+function Menu({ label, icon, primary, items, className }: { label: string; icon?: IconName; primary?: boolean; items: MenuItem[]; className?: string }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -47,7 +47,7 @@ function Menu({ label, icon, primary, items }: { label: string; icon?: IconName;
     };
   }, [open]);
   return (
-    <div className="menu" ref={ref}>
+    <div className={`menu${className ? ` ${className}` : ""}`} ref={ref}>
       <button type="button" className={`btn sm ${primary ? "primary" : "ghost"}`} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
         {icon && <Icon name={icon} />}
         {label}
@@ -86,6 +86,7 @@ function StatusLine({ summary, ok }: { summary?: Summary; ok: boolean }) {
   const s = summary;
   return (
     <div className={`statusbar ${open ? "open" : ""}`} role="status" onClick={() => setOpen((o) => !o)}>
+      {s?.workers.paused && <b className="warn-t">paused</b>}
       <Link to="/workers">
         <i></i>
         <b>converting</b> {s ? `${s.converting.running} of ${s.converting.workers} workers` : "—"}
@@ -116,7 +117,6 @@ export function Shell({ children }: { children: ReactNode }) {
   const summary = useApi(() => api.getSummary(), []);
   const ok = useConnectionOk();
   const [theme, setTheme] = useState<ThemeMode>(() => readTheme());
-  const [searching, setSearching] = useState(false);
   const active = activeKey(pathname);
 
   useEffect(() => {
@@ -135,16 +135,13 @@ export function Shell({ children }: { children: ReactNode }) {
     };
   }, [reloadSummary]);
 
+  // While files finish after the switch goes off, the count is read again so the label clears on its own.
+  const finishingNow = summary.data?.workers.finishing ?? 0;
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        setSearching((v) => !v);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
+    if (finishingNow === 0) return;
+    const t = setTimeout(reloadSummary, 1500);
+    return () => clearTimeout(t);
+  }, [finishingNow, summary.data, reloadSummary]);
 
   const failed = summary.data?.failed24h ?? 0;
   const offline = summary.data?.workersOffline ?? 0;
@@ -175,11 +172,7 @@ export function Shell({ children }: { children: ReactNode }) {
           ))}
         </nav>
         <span className="sp"></span>
-        <button type="button" className="search" onClick={() => setSearching(true)}>
-          <Icon name="search" />
-          Search
-          <kbd>Ctrl K</kbd>
-        </button>
+        <WorkersSwitch summary={summary.data} />
         <Menu
           label="New"
           icon="plus"
@@ -193,6 +186,7 @@ export function Shell({ children }: { children: ReactNode }) {
         />
         <Menu
           label="Account"
+          className="acct"
           items={[
             { label: "Your access tokens", to: "/settings/access" },
             {
@@ -216,16 +210,6 @@ export function Shell({ children }: { children: ReactNode }) {
       </header>
       <StatusLine summary={summary.data} ok={ok} />
       <main className="main-col">
-        <div className="phonebar">
-          <b>syp</b>
-          <span className="sp"></span>
-          <Menu label="New" icon="plus" primary items={[
-            { label: "Add library", to: "/libraries?add=1" },
-            { label: "New workflow", to: "/workflows/new" },
-            { label: "Process one file now", to: "/process" },
-            { label: "Add worker", to: "/workers?add=1" },
-          ]} />
-        </div>
         {children}
         <nav className="bottomnav" aria-label="Main">
           {SECTIONS.map((s) => (
@@ -237,7 +221,6 @@ export function Shell({ children }: { children: ReactNode }) {
           ))}
         </nav>
       </main>
-      {searching && <Search onClose={() => setSearching(false)} />}
     </div>
   );
 }

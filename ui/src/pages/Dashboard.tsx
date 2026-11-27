@@ -1,6 +1,6 @@
 import { jobHint, sizeText } from "../format/job.ts";
 import { clock, dayClock, dayOf } from "../format/time.ts";
-import { Fragment, useEffect, useState, type MouseEvent } from "react";
+import { Fragment, useState, type MouseEvent } from "react";
 import { ApiError, api, formatBytes, formatCount, formatGB, type Attention, type Job, type Library } from "../api/index.ts";
 import type { DaySeries, Series } from "../api/types.ts";
 import { useApi } from "../api/useApi.ts";
@@ -158,41 +158,15 @@ function LibraryRow({ l }: { l: Library }) {
 export function Dashboard() {
   const overview = useApi(() => api.getOverview(), []);
   const attention = useApi(() => api.getAttention(), []);
-  const [workersOverride, setWorkersOverride] = useState<boolean | null>(null);
   const o = overview.data;
-  // The last state the server reported. It stays when a later call fails, so the switch can show it disabled.
-  const [known, setKnown] = useState<boolean | null>(null);
-  useEffect(() => {
-    if (o) setKnown(o.workersOn);
-  }, [o?.workersOn]);
-  const workersOn = workersOverride ?? known ?? false;
   const down = !!overview.error;
   const UNREACHABLE = "Can't change this while the server can't be reached";
-  const toggleWorkers = () => {
-    const next = !workersOn;
-    setWorkersOverride(next);
-    void api.runWorkersAction(next ? "on" : "off");
-  };
 
   return (
     <>
       <div className="pagehead">
         <h1>Dashboard</h1>
         <span className="sp"></span>
-        {/* Shows the last known state. While the server can't be reached it is disabled, in muted tones, and says so. Hidden only if no state was ever known. */}
-        {known !== null && (
-          <button
-            type="button"
-            className={`sw${down ? " dis" : ""}`}
-            aria-pressed={workersOn}
-            disabled={down}
-            title={down ? UNREACHABLE : undefined}
-            onClick={toggleWorkers}
-          >
-            <span className={`k ${workersOn ? "on" : ""}`}></span>
-            <b>{down ? `Workers ${workersOn ? "on" : "off"} · last known` : `Workers ${workersOn ? "on" : "off"}`}</b>
-          </button>
-        )}
         <button
           type="button"
           className={`btn ghost sm${down ? " dis" : ""}`}
