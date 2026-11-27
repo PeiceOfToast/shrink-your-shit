@@ -5,6 +5,7 @@ import * as mock from "./mock.ts";
 export const api = mock;
 export { setForcedState, getForcedState, onForcedStateChange } from "./mock.ts";
 export type * from "./types.ts";
+export type * from "./flowTypes.ts";
 export { LOG_CHOICES } from "./mockSettings.ts";
 export { ApiError } from "./errors.ts";
 export { onSummaryChanged } from "./summaryBus.ts";

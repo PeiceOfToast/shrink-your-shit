@@ -18,8 +18,8 @@ export type SetupInput = {
 };
 
 const STARTERS: Starter[] = [
-  { id: "shrink-videos", kind: "video", name: "Shrink videos", line: "Converts big files to HEVC on the graphics card", icon: "flow", guided: true },
-  { id: "blank-video", kind: "video", name: "Blank", line: "Start from nothing and build the steps yourself", icon: "plus", guided: false },
+  { id: "shrink-videos", kind: "video", name: "Shrink videos", line: "Answer a few plain questions. The steps are set for you, and you can open them in the editor later.", icon: "flow", guided: true },
+  { id: "blank-video", kind: "video", name: "Blank", line: "An empty workflow in the editor. For people who know which steps they want.", icon: "plus", guided: false },
 ];
 
 // Finishing setup ends the forced "First run" state for the rest of the session (the switcher can set it again).

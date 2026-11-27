@@ -9,6 +9,25 @@ const FORMAT = "shrink-your-shit.workflow";
 let rows: Omit<WorkflowRow, "usedBy">[] = WORKFLOW_ROWS.map((r) => ({ ...r }));
 let seq = 0;
 
+// Used by the picker's Start and by the flow pages' saves: a new draft row, and the state a publish or save sets.
+export function createWorkflowRow(input: { name: string; description: string; madeWith: "guided" | "editor" }): string {
+  const id = `${input.name.toLowerCase().replace(/[^a-z0-9]+/g, "-") || "workflow"}-${++seq}`;
+  rows = [
+    ...rows,
+    { id, name: input.name, description: input.description, kind: "video", updatedAt: new Date().toISOString(), state: "draft", problemCount: 0, madeWith: input.madeWith, fitsGuided: input.madeWith === "guided" },
+  ];
+  return id;
+}
+
+export function peekWorkflowRow(id: string): Omit<WorkflowRow, "usedBy"> | null {
+  return rows.find((r) => r.id === id) ?? null;
+}
+
+export function updateWorkflowRow(id: string, patch: Partial<Omit<WorkflowRow, "usedBy" | "id">>): void {
+  const cur = find(id);
+  rows = rows.map((r) => (r.id === cur.id ? { ...cur, ...patch, updatedAt: new Date().toISOString() } : r));
+}
+
 // The libraries that use a workflow, read from the library list at call time.
 function usedBy(id: string): WorkflowRow["usedBy"] {
   return currentLibraries()

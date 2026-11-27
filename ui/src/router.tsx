@@ -34,6 +34,8 @@ export type Route =
   | { name: "job"; id: string }
   | { name: "jobLog"; id: string }
   | { name: "workflows" }
+  | { name: "workflowPicker" }
+  | { name: "workflowGuided"; id: string }
   | { name: "workflowEditor"; id: string }
   | { name: "libraries" }
   | { name: "workers" }
@@ -66,6 +68,10 @@ export function resolve(pathname: string): Route {
   }
   if (parts[0] === "workflows") {
     if (parts.length === 1) return { name: "workflows" };
+    if (parts.length === 2 && parts[1] === "new") return { name: "workflowPicker" };
+    if (parts.length === 3 && parts[1] === "new" && parts[2] === "guided") return { name: "workflowGuided", id: "new" };
+    if (parts.length === 3 && parts[1] === "new" && parts[2] === "editor") return { name: "workflowEditor", id: "new" };
+    if (parts.length === 3 && parts[2] === "guided") return { name: "workflowGuided", id: parts[1] };
     if (parts.length === 2) return { name: "workflowEditor", id: parts[1] };
   }
   if (parts[0] === "workers") {
