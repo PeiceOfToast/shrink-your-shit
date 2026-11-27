@@ -160,14 +160,16 @@ type AudioTrack struct {
 	Comment       bool
 }
 
-// SubtitleTrack is one subtitle stream.
+// SubtitleTrack is one subtitle stream. HearingImpaired is the file's own "for people who cannot
+// hear the soundtrack" flag; it decides whether a name says .sdh.
 type SubtitleTrack struct {
-	Index    int
-	Codec    string
-	Language string
-	Title    string
-	Default  bool
-	Forced   bool
+	Index           int
+	Codec           string
+	Language        string
+	Title           string
+	Default         bool
+	Forced          bool
+	HearingImpaired bool
 }
 
 // SubtitleKind is how a subtitle stream can be handled. The three values are explicit on purpose:
@@ -186,13 +188,17 @@ func (s SubtitleTrack) Kind() SubtitleKind {
 	return subtitleKind(s.Codec)
 }
 
-// subtitleKind lists both directions explicitly: text codecs that convert to .srt, bitmap codecs
-// that need picture handling (PGS, VobSub, DVB), and everything else as other.
+// subtitleKind lists both directions explicitly (L-AUD-19): text codecs that convert to .srt,
+// bitmap codecs that need picture handling, and everything else as other. The list is deliberately
+// long: a text codec missing here is left alone rather than converted, so each names the ffmpeg
+// demuxer's own name.
 func subtitleKind(codec string) SubtitleKind {
 	switch codec {
-	case "subrip", "ass", "ssa", "webvtt", "mov_text", "text":
+	case "subrip", "srt", "ass", "ssa", "mov_text", "webvtt", "text",
+		"subviewer", "subviewer1", "jacosub", "sami", "realtext", "stl", "vplayer", "mpl2", "pjs",
+		"microdvd", "eia_608":
 		return SubtitleText
-	case "hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle", "xsub":
+	case "hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle", "dvb_teletext", "xsub":
 		return SubtitleBitmap
 	}
 	return SubtitleOther
@@ -325,10 +331,11 @@ type probeStream struct {
 }
 
 type probeDisposition struct {
-	Default     flexInt `json:"default"`
-	Forced      flexInt `json:"forced"`
-	Comment     flexInt `json:"comment"`
-	AttachedPic flexInt `json:"attached_pic"`
+	Default         flexInt `json:"default"`
+	Forced          flexInt `json:"forced"`
+	Comment         flexInt `json:"comment"`
+	HearingImpaired flexInt `json:"hearing_impaired"`
+	AttachedPic     flexInt `json:"attached_pic"`
 }
 
 type probeSideData struct {
@@ -491,12 +498,13 @@ func audioTrack(s *probeStream) AudioTrack {
 
 func subtitleTrack(s *probeStream) SubtitleTrack {
 	return SubtitleTrack{
-		Index:    s.Index,
-		Codec:    s.CodecName,
-		Language: s.Tags.Strings()["language"],
-		Title:    s.Tags.Strings()["title"],
-		Default:  s.Disposition.Default != 0,
-		Forced:   s.Disposition.Forced != 0,
+		Index:           s.Index,
+		Codec:           s.CodecName,
+		Language:        s.Tags.Strings()["language"],
+		Title:           s.Tags.Strings()["title"],
+		Default:         s.Disposition.Default != 0,
+		Forced:          s.Disposition.Forced != 0,
+		HearingImpaired: s.Disposition.HearingImpaired != 0,
 	}
 }
 

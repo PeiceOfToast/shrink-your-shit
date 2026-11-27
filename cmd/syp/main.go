@@ -115,10 +115,16 @@ func run(dataDir, listen string) error {
 		bus.Close(context.Background())
 		return fmt.Errorf("recover jobs: %w", err)
 	}
+	// A stop between placing a file's .srt subtitles and the file itself leaves records: each .srt
+	// of ours whose new file is not in place goes, so a retry finds no name taken by our own file.
+	for _, said := range safety.RecoverSidecars(jobs.SidecarJournal{DB: db}) {
+		_ = bus.Emit(events.Event{Level: events.LevelWarn, Kind: events.KindWarning,
+			Source: "safety", Code: "sidecar.recovered", Message: said})
+	}
 	wk := worker.New(worker.Config{
 		Slots: 1, WorkerID: "local", DataDir: dataDir, Bus: bus,
 		Source: worker.Builtin{Queue: q, DB: db, Flows: flows},
-		Run:    flow.Run, Env: workerEnv(flows, bus),
+		Run:    flow.Run, Env: workerEnv(flows, bus, db),
 	})
 	wctx, stopWorker := context.WithCancel(ctx)
 	workerDone := make(chan struct{})
@@ -260,13 +266,14 @@ func engineEnv() flow.Env {
 	}
 }
 
-func workerEnv(flows *flow.Store, bus *events.Bus) flow.Env {
+func workerEnv(flows *flow.Store, bus *events.Bus, db *store.DB) flow.Env {
 	env := engineEnv()
 	env.LoadRevision = func(ctx context.Context, id int64, rev int) (flow.Flow, error) {
 		r, err := flows.Revision(ctx, id, rev)
 		return r.Flow, err
 	}
 	env.Bus = bus
+	env.Sidecars = jobs.SidecarJournal{DB: db}
 	return env
 }
 

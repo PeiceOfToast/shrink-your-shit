@@ -458,8 +458,8 @@ func TestAudioInertFields(t *testing.T) {
 	}
 }
 
-// TestAudioNotYet pins the two settings the engine still cannot act on: the subtitles (S2-7b) and
-// keeping the original track as well.
+// TestAudioNotYet pins the one setting the engine still cannot act on: keeping the original track
+// as well.
 func TestAudioNotYet(t *testing.T) {
 	set := audioDefaults()
 	set.KeepOriginal = true
@@ -474,9 +474,7 @@ func TestAudioNotYet(t *testing.T) {
 		got[p.Field] = p.Message
 	}
 	want := map[string]string{
-		"keepOriginal":      "Keeping the original track as well is not built yet.",
-		"subtitles":         "Choosing which subtitles to keep is not built yet; every subtitle is kept.",
-		"subtitleLanguages": "Keeping only some subtitle languages is not built yet; every subtitle is kept.",
+		"keepOriginal": "Keeping the original track as well is not built yet.",
 	}
 	for field, message := range want {
 		if got[field] != message {

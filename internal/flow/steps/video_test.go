@@ -388,7 +388,7 @@ func TestVideoNotYet(t *testing.T) {
 		}
 		got[p.Field] = true
 	}
-	for _, field := range []string{"size", "preset", "fps", "bitDepth", "hdr", "keepDolbyVision", "twoPass"} {
+	for _, field := range []string{"twoPass"} {
 		if !got[field] {
 			t.Errorf("problems = %v, want one on %s", got, field)
 		}

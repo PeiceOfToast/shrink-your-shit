@@ -101,7 +101,14 @@ func job(id int64) Work {
 // waitFor polls until cond holds or the test has waited two seconds.
 func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	waitForWithin(t, 2*time.Second, what, cond)
+}
+
+// waitForWithin is waitFor with its own limit, for tests that run a real encode: a loaded CI runner can take
+// longer than two seconds for one (#858's go job timed out at 2.46 s on a 1.9 s encode).
+func waitForWithin(t *testing.T, limit time.Duration, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(limit)
 	for !cond() {
 		if time.Now().After(deadline) {
 			t.Fatalf("timed out waiting for %s", what)

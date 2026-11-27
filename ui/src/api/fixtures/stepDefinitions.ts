@@ -36,6 +36,19 @@ export const STEP_DEFINITIONS: StepDefinition[] = [
         "keep": "log",
         "level": "error",
         "text": "The bitrate is missing"
+      },
+      {
+        "code": "video.hdr_h264",
+        "keep": "log",
+        "level": "error",
+        "text": "H.264 isn't used for HDR"
+      },
+      {
+        "code": "video.hdr_skipped",
+        "fields": ["hdr"],
+        "keep": "log",
+        "level": "info",
+        "text": "Left alone: {hdr} is not converted"
       }
     ],
     "form": {
@@ -570,6 +583,19 @@ export const STEP_DEFINITIONS: StepDefinition[] = [
         "keep": "log",
         "level": "info",
         "text": "The file has no audio"
+      },
+      {
+        "code": "audio.subtitles",
+        "fields": [
+          "subtitles",
+          "subtitleTracks",
+          "subtitlesKept",
+          "subtitlesDropped",
+          "subtitlesExtracted"
+        ],
+        "keep": "log",
+        "level": "info",
+        "text": "Choosing subtitles"
       }
     ],
     "form": {

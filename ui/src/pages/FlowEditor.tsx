@@ -3,7 +3,7 @@ import { navigate, useLocation } from "../router.tsx";
 import { api, type Flow, type FlowCheck, type FlowStep, type StepDefinition, type StepId } from "../api/index.ts";
 import { useApi } from "../api/useApi.ts";
 import { QUALITY_NAMES, Row, Seg, toErr, useBitrateLadder, useCardFamilies, type Err } from "./flowParts.tsx";
-import { DRAWN, NO_LONGER_OFFERED, choiceKey, greyedChoices, offeredChoices, type Choice } from "./flowFields.ts";
+import { DRAWN, NO_LONGER_OFFERED, choiceKey, greyedChoices, offeredChoices, valueGreys, type Choice } from "./flowFields.ts";
 import { qualityMeaning } from "../format/quality.ts";
 import { fileTypeHint } from "../format/fileType.ts";
 import { nameExample } from "../format/nameExample.ts";
@@ -137,10 +137,11 @@ function Editor({ id, initial }: { id: string; initial: Loaded }) {
   // A choice the check rules out for its value (the file types): the reason, or undefined.
   const whyValue = (stepId: StepId, field: string, value: string): string | undefined =>
     check?.disabled.find((d) => d.stepId === stepId && d.field === field && d.value === value)?.why;
-  // The choices the step definitions grey out for a field, by choice key, with the server's reason.
+  // The choices greyed for a field, by choice key, with the server's reason: the step definitions' greys, then every
+  // check entry for the field that rules out a value (the file types, Colour depth 10, and so on).
   const greyed = (stepId: StepId, field: string): Off => {
     const def = initial.defs.find((d) => d.type === TYPE[stepId]);
-    return def ? greyedChoices(def, field) : {};
+    return { ...(def ? greyedChoices(def, field) : {}), ...valueGreys(check?.disabled ?? [], stepId, field) };
   };
   const problemsFor = (stepId: StepId) => (check?.problems ?? []).filter((p) => p.stepId === stepId);
   const problemCount = check?.problems.length ?? 0;

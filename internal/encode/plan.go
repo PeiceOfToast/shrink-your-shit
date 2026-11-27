@@ -56,7 +56,7 @@ const (
 
 // HDRMode is page 07's HDR choice. The zero value keeps the source's metadata; skip is the step's
 // "leave HDR files alone" and reaches Build only as the backstop, where an HDR source is refused;
-// tonemap belongs to a later stage.
+// tonemap converts an HDR picture to SDR BT.709 (zscale and tonemap on the processor).
 type HDRMode string
 
 const (
@@ -81,6 +81,9 @@ const (
 	StreamDrop StreamAction = "drop"
 	// StreamConvert re-encodes a stream: the audio step's formats and channels.
 	StreamConvert StreamAction = "convert"
+	// StreamExtract writes a text subtitle to its own .srt file beside the new file instead of
+	// carrying it inside (L-AUD-22).
+	StreamExtract StreamAction = "extract"
 )
 
 // StreamPlan names an input stream by its ffprobe index and what to do with it. A stream the plan
@@ -88,6 +91,9 @@ const (
 type StreamPlan struct {
 	Index  int
 	Action StreamAction
+	// Part is the name an extracted subtitle gets, lang[.forced|.sdh][.N] (L-AUD-22); empty means
+	// the new file's base name alone. It is unused for every other action.
+	Part string
 }
 
 // VideoPlan is the video stream part of the plan.
@@ -123,8 +129,12 @@ type Plan struct {
 	// Audio says what happens to each named audio stream, including the codec and channel choices
 	// when it converts; a stream it does not name is copied.
 	Audio []AudioPlan
-	// Subtitles says what happens to named input streams; unnamed streams are copied.
+	// Subtitles says what happens to named input streams; unnamed streams are copied, except that
+	// the file type decides how each one is written (Build's container rules).
 	Subtitles []StreamPlan
+	// SidecarDir is the folder extracted subtitles are written to, before they are placed beside
+	// the new file (L-AUD-25). It is required when the plan extracts any.
+	SidecarDir string
 	// MetadataClear names per-stream video tags to remove from the output. The ffmpeg statistics
 	// tags are always cleared on a re-encoded video stream, because they describe the old encode.
 	MetadataClear []string
