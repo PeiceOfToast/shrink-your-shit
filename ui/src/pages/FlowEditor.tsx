@@ -1,24 +1,25 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { navigate, useLocation } from "../router.tsx";
-import { api, type Flow, type FlowCheck, type FlowStep, type StepId, type TryLine } from "../api/index.ts";
+import { api, type Flow, type FlowCheck, type FlowStep, type StepDefinition, type StepId, type TryLine } from "../api/index.ts";
 import { useApi } from "../api/useApi.ts";
-import { ChoiceField, QUALITY_NAMES, Row, Seg, toErr, useBitrateLadder, useCardFamilies, type Err } from "./flowParts.tsx";
+import { QUALITY_NAMES, Row, Seg, toErr, useBitrateLadder, useCardFamilies, type Err } from "./flowParts.tsx";
+import { DRAWN, NO_LONGER_OFFERED, choiceKey, greyedChoices, offeredChoices, type Choice } from "./flowFields.ts";
 import { qualityMeaning } from "../format/quality.ts";
 import { fileTypeHint } from "../format/fileType.ts";
 import { LanguageChips } from "./LanguageChips.tsx";
 
 // Flow editor (07): the fixed walk Video → Audio → Save the result. Nothing is added or reordered.
 // The Advanced parts replace the simple choices for the things the guided page doesn't cover.
+// Option lists come from flowFields.ts (checked against the step definitions golden); the greyed choices come from
+// the definitions the server sends.
 
 const NEW = "new";
 const ORDER: StepId[] = ["video", "audio", "save"];
-// The file types, in the order the File type row shows them. Greyed ones come from the check's disabled list.
-const CONTAINERS = [
-  { value: "mkv", label: "MKV" },
-  { value: "mp4", label: "MP4" },
-  { value: "webm", label: "WebM" },
-  { value: "keep", label: "Keep the same" },
-];
+type StepType = "video.convert" | "audio.tracks" | "file.save";
+const TYPE: Record<StepId, StepType> = { video: "video.convert", audio: "audio.tracks", save: "file.save" };
+const V: StepType = "video.convert";
+const A: StepType = "audio.tracks";
+const F: StepType = "file.save";
 // What each Subtitles choice keeps, under the choice.
 const SUBTITLE_HINT: Record<string, string> = {
   keep_all: "Every subtitle is kept.",
@@ -26,6 +27,13 @@ const SUBTITLE_HINT: Record<string, string> = {
   text_only: "Only text subtitles are kept; picture subtitles are dropped.",
   srt: "Subtitles are made into SRT files.",
 };
+// The two special tracks the default track can name, in page 07's words.
+const SPECIAL_TRACKS = [
+  { code: "orig", name: "Original language" },
+  { code: "und", name: "Unknown" },
+];
+// The Advanced video fields that "Back to the defaults" resets to the golden's defaults.
+const ADVANCED_VIDEO = ["size", "width", "height", "rateControl", "bitrateLevel", "avgMbps", "maxMbps", "twoPass", "preset", "fps", "bitDepth", "hdr", "keepDolbyVision"];
 // The name example follows the file type: Keep the same keeps the source's own extension.
 function nameExample(container: string, suffix: string): string {
   const after = suffix || "…";
@@ -35,30 +43,35 @@ function nameExample(container: string, suffix: string): string {
 const STEP_NAME: Record<StepId, string> = { video: "Video", audio: "Audio", save: "Save the result" };
 const FORMAT_NAME: Record<string, string> = { hevc: "HEVC", h264: "H.264", av1: "AV1" };
 const ROW_FOR_SIZE: Record<string, string> = { "2160": "2160", "1440": "1440", "1080": "1080", "720": "720", "480": "sd" };
-const SIZE_OPTIONS = [
-  { value: "keep", label: "Same as the source" },
-  { value: "2160", label: "2160p" },
-  { value: "1440", label: "1440p" },
-  { value: "1080", label: "1080p" },
-  { value: "720", label: "720p" },
-  { value: "480", label: "480p" },
-  { value: "custom", label: "Custom" },
-];
+
+// A field's value as the card shows it: the stored value, or the golden's default when unset.
+function valueOf(type: StepType, s: Record<string, unknown>, key: string): unknown {
+  return s[key] ?? DRAWN[type].defaults[key];
+}
+function choicesOf(type: StepType, key: string): Choice[] {
+  return DRAWN[type].choices[key] ?? [];
+}
+// Greyed choices by choice key, with the reason shown under the field.
+type Off = Record<string, string>;
 
 interface Loaded {
   flow: Flow;
   rev: number;
   name: string;
   usedBy: string[];
+  defs: StepDefinition[];
 }
 
-// The graphics card choice. The backend has no separate value for Automatic and Intel (QSV): both use the card.
-type GpuPick = "auto" | "qsv" | "none";
+// The graphics card, as page 07 words it: the stored useGpu bool, as "true" or "false".
+const GPU_CHOICES: Choice[] = [
+  { value: "true", label: "Automatic" },
+  { value: "false", label: "Off" },
+];
 
 export function FlowEditor({ id }: { id: string }) {
   const starter = useLocation().query.get("starter");
   const loaded = useApi<Loaded>(async () => {
-    const rows = await api.listWorkflows();
+    const [rows, defs] = await Promise.all([api.listWorkflows(), api.getStepDefinitions()]);
     const row = rows.find((r) => r.id === id);
     const name = row?.name ?? "New workflow";
     const usedBy = row?.usedBy.map((u) => u.name) ?? [];
@@ -66,10 +79,10 @@ export function FlowEditor({ id }: { id: string }) {
       const g = await api.getGuideAnswers(NEW);
       const extra = starter ? (await api.getStarter(starter)).answers : {};
       const p = await api.guidePreview({ ...g.answers, ...extra });
-      return { flow: { ...p.flow, name }, rev: 0, name, usedBy };
+      return { flow: { ...p.flow, name }, rev: 0, name, usedBy, defs };
     }
     const f = await api.getFlow(id);
-    return { flow: f.flow, rev: f.rev, name, usedBy };
+    return { flow: f.flow, rev: f.rev, name, usedBy, defs };
   }, [id, starter]);
 
   if (loaded.error && !loaded.data) {
@@ -94,7 +107,6 @@ function Editor({ id, initial }: { id: string; initial: Loaded }) {
   const [tryErr, setTryErr] = useState<Err | null>(null);
   const [draftId, setDraftId] = useState(id);
   const [tryOpen, setTryOpen] = useState(false);
-  const [gpu, setGpu] = useState<GpuPick>(() => (initial.flow.steps.find((s) => s.id === "video")?.settings.useGpu === false ? "none" : "auto"));
   const seq = useRef(0);
   const isNew = draftId === NEW;
 
@@ -130,6 +142,11 @@ function Editor({ id, initial }: { id: string; initial: Loaded }) {
   // A choice the check rules out for its value (the file types): the reason, or undefined.
   const whyValue = (stepId: StepId, field: string, value: string): string | undefined =>
     check?.disabled.find((d) => d.stepId === stepId && d.field === field && d.value === value)?.why;
+  // The choices the step definitions grey out for a field, by choice key, with the server's reason.
+  const greyed = (stepId: StepId, field: string): Off => {
+    const def = initial.defs.find((d) => d.type === TYPE[stepId]);
+    return def ? greyedChoices(def, field) : {};
+  };
   const problemsFor = (stepId: StepId) => (check?.problems ?? []).filter((p) => p.stepId === stepId);
   const problemCount = check?.problems.length ?? 0;
 
@@ -181,86 +198,71 @@ function Editor({ id, initial }: { id: string; initial: Loaded }) {
   const audio = settings("audio");
   const save_ = settings("save");
 
+  // The file types the picked video can't go in: the server's reasons, by choice key.
+  const containerOff = (): Off => {
+    const out: Off = { ...greyed("save", "container") };
+    for (const c of choicesOf(F, "container")) {
+      const w = whyValue("save", "container", String(c.value));
+      if (w) out[choiceKey(c.value)] = w;
+    }
+    return out;
+  };
+  // Format is greyed as a whole when the check says so (a codec above it replaces it); otherwise the definitions' greys.
+  const formatOff = (): Off => {
+    const w = why("audio", "format");
+    if (!w) return greyed("audio", "format");
+    return Object.fromEntries(choicesOf(A, "format").map((c) => [choiceKey(c.value), w]));
+  };
+
   const cards: Record<StepId, ReactNode> = {
     video: (
       <>
-        <Row label="Format" hint={video.format === "hevc" ? "Small files that play on most TVs and phones since 2016." : undefined}>
-          <Seg
-            label="Format"
-            value={String(video.format)}
-            options={[
-              { value: "hevc", label: "HEVC" },
-              { value: "h264", label: "H.264" },
-              { value: "av1", label: "AV1" },
-            ]}
-            onChange={(v) => set("video", { format: v, ...(v === "av1" && video.rateControl === "vbr" ? { rateControl: null } : {}) })}
-          />
-        </Row>
+        <Choose
+          label="Format"
+          choices={choicesOf(V, "format")}
+          value={valueOf(V, video, "format")}
+          off={greyed("video", "format")}
+          hint={valueOf(V, video, "format") === "hevc" ? "Small files that play on most TVs and phones since 2016." : undefined}
+          onChange={(v) => set("video", { format: v, ...(v === "av1" && video.rateControl === "vbr" ? { rateControl: null } : {}) })}
+        />
         <QualityRow
-          value={Number(video.quality ?? 3)}
-          format={String(video.format)}
-          card={video.useGpu !== false}
+          value={Number(valueOf(V, video, "quality") ?? 3)}
+          format={String(valueOf(V, video, "format"))}
+          card={valueOf(V, video, "useGpu") !== false}
           size={video.size == null ? null : String(video.size)}
           off={video.rateControl != null ? "Not used: Advanced sets a bitrate instead." : why("video", "quality")}
           onChange={(q) => set("video", { quality: q })}
         />
-        <Row label="Graphics card" hint="Made on your card (QSV) when it can.">
-          <select
-            className="sel"
-            aria-label="Graphics card"
-            value={gpu}
-            onChange={(e) => {
-              const v = e.target.value as GpuPick;
-              setGpu(v);
-              set("video", { useGpu: v !== "none" });
-            }}
-          >
-            <option value="auto">Automatic</option>
-            <option value="qsv">Intel (QSV)</option>
-            <option value="none">None, use the processor</option>
-          </select>
-        </Row>
-        <Row label="If the graphics card can't do it">
-          <Seg
-            label="If the graphics card can't do it"
-            value={String(video.ifGpuFails ?? "cpu")}
-            options={[
-              { value: "cpu", label: "Use the processor" },
-              { value: "stop", label: "Stop and tell me" },
-            ]}
-            onChange={(v) => set("video", { ifGpuFails: v })}
-          />
-        </Row>
+        <Choose
+          widget="select"
+          label="Graphics card"
+          hint="Made on the graphics card when a worker has one."
+          choices={GPU_CHOICES}
+          value={String(video.useGpu !== false)}
+          onChange={(v) => set("video", { useGpu: v === "true" })}
+        />
+        <Choose
+          label="If the graphics card can't do it"
+          choices={choicesOf(V, "ifGpuFails")}
+          value={valueOf(V, video, "ifGpuFails")}
+          off={greyed("video", "ifGpuFails")}
+          onChange={(v) => set("video", { ifGpuFails: v })}
+        />
         <Advanced summary="Advanced" description="Picture size, bitrate, speed, frame rate, bit depth, HDR">
           <VideoAdvanced
             s={video}
-            format={String(video.format)}
+            format={String(valueOf(V, video, "format"))}
             set={(patch) => set("video", patch)}
             disabledRate={why("video", "rateControl")}
+            greyed={(field) => greyed("video", field)}
           />
         </Advanced>
       </>
     ),
     audio: (
       <>
-        <ChoiceField
-          label="Format"
-          value={String(audio.format ?? "aac")}
-          choices={[
-            { value: "aac", label: "AAC", available: why("audio", "format") === undefined, why: why("audio", "format") },
-            { value: "opus", label: "Opus", available: why("audio", "format") === undefined, why: why("audio", "format") },
-            { value: "copy", label: "Same as the source", available: why("audio", "format") === undefined, why: why("audio", "format") },
-          ]}
-          onChange={(v) => set("audio", { format: v })}
-        />
-        <Row label="Channels">
-          <select className="sel" aria-label="Channels" value={String(audio.channels ?? "stereo")} onChange={(e) => set("audio", { channels: e.target.value })}>
-            <option value="stereo">Stereo</option>
-            <option value="source">Same as the source</option>
-            <option value="mono">Mono</option>
-            <option value="5.1">5.1</option>
-          </select>
-        </Row>
+        <Choose label="Format" choices={choicesOf(A, "format")} value={valueOf(A, audio, "format")} off={formatOff()} onChange={(v) => set("audio", { format: v })} />
+        <Choose label="Channels" widget="select" choices={choicesOf(A, "channels")} value={valueOf(A, audio, "channels")} onChange={(v) => set("audio", { channels: v })} />
         {audio.channels === "5.1" && (
           <div className="note" style={{ margin: "0 0 8px" }}>
             <span className="ic" aria-hidden="true">!</span>
@@ -280,22 +282,18 @@ function Editor({ id, initial }: { id: string; initial: Loaded }) {
         >
           <LanguageChips label="Languages" value={(audio.languages as string[] | undefined) ?? []} onChange={(languages) => set("audio", { languages })} />
         </Row>
-        <Advanced summary="Advanced" description="Codec, bitrate, downmix, loudness, commentary, original track">
-          <AudioAdvanced s={audio} set={(patch) => set("audio", patch)} />
+        <Advanced summary="Advanced" description="Codec, bitrate, sample rate, stereo from surround, loudness, commentary, default track, original track">
+          <AudioAdvanced s={audio} set={(patch) => set("audio", patch)} greyed={(field) => greyed("audio", field)} />
         </Advanced>
-        <Row label="Subtitles" full hint={SUBTITLE_HINT[String(audio.subtitles ?? "keep_all")]}>
-          <Seg
-            label="Subtitles"
-            value={String(audio.subtitles ?? "keep_all")}
-            options={[
-              { value: "keep_all", label: "Keep all" },
-              { value: "my_languages", label: "Keep my languages" },
-              { value: "text_only", label: "Text only" },
-              { value: "srt", label: "Make SRT files" },
-            ]}
-            onChange={(v) => set("audio", { subtitles: v })}
-          />
-        </Row>
+        <Choose
+          label="Subtitles"
+          full
+          choices={choicesOf(A, "subtitles")}
+          value={valueOf(A, audio, "subtitles")}
+          off={greyed("audio", "subtitles")}
+          hint={SUBTITLE_HINT[String(valueOf(A, audio, "subtitles"))]}
+          onChange={(v) => set("audio", { subtitles: v })}
+        />
         {audio.subtitles === "my_languages" && (
           <Row label="Subtitle languages" full hint="None picked keeps the same languages as the audio.">
             <LanguageChips label="Subtitle languages" value={(audio.subtitleLanguages as string[] | undefined) ?? []} onChange={(subtitleLanguages) => set("audio", { subtitleLanguages })} />
@@ -306,35 +304,25 @@ function Editor({ id, initial }: { id: string; initial: Loaded }) {
     save: (
       <>
         <p className="hint" style={{ marginTop: 0 }}>Every result is checked first: it must play and not be broken. A broken result is never saved, and the original stays as it was.</p>
-        <Row label="File type" full hint={fileTypeHint(CONTAINERS.map((o) => whyValue("save", "container", o.value)).filter((w): w is string => Boolean(w)))}>
-          <Seg
-            label="File type"
-            value={String(save_.container ?? "mkv")}
-            options={CONTAINERS.map((o) => ({ value: o.value, label: o.label, disabled: whyValue("save", "container", o.value) !== undefined, title: whyValue("save", "container", o.value) }))}
-            onChange={(v) => set("save", { container: v })}
-          />
-        </Row>
-        <Row label="Where the result goes">
-          <Seg
-            label="Where the result goes"
-            value={String(save_.where ?? "replace")}
-            options={[
-              { value: "replace", label: "Replace the original" },
-              { value: "next_to", label: "Next to the original" },
-              { value: "folder", label: "A different folder" },
-            ]}
-            onChange={(v) => set("save", { where: v })}
-          />
-        </Row>
-        {save_.where === "folder" && (
+        <Choose
+          label="File type"
+          full
+          choices={choicesOf(F, "container")}
+          value={valueOf(F, save_, "container")}
+          off={containerOff()}
+          hint={fileTypeHint(choicesOf(F, "container").map((c) => whyValue("save", "container", String(c.value))).filter((w): w is string => Boolean(w)))}
+          onChange={(v) => set("save", { container: v })}
+        />
+        <Choose label="Where the result goes" choices={choicesOf(F, "where")} value={valueOf(F, save_, "where")} off={greyed("save", "where")} onChange={(v) => set("save", { where: v })} />
+        {valueOf(F, save_, "where") === "folder" && (
           <Row label="Folder" hint="Sub-folders of the library are kept.">
             <input className="inp" aria-label="Folder" value={String(save_.folder ?? "")} onChange={(e) => set("save", { folder: e.target.value })} />
           </Row>
         )}
-        {save_.where === "replace" && (
+        {valueOf(F, save_, "where") === "replace" && (
           <p className="hint" style={{ margin: "0 0 8px" }}>The original goes to the trash and is kept 7 days. How long is set for all workflows in Settings › Processing.</p>
         )}
-        <Row label="Add to the file name" hint={nameExample(String(save_.container ?? "mkv"), String(save_.nameSuffix ?? ""))}>
+        <Row label="Add to the file name" hint={nameExample(String(valueOf(F, save_, "container")), String(save_.nameSuffix ?? ""))}>
           <input className="inp" aria-label="Add to the file name" value={String(save_.nameSuffix ?? "")} onChange={(e) => set("save", { nameSuffix: e.target.value })} />
         </Row>
       </>
@@ -454,6 +442,61 @@ function Editor({ id, initial }: { id: string; initial: Loaded }) {
   );
 }
 
+// One field: its choices from the editor table, as a segmented control or a select. A greyed choice is disabled, and its
+// reason shows under the field (the explicit hint wins). children sit inside the row, under the control.
+function Choose({
+  label,
+  choices,
+  value,
+  onChange,
+  off = {},
+  widget = "seg",
+  hint,
+  full,
+  children,
+}: {
+  label: string;
+  choices: Choice[];
+  value: unknown;
+  onChange: (v: string | number | null) => void;
+  off?: Off;
+  widget?: "seg" | "select";
+  hint?: string;
+  full?: boolean;
+  children?: ReactNode;
+}) {
+  const { options, stale } = offeredChoices(choices, value);
+  const key = choiceKey(value);
+  const isOff = (k: string) => Boolean(off[k]) || k === stale;
+  const reasons = options.map((c) => off[choiceKey(c.value)]).filter((w): w is string => Boolean(w));
+  const shown = stale !== null ? NO_LONGER_OFFERED : (hint ?? (reasons.length ? reasons.join(" ") : undefined));
+  const pick = (k: string) => {
+    const c = options.find((x) => choiceKey(x.value) === k);
+    if (c) onChange(c.value);
+  };
+  return (
+    <Row label={label} hint={shown} full={full}>
+      {widget === "seg" ? (
+        <Seg
+          label={label}
+          value={key}
+          options={options.map((c) => ({ value: choiceKey(c.value), label: c.label, disabled: isOff(choiceKey(c.value)), title: off[choiceKey(c.value)] }))}
+          onChange={pick}
+        />
+      ) : (
+        <select className="sel" aria-label={label} value={key} onChange={(e) => pick(e.target.value)}>
+          {options.map((c) => (
+            <option key={choiceKey(c.value)} value={choiceKey(c.value)} disabled={isOff(choiceKey(c.value))}>
+              {c.label}
+            </option>
+          ))}
+        </select>
+      )}
+      {children}
+    </Row>
+  );
+}
+
 // Quality: the 1–5 slider with its name, and the number it resolves to for the picture size.
 function QualityRow({ value, format, card, size, off, onChange }: { value: number; format: string; card: boolean; size: string | null; off?: string; onChange: (q: number) => void }) {
   const ladder = useBitrateLadder();
@@ -480,32 +523,34 @@ function Advanced({ summary, description, children }: { summary: string; descrip
   );
 }
 
-function VideoAdvanced({ s, format, set, disabledRate }: { s: Record<string, unknown>; format: string; set: (patch: Record<string, unknown>) => void; disabledRate?: string }) {
+function VideoAdvanced({
+  s,
+  format,
+  set,
+  disabledRate,
+  greyed,
+}: {
+  s: Record<string, unknown>;
+  format: string;
+  set: (patch: Record<string, unknown>) => void;
+  disabledRate?: string;
+  greyed: (field: string) => Off;
+}) {
   const rate = (s.rateControl as string | null) ?? null;
-  const level = String(s.bitrateLevel ?? "medium");
-  const sizeKey = s.size == null ? "keep" : String(s.size);
+  const level = String(valueOf(V, s, "bitrateLevel"));
+  const size = valueOf(V, s, "size");
   const row = ROW_FOR_SIZE[String(s.size ?? "1080")] ?? "1080";
   const rec = useLadder(format, row);
   const recLine = rec?.line;
   const avgShown = level === "custom" ? (s.avgMbps ?? "") : recLine ? recLine[level as "low" | "medium" | "high"] : "";
+  // Variable bitrate doesn't work with AV1 yet: greyed here, whatever the definitions say.
+  const rateOff: Off = { ...greyed("rateControl") };
+  if (format === "av1") rateOff.vbr = "Variable bitrate doesn't work with AV1 yet. Pick Constant bitrate or Quality, or another format.";
 
   return (
     <>
-      <Row label="Picture size">
-        <select
-          className="sel"
-          aria-label="Picture size"
-          value={sizeKey}
-          onChange={(e) => set({ size: e.target.value === "keep" ? null : e.target.value })}
-        >
-          {SIZE_OPTIONS.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
-      </Row>
-      {sizeKey === "custom" && (
+      <Choose widget="select" label="Picture size" choices={choicesOf(V, "size")} value={size} off={greyed("size")} onChange={(v) => set({ size: v })} />
+      {size === "custom" && (
         <Row label="Custom size">
           <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <input className="inp narrow" aria-label="Width" type="number" value={String(s.width ?? "")} onChange={(e) => set({ width: e.target.value ? Number(e.target.value) : null })} /> ×
@@ -513,38 +558,16 @@ function VideoAdvanced({ s, format, set, disabledRate }: { s: Record<string, unk
           </span>
         </Row>
       )}
-      <Row label="Bitrate" hint={disabledRate}>
-        <Seg
-          label="Bitrate"
-          value={rate ?? "quality"}
-          options={[
-            { value: "quality", label: "Quality" },
-            { value: "vbr", label: format === "av1" ? "Variable bitrate (not with AV1)" : "Variable bitrate", disabled: format === "av1", title: format === "av1" ? "Not with AV1" : undefined },
-            { value: "cbr", label: "Constant bitrate" },
-          ]}
-          onChange={(v) => set({ rateControl: v === "quality" ? null : v })}
-        />
-      </Row>
+      <Choose label="Bitrate" choices={choicesOf(V, "rateControl")} value={rate} off={rateOff} hint={disabledRate} onChange={(v) => set({ rateControl: v })} />
       {rate != null && (
         <>
-          <Row label="Bitrate level">
-            <Seg
-              label="Bitrate level"
-              value={level}
-              options={[
-                { value: "low", label: "Low" },
-                { value: "medium", label: "Medium" },
-                { value: "high", label: "High" },
-                { value: "custom", label: "Custom" },
-              ]}
-              onChange={(v) => set({ bitrateLevel: v })}
-            />
+          <Choose label="Bitrate level" choices={choicesOf(V, "bitrateLevel")} value={valueOf(V, s, "bitrateLevel")} off={greyed("bitrateLevel")} onChange={(v) => set({ bitrateLevel: v })}>
             {rec && recLine && (
               <p className="hint wf-hint">
                 Recommended for {rec.rowLabel} {FORMAT_NAME[format] ?? format}: {recLine.low}–{recLine.high} Mb/s (Medium {recLine.medium}). More for HDR (+25%) and 50–60 fps (+40%), never above the source.
               </p>
             )}
-          </Row>
+          </Choose>
           <Row label={rate === "cbr" ? "Bitrate Mb/s" : "Average Mb/s"}>
             <input
               className="inp narrow"
@@ -556,52 +579,38 @@ function VideoAdvanced({ s, format, set, disabledRate }: { s: Record<string, unk
             />
           </Row>
           {rate === "vbr" && (
-            <Row label="At most Mb/s">
-              <input className="inp narrow" aria-label="At most Mb/s" type="number" step="0.1" value={String(s.maxMbps ?? "")} onChange={(e) => set({ maxMbps: e.target.value ? Number(e.target.value) : null })} />
-            </Row>
+            <>
+              <Row label="At most Mb/s">
+                <input className="inp narrow" aria-label="At most Mb/s" type="number" step="0.1" value={String(s.maxMbps ?? "")} onChange={(e) => set({ maxMbps: e.target.value ? Number(e.target.value) : null })} />
+              </Row>
+              <Row label="Variable bitrate">
+                <label style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
+                  <input type="checkbox" checked={Boolean(valueOf(V, s, "twoPass"))} onChange={(e) => set({ twoPass: e.target.checked })} />
+                  Two passes
+                </label>
+              </Row>
+            </>
           )}
         </>
       )}
-      <Row label="Speed">
-        <select className="sel" aria-label="Speed" value={String(s.preset ?? "")} onChange={(e) => set({ preset: e.target.value || null })}>
-          <option value="">Balanced (medium)</option>
-          <option value="slow">Slower, smaller</option>
-          <option value="fast">Faster, larger</option>
-        </select>
+      <Choose widget="select" label="Speed" choices={choicesOf(V, "preset")} value={valueOf(V, s, "preset")} off={greyed("preset")} onChange={(v) => set({ preset: v })} />
+      <Row label="Frame rate" hint="Left empty, each file keeps its own frame rate.">
+        <input className="inp narrow" aria-label="Frame rate" type="number" min={1} max={240} value={String(s.fps ?? "")} onChange={(e) => set({ fps: e.target.value ? Number(e.target.value) : null })} />
       </Row>
-      <Row label="Frame rate">
-        <Seg
-          label="Frame rate"
-          value={s.fps == null ? "keep" : String(s.fps)}
-          options={[
-            { value: "keep", label: "Same as the source" },
-            { value: "24", label: "24" },
-            { value: "25", label: "25" },
-            { value: "30", label: "30" },
-            { value: "60", label: "60" },
-          ]}
-          onChange={(v) => set({ fps: v === "keep" ? null : Number(v) })}
-        />
+      <Choose widget="select" label="Colour depth" choices={choicesOf(V, "bitDepth")} value={valueOf(V, s, "bitDepth")} off={greyed("bitDepth")} onChange={(v) => set({ bitDepth: v })} />
+      <Choose widget="select" label="HDR" choices={choicesOf(V, "hdr")} value={valueOf(V, s, "hdr")} off={greyed("hdr")} onChange={(v) => set({ hdr: v })} />
+      <Row label="Dolby Vision" hint="Only with HEVC.">
+        <label style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
+          <input
+            type="checkbox"
+            checked={Boolean(valueOf(V, s, "keepDolbyVision"))}
+            disabled={format !== "hevc"}
+            onChange={(e) => set({ keepDolbyVision: e.target.checked })}
+          />
+          Keep Dolby Vision
+        </label>
       </Row>
-      <Row label="Colour depth">
-        <select className="sel" aria-label="Colour depth" value={String(s.bitDepth ?? "")} onChange={(e) => set({ bitDepth: e.target.value ? Number(e.target.value) : null })}>
-          <option value="">Same as the source</option>
-          <option value="8">8-bit</option>
-          <option value="10">10-bit</option>
-        </select>
-      </Row>
-      <Row label="HDR">
-        <select className="sel" aria-label="HDR" value={String(s.hdr ?? "keep")} onChange={(e) => set({ hdr: e.target.value === "keep" ? null : e.target.value })}>
-          <option value="keep">Keep</option>
-          <option value="sdr">Convert to SDR</option>
-          <option value="leave">Leave HDR files alone</option>
-        </select>
-      </Row>
-      <button
-        type="button"
-        className="btn ghost sm"
-        onClick={() => set({ rateControl: null, size: null, width: null, height: null, bitrateLevel: "medium", avgMbps: null, maxMbps: null, preset: null, fps: null, bitDepth: null, hdr: null })}
-      >
+      <button type="button" className="btn ghost sm" onClick={() => set(Object.fromEntries(ADVANCED_VIDEO.map((k) => [k, DRAWN[V].defaults[k]])))}>
         Back to the defaults
       </button>
     </>
@@ -616,47 +625,47 @@ function useLadder(format: string, row: string) {
   return { line: table[row], rowLabel: ladder.data.rows.find((r) => r.row === row)?.label ?? row };
 }
 
-function AudioAdvanced({ s, set }: { s: Record<string, unknown>; set: (patch: Record<string, unknown>) => void }) {
+function AudioAdvanced({ s, set, greyed }: { s: Record<string, unknown>; set: (patch: Record<string, unknown>) => void; greyed: (field: string) => Off }) {
+  const langs = useApi(() => api.getLanguages(), []);
   return (
     <>
-      <Row label="Codec">
-        <select className="sel" aria-label="Codec" value={String(s.codec ?? "")} onChange={(e) => set({ codec: e.target.value || null })}>
-          <option value="">As picked above</option>
-          <option value="aac">AAC</option>
-          <option value="opus">Opus</option>
-          <option value="ac3">AC-3</option>
-          <option value="eac3">E-AC-3</option>
-          <option value="flac">FLAC</option>
-          <option value="copy">Copy the original</option>
-        </select>
-      </Row>
+      <Choose widget="select" label="Codec" choices={choicesOf(A, "codec")} value={valueOf(A, s, "codec")} off={greyed("codec")} onChange={(v) => set({ codec: v })} />
       <Row label="Bitrate (kb/s)" hint="Empty uses the codec's default.">
-        <input className="inp narrow" aria-label="Bitrate (kb/s)" type="number" value={String(s.bitrateKbps ?? "")} onChange={(e) => set({ bitrateKbps: e.target.value ? Number(e.target.value) : null })} />
+        <input className="inp narrow" aria-label="Bitrate (kb/s)" type="number" min={8} max={1536} value={String(s.bitrateKbps ?? "")} onChange={(e) => set({ bitrateKbps: e.target.value ? Number(e.target.value) : null })} />
       </Row>
-      <Row label="Downmix">
-        <select className="sel" aria-label="Downmix" value={String(s.downmix ?? "")} onChange={(e) => set({ downmix: e.target.value || null })}>
-          <option value="">None</option>
-          <option value="clear_speech">Clear speech</option>
-          <option value="plain_mix">Plain mix</option>
-          <option value="pro_logic_ii">Dolby Pro Logic II</option>
-        </select>
+      {s.bitrateKbps != null && <Choose label="Bitrate is for" choices={choicesOf(A, "bitratePer")} value={valueOf(A, s, "bitratePer")} off={greyed("bitratePer")} onChange={(v) => set({ bitratePer: v })} />}
+      <Row label="Sample rate" hint="Left empty, each file keeps its own sample rate.">
+        <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <input className="inp narrow" aria-label="Sample rate" type="number" min={8000} max={192000} value={String(s.sampleRate ?? "")} onChange={(e) => set({ sampleRate: e.target.value ? Number(e.target.value) : null })} /> Hz
+        </span>
       </Row>
+      <Choose widget="select" label="Making stereo from surround" choices={choicesOf(A, "downmix")} value={valueOf(A, s, "downmix")} off={greyed("downmix")} onChange={(v) => set({ downmix: v })} />
       <Row label="Loudness">
         <label style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
           <input type="checkbox" checked={Boolean(s.loudnorm)} onChange={(e) => set({ loudnorm: e.target.checked })} />
           Even out loudness
         </label>
       </Row>
-      <Row label="Commentary">
-        <Seg
-          label="Commentary"
-          value={String(s.commentary ?? "keep")}
-          options={[
-            { value: "keep", label: "Keep" },
-            { value: "drop", label: "Drop" },
-          ]}
-          onChange={(v) => set({ commentary: v })}
-        />
+      <Choose label="Commentary tracks" choices={choicesOf(A, "commentary")} value={valueOf(A, s, "commentary")} off={greyed("commentary")} onChange={(v) => set({ commentary: v })} />
+      <Row label="Default track">
+        <select
+          className="sel"
+          aria-label="Default track"
+          value={s.defaultTrack == null ? "none" : String(s.defaultTrack)}
+          onChange={(e) => set({ defaultTrack: e.target.value === "none" ? null : e.target.value })}
+        >
+          <option value="none">As in the file</option>
+          {SPECIAL_TRACKS.map((o) => (
+            <option key={o.code} value={o.code}>
+              {o.name}
+            </option>
+          ))}
+          {(langs.data ?? []).map((l) => (
+            <option key={l.code} value={l.code}>
+              {l.name}
+            </option>
+          ))}
+        </select>
       </Row>
       <Row label="Original track">
         <label style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
