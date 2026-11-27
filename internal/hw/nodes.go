@@ -44,14 +44,18 @@ func ChooseRenderNode(nodes []RenderNode) string {
 	return fallbackNode
 }
 
-// ReadRenderNodes lists the render nodes under a sysfs class folder (/sys/class/drm in production), with the vendor
-// of each card. A node whose vendor cannot be read keeps an empty vendor.
-func ReadRenderNodes(sysDrm string) []RenderNode {
+// ReadRenderNodes lists the render nodes that exist on this machine: sysDrm is the sysfs class folder (/sys/class/drm in
+// production) and devDri the device folder (/dev/dri). A node in sysfs with no device node here (a card that was not
+// passed through) is left out. A node whose vendor cannot be read keeps an empty vendor.
+func ReadRenderNodes(sysDrm, devDri string) []RenderNode {
 	matches, _ := filepath.Glob(filepath.Join(sysDrm, "renderD*"))
 	sort.Strings(matches)
 	var out []RenderNode
 	for _, m := range matches {
 		name := filepath.Base(m)
+		if _, err := os.Stat(filepath.Join(devDri, name)); err != nil {
+			continue
+		}
 		vendor, _ := os.ReadFile(filepath.Join(m, "device", "vendor"))
 		out = append(out, RenderNode{
 			Path:   path.Join("/dev/dri", name), // a Linux device path, whatever OS runs the check

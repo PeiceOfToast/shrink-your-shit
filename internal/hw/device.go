@@ -220,12 +220,13 @@ func deviceSetup(c Candidate) []string {
 // scaleFilter is the scale to 240p on the card, with the family's own filter.
 func scaleFilter(c Candidate) string {
 	switch c.Family {
+	// The probe clip is square, so 240×240 is 240 high. Hardware scalers take explicit sizes (L-HW-10).
 	case encode.FamilyVAAPI:
-		return "format=nv12,hwupload,scale_vaapi=w=-2:h=240:format=nv12"
+		return "format=nv12,hwupload,scale_vaapi=w=240:h=240:format=nv12"
 	case encode.FamilyQSV:
-		return "format=nv12,hwupload=extra_hw_frames=64,scale_qsv=w=-2:h=240"
+		return "format=nv12,hwupload=extra_hw_frames=64,scale_qsv=w=240:h=240"
 	}
-	return "scale=-2:240"
+	return "scale=240:240"
 }
 
 // uploadFilter puts a frame on the card in a pixel format.

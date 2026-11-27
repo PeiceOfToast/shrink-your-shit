@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -24,7 +23,7 @@ func TestRealHardwareInventory(t *testing.T) {
 	}
 	m := media.MediaFuncs{ProbeFunc: media.Probe, RunFunc: media.Run}
 	dir := t.TempDir()
-	nodes := ReadRenderNodes("/sys/class/drm")
+	nodes := ReadRenderNodes("/sys/class/drm", "/dev/dri")
 	inv := Detect(context.Background(), m, dir, Candidates(nodes))
 	fmt.Println("render nodes:", nodeList(nodes))
 	for _, v := range inv.Verdicts {
@@ -39,7 +38,7 @@ func TestRealHardwareInventory(t *testing.T) {
 		if !v.Available {
 			continue
 		}
-		rec := Probe(context.Background(), m, filepath.Join(dir, v.Encoder), v.Candidate)
+		rec := Probe(context.Background(), m, dir, v.Candidate)
 		fmt.Printf("probe %-12s decode=%v scale=%v encode10=%v decode10=%v hdr=%v reasons=%v\n",
 			v.Encoder, rec.Decode, rec.Scale, rec.Encode10, rec.Decode10, rec.HDRSurvives, rec.Reasons)
 	}
