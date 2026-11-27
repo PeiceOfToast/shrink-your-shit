@@ -11,7 +11,6 @@ export default defineConfig({
     proxy: {
       "/api": {
         target: (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.SYP_URL || "http://127.0.0.1:8484",
-        changeOrigin: true,
       },
     },
   },

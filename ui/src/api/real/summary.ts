@@ -5,5 +5,5 @@ import type { Summary } from "../types.ts";
 
 export const getSummary = (): Promise<Summary> => request<Summary>("GET", "/summary");
 
-type Same = Pick<typeof mock, "getSummary">;
-export const sameAsMock: Same = { getSummary };
+// Checked against the mock: the same signature or tsc fails.
+({ getSummary }) satisfies Pick<typeof mock, "getSummary">;
