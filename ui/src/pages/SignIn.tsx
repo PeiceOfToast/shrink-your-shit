@@ -63,16 +63,18 @@ export function SignIn() {
               autoComplete="current-password"
               autoFocus
               value={password}
+              aria-invalid={problem ? true : undefined}
               onChange={(e) => {
                 setPassword(e.target.value);
                 setProblem(null);
               }}
             />
+            {/* An error takes the place of the hint under the field. */}
+            {problem && <p className="err" role="alert">{problem}</p>}
           </div>
-          {problem && <p className="err" role="alert">{problem}</p>}
           <div className="start-actions">
             <button type="submit" className="btn primary" disabled={password === "" || busy}>
-              Sign in
+              {busy ? "Signing in…" : "Sign in"}
             </button>
           </div>
         </form>

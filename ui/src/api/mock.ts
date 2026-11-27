@@ -3,7 +3,7 @@ import { ATTENTION, OVERVIEW, SUMMARY } from "./fixtures/index.ts";
 import { JOBS } from "./fixtures/jobs.ts";
 import { jobDetail } from "./fixtures/jobDetail.ts";
 import { ApiError } from "./errors.ts";
-import { getForcedState, isFreshInstall, respond } from "./mockState.ts";
+import { getForcedState, isFreshInstall, noLibrariesYet, respond } from "./mockState.ts";
 import { currentLibraries, reconnectShare } from "./mockLibraries.ts";
 import { setAllWorkers, workerName } from "./mockWorkers.ts";
 import { healthFailing } from "./mockSettings.ts";
@@ -39,13 +39,17 @@ export function getSummary(): Promise<Summary> {
 
 export function getOverview(): Promise<Overview> {
   return respond(() => {
-    if (getForcedState() === "empty") {
+    if (noLibrariesYet()) {
       return {
         ...OVERVIEW,
+        freed: { ...OVERVIEW.freed, totalBytes: 0, todayBytes: 0, nextReleaseBytes: 0, inTrashBytes: 0 },
         converted: { ...OVERVIEW.converted, total: 0, perDay: 0 },
         waiting: { ...OVERVIEW.waiting, count: 0 },
+        avgShrink: { pct: 0, secPerGB: 0 },
+        series: { days: [] },
         running: [],
-        failed24h: { ...OVERVIEW.failed24h, count: 0 },
+        failed24h: { ...OVERVIEW.failed24h, count: 0, pct: 0 },
+        last24h: { done: 0, skipped: 0, failed: 0 },
         libraries: [],
       };
     }
@@ -54,7 +58,7 @@ export function getOverview(): Promise<Overview> {
 }
 
 export function getAttention(): Promise<Attention[]> {
-  return respond(() => (getForcedState() === "empty" ? [] : ATTENTION));
+  return respond(() => (noLibrariesYet() ? [] : ATTENTION));
 }
 
 export function getJobs(params: JobsParams = {}): Promise<JobsPage> {

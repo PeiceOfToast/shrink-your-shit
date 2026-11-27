@@ -3,6 +3,7 @@
 import { ApiError } from "./errors.ts";
 import { DELAY_MS, getForcedState, onForcedStateChange, respond, setFreshInstall } from "./mockState.ts";
 import { currentToken } from "./mockSettings.ts";
+import { clearLibraries } from "./mockLibraries.ts";
 
 export type Setup = { needsAccount: boolean; starting: boolean };
 
@@ -52,7 +53,7 @@ export function getStarter(id: string): Promise<StarterDetail> {
 // Page 13: the password is 8 characters or more and at most 72 bytes. The messages are placeholders (a gap in the handback).
 function checkPassword(password: string): void {
   if ([...password].length < 8) throw new ApiError("invalid_password", "Use at least 8 characters.", "account.password");
-  if (new TextEncoder().encode(password).length > 72) throw new ApiError("invalid_password", "Use 72 bytes or fewer.", "account.password");
+  if (new TextEncoder().encode(password).length > 72) throw new ApiError("invalid_password", "That password is too long. Use up to 72 characters.", "account.password");
 }
 
 // Page 13: one call, all or nothing. A refused folder is 409 with field library.path and saves nothing.
@@ -63,6 +64,7 @@ export function postSetup(input: SetupInput): Promise<{ ok: true; scanStarted: b
       throw new ApiError("overlaps", "That folder is already in another library. Pick a different folder.", "library.path");
     }
     setFreshInstall(input.library === null);
+    if (input.library === null) clearLibraries();
     setupDone = true;
     return { ok: true as const, scanStarted: input.library !== null };
   });
@@ -113,7 +115,7 @@ export function signInWithToken(token: string): Promise<{ ok: true }> {
     checkLock(now);
     if (token !== currentToken()) {
       recordFailure(now);
-      throw new ApiError("bad_token", "That sign-in link isn't valid. Ask for a new one.");
+      throw new ApiError("bad_token", "That sign-in link doesn't work any more. Sign in with your password, or get a new link from the server.");
     }
     failures = [];
     return { ok: true as const };

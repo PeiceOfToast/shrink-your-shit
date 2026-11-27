@@ -1,7 +1,7 @@
 // Libraries, workflows and folders for the mock. Writes change an in-memory copy, so a session behaves like the app.
 import type { FolderCheck, FolderListing, Library, LibraryDetail, LibraryInput, LibraryPatch, Preview, Watch, WorkflowSummary } from "./types.ts";
 import { ApiError } from "./errors.ts";
-import { getForcedState, respond } from "./mockState.ts";
+import { getForcedState, respond, setFreshInstall } from "./mockState.ts";
 import { FOLDERS, LIBRARIES, PREVIEW, SHARE_FOLDERS, WORKFLOW_SUMMARY } from "./fixtures/libraries.ts";
 import { WORKFLOW_ROWS } from "./fixtures/workflowRows.ts";
 import { nextScanFor } from "./schedule.ts";
@@ -82,8 +82,14 @@ export function createLibrary(input: LibraryInput): Promise<Library> {
       nextScanAt: nextScanFor(input.watch ?? "daily"),
     };
     rows = [...rows, lib];
+    setFreshInstall(false);
     return { ...lib };
   });
+}
+
+// A first run finished with Skip has no library at all (the setup call does this).
+export function clearLibraries(): void {
+  rows = [];
 }
 
 export function patchLibrary(id: string, patch: LibraryPatch): Promise<LibraryDetail> {

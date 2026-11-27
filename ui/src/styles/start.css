@@ -100,6 +100,37 @@
 .start-note {
   margin: 0;
 }
+/* One field style on the card (the page 09 field takes it here; the Add library panel keeps its own). */
+.start-step {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.start-card .field {
+  gap: 6px;
+}
+.start-card .lbl {
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text2);
+}
+.start-card .inp {
+  font-family: var(--sans);
+  font-size: 14px;
+}
+.start-card .hint,
+.start-card .err {
+  margin: 0;
+}
+/* A disabled button shows its label in muted text on a muted surface, never dimmed green. */
+.start-card .btn.primary:disabled {
+  background: var(--raised);
+  border-color: var(--border);
+  color: var(--text2);
+}
 @media (max-width: 480px) {
   .start-card {
     padding: 16px;

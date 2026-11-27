@@ -22,8 +22,10 @@ export function App() {
   const route = resolve(pathname);
   // Setup gate: a fresh install goes to the first-run page until its account exists. Checked again on every
   // navigation, so finishing setup (which navigates to the dashboard) is seen at once.
-  const setup = useApi(() => api.getSetup(), [pathname]);
-  const needsSetup = Boolean(setup.data?.needsAccount) && route.name !== "start";
+  // The answer is tied to the path it was asked on: right after a navigation the old answer is still on screen,
+  // and it must not send the person back to the first-run page.
+  const setup = useApi(() => api.getSetup().then((s) => ({ ...s, pathname })), [pathname]);
+  const needsSetup = setup.data?.pathname === pathname && Boolean(setup.data?.needsAccount) && route.name !== "start";
   // Redirect only on a fresh answer: while a reload runs, the old answer is still on screen.
   useEffect(() => {
     if (!setup.loading && needsSetup) navigate("/start");
