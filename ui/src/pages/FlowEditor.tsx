@@ -6,6 +6,7 @@ import { QUALITY_NAMES, Row, Seg, toErr, useBitrateLadder, useCardFamilies, type
 import { DRAWN, NO_LONGER_OFFERED, choiceKey, greyedChoices, offeredChoices, type Choice } from "./flowFields.ts";
 import { qualityMeaning } from "../format/quality.ts";
 import { fileTypeHint } from "../format/fileType.ts";
+import { nameExample } from "../format/nameExample.ts";
 import { LanguageChips } from "./LanguageChips.tsx";
 
 // Flow editor (07): the fixed walk Video → Audio → Save the result. Nothing is added or reordered.
@@ -34,12 +35,6 @@ const SPECIAL_TRACKS = [
 ];
 // The Advanced video fields that "Back to the defaults" resets to the golden's defaults.
 const ADVANCED_VIDEO = ["size", "width", "height", "rateControl", "bitrateLevel", "avgMbps", "maxMbps", "twoPass", "preset", "fps", "bitDepth", "hdr", "keepDolbyVision"];
-// The name example follows the file type: Keep the same keeps the source's own extension.
-function nameExample(container: string, suffix: string): string {
-  const after = suffix || "…";
-  if (container === "keep") return `Keeps the file's own extension: media.mov becomes media-${after}.mov. Empty keeps the name.`;
-  return `media.${container} becomes media-${after}.${container}. Empty keeps the name.`;
-}
 const STEP_NAME: Record<StepId, string> = { video: "Video", audio: "Audio", save: "Save the result" };
 const FORMAT_NAME: Record<string, string> = { hevc: "HEVC", h264: "H.264", av1: "AV1" };
 const ROW_FOR_SIZE: Record<string, string> = { "2160": "2160", "1440": "1440", "1080": "1080", "720": "720", "480": "sd" };
