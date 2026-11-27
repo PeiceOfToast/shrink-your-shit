@@ -162,3 +162,11 @@ test("a guided save after an editor save is refused with changed_since", async (
   assert.equal(edited.rev, 2);
   await assert.rejects(putAnswers(made.id, { ...DEFAULT_ANSWERS, quality: 6 }, 1), (e: ApiError) => e.code === "changed_since");
 });
+
+// Each try line's text starts with its step's name; the editor and Guided show the text alone.
+test("each try line starts with its step name", async () => {
+  const flow = answersToFlow(DEFAULT_ANSWERS, META);
+  const { lines } = await tryFlow(flow, "clip.mp4");
+  const name: Record<string, string> = { video: "Video:", audio: "Audio:", save: "Save:" };
+  for (const l of lines) assert.ok(l.text.startsWith(name[l.stepId]), `${l.stepId}: ${l.text}`);
+});

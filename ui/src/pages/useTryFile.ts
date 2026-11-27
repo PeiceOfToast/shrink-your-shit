@@ -10,9 +10,21 @@ export function useTryFile() {
   const [err, setErr] = useState<Err | null>(null);
   const [stopped, setStopped] = useState(false);
   const current = useRef<AbortController | null>(null);
+  // The Try button. When a try ends while Stop had focus (Stop unmounts, so focus falls to the body), focus goes back to Try.
+  // Focus on anything else is left where the user put it.
+  const button = useRef<HTMLButtonElement>(null);
+  const wasTrying = useRef(false);
 
   // Leaving the page stops a try in flight; nothing is shown for it.
   useEffect(() => () => current.current?.abort(), []);
+
+  useEffect(() => {
+    if (wasTrying.current && !trying) {
+      const focused = document.activeElement;
+      if (!focused || focused === document.body) button.current?.focus();
+    }
+    wasTrying.current = trying;
+  }, [trying]);
 
   const start = async (run: (signal: AbortSignal) => Promise<TryLine[]>) => {
     current.current?.abort();
@@ -43,5 +55,5 @@ export function useTryFile() {
     current.current.abort();
   };
 
-  return { trying, lines, err, stopped, start, stop };
+  return { trying, lines, err, stopped, button, start, stop };
 }
