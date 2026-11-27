@@ -26,6 +26,18 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ui/.nvmrc
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Build the UI (the same build CI checks)
+        working-directory: ui
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
       - name: Build syp for amd64 and arm64
         env:
           CGO_ENABLED: "0"
