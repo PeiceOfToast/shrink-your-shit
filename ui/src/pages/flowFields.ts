@@ -11,6 +11,18 @@ export function choiceKey(v: unknown): string {
   return v === null || v === undefined ? "none" : String(v);
 }
 
+// The line under a field whose stored value no choice matches (an imported or upgraded flow; the server rejects it on save).
+export const NO_LONGER_OFFERED = "This setting is no longer offered; pick one.";
+
+// The options to show for a stored value. A value no choice matches is kept as one more option, labelled as no longer
+// offered, and stale is its key, so the control shows what is stored instead of the first choice.
+export function offeredChoices(choices: Choice[], value: unknown): { options: Choice[]; stale: string | null } {
+  const key = choiceKey(value);
+  if (choices.some((c) => choiceKey(c.value) === key)) return { options: choices, stale: null };
+  const shown = value === null || value === undefined ? "none" : String(value);
+  return { options: [...choices, { value: value as Choice["value"], label: `${shown} (no longer offered)` }], stale: key };
+}
+
 export interface StepFields {
   fields: string[];
   choices: Record<string, Choice[]>;

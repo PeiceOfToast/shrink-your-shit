@@ -3,7 +3,7 @@ import { navigate, useLocation } from "../router.tsx";
 import { api, type Flow, type FlowCheck, type FlowStep, type StepDefinition, type StepId, type TryLine } from "../api/index.ts";
 import { useApi } from "../api/useApi.ts";
 import { QUALITY_NAMES, Row, Seg, toErr, useBitrateLadder, useCardFamilies, type Err } from "./flowParts.tsx";
-import { DRAWN, choiceKey, greyedChoices, type Choice } from "./flowFields.ts";
+import { DRAWN, NO_LONGER_OFFERED, choiceKey, greyedChoices, offeredChoices, type Choice } from "./flowFields.ts";
 import { qualityMeaning } from "../format/quality.ts";
 import { fileTypeHint } from "../format/fileType.ts";
 import { LanguageChips } from "./LanguageChips.tsx";
@@ -62,8 +62,11 @@ interface Loaded {
   defs: StepDefinition[];
 }
 
-// The graphics card choice. The backend has no separate value for Automatic and Intel (QSV): both use the card.
-type GpuPick = "auto" | "qsv" | "none";
+// The graphics card, as page 07 words it: the stored useGpu bool, as "true" or "false".
+const GPU_CHOICES: Choice[] = [
+  { value: "true", label: "Automatic" },
+  { value: "false", label: "Off" },
+];
 
 export function FlowEditor({ id }: { id: string }) {
   const starter = useLocation().query.get("starter");
@@ -104,7 +107,6 @@ function Editor({ id, initial }: { id: string; initial: Loaded }) {
   const [tryErr, setTryErr] = useState<Err | null>(null);
   const [draftId, setDraftId] = useState(id);
   const [tryOpen, setTryOpen] = useState(false);
-  const [gpu, setGpu] = useState<GpuPick>(() => (initial.flow.steps.find((s) => s.id === "video")?.settings.useGpu === false ? "none" : "auto"));
   const seq = useRef(0);
   const isNew = draftId === NEW;
 
@@ -231,22 +233,14 @@ function Editor({ id, initial }: { id: string; initial: Loaded }) {
           off={video.rateControl != null ? "Not used: Advanced sets a bitrate instead." : why("video", "quality")}
           onChange={(q) => set("video", { quality: q })}
         />
-        <Row label="Graphics card" hint="Made on your card (QSV) when it can.">
-          <select
-            className="sel"
-            aria-label="Graphics card"
-            value={gpu}
-            onChange={(e) => {
-              const v = e.target.value as GpuPick;
-              setGpu(v);
-              set("video", { useGpu: v !== "none" });
-            }}
-          >
-            <option value="auto">Automatic</option>
-            <option value="qsv">Intel (QSV)</option>
-            <option value="none">None, use the processor</option>
-          </select>
-        </Row>
+        <Choose
+          widget="select"
+          label="Graphics card"
+          hint="Made on the graphics card when a worker has one."
+          choices={GPU_CHOICES}
+          value={String(video.useGpu !== false)}
+          onChange={(v) => set("video", { useGpu: v === "true" })}
+        />
         <Choose
           label="If the graphics card can't do it"
           choices={choicesOf(V, "ifGpuFails")}
@@ -471,11 +465,13 @@ function Choose({
   full?: boolean;
   children?: ReactNode;
 }) {
+  const { options, stale } = offeredChoices(choices, value);
   const key = choiceKey(value);
-  const reasons = choices.map((c) => off[choiceKey(c.value)]).filter((w): w is string => Boolean(w));
-  const shown = hint ?? (reasons.length ? reasons.join(" ") : undefined);
+  const isOff = (k: string) => Boolean(off[k]) || k === stale;
+  const reasons = options.map((c) => off[choiceKey(c.value)]).filter((w): w is string => Boolean(w));
+  const shown = stale !== null ? NO_LONGER_OFFERED : (hint ?? (reasons.length ? reasons.join(" ") : undefined));
   const pick = (k: string) => {
-    const c = choices.find((x) => choiceKey(x.value) === k);
+    const c = options.find((x) => choiceKey(x.value) === k);
     if (c) onChange(c.value);
   };
   return (
@@ -484,13 +480,13 @@ function Choose({
         <Seg
           label={label}
           value={key}
-          options={choices.map((c) => ({ value: choiceKey(c.value), label: c.label, disabled: Boolean(off[choiceKey(c.value)]), title: off[choiceKey(c.value)] }))}
+          options={options.map((c) => ({ value: choiceKey(c.value), label: c.label, disabled: isOff(choiceKey(c.value)), title: off[choiceKey(c.value)] }))}
           onChange={pick}
         />
       ) : (
         <select className="sel" aria-label={label} value={key} onChange={(e) => pick(e.target.value)}>
-          {choices.map((c) => (
-            <option key={choiceKey(c.value)} value={choiceKey(c.value)} disabled={Boolean(off[choiceKey(c.value)])}>
+          {options.map((c) => (
+            <option key={choiceKey(c.value)} value={choiceKey(c.value)} disabled={isOff(choiceKey(c.value))}>
               {c.label}
             </option>
           ))}

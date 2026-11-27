@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { DRAWN, greyedChoices } from "./flowFields.ts";
+import { DRAWN, greyedChoices, offeredChoices } from "./flowFields.ts";
 import { STEP_DEFINITIONS } from "../api/fixtures/stepDefinitions.ts";
 
 // The golden is the server's GET /api/v2/step-definitions (internal/api/testdata/contract, from #834).
@@ -73,4 +73,19 @@ test("greyedChoices reads available: false and its reason", () => {
   };
   assert.deepEqual(greyedChoices(def, "rateControl"), { vbr: "Not with AV1" });
   assert.deepEqual(greyedChoices(def, "missing"), {});
+});
+
+// A stored value no choice matches is shown as one more option, not swapped for the first choice.
+test("offeredChoices keeps a stored value no choice matches", () => {
+  const hdr = DRAWN["video.convert"].choices.hdr;
+  const gone = offeredChoices(hdr, "sdr");
+  assert.equal(gone.stale, "sdr");
+  assert.equal(gone.options.length, hdr.length + 1);
+  assert.equal(gone.options[gone.options.length - 1].label, "sdr (no longer offered)");
+  assert.equal(offeredChoices(hdr, "keep").stale, null);
+  assert.equal(offeredChoices(hdr, "keep").options, hdr);
+  // A number choice matches its string key, and an unset stored value that no choice holds is shown as "none".
+  assert.equal(offeredChoices(DRAWN["video.convert"].choices.bitDepth, 8).stale, null);
+  assert.equal(offeredChoices(DRAWN["video.convert"].choices.bitDepth, 12).stale, "12");
+  assert.equal(offeredChoices(hdr, null).options[hdr.length].label, "none (no longer offered)");
 });
