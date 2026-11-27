@@ -88,17 +88,17 @@ jobs:
       - name: Put ffmpeg 8 on PATH
         run: echo "$RUNNER_TEMP/ffmpeg-8/ffmpeg-n8.0.1-17-g27a297f186-linux64-gpl-8.0/bin" >> "$GITHUB_PATH"
 
-      # The real-media tests must run, not skip: SYP_REQUIRE_FFMPEG turns a missing tool into a
+      # Every real test must run, not skip: SYP_REQUIRE_FFMPEG turns a missing tool into a
       # failure, and the grep turns any "--- SKIP: TestReal" into one too.
-      - name: Test real media (ffmpeg 8)
+      - name: Test real (ffmpeg 8)
         env:
           SYP_REQUIRE_FFMPEG: "1"
         run: |
           ffmpeg -version | head -n 1
-          go test -count=1 -v -run TestReal ./internal/media/ ./internal/encode/ > real.log 2>&1 || { cat real.log; exit 1; }
+          go test -count=1 -v -run TestReal ./... > real.log 2>&1 || { cat real.log; exit 1; }
           grep -E '^[[:space:]]*--- (PASS|FAIL|SKIP): TestReal' real.log
-          grep -qE '^[[:space:]]*--- PASS: TestReal' real.log || { echo "no real-media test ran"; exit 1; }
-          if grep -qE '^[[:space:]]*--- SKIP: TestReal' real.log; then echo "a real-media test was skipped"; exit 1; fi
+          grep -qE '^[[:space:]]*--- PASS: TestReal' real.log || { echo "no real test ran"; exit 1; }
+          if grep -qE '^[[:space:]]*--- SKIP: TestReal' real.log; then echo "a real test was skipped"; exit 1; fi
 
   go-build:
     strategy:
