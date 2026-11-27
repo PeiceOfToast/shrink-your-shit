@@ -149,13 +149,23 @@ func (s *Scanner) scan(ctx context.Context, lib Library) (ScanResult, error) {
 		return res, fmt.Errorf("scan %s: %w", lib.Path, ErrNotFolder)
 	}
 
+	// Resolve the root once and walk the folder it points at: a library path that is itself a
+	// link (a NAS mount alias, a folder alias) must scan what the link names. WalkDir does not
+	// follow a root symlink, and an unresolved link would leave the walk empty and look complete.
+	// Every relative path, the settle stat and the guards then share one real root.
+	root, err := filepath.EvalSymlinks(filepath.Clean(lib.Path))
+	if err != nil {
+		s.event(events.Event{Level: events.LevelError, Kind: events.KindError, Message: fmt.Sprintf("Cannot scan %s: %v", lib.Path, err)})
+		return res, fmt.Errorf("scan %s: %w", lib.Path, err)
+	}
+
 	now := s.now()
 	s.event(events.Event{
 		Level: events.LevelInfo, Kind: events.KindScanStart, Message: "Scanning " + lib.Name,
 		LibraryID: strconv.FormatInt(lib.ID, 10),
 	})
 
-	seen, complete, err := s.walk(ctx, lib, &res)
+	seen, complete, err := s.walk(ctx, lib, root, &res)
 	if err != nil {
 		return res, err
 	}
@@ -227,7 +237,7 @@ func (s *Scanner) scan(ctx context.Context, lib Library) (ScanResult, error) {
 	}
 
 	if len(candidates) > 0 {
-		settled, err := s.settle(ctx, lib, candidates, &res)
+		settled, err := s.settle(ctx, lib, root, candidates, &res)
 		if err != nil {
 			return res, err
 		}
@@ -276,11 +286,12 @@ func (s *Scanner) scan(ctx context.Context, lib Library) (ScanResult, error) {
 
 // walk lists the files the guards allow. seen holds every regular file the walk met, including the
 // ones a file guard refuses, so a refused file with a catalog row is not marked gone. complete is
-// false when a folder could not be read: such a scan marks nothing gone (L-SCAN-3).
-func (s *Scanner) walk(ctx context.Context, lib Library, res *ScanResult) (seen []scanFile, complete bool, err error) {
+// false when a folder could not be read, and when the walk never entered the root as a folder:
+// such a scan marks nothing gone (L-SCAN-3).
+func (s *Scanner) walk(ctx context.Context, lib Library, root string, res *ScanResult) (seen []scanFile, complete bool, err error) {
 	complete = true
 	outputs := s.outputDirs(lib)
-	root := filepath.Clean(lib.Path)
+	rootDir := false
 
 	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
 		if cerr := ctx.Err(); cerr != nil {
@@ -299,7 +310,11 @@ func (s *Scanner) walk(ctx context.Context, lib Library, res *ScanResult) (seen 
 			return nil
 		}
 		if path == root {
-			return nil // the library root itself is never skipped or guarded
+			// Belt and braces behind the resolved root: an empty walk that never stood in the
+			// folder is not evidence that the files are gone. The root itself is never skipped
+			// or guarded.
+			rootDir = d.IsDir()
+			return nil
 		}
 		if d.IsDir() {
 			if d.Type()&fs.ModeSymlink != 0 || skipName(d.Name()) || insideAny(path, outputs) {
@@ -343,12 +358,20 @@ func (s *Scanner) walk(ctx context.Context, lib Library, res *ScanResult) (seen 
 	if walkErr != nil {
 		return nil, false, fmt.Errorf("walk %s: %w", lib.Path, walkErr)
 	}
+	if !rootDir {
+		complete = false
+		s.event(events.Event{
+			Level: events.LevelWarn, Kind: events.KindWarning,
+			Message:   fmt.Sprintf("Cannot scan %s: it was not walked as a folder", root),
+			LibraryID: strconv.FormatInt(lib.ID, 10),
+		})
+	}
 	return seen, complete, nil
 }
 
 // settle takes the second look: after one wait for all candidates, a file is settled only when the
 // size and mtime are the same as the first look (L-SCAN-2). Empty files never settle.
-func (s *Scanner) settle(ctx context.Context, lib Library, candidates []scanFile, res *ScanResult) ([]scanFile, error) {
+func (s *Scanner) settle(ctx context.Context, lib Library, root string, candidates []scanFile, res *ScanResult) ([]scanFile, error) {
 	s.sleep(s.settleWait())
 
 	var settled []scanFile
@@ -356,7 +379,7 @@ func (s *Scanner) settle(ctx context.Context, lib Library, candidates []scanFile
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		second, err := s.stat(f.abs, filepath.Clean(lib.Path))
+		second, err := s.stat(f.abs, root)
 		if err != nil {
 			res.StillChanging++
 			if err := s.saveStillChanging(ctx, lib, f, skipUnreadable); err != nil {

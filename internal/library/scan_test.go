@@ -352,13 +352,22 @@ func TestScanMarksAMissingFileGone(t *testing.T) {
 func TestScanReportsAMissingFolder(t *testing.T) {
 	st := newScanTest(t)
 	st.write("clip.mp4", "0123456789")
+	st.run()
 	if err := os.RemoveAll(st.dir); err != nil {
 		t.Fatal(err)
 	}
 
-	_, err := st.scanner.Scan(context.Background(), st.lib)
+	res, err := st.scanner.Scan(context.Background(), st.lib)
 	if err == nil {
 		t.Fatal("scan of a removed folder succeeded, want an error")
+	}
+	// A root that is not there is not evidence that the files are: the scan errors and every
+	// catalogued row keeps its state (#806 review).
+	if res.Gone != 0 {
+		t.Errorf("result = %+v, want nothing marked gone", res)
+	}
+	if f := st.row("clip.mp4"); f.State != Queued {
+		t.Errorf("row = %+v, want its state kept", f)
 	}
 	if got := st.events.ofKind(events.KindError); len(got) != 1 {
 		t.Errorf("error events = %d, want one naming the folder", len(got))
@@ -641,4 +650,86 @@ func TestScanSkipsSymlinks(t *testing.T) {
 		t.Errorf("result = %+v, want only the real file found and queued", res)
 	}
 	wantQueued(t, st.queue.names(), "ok.mp4")
+}
+
+// swapForSymlink moves the folder and leaves a link of the same name in its place, the way a NAS
+// alias or a folder alias looks. It skips when the host will not make a link.
+func swapForSymlink(t *testing.T, dir string) {
+	t.Helper()
+	moved := filepath.Join(t.TempDir(), "moved")
+	if err := os.Rename(dir, moved); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(moved, dir); err != nil {
+		t.Skipf("this host will not make symlinks: %v", err)
+	}
+}
+
+// TestScanFollowsASymlinkedRoot is the #806 review's P1: a library path that is itself a symlink
+// must scan the folder it names. WalkDir does not follow a root link, so without resolving it the
+// walk came back empty, looked complete, and marked the whole catalogue gone.
+func TestScanFollowsASymlinkedRoot(t *testing.T) {
+	st := newScanTest(t)
+	st.write("a.mp4", "0123456789")
+	st.write("b.mp4", "0123456789")
+	st.run()
+	wantQueued(t, st.queue.names(), "a.mp4", "b.mp4")
+
+	swapForSymlink(t, st.dir)
+
+	res := st.run()
+	if res.Found != 2 || res.Gone != 0 || res.New != 0 || res.Changed != 0 {
+		t.Errorf("second scan = %+v, want both files found and nothing gone", res)
+	}
+	for _, name := range []string{"a.mp4", "b.mp4"} {
+		if f := st.row(name); f.State != Queued {
+			t.Errorf("row %s = %+v, want its state kept", name, f)
+		}
+	}
+	if queued := st.queue.names(); len(queued) != 2 {
+		t.Errorf("queued = %v, want the files left alone", queued)
+	}
+}
+
+// TestScanFindsAnOutputFolderUnderASymlinkedRoot checks the output-folder guard against the
+// resolved root: the guard compares real paths, so a folder named through the link is still the
+// folder the walk meets.
+func TestScanFindsAnOutputFolderUnderASymlinkedRoot(t *testing.T) {
+	st := newScanTest(t)
+	st.write("ok.mp4", "0123456789")
+	st.write("converted/out.mp4", "0123456789")
+	swapForSymlink(t, st.dir)
+	st.scanner.OutputDirs = func(Library) []string { return []string{filepath.Join(st.dir, "converted")} }
+
+	// out.mp4 would be new to the walk, but the output folder is stopped at before it is met.
+	res := st.run()
+	if res.Found != 1 || res.Queued != 1 || res.Skipped != 0 {
+		t.Errorf("scan = %+v, want only ok.mp4 met and queued", res)
+	}
+	wantQueued(t, st.queue.names(), "ok.mp4")
+}
+
+// TestWalkRefusesARootItDidNotEnter is the belt behind the resolved root: even handed a root the
+// walk could not stand in, the walk is incomplete, and an incomplete walk marks nothing gone.
+func TestWalkRefusesARootItDidNotEnter(t *testing.T) {
+	st := newScanTest(t)
+	st.write("a.mp4", "0123456789")
+	swapForSymlink(t, st.dir)
+
+	var res ScanResult
+	res.SkippedBy = map[string]int{}
+	seen, complete, err := st.scanner.walk(context.Background(), st.lib, st.dir, &res)
+	if err != nil {
+		t.Fatalf("walk: %v", err)
+	}
+	if complete {
+		t.Error("walk of a root it never entered reported complete")
+	}
+	if len(seen) != 0 {
+		t.Errorf("seen = %+v, want an empty walk", seen)
+	}
+	warnings := st.events.ofKind(events.KindWarning)
+	if len(warnings) == 0 {
+		t.Error("no warning event for the root that was not walked as a folder")
+	}
 }
