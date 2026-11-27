@@ -41,6 +41,8 @@ button.search{background:none;border:1px solid var(--border);color:var(--text2);
   .statusbar .lg-only{display:none}
   .statusbar.open .lg-only{display:inline}
   .statusbar{cursor:pointer}
+  /* The dev state chip sits above the bottom bar (about 64 px) instead of over its first label. */
+  .dev-chip,.dev-states{bottom:76px}
 }
 
 /* Dashboard error state: the Workers switch and Scan all are disabled. Muted tones, no opacity. */
@@ -135,6 +137,7 @@ table.tbl.wkr td.wk-sub{display:none}
 .set-grouphead{display:flex;align-items:center;gap:8px;padding:10px 0 4px}
 .set-main .row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 0}
 .set-back{display:none;color:var(--accent);font-size:14px;margin-bottom:8px}
+.set-account{display:none}
 .savebar{position:sticky;bottom:0;display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--raised);border:1px solid var(--border);border-radius:var(--radius);padding:10px 14px;margin-top:16px;z-index:4}
 .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--bad);margin-left:6px;vertical-align:middle}
 @media (max-width:900px){
@@ -144,7 +147,11 @@ table.tbl.wkr td.wk-sub{display:none}
   .set:not(.open) .set-main{display:none}
   .set-back{display:inline-block}
   .set-row{grid-template-columns:1fr}
+  .set-account{display:block;padding:12px 0;border-bottom:1px solid var(--border);margin-bottom:8px}
+  .set.open .set-account{display:none}
 }
+.set-account-who{margin:0 0 6px;font-size:13px;color:var(--text2)}
+.set-account-acts{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 /* Settings #777 fixes */
 .set-sub{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text2);margin:28px 0 0;padding-top:14px;border-top:1px solid var(--border)}
 .set-row.full{grid-template-columns:minmax(0,1fr)}

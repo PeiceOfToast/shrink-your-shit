@@ -113,6 +113,9 @@
   .wf-step-of { display: none; }
   .wf-quality { grid-template-columns: minmax(0, 1fr); }
   .wf-head h1 { font-size: 19px; }
+  /* The title block always takes its own line, so the buttons below it don't move while the check runs. */
+  .wf-head > div:first-child { flex: 1 0 100%; }
+  .wf-head > .sp { display: none; }
   .wf-actions .btn, .wf-step-nav .btn { flex: 1; justify-content: center; }
   .wf-part { padding: 14px; }
   .wf-back, .wf-settings > summary, .wf-advbox > summary, .wf-close {
