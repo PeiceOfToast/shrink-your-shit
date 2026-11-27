@@ -466,7 +466,9 @@ func (s *Server) detail(ctx context.Context, d *jobDeps, j jobs.Job) (jobDetailJ
 		out.Original.Action = "not_touched"
 	}
 	if j.State == jobs.Failed {
-		out.Failure = &failureJSON{Step: j.FailedStep, Reason: j.Reason, NextAction: j.NextAction, ActionLabel: j.NextAction}
+		// actionLabel is the failure button's short text, not the next-step sentence (which the page shows
+		// as its own line): every failed job can be retried today.
+		out.Failure = &failureJSON{Step: j.FailedStep, Reason: j.Reason, NextAction: j.NextAction, ActionLabel: "Retry"}
 	}
 	return out, nil
 }

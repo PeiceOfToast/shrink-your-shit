@@ -236,7 +236,9 @@ func TestJobGetOneAndNotFound(t *testing.T) {
 			} `json:"result"`
 		} `json:"job"`
 		Failure *struct {
-			Step string `json:"step"`
+			Step        string `json:"step"`
+			NextAction  string `json:"nextAction"`
+			ActionLabel string `json:"actionLabel"`
 		} `json:"failure"`
 		Steps []any `json:"steps"`
 	}
@@ -246,6 +248,10 @@ func TestJobGetOneAndNotFound(t *testing.T) {
 	}
 	if j.Failure == nil || j.Failure.Step != "encode" {
 		t.Errorf("failure = %+v; want step encode", j.Failure)
+	}
+	// The button text is short; the next-step sentence is its own field (it was shown twice, ui-shop 11-27).
+	if j.Failure != nil && (j.Failure.ActionLabel != "Retry" || (j.Failure.NextAction != "" && j.Failure.ActionLabel == j.Failure.NextAction)) {
+		t.Errorf("failure actionLabel = %q (nextAction %q); want the button text Retry", j.Failure.ActionLabel, j.Failure.NextAction)
 	}
 	for _, path := range []string{"/api/v2/jobs/999999", "/api/v2/jobs/abc", "/api/v2/jobs/0"} {
 		rec := f.get(path)
