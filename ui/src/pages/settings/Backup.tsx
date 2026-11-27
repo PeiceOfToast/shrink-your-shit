@@ -10,7 +10,6 @@ const REASON: Record<BackupItem["reason"], string> = {
   before_import: "Before an import",
 };
 const size = (n: number) => (n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : n >= 1e6 ? `${Math.round(n / 1e6)} MB` : `${Math.max(1, Math.round(n / 1e3))} KB`);
-const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 const dayMonth = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 
 export function Backup() {
@@ -110,10 +109,8 @@ export function Backup() {
       {preview && (
         <div className="scrim">
         <div className="dlg" role="dialog" aria-modal="true" aria-labelledby="restore-q">
-          <h2 id="restore-q">Replace all settings and workflows with this backup from {dayMonth(preview.createdAt)}?</h2>
-          <p className="muted sm">
-            {plural(preview.contents.workflows, "workflow", "workflows")}, {plural(preview.contents.libraries, "library", "libraries")}, {plural(preview.contents.shares, "share", "shares")}, {plural(preview.contents.connections, "connection", "connections")}. Jobs, history and files aren't touched.
-          </p>
+          <h2 id="restore-q">Replace your set-up (settings, workflows, libraries, shares, connections, notifications, appearance) with this backup from {dayMonth(preview.createdAt)}?</h2>
+          <p className="muted sm">Jobs, history, the trash and your files aren't touched.</p>
           {preview.warnings.map((w) => <p className="bad sm" key={w}>{w}</p>)}
           <div className="row dlg-actions">
             <button type="button" className="btn ghost sm" onClick={() => setPreview(null)} disabled={busy}>Cancel</button>
