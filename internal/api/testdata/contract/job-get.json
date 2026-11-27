@@ -39,7 +39,7 @@
       "state": "done",
       "step": null,
       "tookMs": 0,
-      "worker": "local",
+      "worker": "",
       "workflow": "Shrink"
     },
     "logs": [],
@@ -48,8 +48,8 @@
       "action": "not_touched",
       "until": null
     },
-    "outputPath": "/tmp/TestContractGoldensForJobs1500286280/002/three-shrunk.mkv",
-    "path": "/tmp/TestContractGoldensForJobs1500286280/002/three.mkv",
+    "outputPath": "/videos/three-shrunk.mkv",
+    "path": "/videos/three.mkv",
     "sizeAfterBytes": 400,
     "sizeBeforeBytes": 1000,
     "skipReason": null,
@@ -57,7 +57,7 @@
     "steps": [],
     "timeLeftMs": null,
     "tookMs": 0,
-    "worker": "local",
+    "worker": "",
     "workflow": "Shrink",
     "writtenAt": "2026-11-27T04:00:00.000Z"
   },
