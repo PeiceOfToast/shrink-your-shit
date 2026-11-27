@@ -36,12 +36,12 @@ func settle(res flow.Result, stopping bool) (jobs.Result, End) {
 		}, EndFinish
 	case flow.OutcomeMayPass:
 		return jobs.Result{
-			Verdict: jobs.VerdictRetry, Reason: reasonOr(res, "run.may_pass"), FailedStep: res.FailedStep,
+			Verdict: jobs.VerdictRetry, Reason: sentenceOr(res, "run.may_pass"), FailedStep: res.FailedStep,
 			NextAction: res.NextAction,
 		}, EndFinish
 	case flow.OutcomeFatal:
 		return jobs.Result{
-			Verdict: jobs.VerdictFail, Reason: reasonOr(res, "run.fatal"), FailedStep: res.FailedStep,
+			Verdict: jobs.VerdictFail, Reason: sentenceOr(res, "run.fatal"), FailedStep: res.FailedStep,
 			NextAction: res.NextAction,
 		}, EndFinish
 	case flow.OutcomeRequeue:
@@ -65,6 +65,14 @@ func reasonOr(res flow.Result, fallback string) string {
 		return res.Reason
 	}
 	return fallback
+}
+
+// sentenceOr is the sentence a failed or retried job shows the person: flow's message, else its code, else fallback.
+func sentenceOr(res flow.Result, fallback string) string {
+	if res.Message != "" {
+		return res.Message
+	}
+	return reasonOr(res, fallback)
 }
 
 // messageOr returns the sentence the person reads, or fallback when flow left it empty.
