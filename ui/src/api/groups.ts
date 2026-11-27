@@ -3,8 +3,8 @@
 export const REAL = {
   access: false,
   libraries: false,
-  jobs: false,
-  events: false,
+  jobs: true,
+  events: true,
   summary: false,
   overview: false,
 } as const;

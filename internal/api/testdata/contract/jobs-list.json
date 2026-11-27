@@ -1,0 +1,85 @@
+{
+  "body": {
+    "counts": {
+      "all": 3,
+      "done": 1,
+      "failed": 1,
+      "running": 0,
+      "skipped": 0,
+      "waiting": 1
+    },
+    "items": [
+      {
+        "file": "three.mkv",
+        "finishedAt": "2026-11-27T16:14:36.441Z",
+        "id": "3",
+        "library": "Clips",
+        "progress": null,
+        "queuedAt": "2026-11-27T16:14:36.439Z",
+        "result": {
+          "failedStep": null,
+          "outcome": "smaller",
+          "reason": null,
+          "sizeAfter": 400,
+          "sizeBefore": 1000,
+          "warnings": 0
+        },
+        "startedAt": "2026-11-27T16:14:36.440Z",
+        "state": "done",
+        "step": null,
+        "tookMs": 1,
+        "worker": "",
+        "workflow": "Shrink"
+      },
+      {
+        "file": "two.mkv",
+        "finishedAt": "2026-11-27T16:14:36.443Z",
+        "id": "2",
+        "library": "Clips",
+        "progress": null,
+        "queuedAt": "2026-11-27T16:14:36.437Z",
+        "result": {
+          "failedStep": "encode",
+          "outcome": null,
+          "reason": "the encoder stopped",
+          "sizeAfter": null,
+          "sizeBefore": 0,
+          "warnings": 0
+        },
+        "startedAt": "2026-11-27T16:14:36.442Z",
+        "state": "failed",
+        "step": null,
+        "tookMs": 1,
+        "worker": "",
+        "workflow": "Shrink"
+      },
+      {
+        "file": "one.mkv",
+        "finishedAt": null,
+        "id": "1",
+        "library": "Clips",
+        "progress": null,
+        "queuedAt": "2026-11-27T16:14:36.436Z",
+        "result": {
+          "failedStep": null,
+          "outcome": null,
+          "reason": null,
+          "sizeAfter": null,
+          "sizeBefore": 0,
+          "warnings": 0
+        },
+        "startedAt": null,
+        "state": "waiting",
+        "step": null,
+        "tookMs": null,
+        "worker": "",
+        "workflow": "Shrink"
+      }
+    ],
+    "next": null
+  },
+  "method": "GET",
+  "path": "/api/v2/jobs",
+  "status": 200,
+  "type": "JobsPage"
+}
