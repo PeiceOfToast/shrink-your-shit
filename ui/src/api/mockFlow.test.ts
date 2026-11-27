@@ -202,6 +202,11 @@ test("ten-bit H.264 is greyed and a problem, with the server's sentence", () => 
   assert.equal(d?.stepId, "video");
   assert.equal(d?.why, why);
 });
+test("with H.264 and 8-bit, 10 is greyed up front but there is no problem", () => {
+  const check = checkFlow(videoWith("h264", 8));
+  assert.equal(check.problems.find((x) => x.code === "video.bitdepth_h264"), undefined);
+  assert.equal(check.disabled.find((x) => x.field === "bitDepth" && x.value === "10")?.stepId, "video");
+});
 test("with HEVC, ten-bit is not greyed and not a problem", () => {
   const check = checkFlow(videoWith("hevc", 10));
   assert.equal(check.problems.find((x) => x.code === "video.bitdepth_h264"), undefined);

@@ -335,11 +335,12 @@ export function checkFlow(flow: Flow): FlowCheck {
   if (v.rateControl === "vbr" && !LADDER.vbrFormats.includes(String(v.format))) {
     problems.push({ stepId: "video", field: "rateControl", code: "vbr_av1", message: "Variable bitrate doesn't work with AV1 yet. Pick Constant bitrate or Quality, or another format." });
   }
-  // Ten-bit H.264 is refused (#855): a greyed 10 and a problem, with the server's sentence (video.bitdepth_h264).
-  if (v.bitDepth === 10 && String(v.format) === "h264") {
+  // Ten-bit H.264 is refused (#855, #858): 10 is greyed whenever H.264 is the format, and a stored 10 is also a problem,
+  // with the server's sentence (video.bitdepth_h264).
+  if (String(v.format) === "h264") {
     const why = "10-bit H.264 plays on few devices, so it isn't offered. Pick HEVC or AV1 for 10-bit.";
     disabled.push({ stepId: "video", field: "bitDepth", value: "10", why });
-    problems.push({ stepId: "video", field: "bitDepth", code: "video.bitdepth_h264", message: why });
+    if (v.bitDepth === 10) problems.push({ stepId: "video", field: "bitDepth", code: "video.bitdepth_h264", message: why });
   }
   // Replacing the original and a chosen folder arrive with item 10: the choices are greyed with the
   // same sentences the server uses, and a stored pick is a problem with its own sentence.
