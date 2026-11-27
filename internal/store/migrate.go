@@ -128,15 +128,29 @@ func upgradeError(m Migration, err error, backup string) error {
 	return fmt.Errorf("upgrade the schema at migration %d (%s) failed: %v%s", m.Version, m.Name, err, where)
 }
 
-// backupTo copies the database to path with VACUUM INTO. A failed attempt leaves no partial file.
+// backupTo copies the database to path with VACUUM INTO. It writes a temp name beside the real one
+// and renames it into place: an earlier backup of the same version (left by an upgrade that failed
+// and rolled back) is replaced only once the new copy is complete, so a retry still has a backup.
+// A failed attempt removes only the temp file.
 func (db *DB) backupTo(path string) error {
-	if _, err := db.write.Exec("VACUUM INTO ?", path); err != nil {
-		if fi, statErr := os.Lstat(path); statErr == nil && fi.Mode().IsRegular() {
-			os.Remove(path)
-		}
+	tmp := path + ".tmp"
+	removeRegularFile(tmp) // a stale temp from an earlier failure is not a backup
+	if _, err := db.write.Exec("VACUUM INTO ?", tmp); err != nil {
+		removeRegularFile(tmp) // VACUUM INTO can leave a partial file
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		removeRegularFile(tmp)
 		return err
 	}
 	return nil
+}
+
+// removeRegularFile removes path when it is a regular file; a folder in the way is not ours to remove.
+func removeRegularFile(path string) {
+	if fi, err := os.Lstat(path); err == nil && fi.Mode().IsRegular() {
+		os.Remove(path)
+	}
 }
 
 // pruneBackups keeps the newest keep backups and deletes the rest. The versions come from the names

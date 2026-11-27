@@ -156,6 +156,69 @@ func TestANewerDatabaseIsRefusedBeforeAnyWrite(t *testing.T) {
 	}
 }
 
+// The same refusal for a database in WAL mode, which is what this program makes: the main file's
+// bytes are unchanged. A -shm or an empty -wal is SQLite's index, not data; a non-empty -wal would
+// be the newer program's data and may not remain.
+func TestANewerWalDatabaseIsRefusedBeforeAnyWrite(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "syp.db")
+	newest := newestVersion(registered())
+
+	raw, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mode string
+	if err := raw.QueryRow("PRAGMA journal_mode = WAL").Scan(&mode); err != nil {
+		t.Fatal(err)
+	}
+	if mode != "wal" {
+		t.Fatalf("journal_mode is %q, want wal", mode)
+	}
+	for _, stmt := range []string{
+		`CREATE TABLE t(id INTEGER)`,
+		`INSERT INTO t(id) VALUES (1)`,
+		fmt.Sprintf("PRAGMA user_version = %d", newest+1),
+	} {
+		if _, err := raw.Exec(stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Open(dir); err == nil {
+		t.Fatal("Open of a WAL database from a newer program succeeded")
+	} else if !strings.Contains(err.Error(), "from a newer syp") {
+		t.Errorf("the refusal is not the newer-syp sentence: %v", err)
+	}
+
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Error("the main database file changed even though it was refused")
+	}
+	fi, walErr := os.Stat(path + "-wal")
+	if walErr == nil {
+		t.Logf("after Open: -wal is %d bytes", fi.Size())
+		if fi.Size() > 0 {
+			t.Errorf("a non-empty -wal file (%d bytes) remains after Open", fi.Size())
+		}
+	} else {
+		t.Logf("after Open: no -wal file")
+	}
+	if _, shmErr := os.Stat(path + "-shm"); shmErr == nil {
+		t.Log("after Open: a -shm file remains (an index, not data)")
+	}
+}
+
 // L-SAFE-18, one transaction: the third step of three fails, so the second step's table, the schema
 // version and the backup are exactly what they were before.
 func TestAFailingStepRollsEverythingBackAndNamesTheBackup(t *testing.T) {
@@ -196,37 +259,154 @@ func TestAFailingStepRollsEverythingBackAndNamesTheBackup(t *testing.T) {
 	}
 }
 
-// L-SAFE-18, a failed backup: nothing is upgraded and no partial file is left.
+// L-SAFE-18, a failed backup: nothing is upgraded, no partial file is left, and any backup an
+// earlier upgrade wrote is exactly as it was.
 func TestAFailedBackupLeavesNoUpgradeAndNoPartialFile(t *testing.T) {
-	dir := t.TempDir()
 	ms := []Migration{tableMigration(1, "first"), tableMigration(2, "second")}
-	openAt(t, dir, ms, 1)
 
-	backup := filepath.Join(dir, "syp.db.bak-v1")
-	if err := os.Mkdir(backup, 0o700); err != nil {
-		t.Fatal(err)
+	t.Run("the backup path is a folder", func(t *testing.T) {
+		dir := t.TempDir()
+		openAt(t, dir, ms, 1)
+		backup := filepath.Join(dir, "syp.db.bak-v1")
+		if err := os.Mkdir(backup, 0o700); err != nil {
+			t.Fatal(err)
+		}
+
+		db, err := open(dir, ms)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		err = db.Migrate()
+		if err == nil {
+			t.Fatal("Migrate succeeded even though the backup failed")
+		}
+		if !strings.Contains(err.Error(), backup) {
+			t.Errorf("the error does not name the backup %s: %v", backup, err)
+		}
+		if got := userVersion(t, db); got != 1 {
+			t.Errorf("user_version is %d, want 1", got)
+		}
+		if tableExists(t, db, "second") {
+			t.Error("the upgrade ran even though the backup failed")
+		}
+		if fi, statErr := os.Stat(backup); statErr != nil || !fi.IsDir() {
+			t.Errorf("the folder at the backup path is gone: %v", statErr)
+		}
+		if _, statErr := os.Stat(backup + ".tmp"); statErr == nil {
+			t.Error("a temp file was left beside the backup")
+		}
+	})
+
+	t.Run("an earlier backup is left alone", func(t *testing.T) {
+		dir := t.TempDir()
+		openAt(t, dir, ms, 1)
+		backup := filepath.Join(dir, "syp.db.bak-v1")
+		earlier := []byte("the only backup a failed upgrade left")
+		if err := os.WriteFile(backup, earlier, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Mkdir(backup+".tmp", 0o700); err != nil { // makes VACUUM INTO fail
+			t.Fatal(err)
+		}
+
+		db, err := open(dir, ms)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		if err := db.Migrate(); err == nil {
+			t.Fatal("Migrate succeeded even though the backup failed")
+		}
+		if got, readErr := os.ReadFile(backup); readErr != nil || !bytes.Equal(got, earlier) {
+			t.Errorf("the earlier backup was changed or removed: %v, %q", readErr, got)
+		}
+		if got := userVersion(t, db); got != 1 {
+			t.Errorf("user_version is %d, want 1", got)
+		}
+		if tableExists(t, db, "second") {
+			t.Error("the upgrade ran even though the backup failed")
+		}
+	})
+}
+
+// A retry after a failed upgrade must still have its backup (the failure left syp.db.bak-v1 behind,
+// and the retry backs up over it) and must go through.
+func TestARetryAfterAFailedUpgradeKeepsABackupAndUpgrades(t *testing.T) {
+	dir := t.TempDir()
+	fails := true
+	second := Migration{
+		Version: 2,
+		Name:    "make second",
+		Up: func(tx *sql.Tx) error {
+			if fails {
+				fails = false
+				return errors.New("the second step broke once")
+			}
+			_, err := tx.Exec("CREATE TABLE second(id INTEGER)")
+			return err
+		},
 	}
+	ms := []Migration{tableMigration(1, "first"), second}
+	openAt(t, dir, ms, 1)
 
 	db, err := open(dir, ms)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	err = db.Migrate()
-	if err == nil {
-		t.Fatal("Migrate succeeded even though the backup failed")
+	if err := db.Migrate(); err == nil {
+		t.Fatal("the first attempt succeeded even though the second step fails once")
 	}
-	if !strings.Contains(err.Error(), backup) {
-		t.Errorf("the error does not name the backup %s: %v", backup, err)
+	backup := filepath.Join(dir, "syp.db.bak-v1")
+	if _, statErr := os.Stat(backup); statErr != nil {
+		t.Fatalf("the failed upgrade left no backup to retry from: %v", statErr)
 	}
-	if got := userVersion(t, db); got != 1 {
-		t.Errorf("user_version is %d, want 1", got)
+
+	if err := db.Migrate(); err != nil {
+		t.Fatalf("the retry failed: %v", err)
 	}
-	if tableExists(t, db, "second") {
-		t.Error("the upgrade ran even though the backup failed")
+	if got := userVersion(t, db); got != 2 {
+		t.Errorf("user_version is %d, want 2", got)
 	}
-	if fi, statErr := os.Stat(backup); statErr != nil || !fi.IsDir() {
-		t.Errorf("the folder at the backup path is gone: %v", statErr)
+	if !tableExists(t, db, "second") {
+		t.Error("the retry did not make table second")
+	}
+
+	raw, err := sql.Open("sqlite", "file:"+backup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	var v int
+	if err := raw.QueryRow("PRAGMA user_version").Scan(&v); err != nil {
+		t.Fatalf("the backup is not a database: %v", err)
+	}
+	if v != 1 {
+		t.Errorf("the backup is at schema %d, want 1 (the version before the upgrade)", v)
+	}
+}
+
+// A temp file in the data folder is not a backup: pruning leaves it alone and keeps three backups.
+func TestPruneIgnoresATempBackup(t *testing.T) {
+	dir := t.TempDir()
+	for v := 1; v <= 4; v++ {
+		if err := os.WriteFile(filepath.Join(dir, backupName(v)), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tmp := filepath.Join(dir, backupName(5)+".tmp")
+	if err := os.WriteFile(tmp, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := pruneBackups(dir, 3); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := backupVersions(t, dir), []int{4, 3, 2}; !reflect.DeepEqual(got, want) {
+		t.Errorf("backups left: %v, want %v", got, want)
+	}
+	if _, statErr := os.Stat(tmp); statErr != nil {
+		t.Error("the temp file was treated as a backup and removed")
 	}
 }
 
