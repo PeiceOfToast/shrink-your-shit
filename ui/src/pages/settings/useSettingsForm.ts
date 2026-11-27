@@ -3,7 +3,7 @@ import { api, type SettingsData, type SettingsPatch } from "../../api/index.ts";
 import { useApi } from "../../api/useApi.ts";
 import { asProblem, useDirty, useDraft, type FieldProblem } from "./parts.tsx";
 
-export type SettingsGroup = "general" | "processing" | "logs";
+export type SettingsGroup = "general" | "appearance" | "processing" | "logs";
 
 const READ_ONLY = new Set(["updateAvailable", "trashPath"]);
 

@@ -33,11 +33,11 @@ let settings: SettingsData = {
     language: "en",
     timeFormat: "24h",
     dateFormat: "YYYY-MM-DD",
-    theme: "system",
     checkForUpdates: true,
     updateAvailable: null,
     languages: ["eng", "ger"],
   },
+  appearance: { theme: "system", accent: null },
   processing: {
     parallelJobs: 1,
     gpuJobsSeparate: true,
@@ -54,7 +54,8 @@ let settings: SettingsData = {
 };
 
 const KNOWN: Record<string, string[]> = {
-  general: ["serverName", "language", "timeFormat", "dateFormat", "theme", "checkForUpdates", "languages"],
+  general: ["serverName", "language", "timeFormat", "dateFormat", "checkForUpdates", "languages"],
+  appearance: ["theme", "accent"],
   processing: ["parallelJobs", "gpuJobsSeparate", "scanSchedule", "queueOrder", "lowPriority", "keepOriginalsDays", "lowSpaceGB", "workflowsMayRunCommands"],
   logs: ["jobDays", "systemDays", "rawDays"],
 };
@@ -67,6 +68,9 @@ function validate(next: SettingsData) {
   const g = next.general;
   if (!g.serverName.trim()) throw bad("general.serverName", "Give the server a name.");
   if (!g.languages.every((l) => /^[a-z]{3}$/.test(l))) throw bad("general.languages", "Use three-letter codes like eng, ger, fra.");
+  const a = next.appearance;
+  if (!["system", "light", "dark"].includes(a.theme)) throw bad("appearance.theme", "Pick Match system, Dark or Light.");
+  if (a.accent !== null && !/^#[0-9a-f]{6}$/i.test(a.accent)) throw bad("appearance.accent", "Use a colour like #3b82f6.");
   const p = next.processing;
   if (!inRange(p.parallelJobs, 1, 8)) throw bad("processing.parallelJobs", "Pick from 1 to 8 files at once.");
   if (p.scanSchedule !== "" && !/^([01]\d|2[0-3]):[0-5]\d$/.test(p.scanSchedule)) throw bad("processing.scanSchedule", "Use a time like 02:00, or leave it empty for no daily scan.");

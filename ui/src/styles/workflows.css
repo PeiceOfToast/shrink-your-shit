@@ -76,7 +76,8 @@
 .wf-step.open { border-color: var(--strong); }
 .wf-step-head { width: 100%; display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 12px 14px; background: none; border: 0; color: var(--text); text-align: left; }
 .wf-num { width: 28px; height: 28px; border-radius: 50%; border: 2px solid var(--strong); display: inline-flex; align-items: center; justify-content: center; font-weight: 700; font-size: 13px; }
-.wf-step.open .wf-num, .wf-num.done { border-color: var(--accent); color: var(--accent); }
+.wf-step.open .wf-num { border-color: var(--accent); color: var(--accent); }
+.wf-num.done { border-color: var(--ok); color: var(--ok); }
 .wf-step-title { font-weight: 700; }
 .wf-step-sum { display: block; font-size: 13px; color: var(--text2); font-weight: 400; }
 .wf-step-body { padding: 4px 16px 16px; border-top: 1px solid var(--border); }

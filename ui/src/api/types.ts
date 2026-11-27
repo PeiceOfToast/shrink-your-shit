@@ -4,7 +4,7 @@
 export type JobState = "waiting" | "running" | "done" | "failed" | "skipped";
 
 export interface Series {
-  c: "ok" | "accent" | "text2" | "bad";
+  c: "ok" | "accent" | "text2" | "bad" | "trash";
   v: (number | null)[];
 }
 
@@ -393,14 +393,19 @@ export interface JoinRequest {
 
 // ---- Settings (page 11). Shapes are the ones in pages/11-settings.md "Data and API".
 
-export type SettingsSection = "general" | "processing" | "connections" | "notifications" | "backup" | "health" | "access";
+export type SettingsSection = "general" | "appearance" | "processing" | "connections" | "notifications" | "backup" | "health" | "access";
+
+// One setting for the install, applied in every browser that signs in. accent null = the default green.
+export interface AppearanceSettings {
+  theme: "system" | "light" | "dark";
+  accent: string | null;
+}
 
 export interface GeneralSettings {
   serverName: string;
   language: "en";
   timeFormat: "24h" | "12h";
   dateFormat: "YYYY-MM-DD" | "DD.MM.YYYY" | "MM/DD/YYYY";
-  theme: "system" | "light" | "dark";
   checkForUpdates: boolean;
   updateAvailable: string | null;
   // My languages: three-letter codes, kept for the workflows that keep only some tracks.
@@ -427,6 +432,7 @@ export interface LogSettings {
 
 export interface SettingsData {
   general: GeneralSettings;
+  appearance: AppearanceSettings;
   processing: ProcessingSettings;
   logs: LogSettings;
   backupKeep: number;
@@ -435,6 +441,7 @@ export interface SettingsData {
 // PATCH sends only the changed fields, nested by group.
 export type SettingsPatch = {
   general?: Partial<Omit<GeneralSettings, "updateAvailable">>;
+  appearance?: Partial<AppearanceSettings>;
   processing?: Partial<Omit<ProcessingSettings, "trashPath">>;
   logs?: Partial<LogSettings>;
   backupKeep?: number;

@@ -4,10 +4,10 @@ import "./styles/draft-b.css";
 import "./styles/app.css";
 import "./styles/panels.css";
 import { App } from "./app.tsx";
-import { applyTheme, readTheme } from "./shell/theme.ts";
+import { applyAppearance, readAccent, readTheme } from "./shell/theme.ts";
 
-// Apply the saved theme before the first paint.
-applyTheme(readTheme());
+// Apply the cached theme and accent before the first paint.
+applyAppearance({ theme: readTheme(), accent: readAccent() });
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

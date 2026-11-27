@@ -7,6 +7,7 @@
 .gsw-wrap{display:inline-flex;align-items:center;gap:8px}
 .gsw{min-height:32px;height:32px;padding:0 10px;border:1px solid var(--border);border-radius:4px;font-size:13px;white-space:nowrap}
 .gsw.on b{color:var(--ok)}
+.gsw .k.on{background:var(--ok)}
 .gsw.paused b{color:var(--warn)}
 .gsw:disabled{cursor:progress}
 .gsw .short{display:none}
@@ -167,3 +168,39 @@ table.tbl.wkr td.wk-sub{display:none}
 /* At 600px and below, the status line's links are inline-flex (panels.css), which drops the space between a label and
    its value ("converting2 of 3 workers"). A gap between the link's parts keeps it. */
 @media (max-width:600px){.statusbar a{gap:5px}}
+/* The trash series on the dashboard: a neutral blue-grey, never the accent or a status hue. */
+:root{--trash:#7C93AD}
+.trash-t{color:var(--trash)}
+:root[data-theme="light"]{--trash:#4F6480}
+@media (prefers-color-scheme:light){:root:not([data-theme]){--trash:#4F6480}}
+
+/* Appearance: the chosen accent, per theme (set by applyAppearance in shell/theme.ts). The default green is the
+   stylesheet's own values. Status colours (--ok, --warn, --bad) are never mapped from the accent. */
+:root{--accent:var(--acc-dark,#22C55E);--on:var(--on-dark,#06130B)}
+:root[data-theme="dark"]{--accent:var(--acc-dark,#22C55E);--on:var(--on-dark,#06130B)}
+:root[data-theme="light"]{--accent:var(--acc-light,#15803D);--on:var(--on-light,#FFFFFF)}
+@media (prefers-color-scheme:light){:root:not([data-theme]){--accent:var(--acc-light,#15803D);--on:var(--on-light,#FFFFFF)}}
+.ap-sw{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.ap-sw button{width:32px;height:32px;border-radius:50%;border:2px solid var(--border);padding:0;cursor:pointer}
+.ap-sw button[aria-pressed="true"]{outline:2px solid var(--text);outline-offset:2px}
+.set-own{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px}
+.set-own label{display:flex;gap:8px;align-items:center;color:var(--text2)}
+.set-own input[type="color"]{width:40px;height:30px;padding:0;border:1px solid var(--border);background:none}
+.ap-preview{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.ap-sample{border:1px solid var(--border);border-radius:4px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.ap-dark{background:#10161D;color:#E6EDF3}
+.ap-light{background:#FFFFFF;color:#0F1720}
+.ap-btn{display:inline-block;padding:6px 12px;border-radius:4px;background:var(--ap-acc);color:var(--ap-on)}
+.ap-sample a{color:var(--ap-acc)}
+.ap-tabs{display:flex;gap:6px}
+.ap-tabs span{padding:4px 10px;border-bottom:2px solid transparent}
+.ap-tabs span.on{border-bottom-color:var(--ap-acc);color:var(--ap-acc)}
+.ap-chips{display:flex;gap:6px;flex-wrap:wrap}
+.ap-chips span{padding:2px 8px;border-radius:4px;font-size:12px;border:1px solid currentColor}
+.ap-chips .ok{color:#4ADE80}.ap-chips .warn{color:#FBBF24}.ap-chips .bad{color:#F87171}
+.ap-light .ap-chips .ok{color:#166534}.ap-light .ap-chips .warn{color:#854D0E}.ap-light .ap-chips .bad{color:#991B1B}
+@media (max-width:900px){.ap-preview{grid-template-columns:1fr}}
+
+/* The Unsaved changes bar sits above the phone's tab bar on every settings page: fixed, not sticky, because a sticky
+   bar can't leave its section, so on a short page it covered the tab bar. The section keeps room under its last row. */
+@media (max-width:900px){.savebar{position:fixed;left:12px;right:12px;bottom:64px;margin-top:0;z-index:4}.set-main{padding-bottom:140px}}

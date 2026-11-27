@@ -7,7 +7,7 @@ import { Icon } from "../ui/Icon.tsx";
 import type { IconName } from "../ui/icon-paths.ts";
 import { Link, navigate, useLocation } from "../router.tsx";
 import { WorkersSwitch } from "./WorkersSwitch.tsx";
-import { applyTheme, nextTheme, readTheme, type ThemeMode } from "./theme.ts";
+import { applyAppearance, nextTheme, readAccent, readTheme, type ThemeMode } from "./theme.ts";
 
 // Main sections in the order decided 11-26 (Dashboard · Libraries · Workflows · Jobs · Workers · Settings).
 const SECTIONS: { key: string; label: string; to: string; icon: IconName }[] = [
@@ -116,12 +116,18 @@ export function Shell({ children }: { children: ReactNode }) {
   const { pathname } = useLocation();
   const summary = useApi(() => api.getSummary(), []);
   const ok = useConnectionOk();
-  const [theme, setTheme] = useState<ThemeMode>(() => readTheme());
+  // The install's appearance (settings > appearance): the sun button changes the theme for every browser.
+  const [appearance, setAppearance] = useState<{ theme: ThemeMode; accent: string | null }>(() => ({ theme: readTheme(), accent: readAccent() }));
+  const theme = appearance.theme;
   const active = activeKey(pathname);
 
   useEffect(() => {
-    applyTheme(theme);
-  }, [theme]);
+    applyAppearance(appearance);
+  }, [appearance.theme, appearance.accent]);
+
+  useEffect(() => {
+    api.getSettings().then((s) => setAppearance(s.appearance), () => {});
+  }, []);
 
   // Settings' health check refreshes this summary after a fix or re-run, so the red dot clears at once.
   // The System log reports when it has been opened, so the new-errors count clears at once.
@@ -203,7 +209,7 @@ export function Shell({ children }: { children: ReactNode }) {
           className="btn ghost sm"
           aria-label={`Theme: ${theme}`}
           title={`Theme: ${theme}`}
-          onClick={() => setTheme((t) => nextTheme(t))}
+          onClick={() => { const next = nextTheme(theme); setAppearance((a) => ({ ...a, theme: next })); api.patchSettings({ appearance: { theme: next } }).catch(() => {}); }}
         >
           <Icon name="sun" />
         </button>
