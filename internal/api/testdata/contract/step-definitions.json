@@ -1,0 +1,1056 @@
+{
+  "body": [
+    {
+      "events": [
+        {
+          "code": "video.convert",
+          "fields": [
+            "format",
+            "from",
+            "crf"
+          ],
+          "keep": "log",
+          "level": "info",
+          "text": "Converting to {format}"
+        },
+        {
+          "code": "video.already_target",
+          "fields": [
+            "format"
+          ],
+          "keep": "log",
+          "level": "info",
+          "text": "Already {format}"
+        },
+        {
+          "code": "video.no_video",
+          "keep": "log",
+          "level": "error",
+          "text": "The file has no picture to convert"
+        }
+      ],
+      "form": {
+        "groups": [
+          {
+            "id": "basic",
+            "label": ""
+          },
+          {
+            "help": "Picture size, bitrate, speed, frame rate, bit depth, HDR",
+            "id": "advanced",
+            "label": "Advanced"
+          }
+        ],
+        "schema": {
+          "additionalProperties": false,
+          "properties": {
+            "avgMbps": {
+              "default": null,
+              "maximum": 1000,
+              "minimum": 0.1,
+              "title": "Average",
+              "type": [
+                "null",
+                "number"
+              ],
+              "x-ui": {
+                "group": "advanced",
+                "order": 10,
+                "showIf": {
+                  "field": "rateControl",
+                  "notEquals": null
+                },
+                "unit": "Mb/s",
+                "widget": "number"
+              }
+            },
+            "bitDepth": {
+              "default": null,
+              "enum": [
+                null,
+                8,
+                10
+              ],
+              "title": "Colour depth",
+              "type": [
+                "null",
+                "integer"
+              ],
+              "x-ui": {
+                "choices": [
+                  {
+                    "available": true,
+                    "label": "Same as the source",
+                    "value": null
+                  },
+                  {
+                    "available": true,
+                    "label": "8-bit",
+                    "value": 8
+                  },
+                  {
+                    "available": true,
+                    "label": "10-bit",
+                    "value": 10
+                  }
+                ],
+                "group": "advanced",
+                "order": 15,
+                "widget": "segmented"
+              }
+            },
+            "bitrateLevel": {
+              "default": "medium",
+              "description": "Fills in the numbers for the picked size and format.",
+              "enum": [
+                "low",
+                "medium",
+                "high",
+                "custom"
+              ],
+              "title": "Recommended",
+              "type": "string",
+              "x-ui": {
+                "choices": [
+                  {
+                    "available": true,
+                    "label": "Low",
+                    "value": "low"
+                  },
+                  {
+                    "available": true,
+                    "label": "Medium",
+                    "value": "medium"
+                  },
+                  {
+                    "available": true,
+                    "label": "High",
+                    "value": "high"
+                  },
+                  {
+                    "available": true,
+                    "label": "Custom",
+                    "value": "custom"
+                  }
+                ],
+                "group": "advanced",
+                "order": 9,
+                "showIf": {
+                  "field": "rateControl",
+                  "notEquals": null
+                },
+                "widget": "segmented"
+              }
+            },
+            "format": {
+              "default": "hevc",
+              "description": "HEVC makes the smallest files. H.264 plays everywhere. AV1 is smallest but slow to encode.",
+              "enum": [
+                "hevc",
+                "h264",
+                "av1"
+              ],
+              "title": "Format",
+              "type": "string",
+              "x-ui": {
+                "choices": [
+                  {
+                    "available": true,
+                    "label": "HEVC",
+                    "value": "hevc"
+                  },
+                  {
+                    "available": true,
+                    "label": "H.264",
+                    "value": "h264"
+                  },
+                  {
+                    "available": true,
+                    "label": "AV1",
+                    "value": "av1"
+                  }
+                ],
+                "group": "basic",
+                "order": 1,
+                "widget": "segmented"
+              }
+            },
+            "fps": {
+              "default": null,
+              "description": "Left empty, each file keeps its own frame rate.",
+              "maximum": 240,
+              "minimum": 1,
+              "title": "Frame rate",
+              "type": [
+                "null",
+                "number"
+              ],
+              "x-ui": {
+                "group": "advanced",
+                "order": 14,
+                "widget": "number"
+              }
+            },
+            "hdr": {
+              "default": "keep",
+              "enum": [
+                "keep",
+                "tonemap",
+                "skip"
+              ],
+              "title": "HDR",
+              "type": [
+                "null",
+                "string"
+              ],
+              "x-ui": {
+                "choices": [
+                  {
+                    "available": true,
+                    "label": "Keep",
+                    "value": "keep"
+                  },
+                  {
+                    "available": true,
+                    "label": "Convert to SDR",
+                    "value": "tonemap"
+                  },
+                  {
+                    "available": true,
+                    "label": "Leave HDR files alone",
+                    "value": "skip"
+                  }
+                ],
+                "group": "advanced",
+                "order": 16,
+                "widget": "segmented"
+              }
+            },
+            "height": {
+              "default": null,
+              "maximum": 7680,
+              "minimum": 16,
+              "title": "Height",
+              "type": [
+                "null",
+                "integer"
+              ],
+              "x-ui": {
+                "group": "advanced",
+                "order": 7,
+                "showIf": {
+                  "equals": "custom",
+                  "field": "size"
+                },
+                "unit": "px",
+                "widget": "number"
+              }
+            },
+            "ifGpuFails": {
+              "default": "cpu",
+              "enum": [
+                "cpu",
+                "stop"
+              ],
+              "title": "If the graphics card can't do it",
+              "type": "string",
+              "x-ui": {
+                "choices": [
+                  {
+                    "available": true,
+                    "label": "Use the processor",
+                    "value": "cpu"
+                  },
+                  {
+                    "available": true,
+                    "label": "Stop and tell me",
+                    "value": "stop"
+                  }
+                ],
+                "group": "basic",
+                "order": 4,
+                "widget": "segmented"
+              }
+            },
+            "keepDolbyVision": {
+              "default": false,
+              "description": "Only with HEVC.",
+              "title": "Keep Dolby Vision",
+              "type": "boolean",
+              "x-ui": {
+                "group": "advanced",
+                "order": 17,
+                "widget": "checkbox"
+              }
+            },
+            "maxMbps": {
+              "default": null,
+              "maximum": 1000,
+              "minimum": 0.1,
+              "title": "At most",
+              "type": [
+                "null",
+                "number"
+              ],
+              "x-ui": {
+                "group": "advanced",
+                "order": 11,
+                "showIf": {
+                  "equals": "vbr",
+                  "field": "rateControl"
+                },
+                "unit": "Mb/s",
+                "widget": "number"
+              }
+            },
+            "preset": {
+              "default": "normal",
+              "enum": [
+                "faster",
+                "normal",
+                "slower"
+              ],
+              "title": "Speed",
+              "type": [
+                "null",
+                "string"
+              ],
+              "x-ui": {
+                "choices": [
+                  {
+                    "available": true,
+                    "label": "Faster",
+                    "value": "faster"
+                  },
+                  {
+                    "available": true,
+                    "label": "Balanced",
+                    "value": "normal"
+                  },
+                  {
+                    "available": true,
+                    "label": "Slower and smaller",
+                    "value": "slower"
+                  }
+                ],
+                "group": "advanced",
+                "order": 13,
+                "widget": "select"
+              }
+            },
+            "quality": {
+              "default": 3,
+              "description": "Lower means a better picture and a bigger file.",
+              "maximum": 5,
+              "minimum": 1,
+              "title": "Quality",
+              "type": "integer",
+              "x-ui": {
+                "group": "basic",
+                "order": 2,
+                "sliderLabels": [
+                  "Smallest file",
+                  "Smaller",
+                  "Balanced",
+                  "Better quality",
+                  "Best quality"
+                ],
+                "widget": "slider"
+              }
+            },
+            "rateControl": {
+              "default": null,
+              "description": "A bitrate replaces the Quality slider.",
+              "enum": [
+                null,
+                "vbr",
+                "cbr"
+              ],
+              "title": "Bitrate",
+              "type": [
+                "null",
+                "string"
+              ],
+              "x-ui": {
+                "choices": [
+                  {
+                    "available": true,
+                    "label": "Quality (the slider)",
+                    "value": null
+                  },
+                  {
+                    "available": true,
+                    "label": "Variable bitrate",
+                    "value": "vbr"
+                  },
+                  {
+                    "available": true,
+                    "label": "Constant bitrate",
+                    "value": "cbr"
+                  }
+                ],
+                "group": "advanced",
+                "order": 8,
+                "widget": "segmented"
+              }
+            },
+            "size": {
+              "default": null,
+              "description": "Never made bigger than the source; the shape is kept.",
+              "enum": [
+                null,
+                "2160",
+                "1080",
+                "720",
+                "480",
+                "custom"
+              ],
+              "title": "Picture size",
+              "type": [
+                "null",
+                "string"
+              ],
+              "x-ui": {
+                "choices": [
+                  {
+                    "available": true,
+                    "label": "Same as the source",
+                    "value": null
+                  },
+                  {
+                    "available": true,
+                    "label": "2160p",
+                    "value": "2160"
+                  },
+                  {
+                    "available": true,
+                    "label": "1080p",
+                    "value": "1080"
+                  },
+                  {
+                    "available": true,
+                    "label": "720p",
+                    "value": "720"
+                  },
+                  {
+                    "available": true,
+                    "label": "480p",
+                    "value": "480"
+                  },
+                  {
+                    "available": true,
+                    "label": "Custom (width × height)",
+                    "value": "custom"
+                  }
+                ],
+                "group": "advanced",
+                "order": 5,
+                "widget": "segmented"
+              }
+            },
+            "twoPass": {
+              "default": false,
+              "description": "Slower, but the size stays closer to the average.",
+              "title": "Two passes",
+              "type": "boolean",
+              "x-ui": {
+                "group": "advanced",
+                "order": 12,
+                "showIf": {
+                  "equals": "vbr",
+                  "field": "rateControl"
+                },
+                "widget": "checkbox"
+              }
+            },
+            "useGpu": {
+              "default": true,
+              "description": "Use a graphics card when a worker has one.",
+              "title": "Graphics card",
+              "type": "boolean",
+              "x-ui": {
+                "group": "basic",
+                "order": 3,
+                "widget": "checkbox"
+              }
+            },
+            "width": {
+              "default": null,
+              "maximum": 7680,
+              "minimum": 16,
+              "title": "Width",
+              "type": [
+                "null",
+                "integer"
+              ],
+              "x-ui": {
+                "group": "advanced",
+                "order": 6,
+                "showIf": {
+                  "equals": "custom",
+                  "field": "size"
+                },
+                "unit": "px",
+                "widget": "number"
+              }
+            }
+          },
+          "type": "object"
+        }
+      },
+      "help": "Choose the format and how small the picture should get. The file is not touched until the end.",
+      "name": "Video",
+      "type": "video.convert",
+      "version": 1
+    },
+    {
+      "events": [
+        {
+          "code": "audio.as_is",
+          "fields": [
+            "format",
+            "audioTracks",
+            "subtitleTracks"
+          ],
+          "keep": "log",
+          "level": "info",
+          "text": "Audio copied as is"
+        }
+      ],
+      "form": {
+        "groups": [
+          {
+            "id": "basic",
+            "label": ""
+          },
+          {
+            "id": "advanced",
+            "label": "Advanced"
+          },
+          {
+            "help": "The flow has three steps, so the subtitles live here.",
+            "id": "subtitles",
+            "label": "Subtitles"
+          }
+        ],
+        "schema": {
+          "additionalProperties": false,
+          "properties": {
+            "bitrateKbps": {
+              "default": null,
+              "maximum": 1536,
+              "minimum": 8,
+              "title": "Bitrate",
+              "type": [
+                "null",
+                "integer"
+              ],
+              "x-ui": {
+                "group": "advanced",
+                "order": 5,
+                "unit": "kb/s",
+                "widget": "number"
+              }
+            },
+            "bitratePer": {
+              "default": "channel",
+              "enum": [
+                "channel",
+                "track"
+              ],
+              "title": "Bitrate is for",
+              "type": "string",
+              "x-ui": {
+                "choices": [
+                  {
+                    "available": true,
+                    "label": "Each channel",
+                    "value": "channel"
+                  },
+                  {
+                    "available": true,
+                    "label": "The whole track",
+                    "value": "track"
+                  }
+                ],
+                "group": "advanced",
+                "order": 6,
+                "showIf": {
+                  "field": "bitrateKbps",
+                  "notEquals": null
+                },
+                "widget": "segmented"
+              }
+            },
+            "channels": {
+              "default": "source",
+              "description": "A most, never an upmix: a stereo file stays stereo wherever 5.1 is asked for.",
+              "enum": [
+                "stereo",
+                "source",
+                "mono",
+                "5.1"
+              ],
+              "title": "Channels",
+              "type": "string",
+              "x-ui": {
+                "choices": [
+                  {
+                    "available": true,
+                    "label": "Stereo",
+                    "value": "stereo"
+                  },
+                  {
+                    "available": true,
+                    "label": "Same as the source",
+                    "value": "source"
+                  },
+                  {
+                    "available": true,
+                    "label": "Mono",
+                    "value": "mono"
+                  },
+                  {
+                    "available": true,
+                    "label": "5.1",
+                    "value": "5.1"
+                  }
+                ],
+                "group": "basic",
+                "order": 2,
+                "widget": "segmented"
+              }
+            },
+            "codec": {
+              "default": null,
+              "enum": [
+                null,
+                "aac",
+                "opus",
+                "ac3",
+                "eac3",
+                "flac",
+                "copy"
+              ],
+              "title": "Codec",
+              "type": [
+                "null",
+                "string"
+              ],
+              "x-ui": {
+                "choices": [
+                  {
+                    "available": true,
+                    "label": "As picked above",
+                    "value": null
+                  },
+                  {
+                    "available": true,
+                    "label": "AAC",
+                    "value": "aac"
+                  },
+                  {
+                    "available": true,
+                    "label": "Opus",
+                    "value": "opus"
+                  },
+                  {
+                    "available": true,
+                    "label": "AC-3",
+                    "value": "ac3"
+                  },
+                  {
+                    "available": true,
+                    "label": "E-AC-3",
+                    "value": "eac3"
+                  },
+                  {
+                    "available": true,
+                    "label": "FLAC",
+                    "value": "flac"
+                  },
+                  {
+                    "available": true,
+                    "label": "Copy the original",
+                    "value": "copy"
+                  }
+                ],
+                "group": "advanced",
+                "order": 4,
+                "widget": "select"
+              }
+            },
+            "commentary": {
+              "default": "keep",
+              "enum": [
+                "keep",
+                "drop"
+              ],
+              "title": "Commentary tracks",
+              "type": "string",
+              "x-ui": {
+                "choices": [
+                  {
+                    "available": true,
+                    "label": "Keep",
+                    "value": "keep"
+                  },
+                  {
+                    "available": true,
+                    "label": "Drop",
+                    "value": "drop"
+                  }
+                ],
+                "group": "advanced",
+                "order": 10,
+                "widget": "segmented"
+              }
+            },
+            "defaultTrack": {
+              "default": null,
+              "title": "Default track",
+              "type": [
+                "null",
+                "string"
+              ],
+              "x-ui": {
+                "group": "advanced",
+                "order": 11,
+                "widget": "select"
+              }
+            },
+            "downmix": {
+              "default": "plain",
+              "enum": [
+                "speech",
+                "plain",
+                "dpl2"
+              ],
+              "title": "Making stereo from surround",
+              "type": [
+                "null",
+                "string"
+              ],
+              "x-ui": {
+                "choices": [
+                  {
+                    "available": true,
+                    "label": "Clear speech",
+                    "value": "speech"
+                  },
+                  {
+                    "available": true,
+                    "label": "Plain mix",
+                    "value": "plain"
+                  },
+                  {
+                    "available": true,
+                    "label": "Dolby Pro Logic II",
+                    "value": "dpl2"
+                  }
+                ],
+                "group": "advanced",
+                "order": 8,
+                "widget": "select"
+              }
+            },
+            "format": {
+              "default": "copy",
+              "enum": [
+                "aac",
+                "opus",
+                "copy"
+              ],
+              "title": "Format",
+              "type": "string",
+              "x-ui": {
+                "choices": [
+                  {
+                    "available": true,
+                    "label": "AAC",
+                    "value": "aac"
+                  },
+                  {
+                    "available": true,
+                    "label": "Opus",
+                    "value": "opus"
+                  },
+                  {
+                    "available": true,
+                    "label": "Same as the source",
+                    "value": "copy"
+                  }
+                ],
+                "group": "basic",
+                "order": 1,
+                "widget": "segmented"
+              }
+            },
+            "keepOriginal": {
+              "default": false,
+              "title": "Keep the original track as well",
+              "type": "boolean",
+              "x-ui": {
+                "group": "advanced",
+                "order": 12,
+                "widget": "checkbox"
+              }
+            },
+            "languages": {
+              "default": [],
+              "description": "Other tracks are removed; if none match, the main track stays. Original language keeps the film's own language, whatever it is.",
+              "items": {
+                "type": "string"
+              },
+              "title": "Keep these languages",
+              "type": "array",
+              "x-ui": {
+                "group": "basic",
+                "order": 3,
+                "widget": "languages"
+              }
+            },
+            "loudnorm": {
+              "default": false,
+              "title": "Even out loudness",
+              "type": "boolean",
+              "x-ui": {
+                "group": "advanced",
+                "order": 9,
+                "widget": "checkbox"
+              }
+            },
+            "sampleRate": {
+              "default": null,
+              "maximum": 192000,
+              "minimum": 8000,
+              "title": "Sample rate",
+              "type": [
+                "null",
+                "integer"
+              ],
+              "x-ui": {
+                "group": "advanced",
+                "order": 7,
+                "unit": "Hz",
+                "widget": "number"
+              }
+            },
+            "subtitleLanguages": {
+              "default": [],
+              "description": "Empty keeps the same languages as the audio.",
+              "items": {
+                "type": "string"
+              },
+              "title": "Subtitle languages",
+              "type": "array",
+              "x-ui": {
+                "group": "subtitles",
+                "order": 14,
+                "showIf": {
+                  "equals": "my_languages",
+                  "field": "subtitles"
+                },
+                "widget": "languages"
+              }
+            },
+            "subtitles": {
+              "default": "keep_all",
+              "description": "Text only drops picture subtitles, which some TVs can't show. Make SRT files saves them next to the video.",
+              "enum": [
+                "keep_all",
+                "my_languages",
+                "text_only",
+                "srt"
+              ],
+              "title": "Subtitles",
+              "type": "string",
+              "x-ui": {
+                "choices": [
+                  {
+                    "available": true,
+                    "label": "Keep all",
+                    "value": "keep_all"
+                  },
+                  {
+                    "available": true,
+                    "label": "Keep my languages",
+                    "value": "my_languages"
+                  },
+                  {
+                    "available": true,
+                    "label": "Text only",
+                    "value": "text_only"
+                  },
+                  {
+                    "available": true,
+                    "label": "Make SRT files",
+                    "value": "srt"
+                  }
+                ],
+                "group": "subtitles",
+                "order": 13,
+                "widget": "segmented"
+              }
+            }
+          },
+          "type": "object"
+        }
+      },
+      "help": "Keep the sound as it is, or choose another format once that is built.",
+      "name": "Audio",
+      "type": "audio.tracks",
+      "version": 1
+    },
+    {
+      "events": [
+        {
+          "code": "save.next_to",
+          "fields": [
+            "container",
+            "output"
+          ],
+          "keep": "log",
+          "level": "info",
+          "text": "Saving next to the original"
+        },
+        {
+          "code": "save.nothing",
+          "keep": "log",
+          "level": "info",
+          "text": "Nothing to save"
+        },
+        {
+          "code": "save.would_land_on_source",
+          "keep": "log",
+          "level": "error",
+          "text": "The new file would take the original's name"
+        },
+        {
+          "code": "save.unknown_container",
+          "keep": "log",
+          "level": "error",
+          "text": "The original's file type has no match here"
+        }
+      ],
+      "form": {
+        "groups": [
+          {
+            "id": "basic",
+            "label": ""
+          }
+        ],
+        "schema": {
+          "additionalProperties": false,
+          "properties": {
+            "container": {
+              "default": "mkv",
+              "description": "MKV holds every track and subtitle. MP4 plays on more devices but drops some subtitles.",
+              "enum": [
+                "mkv",
+                "mp4",
+                "webm",
+                "keep"
+              ],
+              "title": "File type",
+              "type": "string",
+              "x-ui": {
+                "choices": [
+                  {
+                    "available": true,
+                    "label": "MKV",
+                    "value": "mkv"
+                  },
+                  {
+                    "available": true,
+                    "label": "MP4",
+                    "value": "mp4"
+                  },
+                  {
+                    "available": true,
+                    "label": "WebM",
+                    "value": "webm"
+                  },
+                  {
+                    "available": true,
+                    "label": "Keep the same",
+                    "value": "keep"
+                  }
+                ],
+                "group": "basic",
+                "order": 1,
+                "widget": "segmented"
+              }
+            },
+            "folder": {
+              "default": "",
+              "title": "Folder",
+              "type": "string",
+              "x-ui": {
+                "group": "basic",
+                "order": 3,
+                "showIf": {
+                  "equals": "folder",
+                  "field": "where"
+                },
+                "widget": "text"
+              }
+            },
+            "nameSuffix": {
+              "default": "",
+              "description": "Added after a hyphen: media.mp4 becomes media-small.mp4. Empty keeps the name.",
+              "title": "Add to the file name",
+              "type": "string",
+              "x-ui": {
+                "group": "basic",
+                "order": 4,
+                "widget": "text"
+              }
+            },
+            "where": {
+              "default": "next_to",
+              "enum": [
+                "replace",
+                "next_to",
+                "folder"
+              ],
+              "title": "Where it goes",
+              "type": "string",
+              "x-ui": {
+                "choices": [
+                  {
+                    "available": true,
+                    "label": "Replace the original",
+                    "value": "replace"
+                  },
+                  {
+                    "available": true,
+                    "label": "Next to the original",
+                    "value": "next_to"
+                  },
+                  {
+                    "available": true,
+                    "label": "A different folder",
+                    "value": "folder"
+                  }
+                ],
+                "group": "basic",
+                "order": 2,
+                "widget": "segmented"
+              }
+            }
+          },
+          "type": "object"
+        }
+      },
+      "help": "Choose the file type and the name the new file gets. The original is never overwritten.",
+      "name": "Save",
+      "type": "file.save",
+      "version": 1
+    }
+  ],
+  "method": "GET",
+  "path": "/api/v2/step-definitions",
+  "status": 200,
+  "type": "StepDefinition[]"
+}
