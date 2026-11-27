@@ -121,3 +121,19 @@ func TestProbeDecodeTimesOutOnItsOwnLimit(t *testing.T) {
 		t.Errorf("decode = %v, reason %q; want a decode that did not finish", rec.Decode, rec.Reasons["decode"])
 	}
 }
+
+// The whole probe has one budget: a card whose steps run past it is recorded as out of time, with the reason.
+func TestProbeStopsAtTheBudget(t *testing.T) {
+	defer func(d time.Duration) { ProbeBudget = d }(ProbeBudget)
+	defer func(d time.Duration) { DecodeTimeout = d }(DecodeTimeout)
+	ProbeBudget = 80 * time.Millisecond
+	DecodeTimeout = 10 * time.Second
+	dir := t.TempDir()
+	c := Candidate{Encoder: "h264_vaapi", Family: encode.FamilyVAAPI, Codec: "h264", Device: "/dev/dri/renderD128"}
+	m := probeMedia(dir, c, 240, "Lavc61.3.100 h264_vaapi")
+	m.Runs = []fake.RunScript{{}, {Hang: true}}
+	rec := Probe(context.Background(), m, dir, c)
+	if rec.Decode || !strings.Contains(rec.Reasons["decode"], "ran out of its") {
+		t.Errorf("decode = %v, reason %q; want the probe to report it ran out of its budget", rec.Decode, rec.Reasons["decode"])
+	}
+}
