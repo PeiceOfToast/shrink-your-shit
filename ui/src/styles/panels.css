@@ -786,8 +786,7 @@
 .syslog .msg a {
   white-space: nowrap;
 }
-.syslog .rep,
-.syslog .rep-span {
+.syslog .rep {
   color: var(--text2);
 }
 /* The fold sits on its own line under the message. */

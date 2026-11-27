@@ -71,23 +71,13 @@ function matches(e: LogEvent, p: LogParams): boolean {
   return true;
 }
 
+// A muted line under the message: how many more times it repeated, and the first and last times.
 function Repeat({ e }: { e: LogEvent }) {
-  const [show, setShow] = useState(false);
   if (!e.repeat) return null;
   const more = e.repeat.count - 1;
-  // A muted line under the message. Show gives the first and last times; Hide folds them away again.
   return (
     <span className="rep">
-      The same line {more} more {more === 1 ? "time" : "times"}, {clock(e.repeat.firstAt)} to {clock(e.repeat.lastAt)} ·{" "}
-      <button type="button" className="syslog-link" aria-expanded={show} onClick={() => setShow((s) => !s)}>
-        {show ? "Hide" : "Show"}
-      </button>
-      {show && (
-        <span className="rep-span">
-          {" "}
-          first {clockPrecise(e.repeat.firstAt)}, last {clockPrecise(e.repeat.lastAt)}
-        </span>
-      )}
+      The same line {more} more {more === 1 ? "time" : "times"}, {clock(e.repeat.firstAt)} to {clock(e.repeat.lastAt)}
     </span>
   );
 }
