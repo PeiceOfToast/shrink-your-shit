@@ -28,6 +28,9 @@ func TestEncoderCountsOnlyWithItsTag(t *testing.T) {
 		want      bool
 	}{
 		{"the right tag", "hevc_qsv", true},
+		{"the tag as real encoders write it", "Lavc61.3.100 hevc_qsv", true},
+		{"a longer encoder name is not a match", "Lavc61.3.100 hevc_qsv_extra", false},
+		{"a Lavc tag naming another encoder", "Lavc61.3.100 h264_qsv", false},
 		{"another encoder's tag", "h264_qsv", false},
 		{"no tag", "", false},
 	}

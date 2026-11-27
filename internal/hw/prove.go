@@ -70,7 +70,7 @@ func Prove(ctx context.Context, m media.Media, dir string, c Candidate) Verdict 
 	if !ok {
 		return no(c, "the test output has no video stream")
 	}
-	if movie.Encoder != c.Encoder {
+	if !namedBy(movie.Encoder, c.Encoder) {
 		got := movie.Encoder
 		if got == "" {
 			got = "nothing"
@@ -126,4 +126,15 @@ func plainReason(err error) string {
 		reason = reason[:300]
 	}
 	return reason
+}
+
+// namedBy reports whether an ENCODER tag names encoder. Real encoders write "Lavc<version> <encoder>" (for example
+// "Lavc61.3.100 hevc_qsv"); a bare name is also accepted. The name must be the last word, so a longer encoder name
+// does not match a shorter one.
+func namedBy(tag, encoder string) bool {
+	fields := strings.Fields(tag)
+	if len(fields) == 0 || fields[len(fields)-1] != encoder {
+		return false
+	}
+	return len(fields) == 1 || strings.HasPrefix(fields[0], "Lavc")
 }
