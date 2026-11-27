@@ -185,16 +185,56 @@ else
   printf '%s\n' "$LIBSET" > "$LIBMARK"
 fi
 
-# GPU helpers: only packages the enabled sources already offer. Each is installed in its own call, so one that cannot
-# install (a conflict, a missing source) is a note and never takes the others with it. The free and the non-free Intel
-# iHD drivers conflict, so the free one is left out when the non-free one is offered. QSV on Ubuntu needs libmfx1 with
-# the non-free driver (L-HW-21); Debian 13 does not offer it, so it is skipped there.
-gpu_pkgs=""
-for p in intel-media-va-driver intel-media-va-driver-non-free libmfx1 mesa-va-drivers vainfo; do
-  if apt-cache policy "$p" 2>/dev/null | grep -q 'Candidate: [^ (]'; then
-    gpu_pkgs="$gpu_pkgs $p"
-  fi
+# What cards this machine has, from the PCI bus: a display-class device, by vendor (0x8086 Intel, 0x1002 AMD,
+# 0x10de NVIDIA). The probe decides later what actually works; these notes only say what is here and what a person
+# can do about it.
+gpu_vendors=""
+for d in /sys/bus/pci/devices/*; do
+  case "$(cat "$d/class" 2>/dev/null)" in 0x030*) ;; *) continue ;; esac
+  case "$(cat "$d/vendor" 2>/dev/null)" in
+    0x8086) gpu_vendors="$gpu_vendors intel" ;;
+    0x1002) gpu_vendors="$gpu_vendors amd" ;;
+    0x10de) gpu_vendors="$gpu_vendors nvidia" ;;
+  esac
 done
+has_gpu() { case " $gpu_vendors " in *" $1 "*) return 0 ;; esac; return 1; }
+
+# Intel's generation from its Core name: i7-1165G7 is 11th, i7-6700K is 6th. A name the numbering does not read
+# (Xeon, Celeron) answers nothing, and then nothing is claimed about Quick Sync.
+intel_generation() {
+  name="$(sed -n 's/^model name[[:space:]]*: //p' /proc/cpuinfo 2>/dev/null | head -n 1)"
+  case "$name" in
+    *"i3-"*|*"i5-"*|*"i7-"*|*"i9-"*) ;;
+    *) return 1 ;;
+  esac
+  num="$(printf '%s\n' "$name" | sed -n 's/.*i[3579]-\([0-9][0-9]*\).*/\1/p')"
+  [ -n "$num" ] || return 1
+  case "$(printf '%s' "$num" | cut -c1-2)" in
+    1[0-9]) printf '%s\n' "$(printf '%s' "$num" | cut -c1-2)" ;;
+    *) printf '%s\n' "$(printf '%s' "$num" | cut -c1)" ;;
+  esac
+}
+
+# GPU helpers: only packages the enabled sources already offer, and only for a card this machine has. An AMD-only
+# machine is never asked for the Intel driver (L-HW-22). Each is installed in its own call, so one that cannot
+# install (a conflict, a missing source) is a note and never takes the others with it. The free and the non-free
+# Intel iHD drivers conflict, so the free one is left out when the non-free one is offered. QSV on Ubuntu needs
+# libmfx1 with the non-free driver (L-HW-21).
+gpu_pkgs=""
+offer() {
+  if apt-cache policy "$1" 2>/dev/null | grep -q 'Candidate: [^ (]'; then
+    gpu_pkgs="$gpu_pkgs $1"
+  fi
+}
+if has_gpu intel; then
+  offer intel-media-va-driver
+  offer intel-media-va-driver-non-free
+  offer libmfx1
+fi
+if has_gpu intel || has_gpu amd; then
+  offer mesa-va-drivers
+  offer vainfo
+fi
 case "$gpu_pkgs" in
   *intel-media-va-driver-non-free*)
     kept=""
@@ -216,10 +256,42 @@ if [ -n "$gpu_pkgs" ]; then
       DEBIAN_FRONTEND=noninteractive apt-get install -y -qq intel-media-va-driver >/dev/null 2>&1 || say "note: intel-media-va-driver did not install either; syp will use the processor for Intel."
     fi
   done
+elif [ -z "$gpu_vendors" ]; then
+  say "note: no Intel, AMD or NVIDIA display device was found; syp will use the processor."
 else
-  say "note: no GPU helper packages are offered by this system's enabled sources; syp will use the processor."
+  say "note: no GPU helper packages are offered by this system's enabled sources; syp will use the processor for the card."
 fi
-say "note: NVIDIA drivers are not installed by this script. See your distribution's driver documentation."
+
+# The notes a person can act on, per vendor. Nothing here installs or enables anything beyond the helpers above:
+# the script never edits apt sources and never installs an NVIDIA driver (L-INST-8).
+if has_gpu intel && [ "${ID:-}" = debian ] && [ "${VERSION_ID:-}" = 13 ] && ! dpkg -s intel-media-va-driver-non-free >/dev/null 2>&1; then
+  say "note: GPU encoding on Intel needs the non-free Intel media driver (intel-media-va-driver-non-free), and"
+  say "      Debian 13 offers it only in its non-free section. To enable it:"
+  say "  1. add non-free to your apt sources (Debian 13: the Components: line of /etc/apt/sources.list.d/debian.sources;"
+  say "     older layout: the deb line in /etc/apt/sources.list)"
+  say "  2. run: sudo apt-get update && sudo apt-get install intel-media-va-driver-non-free"
+  say "      Until then syp converts with the processor."
+fi
+if has_gpu intel && [ "${ID:-}" = debian ] && [ "${VERSION_ID:-}" = 13 ]; then
+  if gen="$(intel_generation)" && [ "$gen" -lt 11 ]; then
+    say "note: this Intel chip is older than Tiger Lake, and Debian 13 has no Quick Sync runtime for it; syp uses the"
+    say "      card through VA-API instead (L-HW-21)."
+  fi
+fi
+if has_gpu nvidia; then
+  if [ -r /proc/driver/nvidia/version ]; then
+    nv="$(sed -n 's/.*Kernel Module  *\([0-9][^ ]*\).*/\1/p' /proc/driver/nvidia/version | head -n 1)"
+    say "note: NVIDIA card found; driver ${nv:-installed} is loaded, and syp will use the card's encoder through it."
+    say "      This script never installs a driver."
+  else
+    say "note: NVIDIA card found but no driver is loaded; syp will use the processor for it. This script never installs"
+    say "      a driver; install one from your distribution's driver packages if you want the card used."
+  fi
+fi
+if has_gpu amd; then
+  say "note: AMD card found; its encoder comes through mesa (mesa-va-drivers), and the Intel media driver is not"
+  say "      needed on this machine (L-HW-22)."
+fi
 
 # The system user and the data folder.
 if ! id -u syp >/dev/null 2>&1; then
