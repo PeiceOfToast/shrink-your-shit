@@ -8,18 +8,30 @@ import (
 	"io/fs"
 )
 
-// dist is the Vite build output. The committed index.html is a placeholder; `npm run build` in
-// ui/ writes the real build here. A binary built without that step still starts, and its page
-// says the interface was not built.
+// dist is the Vite build's output folder. Only its .gitkeep is committed, so a fresh clone still
+// satisfies the embed pattern without a built page ever being committed.
 //
 //go:embed all:dist
 var dist embed.FS
 
-// Files is the built interface's root: index.html and the hashed assets beside it.
+// notbuilt is the page Files serves when the build has not run: it says how to build the interface.
+//
+//go:embed notbuilt/index.html
+var notbuilt embed.FS
+
+// Files is the web interface's root: the built dist once `npm run build` has written it, and the
+// "not built" placeholder page before that.
 func Files() fs.FS {
-	sub, err := fs.Sub(dist, "dist")
+	built, err := fs.Sub(dist, "dist")
 	if err != nil {
 		panic(err) // dist is in the embed by construction
 	}
-	return sub
+	if _, err := fs.Stat(built, "index.html"); err == nil {
+		return built
+	}
+	placeholder, err := fs.Sub(notbuilt, "notbuilt")
+	if err != nil {
+		panic(err) // notbuilt is in the embed by construction
+	}
+	return placeholder
 }

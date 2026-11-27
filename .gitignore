@@ -3,7 +3,8 @@
 *.db-*
 /data/
 
-# The Vite build lands in the package that embeds it. Only the "not built" placeholder page is
-# committed; a local build's hashed assets are never.
+# The Vite build lands in the package that embeds it. Only .gitkeep is committed there, so a fresh
+# clone still satisfies go:embed; the built page and its hashed assets are never. The "not built"
+# page is internal/ui/notbuilt/index.html, outside the build's folder.
 /internal/ui/dist/*
-!/internal/ui/dist/index.html
+!/internal/ui/dist/.gitkeep
