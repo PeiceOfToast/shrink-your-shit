@@ -1,7 +1,7 @@
 // The workflow mock no longer carries "if a step fails" or flow variables: not in the flow, not in the guide, not in the summary.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { answersToFlow, checkFlow, createDraft, DEFAULT_ANSWERS, getFlow, getGuide, guidePreview, tryFlow } from "./mockFlow.ts";
+import { answersToFlow, checkFlow, createDraft, DEFAULT_ANSWERS, getFlow, getGuide, getGuideAnswers, guidePreview, putAnswers, putDraft, tryFlow } from "./mockFlow.ts";
 import type { Answers } from "./flowTypes.ts";
 import { exportWorkflow, importWorkflow } from "./mockWorkflows.ts";
 import { ApiError } from "./errors.ts";
@@ -141,6 +141,26 @@ test("a try started with an aborted signal rejects at once", async () => {
   const ctl = new AbortController();
   ctl.abort();
   await assert.rejects(tryFlow(flow, "clip.mp4", ctl.signal), { name: "AbortError" });
+});
+
+// The revision rules: a save sends back the revision it read; a stale one is refused with changed_since, from the
+// editor's save or the guided one alike.
+const CHANGED = "This workflow was saved somewhere else since you opened it. Reload to see the newer version.";
+test("a guided save returns the new revision, and a stale one is refused", async () => {
+  const made = await createDraft({ name: "Rev check", answers: DEFAULT_ANSWERS });
+  assert.equal((await getGuideAnswers(made.id)).rev, 1);
+  const saved = await putAnswers(made.id, { ...DEFAULT_ANSWERS, quality: 4 }, 1);
+  assert.equal(saved.rev, 2);
+  await assert.rejects(putAnswers(made.id, { ...DEFAULT_ANSWERS, quality: 5 }, 1), (e: ApiError) => e.code === "changed_since" && e.message === CHANGED);
+  assert.equal((await getGuideAnswers(made.id)).rev, 2);
+});
+
+test("a guided save after an editor save is refused with changed_since", async () => {
+  const made = await createDraft({ name: "Editor first", answers: DEFAULT_ANSWERS });
+  const { flow } = await getFlow(made.id);
+  const edited = await putDraft(made.id, flow, 1);
+  assert.equal(edited.rev, 2);
+  await assert.rejects(putAnswers(made.id, { ...DEFAULT_ANSWERS, quality: 6 }, 1), (e: ApiError) => e.code === "changed_since");
 });
 
 // Each try line's text starts with its step's name; the editor and Guided show the text alone.

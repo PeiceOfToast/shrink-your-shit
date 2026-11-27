@@ -39,12 +39,35 @@ export function getStarters(): Promise<Starter[]> {
   return respond(() => STARTERS);
 }
 
+// The starters' answers. shrink-videos matches internal/api/testdata/contract/starter.json (guideDefaults.test.ts checks it).
+const STARTER_ANSWERS: Record<string, Record<string, unknown>> = {
+  "shrink-videos": {
+    allLanguages: true,
+    audio: "as_is",
+    fileType: "mkv",
+    folder: "",
+    format: "hevc",
+    ifGpuFails: "cpu",
+    includeDolbyVision: false,
+    languages: [],
+    languagesEverywhere: false,
+    nameSuffix: "shrunk",
+    original: "next_to_original",
+    quality: 3,
+    resolution: "keep",
+    slower: false,
+    subtitleLanguages: [],
+    subtitles: "keep_all",
+    useGpu: false,
+  },
+};
+
 // GET /api/v2/workflows/starters/{id}: the starter and its answers (the guide's chips fill from these).
 export function getStarter(id: string): Promise<StarterDetail> {
   return respond(() => {
     const s = STARTERS.find((x) => x.id === id);
     if (!s) throw new ApiError("not_found", "That starting workflow doesn't exist.");
-    return { ...s, answers: {} };
+    return { ...s, answers: STARTER_ANSWERS[id] ?? {} };
   });
 }
 
