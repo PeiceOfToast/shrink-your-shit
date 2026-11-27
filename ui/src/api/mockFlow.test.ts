@@ -142,3 +142,11 @@ test("a try started with an aborted signal rejects at once", async () => {
   ctl.abort();
   await assert.rejects(tryFlow(flow, "clip.mp4", ctl.signal), { name: "AbortError" });
 });
+
+// Each try line's text starts with its step's name; the editor and Guided show the text alone.
+test("each try line starts with its step name", async () => {
+  const flow = answersToFlow(DEFAULT_ANSWERS, META);
+  const { lines } = await tryFlow(flow, "clip.mp4");
+  const name: Record<string, string> = { video: "Video:", audio: "Audio:", save: "Save:" };
+  for (const l of lines) assert.ok(l.text.startsWith(name[l.stepId]), `${l.stepId}: ${l.text}`);
+});

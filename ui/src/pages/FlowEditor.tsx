@@ -365,7 +365,7 @@ function Editor({ id, initial }: { id: string; initial: Loaded }) {
             <ul className="wf-try-lines">
               {tryRun.lines.map((l) => (
                 <li key={l.stepId + l.text}>
-                  {STEP_NAME[l.stepId]}: {l.text}
+                  {l.text}
                 </li>
               ))}
             </ul>
