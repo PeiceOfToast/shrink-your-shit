@@ -9,13 +9,15 @@
     "test": "node --test --experimental-strip-types src/api/format.test.ts src/api/mockFlow.test.ts src/api/mockWorkers.test.ts src/format/time.test.ts src/format/job.test.ts src/format/workflow.test.ts src/format/language.test.ts src/format/quality.test.ts src/format/fileType.test.ts src/api/mockJobs.test.ts src/format/accent.test.ts src/api/mockSettings.test.ts src/api/mockTrash.test.ts src/api/contract.test.ts src/api/real/real.test.ts",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "contract": "node scripts/contract.mjs"
+    "contract": "node scripts/contract.mjs",
+    "e2e:real": "playwright test e2e/real.spec.ts"
   },
   "dependencies": {
     "react": "19.3.1",
     "react-dom": "19.3.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.49.1",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.2.1",
