@@ -95,7 +95,7 @@ jobs:
           SYP_REQUIRE_FFMPEG: "1"
         run: |
           ffmpeg -version | head -n 1
-          go test -count=1 -v -run TestReal ./internal/media/ > real.log 2>&1 || { cat real.log; exit 1; }
+          go test -count=1 -v -run TestReal ./internal/media/ ./internal/encode/ > real.log 2>&1 || { cat real.log; exit 1; }
           grep -E '^[[:space:]]*--- (PASS|FAIL|SKIP): TestReal' real.log
           grep -qE '^[[:space:]]*--- PASS: TestReal' real.log || { echo "no real-media test ran"; exit 1; }
           if grep -qE '^[[:space:]]*--- SKIP: TestReal' real.log; then echo "a real-media test was skipped"; exit 1; fi
