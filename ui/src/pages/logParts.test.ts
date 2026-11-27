@@ -99,3 +99,23 @@ test("an empty decision or command does not replace an earlier one", () => {
   assert.equal(out[0].decision, "First");
   assert.equal(out[0].command, "run it");
 });
+
+test("only queued and picked: no steps reached, so none come back", () => {
+  const events = [ev("queued", "queued"), ev("picked", "picked")];
+  assert.deepEqual(logsFromEvents(steps, events), []);
+});
+
+test("a run that failed in step 1 of 3 shows step 1 alone, with its lines after the failure", () => {
+  const events = [
+    ev("queued", "queued"),
+    ev("run_start", "Starting sample.mp4"),
+    ev("step_start", ""),
+    ev("decision", "Decision one"),
+    ev("error", "Could not read the video", "error"),
+    ev("note", "Check the file and try again"),
+  ];
+  const out = logsFromEvents(steps, events);
+  assert.deepEqual(out.map((s) => s.name), ["Video"]);
+  assert.deepEqual(out[0].lines.map((l) => l.text), ["queued", "Starting sample.mp4", "Could not read the video", "Check the file and try again"]);
+  assert.equal(out[0].decision, "Decision one");
+});

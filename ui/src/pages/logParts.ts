@@ -26,9 +26,11 @@ export function saveText(name: string, text: string): void {
 
 // The Job log's steps, built from the job's events (GET /jobs/{id}/events). Real events carry no step index, so the
 // nth step_start..step_end block is steps[n-1]. Lines before the first step go at the top of step 1; lines after the
-// last step go at the end of the last step. step_start and step_end only mark the blocks, and empty messages are skipped.
+// last reached step. step_start and step_end only mark the blocks, and empty messages are skipped. Only the steps that
+// were reached come back: no step_start gives none (the log says "Not started yet"), and a run that failed in step 1
+// gives step 1 alone.
 export function logsFromEvents(steps: JobStep[], events: LogEvent[]): LogStep[] {
-  if (steps.length === 0) return [];
+  if (steps.length === 0 || !events.some((e) => e.kind === "step_start")) return [];
   const out: LogStep[] = steps.map((s) => ({ ...s, decision: "", command: null, values: [], lines: [] }));
   let block = -1; // becomes 0 at the first step_start
   for (const e of events) {
@@ -50,5 +52,5 @@ export function logsFromEvents(steps: JobStep[], events: LogEvent[]): LogStep[] 
     const level: LogLine["level"] = e.level === "warn" || e.level === "error" ? e.level : "info";
     step.lines.push({ time: e.ts, level, text: e.message });
   }
-  return out;
+  return out.slice(0, Math.min(block + 1, out.length));
 }
