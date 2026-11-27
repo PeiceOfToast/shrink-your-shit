@@ -114,7 +114,7 @@ func TestVideoValidate(t *testing.T) {
 	if len(check.Problems) != 0 {
 		t.Errorf("problems = %+v, want none", check.Problems)
 	}
-	if check.Summary != "HEVC · quality 3 · processor only" {
+	if check.Summary != "HEVC · quality 3 · graphics card off" {
 		t.Errorf("summary = %q", check.Summary)
 	}
 	if len(check.Disabled) != 1 || check.Disabled[0].Field != "ifGpuFails" {
@@ -214,8 +214,9 @@ func TestVideoNotYet(t *testing.T) {
 	if !disabled {
 		t.Errorf("disabled = %+v, want the Quality slider greyed", check.Disabled)
 	}
-	if !strings.Contains(check.Summary, "variable bitrate") || !strings.Contains(check.Summary, "1080p") {
-		t.Errorf("summary = %q, want the bitrate and size", check.Summary)
+	// The card's line names the bitrate, not the quality, and the level is not the default.
+	if !strings.HasPrefix(check.Summary, "HEVC · variable bitrate") || strings.Contains(check.Summary, "quality") {
+		t.Errorf("summary = %q, want the bitrate in place of the quality", check.Summary)
 	}
 
 	// The defaults are the engine's current behaviour: nothing to report.
