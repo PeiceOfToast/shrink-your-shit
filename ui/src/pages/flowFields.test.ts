@@ -3,7 +3,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { DRAWN, greyedChoices, offeredChoices } from "./flowFields.ts";
+import { DRAWN, greyedChoices, offeredChoices, valueGreys } from "./flowFields.ts";
+import { answersToFlow, checkFlow, DEFAULT_ANSWERS } from "../api/mockFlow.ts";
 import { STEP_DEFINITIONS } from "../api/fixtures/stepDefinitions.ts";
 
 // The golden is the server's GET /api/v2/step-definitions (internal/api/testdata/contract, from #834).
@@ -88,4 +89,16 @@ test("offeredChoices keeps a stored value no choice matches", () => {
   assert.equal(offeredChoices(DRAWN["video.convert"].choices.bitDepth, 8).stale, null);
   assert.equal(offeredChoices(DRAWN["video.convert"].choices.bitDepth, 12).stale, "12");
   assert.equal(offeredChoices(hdr, null).options[hdr.length].label, "none (no longer offered)");
+});
+
+// The editor greys a choice the check rules out for its value: Colour depth 10 with H.264 (the server's video.bitdepth_h264).
+test("Colour depth 10 is greyed with the server's sentence for H.264, and not for HEVC", () => {
+  const withVideo = (format: string) => {
+    const flow = answersToFlow(DEFAULT_ANSWERS, { name: "Grey", description: "" });
+    flow.steps[0].settings = { ...flow.steps[0].settings, format, bitDepth: 10 };
+    return checkFlow(flow).disabled;
+  };
+  const why = "10-bit H.264 plays on few devices, so it isn't offered. Pick HEVC or AV1 for 10-bit.";
+  assert.deepEqual(valueGreys(withVideo("h264"), "video", "bitDepth"), { "10": why });
+  assert.deepEqual(valueGreys(withVideo("hevc"), "video", "bitDepth"), {});
 });

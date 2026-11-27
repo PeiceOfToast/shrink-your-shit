@@ -187,3 +187,11 @@ export function greyedChoices(
   }
   return out;
 }
+
+// The check's disabled entries for one field that rule out a value (a choice the server refuses), by choice key, with its
+// reason. An entry with no value is a whole-field grey and is not a choice's grey.
+export function valueGreys(disabled: readonly { stepId: string; field: string; value?: string; why: string }[], stepId: string, field: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const d of disabled) if (d.stepId === stepId && d.field === field && d.value !== undefined) out[d.value] = d.why;
+  return out;
+}
