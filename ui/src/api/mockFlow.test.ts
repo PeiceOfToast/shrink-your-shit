@@ -62,6 +62,18 @@ test("a saved file type the rules rule out is a problem", () => {
   const p = check.problems.find((x) => x.code === "container_unsupported");
   assert.equal(p?.stepId, "save");
   assert.equal(p?.field, "container");
+  assert.equal(p?.message, "WebM needs AV1 video. Pick AV1 in Video to use it. Or pick another file type.");
+});
+
+// The server treats an empty audio codec as unset, so the Format answer is used.
+test("an empty audio codec is unset: opus format with an empty codec is not a WebM problem", () => {
+  const flow = answersToFlow(DEFAULT_ANSWERS, META);
+  flow.steps[0].settings = { ...flow.steps[0].settings, format: "av1" };
+  flow.steps[1].settings = { ...flow.steps[1].settings, format: "opus", codec: "" };
+  flow.steps[2].settings = { ...flow.steps[2].settings, container: "webm" };
+  const check = checkFlow(flow);
+  assert.equal(check.problems.find((x) => x.code === "container_unsupported"), undefined);
+  assert.equal(check.disabled.find((d) => d.field === "container" && d.value === "webm"), undefined);
 });
 
 test("the guided preview greys the file types the answers rule out, with the editor's reason", async () => {
