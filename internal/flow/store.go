@@ -77,18 +77,22 @@ type RevisionInfo struct {
 }
 
 // DraftInfo is what GET /workflows/{id} serves: the flow the editor shows and the draft
-// revision the page holds and sends back as baseRev.
+// revision the page holds and sends back as baseRev. Answers is the guided builder's answers for
+// this flow, nil when the guide cannot say the flow exactly (fitsGuided).
 type DraftInfo struct {
-	Flow Flow
-	Rev  int
+	Flow    Flow
+	Rev     int
+	Answers Answers
 }
 
 // ListItem is one row of GET /workflows before the check and the libraries are added. Flow is
-// the draft when there is one, else the published revision: the flow the check runs on.
+// the draft when there is one, else the published revision: the flow the check runs on. Answers is
+// nil when the flow does not fit the guide.
 type ListItem struct {
 	Workflow
 	DraftAhead bool
 	Flow       Flow
+	Answers    Answers
 	draft      sql.NullString // the row's draft column, kept until the flows are read
 }
 
@@ -119,11 +123,19 @@ func (s *Store) CreateFromStarterTx(ctx context.Context, tx *sql.Tx, starterID, 
 	if err != nil {
 		return 0, 0, fmt.Errorf("save the starter's flow: %w", err)
 	}
+	// A guided starter's answers are stored with it, so the setup-made workflow shows as one the
+	// guide can edit (ui-shop 19:28Z). A starter the guide cannot say keeps NULL.
+	var answers any
+	if starter.Guided {
+		if answers, err = answersColumn(f); err != nil {
+			return 0, 0, err
+		}
+	}
 	now := s.clock().UTC().UnixMilli()
 	res, err := tx.ExecContext(ctx,
-		`INSERT INTO workflows(name, description, kind, made_with, current_rev, created_at, updated_at)
-		 VALUES(?, ?, 'video', 'starter', 1, ?, ?)`,
-		name, f.Description, now, now)
+		`INSERT INTO workflows(name, description, kind, made_with, current_rev, answers, created_at, updated_at)
+		 VALUES(?, ?, 'video', 'starter', 1, ?, ?, ?)`,
+		name, f.Description, answers, now, now)
 	if err != nil {
 		return 0, 0, fmt.Errorf("save the workflow: %w", err)
 	}
@@ -182,19 +194,24 @@ func (s *Store) Revision(ctx context.Context, id int64, rev int) (Revision, erro
 }
 
 // Create makes a workflow and its draft; nothing is published. The rev it returns is the draft's
-// own revision (1), which the editor holds and sends back as baseRev. madeWith is "editor" (the
-// guided builder, "guided", is item 4).
+// own revision (1), which the editor holds and sends back as baseRev. madeWith is "editor" for a
+// flow the page built and "guided" for one made from the guide's answers; either way the answers
+// column is filled when the guide can say the flow exactly.
 func (s *Store) Create(ctx context.Context, f Flow, madeWith string) (id int64, rev int, err error) {
 	text, err := json.Marshal(f)
 	if err != nil {
 		return 0, 0, fmt.Errorf("save the new workflow's flow: %w", err)
 	}
+	answers, err := answersColumn(f)
+	if err != nil {
+		return 0, 0, err
+	}
 	now := s.clock().UTC().UnixMilli()
 	err = s.db.Tx(ctx, func(tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx,
-			`INSERT INTO workflows(name, description, kind, made_with, draft, draft_rev, created_at, updated_at)
-			 VALUES(?, ?, 'video', ?, ?, 1, ?, ?)`,
-			f.Name, f.Description, madeWith, string(text), now, now)
+			`INSERT INTO workflows(name, description, kind, made_with, draft, draft_rev, answers, created_at, updated_at)
+			 VALUES(?, ?, 'video', ?, ?, 1, ?, ?, ?)`,
+			f.Name, f.Description, madeWith, string(text), answers, now, now)
 		if err != nil {
 			return fmt.Errorf("save the workflow: %w", err)
 		}
@@ -210,12 +227,12 @@ func (s *Store) Create(ctx context.Context, f Flow, madeWith string) (id int64, 
 // Draft reads the flow the editor shows: the saved draft when there is one, else the published
 // revision. Rev is the draft's revision, the value the page sends back as baseRev.
 func (s *Store) Draft(ctx context.Context, id int64) (DraftInfo, error) {
-	var draft sql.NullString
+	var draft, answers sql.NullString
 	var rev int
 	var current sql.NullInt64
 	err := s.db.Read().QueryRowContext(ctx,
-		`SELECT draft, draft_rev, current_rev FROM workflows WHERE id = ? AND deleted_at IS NULL`, id).
-		Scan(&draft, &rev, &current)
+		`SELECT draft, draft_rev, current_rev, answers FROM workflows WHERE id = ? AND deleted_at IS NULL`, id).
+		Scan(&draft, &rev, &current, &answers)
 	if errors.Is(err, sql.ErrNoRows) {
 		return DraftInfo{}, ErrNotFound
 	}
@@ -223,6 +240,9 @@ func (s *Store) Draft(ctx context.Context, id int64) (DraftInfo, error) {
 		return DraftInfo{}, fmt.Errorf("read the draft of workflow %d: %w", id, err)
 	}
 	info := DraftInfo{Rev: rev}
+	if info.Answers, err = readAnswers(id, answers); err != nil {
+		return DraftInfo{}, err
+	}
 	if draft.Valid {
 		if err := json.Unmarshal([]byte(draft.String), &info.Flow); err != nil {
 			return DraftInfo{}, fmt.Errorf("read the draft of workflow %d: %w", id, err)
@@ -267,10 +287,62 @@ func (s *Store) SaveDraft(ctx context.Context, id int64, f Flow, baseRev int) (r
 		if err != nil {
 			return fmt.Errorf("save the draft of workflow %d: %w", id, err)
 		}
+		// The answers are read from the flow the page saved: kept when the guide can say it
+		// exactly, cleared when the page edited it into something the guide cannot (item 4).
+		answers, err := answersColumn(f)
+		if err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx,
-			`UPDATE workflows SET name = ?, description = ?, draft = ?, draft_rev = draft_rev + 1,
-			 draft_base_rev = COALESCE(current_rev, 0), updated_at = ? WHERE id = ?`,
-			f.Name, f.Description, string(text), now, id); err != nil {
+			`UPDATE workflows SET name = ?, description = ?, draft = ?, answers = ?,
+			 draft_rev = draft_rev + 1, draft_base_rev = COALESCE(current_rev, 0), updated_at = ?
+			 WHERE id = ?`,
+			f.Name, f.Description, string(text), answers, now, id); err != nil {
+			return fmt.Errorf("save the draft of workflow %d: %w", id, err)
+		}
+		rev = have + 1
+		return nil
+	})
+	return rev, err
+}
+
+// SaveGuidedDraft saves the flow the guided builder made from its answers as the draft. There is
+// no baseRev: the guided page does not hold the editor's draft revision, and a guided save
+// replaces whatever draft was there. An empty name or description keeps the workflow's own, the
+// way the mock's putAnswers does.
+func (s *Store) SaveGuidedDraft(ctx context.Context, id int64, f Flow) (rev int, err error) {
+	now := s.clock().UTC().UnixMilli()
+	err = s.db.Tx(ctx, func(tx *sql.Tx) error {
+		var have int
+		var name, description string
+		err := tx.QueryRowContext(ctx,
+			`SELECT draft_rev, name, description FROM workflows WHERE id = ? AND deleted_at IS NULL`, id).
+			Scan(&have, &name, &description)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("read workflow %d: %w", id, err)
+		}
+		if strings.TrimSpace(f.Name) == "" {
+			f.Name = name
+		}
+		if strings.TrimSpace(f.Description) == "" {
+			f.Description = description
+		}
+		text, err := json.Marshal(f)
+		if err != nil {
+			return fmt.Errorf("save the draft of workflow %d: %w", id, err)
+		}
+		answers, err := answersColumn(f)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE workflows SET name = ?, description = ?, draft = ?, answers = ?,
+			 draft_rev = draft_rev + 1, draft_base_rev = COALESCE(current_rev, 0), updated_at = ?
+			 WHERE id = ?`,
+			f.Name, f.Description, string(text), answers, now, id); err != nil {
 			return fmt.Errorf("save the draft of workflow %d: %w", id, err)
 		}
 		rev = have + 1
@@ -308,6 +380,12 @@ func (s *Store) Publish(ctx context.Context, id int64, given *Flow, vc ValidateC
 	if err != nil {
 		return 0, fmt.Errorf("save revision of workflow %d: %w", id, err)
 	}
+	// Publishing is a save: what the guide can say about the published flow becomes the row's
+	// answers, so fitsGuided follows the published flow until a draft changes it again.
+	answers, err := answersColumn(f)
+	if err != nil {
+		return 0, err
+	}
 	now := s.clock().UTC().UnixMilli()
 	err = s.db.Tx(ctx, func(tx *sql.Tx) error {
 		var exists int
@@ -331,8 +409,8 @@ func (s *Store) Publish(ctx context.Context, id int64, given *Flow, vc ValidateC
 		}
 		if _, err := tx.ExecContext(ctx,
 			`UPDATE workflows SET name = ?, description = ?, current_rev = ?, draft = NULL,
-			 draft_base_rev = ?, draft_rev = draft_rev + 1, updated_at = ? WHERE id = ?`,
-			f.Name, f.Description, rev, rev, now, id); err != nil {
+			 answers = ?, draft_base_rev = ?, draft_rev = draft_rev + 1, updated_at = ? WHERE id = ?`,
+			f.Name, f.Description, rev, answers, rev, now, id); err != nil {
 			return fmt.Errorf("mark revision %d of workflow %d current: %w", rev, id, err)
 		}
 		return nil
@@ -365,7 +443,7 @@ func (s *Store) draftFlow(ctx context.Context, id int64) (Flow, error) {
 // added. A draft ahead of the published revision is the flow the check runs on.
 func (s *Store) List(ctx context.Context) ([]ListItem, error) {
 	rows, err := s.db.Read().QueryContext(ctx,
-		`SELECT id, name, description, kind, made_with, current_rev, draft, created_at, updated_at
+		`SELECT id, name, description, kind, made_with, current_rev, draft, answers, created_at, updated_at
 		 FROM workflows WHERE deleted_at IS NULL ORDER BY updated_at DESC, id`)
 	if err != nil {
 		return nil, fmt.Errorf("read the workflows: %w", err)
@@ -375,11 +453,14 @@ func (s *Store) List(ctx context.Context) ([]ListItem, error) {
 	for rows.Next() {
 		var it ListItem
 		var current sql.NullInt64
-		var draft sql.NullString
+		var draft, answers sql.NullString
 		var created, updated int64
 		if err := rows.Scan(&it.ID, &it.Name, &it.Description, &it.Kind, &it.MadeWith, &current,
-			&draft, &created, &updated); err != nil {
+			&draft, &answers, &created, &updated); err != nil {
 			return nil, fmt.Errorf("read a workflow: %w", err)
+		}
+		if it.Answers, err = readAnswers(it.ID, answers); err != nil {
+			return nil, err
 		}
 		it.CurrentRev = int(current.Int64)
 		it.CreatedAt = time.UnixMilli(created).UTC()
@@ -438,13 +519,20 @@ func (s *Store) Duplicate(ctx context.Context, id int64) (Workflow, error) {
 	if err != nil {
 		return Workflow{}, fmt.Errorf("save the copy of workflow %d: %w", id, err)
 	}
+	// The copy fits the guide exactly when the source does: the answers column comes along.
+	var answers sql.NullString
+	err = s.db.Read().QueryRowContext(ctx,
+		`SELECT answers FROM workflows WHERE id = ?`, id).Scan(&answers)
+	if err != nil {
+		return Workflow{}, fmt.Errorf("read the answers of workflow %d: %w", id, err)
+	}
 	now := s.clock().UTC().UnixMilli()
 	var newID int64
 	err = s.db.Tx(ctx, func(tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx,
-			`INSERT INTO workflows(name, description, kind, made_with, draft, draft_rev, created_at, updated_at)
-			 VALUES(?, ?, ?, ?, ?, 1, ?, ?)`,
-			f.Name, f.Description, src.Kind, src.MadeWith, string(text), now, now)
+			`INSERT INTO workflows(name, description, kind, made_with, draft, draft_rev, answers, created_at, updated_at)
+			 VALUES(?, ?, ?, ?, ?, 1, ?, ?, ?)`,
+			f.Name, f.Description, src.Kind, src.MadeWith, string(text), answers, now, now)
 		if err != nil {
 			return fmt.Errorf("save the copy of workflow %d: %w", id, err)
 		}
@@ -529,6 +617,10 @@ func (s *Store) Restore(ctx context.Context, id int64, rev int) (newRev int, err
 	if err := json.Unmarshal([]byte(text), &f); err != nil {
 		return 0, fmt.Errorf("read the flow of revision %d of workflow %d: %w", rev, id, err)
 	}
+	answers, err := answersColumn(f)
+	if err != nil {
+		return 0, err
+	}
 	now := s.clock().UTC().UnixMilli()
 	err = s.db.Tx(ctx, func(tx *sql.Tx) error {
 		if err := tx.QueryRowContext(ctx,
@@ -544,8 +636,8 @@ func (s *Store) Restore(ctx context.Context, id int64, rev int) (newRev int, err
 		}
 		if _, err := tx.ExecContext(ctx,
 			`UPDATE workflows SET name = ?, description = ?, current_rev = ?, draft = NULL,
-			 draft_base_rev = ?, draft_rev = draft_rev + 1, updated_at = ? WHERE id = ?`,
-			f.Name, f.Description, newRev, newRev, now, id); err != nil {
+			 answers = ?, draft_base_rev = ?, draft_rev = draft_rev + 1, updated_at = ? WHERE id = ?`,
+			f.Name, f.Description, newRev, answers, newRev, now, id); err != nil {
 			return fmt.Errorf("make the restored revision of workflow %d current: %w", id, err)
 		}
 		return nil
@@ -558,4 +650,31 @@ func (s *Store) clock() time.Time {
 		return s.Now()
 	}
 	return time.Now()
+}
+
+// answersColumn is what the workflows.answers column gets for a flow: the guide's answers as JSON
+// when ToAnswers can say the flow exactly, and nil (SQL NULL) when it cannot. NULL is also the
+// server's fitsGuided: a workflow fits the guide exactly when this column holds its answers.
+func answersColumn(f Flow) (any, error) {
+	a, ok := ToAnswers(f)
+	if !ok {
+		return nil, nil
+	}
+	raw, err := json.Marshal(a)
+	if err != nil {
+		return nil, fmt.Errorf("save the answers of workflow %q: %w", f.Name, err)
+	}
+	return string(raw), nil
+}
+
+// readAnswers reads a row's answers column; an empty one is no answers, not an empty object.
+func readAnswers(id int64, raw sql.NullString) (Answers, error) {
+	if !raw.Valid {
+		return nil, nil
+	}
+	var a Answers
+	if err := json.Unmarshal([]byte(raw.String), &a); err != nil {
+		return nil, fmt.Errorf("read the answers of workflow %d: %w", id, err)
+	}
+	return a, nil
 }

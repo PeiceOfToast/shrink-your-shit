@@ -111,8 +111,9 @@ func TestWorkflowLifecycle(t *testing.T) {
 		Rev        int       `json:"rev"`
 		FitsGuided bool      `json:"fitsGuided"`
 	}
+	// The flow is the starter's with another quality, so the guide can say it (S2-4).
 	get(t, e, cookie, "/api/v2/workflows/"+id, &got)
-	if got.Rev != 1 || got.FitsGuided || apiQualityOf(t, got.Flow) != 3 {
+	if got.Rev != 1 || !got.FitsGuided || apiQualityOf(t, got.Flow) != 3 {
 		t.Fatalf("get = rev %d quality %d fitsGuided %v; want the created draft", got.Rev, apiQualityOf(t, got.Flow), got.FitsGuided)
 	}
 
@@ -285,18 +286,51 @@ func TestWorkflowLifecycle(t *testing.T) {
 	}
 }
 
-// The guided builder's answers are item 4: create says so plainly instead of inventing a flow,
-// and a flow that is not the three steps is refused.
+// The guided builder's answers (S2-4) make a workflow when they are answers the guide offers, and
+// are refused on their field when they are not. A create with neither is still invalid_flow, and a
+// flow that is not the three steps is refused.
 func TestWorkflowCreateRefusals(t *testing.T) {
 	e := newEnv(t, true)
 	cookie := e.setup()
 
 	rec := e.do(http.MethodPost, "/api/v2/workflows",
-		mustJSON(t, map[string]any{"name": "Guided", "answers": map[string]any{"smaller": true}}),
+		mustJSON(t, map[string]any{"name": "Guided", "answers": map[string]any{"quality": 9}}),
 		write(withSession(cookie)), false)
-	if code, _, _ := errorBody(t, rec); rec.Code != http.StatusBadRequest || code != "not_yet" {
-		t.Fatalf("answers create = %d %q; want 400 not_yet", rec.Code, code)
+	if code, message, env := errorBody(t, rec); rec.Code != http.StatusBadRequest || code != "invalid_answer" ||
+		env["field"] != "quality" || message != "Quality is 1 to 5." {
+		t.Fatalf("bad answer = %d %q %v %q; want 400 invalid_answer on quality", rec.Code, code, env["field"], message)
 	}
+	// The buildable subset the engine can run today: copy the audio, every language, keep every
+	// subtitle, next to the original.
+	buildable := map[string]any{
+		"format": "hevc", "quality": 5, "useGpu": false, "ifGpuFails": "cpu", "resolution": "keep",
+		"slower": false, "audio": "as_is", "allLanguages": true, "languages": []string{},
+		"languagesEverywhere": false, "subtitles": "keep_all", "subtitleLanguages": []string{},
+		"fileType": "mkv", "includeDolbyVision": false, "original": "next_to_original", "folder": "",
+	}
+	rec = e.do(http.MethodPost, "/api/v2/workflows",
+		mustJSON(t, map[string]any{"name": "Guided", "answers": buildable}),
+		write(withSession(cookie)), false)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("answers create = %d %s; want 201", rec.Code, rec.Body)
+	}
+	var made struct {
+		ID  string `json:"id"`
+		Rev int    `json:"rev"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &made); err != nil || made.ID == "" || made.Rev != 1 {
+		t.Fatalf("answers create = %+v, %v; want an id and rev 1", made, err)
+	}
+	var row workflowRow
+	for _, r := range listWorkflowRows(t, e, cookie) {
+		if r.ID == made.ID {
+			row = r
+		}
+	}
+	if row.ID == "" || row.MadeWith != "guided" || !row.FitsGuided {
+		t.Fatalf("guided create row = %+v; want a guided workflow that fits the guide", row)
+	}
+
 	rec = e.do(http.MethodPost, "/api/v2/workflows",
 		mustJSON(t, map[string]any{"name": "No flow"}), write(withSession(cookie)), false)
 	if code, _, _ := errorBody(t, rec); rec.Code != http.StatusBadRequest || code != "invalid_flow" {

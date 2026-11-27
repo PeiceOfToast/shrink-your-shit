@@ -1,0 +1,33 @@
+{
+  "body": {
+    "answers": {
+      "allLanguages": false,
+      "audio": "stereo_aac",
+      "fileType": "mkv",
+      "folder": "",
+      "format": "hevc",
+      "ifGpuFails": "cpu",
+      "includeDolbyVision": false,
+      "languages": [
+        "eng",
+        "ger"
+      ],
+      "languagesEverywhere": false,
+      "original": "next_to_original",
+      "quality": 3,
+      "resolution": "keep",
+      "slower": false,
+      "subtitleLanguages": [
+        "eng",
+        "ger"
+      ],
+      "subtitles": "keep_all",
+      "useGpu": true
+    },
+    "fitsGuided": true
+  },
+  "method": "GET",
+  "path": "/api/v2/workflows/new/answers",
+  "status": 200,
+  "type": "GuideAnswers"
+}

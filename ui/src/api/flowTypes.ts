@@ -87,6 +87,19 @@ export interface WorkflowDraft {
   fitsGuided: boolean;
 }
 
+// GET /workflows/{id}/answers: the answers the guided page opens on, and whether the workflow is
+// exactly what they make (id "new" is the guide's defaults, which always fit).
+export interface GuideAnswers {
+  answers: Answers;
+  fitsGuided: boolean;
+}
+
+// PUT /workflows/{id}/answers: the flow the answers made, written into the draft at its new revision.
+export interface AnswersSaved {
+  flow: Flow;
+  rev: number;
+}
+
 // POST /workflows: the new workflow's id and the draft revision the editor starts from.
 export interface WorkflowCreated {
   id: string;

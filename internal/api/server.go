@@ -59,6 +59,8 @@ type Workflows interface {
 	Create(ctx context.Context, f flow.Flow, madeWith string) (int64, int, error)
 	Draft(ctx context.Context, id int64) (flow.DraftInfo, error)
 	SaveDraft(ctx context.Context, id int64, f flow.Flow, baseRev int) (int, error)
+	// S2-4: the guided page's save, which has no draft revision to send back.
+	SaveGuidedDraft(ctx context.Context, id int64, f flow.Flow) (int, error)
 	Publish(ctx context.Context, id int64, given *flow.Flow, vc flow.ValidateContext) (int, error)
 	Revisions(ctx context.Context, id int64) ([]flow.RevisionInfo, error)
 	Restore(ctx context.Context, id int64, rev int) (int, error)
@@ -109,6 +111,9 @@ func New(version string) *Server {
 	// Workflows (S2-3): the list, create, the editor's draft, publish, revisions, duplicate, delete.
 	s.mux.HandleFunc("GET /api/v2/workflows", s.listWorkflows)
 	s.mux.HandleFunc("POST /api/v2/workflows", s.createWorkflow)
+	// The guided builder's "What this does" (S2-4). Literal, so it wins over the {rest...} subtree;
+	// the answers themselves are below the subtree, beside the draft they save.
+	s.mux.HandleFunc("POST /api/v2/workflows/preview", s.previewWorkflow)
 	// Everything below /workflows/ is the {id} subtree. It is one handler per method because Go's
 	// mux cannot rank "{id}/revisions" against the starters' literal "/workflows/starters/{id}"
 	// (both match "/workflows/starters/revisions"), and neither is more specific. The trailing

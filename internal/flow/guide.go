@@ -72,7 +72,7 @@ func DefaultAnswers() Answers {
 		"subtitleLanguages":   []string{"eng", "ger"},
 		"fileType":            "mkv",
 		"includeDolbyVision":  false,
-		"original":            "replace",
+		"original":            "next_to_original",
 		"folder":              "",
 	}
 }
@@ -151,9 +151,10 @@ func Guide() GuideDoc {
 				ID: "original", Label: "The original",
 				Fields: []GuideField{
 					{Key: "original", Label: "Where the new file goes", Type: "choice", Choices: []GuideChoice{
-						{Value: "replace", Label: "Replace the original", Available: true},
+						{Value: "replace", Label: "Replace the original", Available: false, Why: ReplaceWhy},
 						{Value: "next_to_original", Label: "Next to the original", Available: true},
 						{Value: "one_folder", Label: "A different folder", Available: true},
+						{Value: "beside_library", Label: "A folder beside the library", Available: true},
 					}},
 					{Key: "folder", Label: "Folder", Type: "folder"},
 				},

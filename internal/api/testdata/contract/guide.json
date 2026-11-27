@@ -67,7 +67,7 @@
         "ger"
       ],
       "languagesEverywhere": false,
-      "original": "replace",
+      "original": "next_to_original",
       "quality": 3,
       "resolution": "keep",
       "slower": false,
@@ -291,9 +291,10 @@
           {
             "choices": [
               {
-                "available": true,
+                "available": false,
                 "label": "Replace the original",
-                "value": "replace"
+                "value": "replace",
+                "why": "Replacing the original comes in a later update; for now the converted file is saved next to it."
               },
               {
                 "available": true,
@@ -304,6 +305,11 @@
                 "available": true,
                 "label": "A different folder",
                 "value": "one_folder"
+              },
+              {
+                "available": true,
+                "label": "A folder beside the library",
+                "value": "beside_library"
               }
             ],
             "key": "original",

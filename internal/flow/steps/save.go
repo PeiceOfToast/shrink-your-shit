@@ -127,8 +127,9 @@ func (SaveStep) Validate(s flow.Settings, vc flow.ValidateContext) flow.Check {
 }
 
 // replaceWhy is why the page greys "Replace the original" until item 10. The where field's notYet
-// tag repeats it for the form; TestSaveReplaceIsGreyed fails if the two ever differ.
-const replaceWhy = "Replacing the original comes in a later update; for now the converted file is saved next to it."
+// tag repeats it for the form, so TestSaveReplaceIsGreyed can compare the two; the guide's greyed
+// choice reads the same constant, so the two pages cannot drift apart.
+const replaceWhy = flow.ReplaceWhy
 
 // trashDays is how long a replaced original stays in the trash. Page 11's
 // processing.keepOriginalsDays is the app-wide setting; until that page feeds the check, the
