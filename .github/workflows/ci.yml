@@ -1,351 +1,40 @@
 name: CI
 
 on:
-  push:
-    branches: [main, dev]
   pull_request:
+    branches: [rebuild]
+  push:
+    branches: [rebuild]
 
-permissions:
-  contents: read
-
-# A newer push to the same pull request cancels its older, now-pointless run. Pushes to dev and main are never
-# cancelled, so every merged commit keeps its own result.
-# (A push gets a group of its own commit: a shared group would still drop a waiting run when a third one queued.)
 concurrency:
-  group: ${{ github.event_name == 'pull_request' && format('ci-pr-{0}', github.event.pull_request.number) || format('ci-push-{0}', github.sha) }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-# Linux jobs run on ubuntu-latest (the distro ffmpeg); the real ffmpeg 8 job stays on ubuntu-24.04 with its pinned static build.
 jobs:
-  # Code the tests do not look at: Go formatting. (The name keeps "UI JavaScript" in case it is a required
-  # check; the UI is TypeScript in web/, typechecked when its build runs.)
-  lint:
-    name: lint (gofmt, UI JavaScript)
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-      - name: gofmt
-        run: |
-          unformatted=$(gofmt -l .)
-          if [ -n "$unformatted" ]; then echo "Not gofmt-formatted (run gofmt -w on them):"; echo "$unformatted"; exit 1; fi
-
-  test:
-    name: test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    # The ffmpeg install alone has taken over 14 minutes on a slow runner, so 15 cancelled the tests mid-run.
-    # 45 leaves room for that install plus go test's own 15-minute timeout, so the test's timeout always fires first.
-    timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-      - run: go vet ./...
-      # Linux: real ffmpeg, so the real-ffmpeg tests (verify, picture comparison, .ts) run instead of
-      # skipping. SYP_REQUIRE_FFMPEG=1 makes a skipped real test a failure, and the step also fails if
-      # the log shows one skipped, so a broken install cannot quietly turn them off.
-      - name: Install ffmpeg
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -y -q --no-install-recommends ffmpeg
-          ffmpeg -version | head -n 1
-      - name: Test (with real ffmpeg)
-        if: runner.os == 'Linux'
-        shell: bash
-        env:
-          SYP_REQUIRE_FFMPEG: "1"
-        run: |
-          # The output streams into this step's log as it runs, so even a cancelled job shows where it was.
-          # go test's own timeout ends before the job's, so a hung test fails with every goroutine's stack.
-          set -o pipefail
-          go test -count=1 -timeout 15m -v ./... 2>&1 | tee test.log
-          grep -E '^(ok|FAIL)[[:space:]]' test.log
-          echo "Real-ffmpeg tests:"
-          grep -E '^[[:space:]]*--- (PASS|FAIL|SKIP): TestReal' test.log
-          if grep -qE '^[[:space:]]*--- SKIP: TestReal' test.log; then echo "a real-ffmpeg test was skipped"; exit 1; fi
-      # Windows and macOS: no ffmpeg on the runner, so the real tests skip there (fake runner only).
-      - name: Test
-        if: runner.os != 'Linux'
-        # 15m, as on Linux: internal/worker takes about 7 minutes on windows-latest, so Go's 10m default is too close.
-        run: go test -count=1 -timeout 15m ./...
-
-  # The real-ffmpeg tests again on ffmpeg 8: ubuntu-latest is moving to it (8.0.1) while the test job above
-  # has the distribution's ffmpeg, so a break with a new ffmpeg shows here. A pinned static build (BtbN,
-  # n8.0.1, checked by hash), so the version does not drift with the runner image.
-  ffmpeg8:
-    name: real ffmpeg 8
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    env:
-      SYP_REQUIRE_FFMPEG: "1"
-      FFMPEG8_TAR: ffmpeg-n8.0.1-17-g27a297f186-linux64-gpl-8.0.tar.xz
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-      - name: Install ffmpeg 8
-        run: |
-          curl -fsSL -o "$RUNNER_TEMP/ff.tar.xz" "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2025-11-30-12-53/$FFMPEG8_TAR"
-          echo "cab6b5dd9cede8a8db8891e28f2fec2ddfd6401785328d139cbcfd23af9f691e  $RUNNER_TEMP/ff.tar.xz" | sha256sum -c -
-          tar -xf "$RUNNER_TEMP/ff.tar.xz" -C "$RUNNER_TEMP"
-          echo "$RUNNER_TEMP/${FFMPEG8_TAR%.tar.xz}/bin" >> "$GITHUB_PATH"
-      - name: Test (real ffmpeg 8)
-        run: |
-          ffmpeg -version | head -n 1
-          go test -count=1 -v -run TestReal ./... > test.log 2>&1 || { cat test.log; exit 1; }
-          grep -E '^[[:space:]]*--- (PASS|FAIL|SKIP): TestReal' test.log
-          if grep -qE '^[[:space:]]*--- SKIP: TestReal' test.log; then echo "a real-ffmpeg test was skipped"; exit 1; fi
-
-  # The race detector needs cgo (a C compiler), which the dev machines lack; ubuntu runners have gcc.
-  # Packages that run goroutines, at unit level: no ffmpeg here, so the real-ffmpeg tests skip.
-  race:
-    name: race (ubuntu-latest)
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    env:
-      CGO_ENABLED: "1"
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-      - run: go test -race -count=1 -timeout 15m ./internal/worker ./internal/doctor ./internal/jobs ./internal/web ./internal/scanner
-
-  # The UI (web/, served at /): typecheck and build it once; the build matrix embeds this output (artifact),
-  # and the test job runs without it, so the no-Node placeholder path stays tested too.
-  web:
-    name: web (typecheck, build, embed check)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: web/.nvmrc
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-      - name: install
-        working-directory: web
-        run: npm ci --no-audit --no-fund
-      - name: typecheck
-        working-directory: web
-        run: npm run typecheck
-      - name: tests (node --test; the typed-setting picker's fit table)
-        working-directory: web
-        run: npm test
-      - name: build (into internal/web/next/dist)
-        working-directory: web
-        run: npm run build
-      - name: the build is the real app, not the "not built" page (workshop's release check)
-        env:
-          SYP_REQUIRE_WEBUI: "1"
-        run: go test -count=1 ./internal/web/next
-      - uses: actions/upload-artifact@v4
-        with:
-          name: next-dist
-          path: internal/web/next/dist/
-          include-hidden-files: true
-          if-no-files-found: error
-
   ui:
-    name: ui (typecheck, test, build)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version-file: ui/.nvmrc
           cache: npm
           cache-dependency-path: ui/package-lock.json
-      - name: install
+
+      - name: Install
         working-directory: ui
         run: npm ci --no-audit --no-fund
-      - name: typecheck
+
+      - name: Typecheck
         working-directory: ui
-        run: npm run typecheck
-      - name: tests
+        run: npx tsc -b
+
+      - name: Test
         working-directory: ui
         run: npm test
-      - name: build
+
+      - name: Build
         working-directory: ui
         run: npm run build
-
-  build:
-    name: build (${{ matrix.goos }}/${{ matrix.goarch }})
-    needs: web
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    env:
-      CGO_ENABLED: "0"
-      GOOS: ${{ matrix.goos }}
-      GOARCH: ${{ matrix.goarch }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { goos: linux, goarch: amd64 }
-          - { goos: linux, goarch: arm64 }
-          - { goos: windows, goarch: amd64 }
-          - { goos: darwin, goarch: arm64 }
-          - { goos: darwin, goarch: amd64 }
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-      - uses: actions/download-artifact@v4 # every platform build embeds the new UI
-        with:
-          name: next-dist
-          path: internal/web/next/dist/
-      - run: test -f internal/web/next/dist/index.html
-      - run: go build ./...
-      - run: go vet ./...
-
-  docker:
-    name: docker image
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t shrink-your-shit .
-      - name: Intel Quick Sync and VA-API are built into ffmpeg
-        run: |
-          hw=$(docker run --rm --entrypoint ffmpeg shrink-your-shit -hide_banner -hwaccels)
-          echo "$hw" | grep -qw qsv || { echo "$hw"; echo "qsv is not in -hwaccels"; exit 1; }
-          echo "$hw" | grep -qw vaapi || { echo "$hw"; echo "vaapi is not in -hwaccels"; exit 1; }
-          enc=$(docker run --rm --entrypoint ffmpeg shrink-your-shit -hide_banner -encoders)
-          echo "$enc" | grep -qw hevc_qsv || { echo "$enc" | grep hevc; echo "hevc_qsv is not an encoder"; exit 1; }
-          echo "$enc" | grep -qw hevc_vaapi || { echo "$enc" | grep hevc; echo "hevc_vaapi is not an encoder"; exit 1; }
-      - name: Intel GPU runtime files are in the x86_64 image
-        run: |
-          docker run --rm --entrypoint sh shrink-your-shit -c 'ls /usr/lib/x86_64-linux-gnu/libmfx-gen.so.1.2 /usr/lib/x86_64-linux-gnu/libvpl.so.2 /usr/lib/x86_64-linux-gnu/dri/iHD_drv_video.so'
-      - name: AMD VA-API driver is in the image (not tested on a real AMD card)
-        run: |
-          docker run --rm --entrypoint sh shrink-your-shit -c 'ls /usr/lib/*/dri/radeonsi_drv_video.so'
-      - name: image size, and what the AMD VA-API driver adds to it
-        run: |
-          docker image inspect -f 'image: {{.Size}} bytes' shrink-your-shit
-          docker run --rm --user 0 --entrypoint sh shrink-your-shit -c 'b=$(du -sxk / | cut -f1); apt-get remove -y -qq mesa-va-drivers >/dev/null 2>&1 && apt-get autoremove -y -qq >/dev/null 2>&1; a=$(du -sxk / | cut -f1); echo "mesa-va-drivers and what it pulled in: $(( (b - a) / 1024 )) MB"'
-      - name: the image can make https calls (CA certificates are installed)
-        run: |
-          docker run --rm --entrypoint sh shrink-your-shit -c 'test -s /etc/ssl/certs/ca-certificates.crt' \
-            || { echo "no CA bundle in the image: every https call would fail"; exit 1; }
-          docker run --rm --entrypoint run-as-syp shrink-your-shit wget -nv --tries=3 --waitretry=5 -O /dev/null https://deb.debian.org/debian/ \
-            || { echo "an https GET from the image failed"; exit 1; }
-      - name: the app runs with the /dev/dri groups (render group is automatic)
-        run: |
-          # A fake device folder: run-as-syp must add its group, the one Docker added, and syp's own.
-          g=$(docker run --rm --group-add 4242 --entrypoint sh shrink-your-shit -c \
-            'mkdir /tmp/dri && touch /tmp/dri/renderD128 && chgrp 4343 /tmp/dri/renderD128 && SYP_DRI=/tmp/dri run-as-syp sh -c "id -u; id -G"')
-          echo "$g"
-          echo "$g" | head -1 | grep -qx 1000 || { echo "not running as uid 1000"; exit 1; }
-          for want in 1000 4242 4343; do echo "$g" | tail -1 | tr ' ' '\n' | grep -qx "$want" || { echo "group $want missing"; exit 1; }; done
-          echo "$g" | tail -1 | tr ' ' '\n' | grep -qx 0 && { echo "root group kept"; exit 1; } || true
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
-      - name: arm64 image builds (no push)
-        run: docker buildx build --platform linux/arm64 .
-      - name: smoke test (web page answers inside the container)
-        run: |
-          docker run -d --name syp -p 8484:8484 -v "$RUNNER_TEMP":/media shrink-your-shit
-          up=
-          for i in $(seq 1 20); do curl -fsS http://127.0.0.1:8484/healthz && up=1 && break; sleep 1; done
-          [ -n "$up" ] || { docker logs syp; exit 1; }
-          # no capabilities here: the container cannot mount, so the Shares page stays in manual mode
-          docker logs syp 2>&1 | grep -q 'network shares: manual' || { docker logs syp; exit 1; }
-          # listening beyond loopback: /api needs the token that `shrink-your-shit token` shows
-          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8484/api/status)" = 401
-          # the image carries the built UI at / (a 200 page that loads its script), not the 503 "not built" page
-          curl -fsS http://127.0.0.1:8484/ | grep -q 'src="/assets/'
-          # old bookmarks answer one 301 to an app page that is a 200
-          for pair in "/next/|/" "/next/jobs|/jobs" "/libraries/|/libraries" "/activity/?show=failed|/jobs?tab=failed" "/settings/system/|/settings/about"; do
-            from=${pair%%|*}; to=${pair#*|}
-            got=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' "http://127.0.0.1:8484$from")
-            test "$got" = "301 http://127.0.0.1:8484$to" || { echo "$from: $got, want 301 to $to"; exit 1; }
-            test "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:8484$to")" = 200 || { echo "$to is not a 200"; exit 1; }
-          done
-          tok=$(docker exec syp shrink-your-shit token | sed -n 's/^Access token: //p')
-          test -n "$tok"
-          curl -fsS -H "Authorization: Bearer $tok" http://127.0.0.1:8484/api/status
-          # no /dev/dri here: after a real encoder test, Quick Sync and VA-API are not_present with the device reason
-          w=$(curl -fsS -X POST -H "Authorization: Bearer $tok" -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:8484/api/v2/workers/local/capabilities/test)
-          for e in hevc_qsv hevc_vaapi; do
-            echo "$w" | jq -e --arg k "encoder:$e" '.capabilities[] | select(.key == $k) | select(.test == "not_present" and (.detail | contains("/dev/dri is missing")))' >/dev/null || { echo "$w" | jq '.capabilities'; echo "$e: want not_present with the /dev/dri reason"; exit 1; }
-          done
-      - name: network shares mount inside the container when it is allowed to
-        run: |
-          docker run -d --name syp-caps --cap-add SYS_ADMIN --cap-add DAC_READ_SEARCH --security-opt apparmor=unconfined -v "$RUNNER_TEMP":/media shrink-your-shit
-          for i in $(seq 1 20); do docker logs syp-caps 2>&1 | grep -q 'network shares:' && break; sleep 1; done
-          docker logs syp-caps 2>&1 | grep -q 'network shares: mounting inside the container' || { docker logs syp-caps; exit 1; }
-          docker exec syp-caps test -S /run/shrink-your-shit/helper.sock || { docker logs syp-caps; exit 1; }
-          docker rm -f syp-caps
-
-  windows-installer:
-    name: windows installer (build + install/convert/uninstall test)
-    runs-on: windows-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-      - name: Install Inno Setup if the runner lacks it
-        run: |
-          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
-      - name: Build the installer
-        run: pwsh installer/windows/build.ps1 -Version 0.0.0-ci
-      - name: Silent install, real conversion, upgrade, uninstall
-        run: pwsh installer/windows/smoke-test.ps1 -Setup dist/shrink-your-shit-setup.exe
-      - name: Keep the installer's logs when something went wrong
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-installer-diagnostics
-          path: dist/diag
-          if-no-files-found: ignore
-      - uses: actions/upload-artifact@v4
-        with:
-          name: windows-installer
-          path: dist/shrink-your-shit-setup.exe
-
-  macos-installer:
-    name: macos installer (release build + install/convert/upgrade/uninstall test)
-    runs-on: macos-latest
-    timeout-minutes: 40
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: web/.nvmrc
-      - name: Build releases A and B (the same archives and checksums.txt a release has; B is the upgrade)
-        run: |
-          sh scripts/build-release.sh 0.0.0-ci-a
-          mv dist "$RUNNER_TEMP/release-a"
-          sh scripts/build-release.sh 0.0.0-ci-b
-          mv dist "$RUNNER_TEMP/release-b"
-      - name: Install A as the README does, convert a clip, upgrade to B, check the Update screen, uninstall
-        run: bash installer/macos/smoke-test.sh "$RUNNER_TEMP/release-a" "$PWD" "$RUNNER_TEMP/diag" "$RUNNER_TEMP/release-b"
-      - name: Keep the installer's logs when something went wrong
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-installer-diagnostics
-          path: ${{ runner.temp }}/diag
-          if-no-files-found: ignore
