@@ -360,7 +360,9 @@ func tagDisabled(set VideoSettings) []flow.Disabled {
 		out = append(out, flow.Disabled{Field: "keepDolbyVision",
 			Why: "Keeping the Dolby Vision layer is not possible on the processor with this ffmpeg. Profiles 7 and 8 convert as their HDR10 base."})
 	}
-	if set.BitDepth != nil && *set.BitDepth == 10 && set.Format == "h264" {
+	if set.Format == "h264" {
+		// Greyed up front whenever H.264 is the format, like the file types the codecs rule out; a stored
+		// ten-bit choice also gets the problem in Validate.
 		out = append(out, flow.Disabled{Field: "bitDepth", Value: "10",
 			Why: "10-bit H.264 plays on few devices, so it isn't offered. Pick HEVC or AV1 for 10-bit."})
 	}

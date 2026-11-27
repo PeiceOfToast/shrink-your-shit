@@ -237,3 +237,21 @@ func TestVideoTenBitH264IsGreyed(t *testing.T) {
 		t.Errorf("disabled = %+v, want 10-bit H.264 greyed", check.Disabled)
 	}
 }
+
+// TestVideoTenBitGreyedUpFrontForH264: with H.264 picked and no colour depth set, the 10-bit choice is already
+// greyed, so it never looks pickable; no problem is raised until 10 is actually set.
+func TestVideoTenBitGreyedUpFrontForH264(t *testing.T) {
+	check := VideoStep{}.Validate(videoSettings("h264", 3), flow.ValidateContext{})
+	if !slices.ContainsFunc(check.Disabled, func(d flow.Disabled) bool {
+		return d.Field == "bitDepth" && d.Value == "10" && strings.Contains(d.Why, "10-bit H.264")
+	}) {
+		t.Errorf("disabled = %+v, want bitDepth 10 greyed whenever the format is H.264", check.Disabled)
+	}
+	if slices.ContainsFunc(check.Problems, func(p flow.Problem) bool { return p.Code == "video.bitdepth_h264" }) {
+		t.Errorf("problems = %+v, want none while no colour depth is set", check.Problems)
+	}
+	hevc := VideoStep{}.Validate(videoSettings("hevc", 3), flow.ValidateContext{})
+	if slices.ContainsFunc(hevc.Disabled, func(d flow.Disabled) bool { return d.Field == "bitDepth" }) {
+		t.Errorf("disabled = %+v, want 10-bit offered with HEVC", hevc.Disabled)
+	}
+}
