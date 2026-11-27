@@ -1,0 +1,26 @@
+{
+  "body": {
+    "converting": {
+      "running": 0,
+      "workers": 1
+    },
+    "diskFreeBytes": 123456789,
+    "failed24h": 0,
+    "healthFailing": false,
+    "lastDoneAt": null,
+    "newErrors": 0,
+    "nextScanAt": "2026-11-27T04:00:00Z",
+    "queue": 0,
+    "seenAt": null,
+    "seenSeq": 0,
+    "workers": {
+      "finishing": 0,
+      "paused": false
+    },
+    "workersOffline": 0
+  },
+  "method": "GET",
+  "path": "/api/v2/summary",
+  "status": 200,
+  "type": "Summary"
+}

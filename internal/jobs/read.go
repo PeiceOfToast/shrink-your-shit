@@ -176,6 +176,58 @@ func (q *Queue) List(ctx context.Context, f ListFilter) ([]Job, error) {
 	return out, rows.Err()
 }
 
+// Tally is the counts the shell's Summary and a library row show. Waiting counts retry_wait with
+// waiting, as Shown does; cancelled jobs are left out, as in every list.
+type Tally struct {
+	Waiting int
+	Running int
+	Done    int
+	Failed  int
+	Skipped int
+	// LastDoneAt is when the latest finished job was done, nil before the first.
+	LastDoneAt *time.Time
+	// Failed24h counts the jobs that failed in the last 24 hours by the queue's clock.
+	Failed24h int
+	// SavedBytes is the space the done-and-smaller jobs gave back: the file's size before minus the
+	// output's size. Summed over the same jobs, BeforeBytes is the size before.
+	SavedBytes  int64
+	BeforeBytes int64
+}
+
+// Tally counts the jobs of one library, or of every library when libraryID is 0.
+func (q *Queue) Tally(ctx context.Context, libraryID int64) (Tally, error) {
+	where := `state <> 'cancelled'`
+	var args []any
+	if libraryID != 0 {
+		where += ` AND library_id = ?`
+		args = append(args, libraryID)
+	}
+	var t Tally
+	var lastDone sql.NullInt64
+	since := q.now().Add(-24 * time.Hour).UnixMilli()
+	err := q.db.Read().QueryRowContext(ctx, `
+		SELECT
+			COALESCE(SUM(CASE WHEN state IN ('waiting', 'retry_wait') THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN state = 'running' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN state = 'done' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN state = 'failed' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN state = 'skipped' THEN 1 ELSE 0 END), 0),
+			MAX(CASE WHEN state = 'done' THEN finished_at END),
+			COALESCE(SUM(CASE WHEN state = 'failed' AND finished_at >= ? THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN state = 'done' AND outcome = 'smaller'
+				THEN COALESCE(size_before, 0) - COALESCE(size_after, 0) ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN state = 'done' AND outcome = 'smaller'
+				THEN COALESCE(size_before, 0) ELSE 0 END), 0)
+		FROM jobs WHERE `+where, append([]any{since}, args...)...).
+		Scan(&t.Waiting, &t.Running, &t.Done, &t.Failed, &t.Skipped, &lastDone,
+			&t.Failed24h, &t.SavedBytes, &t.BeforeBytes)
+	if err != nil {
+		return Tally{}, fmt.Errorf("count the jobs: %w", err)
+	}
+	t.LastDoneAt = optTime(lastDone)
+	return t, nil
+}
+
 // Attempts returns the attempt rows of job id, oldest first.
 func (q *Queue) Attempts(ctx context.Context, id int64) ([]Attempt, error) {
 	rows, err := q.db.Read().QueryContext(ctx, `

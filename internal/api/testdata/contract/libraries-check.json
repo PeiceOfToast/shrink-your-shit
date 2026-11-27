@@ -1,0 +1,16 @@
+{
+  "body": {
+    "problems": [
+      {
+        "code": "already_watched",
+        "message": "Another library already watches this folder. Choose a different folder."
+      }
+    ],
+    "sizeBytes": 5,
+    "videos": 1
+  },
+  "method": "POST",
+  "path": "/api/v2/libraries/check",
+  "status": 200,
+  "type": "FolderCheck"
+}

@@ -1,0 +1,224 @@
+{
+  "body": [
+    {
+      "code": "eng",
+      "name": "English"
+    },
+    {
+      "code": "ger",
+      "name": "German"
+    },
+    {
+      "code": "fre",
+      "name": "French"
+    },
+    {
+      "code": "spa",
+      "name": "Spanish"
+    },
+    {
+      "code": "ita",
+      "name": "Italian"
+    },
+    {
+      "code": "por",
+      "name": "Portuguese"
+    },
+    {
+      "code": "dut",
+      "name": "Dutch"
+    },
+    {
+      "code": "swe",
+      "name": "Swedish"
+    },
+    {
+      "code": "nor",
+      "name": "Norwegian"
+    },
+    {
+      "code": "dan",
+      "name": "Danish"
+    },
+    {
+      "code": "fin",
+      "name": "Finnish"
+    },
+    {
+      "code": "ice",
+      "name": "Icelandic"
+    },
+    {
+      "code": "pol",
+      "name": "Polish"
+    },
+    {
+      "code": "cze",
+      "name": "Czech"
+    },
+    {
+      "code": "slo",
+      "name": "Slovak"
+    },
+    {
+      "code": "hun",
+      "name": "Hungarian"
+    },
+    {
+      "code": "rum",
+      "name": "Romanian"
+    },
+    {
+      "code": "bul",
+      "name": "Bulgarian"
+    },
+    {
+      "code": "gre",
+      "name": "Greek"
+    },
+    {
+      "code": "tur",
+      "name": "Turkish"
+    },
+    {
+      "code": "rus",
+      "name": "Russian"
+    },
+    {
+      "code": "ukr",
+      "name": "Ukrainian"
+    },
+    {
+      "code": "srp",
+      "name": "Serbian"
+    },
+    {
+      "code": "hrv",
+      "name": "Croatian"
+    },
+    {
+      "code": "bos",
+      "name": "Bosnian"
+    },
+    {
+      "code": "slv",
+      "name": "Slovenian"
+    },
+    {
+      "code": "mac",
+      "name": "Macedonian"
+    },
+    {
+      "code": "alb",
+      "name": "Albanian"
+    },
+    {
+      "code": "est",
+      "name": "Estonian"
+    },
+    {
+      "code": "lav",
+      "name": "Latvian"
+    },
+    {
+      "code": "lit",
+      "name": "Lithuanian"
+    },
+    {
+      "code": "cat",
+      "name": "Catalan"
+    },
+    {
+      "code": "baq",
+      "name": "Basque"
+    },
+    {
+      "code": "glg",
+      "name": "Galician"
+    },
+    {
+      "code": "wel",
+      "name": "Welsh"
+    },
+    {
+      "code": "gle",
+      "name": "Irish"
+    },
+    {
+      "code": "heb",
+      "name": "Hebrew"
+    },
+    {
+      "code": "ara",
+      "name": "Arabic"
+    },
+    {
+      "code": "per",
+      "name": "Persian"
+    },
+    {
+      "code": "hin",
+      "name": "Hindi"
+    },
+    {
+      "code": "urd",
+      "name": "Urdu"
+    },
+    {
+      "code": "ben",
+      "name": "Bengali"
+    },
+    {
+      "code": "tam",
+      "name": "Tamil"
+    },
+    {
+      "code": "tel",
+      "name": "Telugu"
+    },
+    {
+      "code": "tha",
+      "name": "Thai"
+    },
+    {
+      "code": "vie",
+      "name": "Vietnamese"
+    },
+    {
+      "code": "ind",
+      "name": "Indonesian"
+    },
+    {
+      "code": "may",
+      "name": "Malay"
+    },
+    {
+      "code": "fil",
+      "name": "Filipino"
+    },
+    {
+      "code": "chi",
+      "name": "Chinese"
+    },
+    {
+      "code": "jpn",
+      "name": "Japanese"
+    },
+    {
+      "code": "kor",
+      "name": "Korean"
+    },
+    {
+      "code": "afr",
+      "name": "Afrikaans"
+    },
+    {
+      "code": "swa",
+      "name": "Swahili"
+    }
+  ],
+  "method": "GET",
+  "path": "/api/v2/languages",
+  "status": 200,
+  "type": "Language[]"
+}

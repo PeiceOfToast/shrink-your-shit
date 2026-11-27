@@ -6,7 +6,9 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -17,6 +19,9 @@ import (
 	"time"
 
 	"github.com/PeiceOfToast/shrink-your-shit/internal/events"
+	"github.com/PeiceOfToast/shrink-your-shit/internal/flow"
+	"github.com/PeiceOfToast/shrink-your-shit/internal/jobs"
+	"github.com/PeiceOfToast/shrink-your-shit/internal/library"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/store"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/system"
 )
@@ -63,14 +68,54 @@ type env struct {
 	srv       *Server
 	access    *system.Access
 	bus       *events.Bus
+	db        *store.DB
+	flows     *flow.Store
+	catalog   *library.Catalog
+	queue     *jobs.Queue
+	scans     *scanRecorder
 	closeOnce sync.Once
 	clock     *clock
 	dir       string
 	stderr    *bytes.Buffer
 }
 
-// newEnv serves a fresh data folder with the real store, events and system packages.
-// ready=false leaves the server answering 503 starting.
+// scanRecorder is the scanner double: it records each scan's library and answers at once, so a
+// handler that starts a scan does not walk anything.
+type scanRecorder struct {
+	mu    sync.Mutex
+	libs  []library.Library
+	done  chan library.Library
+	wakes chan struct{}
+}
+
+func newScanRecorder() *scanRecorder {
+	return &scanRecorder{done: make(chan library.Library, 128), wakes: make(chan struct{}, 128)}
+}
+
+func (s *scanRecorder) Scan(ctx context.Context, lib library.Library) (library.ScanResult, error) {
+	s.mu.Lock()
+	s.libs = append(s.libs, lib)
+	s.mu.Unlock()
+	s.done <- lib
+	return library.ScanResult{}, nil
+}
+
+// wake is the worker wake: the test only needs to know it happened.
+func (s *scanRecorder) wake() {
+	select {
+	case s.wakes <- struct{}{}:
+	default:
+	}
+}
+
+func (s *scanRecorder) scanned() []library.Library {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]library.Library(nil), s.libs...)
+}
+
+// newEnv serves a fresh data folder with the real store, events, system, library, flow and jobs
+// packages. ready=false leaves the server answering 503 starting.
 func newEnv(t *testing.T, ready bool) *env {
 	t.Helper()
 	dir := t.TempDir()
@@ -82,7 +127,10 @@ func newEnv(t *testing.T, ready bool) *env {
 	if err := db.Migrate(); err != nil {
 		t.Fatal(err)
 	}
-	e := &env{t: t, srv: New("test-version"), clock: &clock{now: time.Date(2026, 11, 27, 4, 0, 0, 0, time.UTC)}, dir: dir, stderr: &bytes.Buffer{}}
+	e := &env{
+		t: t, srv: New("test-version"), db: db, scans: newScanRecorder(),
+		clock: &clock{now: time.Date(2026, 11, 27, 4, 0, 0, 0, time.UTC)}, dir: dir, stderr: &bytes.Buffer{},
+	}
 	e.bus, err = events.New(events.Options{DataDir: dir, DB: db, Stderr: e.stderr})
 	if err != nil {
 		t.Fatal(err)
@@ -92,10 +140,39 @@ func newEnv(t *testing.T, ready bool) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
+	e.flows = flow.Open(db)
+	e.catalog = library.NewCatalog(db)
+	e.catalog.Now = e.clock.Now
+	e.queue = jobs.New(jobs.Options{DB: db, Bus: e.bus, Clock: e.clock.Now})
 	if ready {
-		e.srv.Ready(e.access, e.bus)
+		e.ready()
 	}
 	return e
+}
+
+// deps is what the server's routes get in a test: the real packages, a recording scanner, a fixed
+// disk-free answer and the hand clock.
+func (e *env) deps() Deps {
+	return Deps{
+		Access: e.access, Events: e.bus, DB: e.db,
+		Workflows: e.flows, Catalog: e.catalog, Jobs: e.queue, Scanner: e.scans,
+		Wake:     e.scans.wake,
+		DiskFree: func(string) (uint64, error) { return 123456789, nil },
+	}
+}
+
+func (e *env) ready() { e.srv.Ready(e.deps()) }
+
+// nextScan waits for one started scan; a handler that never starts one fails the test.
+func (e *env) nextScan() library.Library {
+	e.t.Helper()
+	select {
+	case lib := <-e.scans.done:
+		return lib
+	case <-time.After(2 * time.Second):
+		e.t.Fatal("no scan started")
+		return library.Library{}
+	}
 }
 
 // do sends a request from remote; headers are set as given. secure makes it a TLS request.
@@ -133,14 +210,23 @@ func write(extra map[string]string) map[string]string {
 	return h
 }
 
+// setupNoLibrary is page 13's call without a library: the password and the starting workflow the Start
+// page always sends.
+const setupNoLibrary = `{"account":{"password":"` + testPassword + `"},"library":null,"starter":{"id":"shrink-videos","answers":{}}}`
+
 // setup sets the password through the api and returns the session cookie it was signed in with.
 func (e *env) setup() *http.Cookie {
 	e.t.Helper()
-	rec := e.do(http.MethodPost, "/api/v2/setup", `{"account":{"password":"`+testPassword+`"},"library":null}`, write(nil), false)
+	rec := e.do(http.MethodPost, "/api/v2/setup", setupNoLibrary, write(nil), false)
 	if rec.Code != http.StatusOK {
 		e.t.Fatalf("setup: %d %s", rec.Code, rec.Body)
 	}
 	return cookieNamed(e.t, rec, sessionCookie)
+}
+
+// withSession is the header map a signed-in browser sends.
+func withSession(cookie *http.Cookie) map[string]string {
+	return map[string]string{"Cookie": cookie.Name + "=" + cookie.Value}
 }
 
 func cookieNamed(t *testing.T, rec *httptest.ResponseRecorder, name string) *http.Cookie {
@@ -258,10 +344,17 @@ func TestMissingHeaderRefused(t *testing.T) {
 	}
 }
 
-// Setup: a short password, a library and a starter are refused with the envelope; a good one signs in.
+// Setup: the password, the starter and the first library are checked before anything is kept. A
+// good call signs the browser in, makes the workflow and starts the library's scan.
 func TestSetupRulesAndCookie(t *testing.T) {
 	e := newEnv(t, true)
-	rec := e.do(http.MethodPost, "/api/v2/setup", `{"account":{"password":"abcdefg"}}`, write(nil), false)
+	clips := t.TempDir()
+	post := func(body string) *httptest.ResponseRecorder {
+		t.Helper()
+		return e.do(http.MethodPost, "/api/v2/setup", body, write(nil), false)
+	}
+
+	rec := post(`{"account":{"password":"abcdefg"},"library":null,"starter":{"id":"shrink-videos","answers":{}}}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("7 chars: %d, want 400", rec.Code)
 	}
@@ -269,18 +362,15 @@ func TestSetupRulesAndCookie(t *testing.T) {
 		t.Fatalf("7 chars: %v", env)
 	}
 
-	rec = e.do(http.MethodPost, "/api/v2/setup", `{"account":{"password":"`+testPassword+`"},"library":{"path":"/x"}}`, write(nil), false)
+	rec = post(`{"account":{"password":"` + testPassword + `"},"library":null}`)
 	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("library given: %d, want 400", rec.Code)
+		t.Fatalf("no starter: %d, want 400", rec.Code)
 	}
-	if code, _, env := errorBody(t, rec); code != "invalid_request" || env["field"] != "library" {
-		t.Fatalf("library given: %v", env)
-	}
-	if need, _ := e.access.NeedsAccount(context.Background()); !need {
-		t.Fatal("a refused setup must not set the password")
+	if code, _, env := errorBody(t, rec); code != "invalid_request" || env["field"] != "starter" {
+		t.Fatalf("no starter: %v", env)
 	}
 
-	rec = e.do(http.MethodPost, "/api/v2/setup", `{"account":{"password":"`+testPassword+`"},"library":null,"starter":{"id":"other","answers":{}}}`, write(nil), false)
+	rec = post(`{"account":{"password":"` + testPassword + `"},"library":null,"starter":{"id":"other","answers":{}}}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("unknown starter: %d, want 400", rec.Code)
 	}
@@ -288,17 +378,70 @@ func TestSetupRulesAndCookie(t *testing.T) {
 		t.Fatalf("unknown starter: %v", env)
 	}
 
-	// The body the Start page sends on its skip path (Start.tsx always sends a starter).
-	rec = e.do(http.MethodPost, "/api/v2/setup", `{"account":{"password":"`+testPassword+`"},"library":null,"starter":{"id":"shrink-videos","answers":{}}}`, write(nil), false)
+	rec = post(`{"account":{"password":"` + testPassword + `"},"library":{"name":"x","shareId":"s1"},"starter":{"id":"shrink-videos","answers":{}}}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("share: %d, want 400", rec.Code)
+	}
+	if code, _, env := errorBody(t, rec); code != "invalid_request" || env["field"] != "library.shareId" {
+		t.Fatalf("share: %v", env)
+	}
+
+	rec = post(`{"account":{"password":"` + testPassword + `"},"library":{"name":"x","path":"/no/such/folder"},"starter":{"id":"shrink-videos","answers":{}}}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("missing folder: %d, want 400", rec.Code)
+	}
+	if code, _, env := errorBody(t, rec); code != "invalid_request" || env["field"] != "library.path" {
+		t.Fatalf("missing folder: %v", env)
+	}
+
+	// A folder inside the app's own data folder is refused too.
+	rec = post(`{"account":{"password":"` + testPassword + `"},"library":{"name":"x","path":"` + e.dir + `"},"starter":{"id":"shrink-videos","answers":{}}}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("inside data: %d, want 400", rec.Code)
+	}
+	if code, _, env := errorBody(t, rec); code != "invalid_request" || env["field"] != "library.path" {
+		t.Fatalf("inside data: %v", env)
+	}
+
+	if need, _ := e.access.NeedsAccount(context.Background()); !need {
+		t.Fatal("a refused setup must not set the password")
+	}
+	if libs, _ := e.catalog.ListLibraries(context.Background()); len(libs) != 0 {
+		t.Fatalf("a refused setup must not add a library: %v", libs)
+	}
+
+	rec = post(`{"account":{"password":"` + testPassword + `"},"library":{"name":"Clips","path":"` + clips + `"},"starter":{"id":"shrink-videos","answers":{}}}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("setup: %d %s", rec.Code, rec.Body)
+	}
+	var done struct {
+		ScanStarted bool `json:"scanStarted"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &done); err != nil || !done.ScanStarted {
+		t.Fatalf("setup body %s; want scanStarted true", rec.Body)
 	}
 	c := cookieNamed(t, rec, sessionCookie)
 	if !c.HttpOnly || c.SameSite != http.SameSiteLaxMode || c.Path != "/" || c.Secure {
 		t.Fatalf("cookie flags: httponly=%v samesite=%v path=%q secure=%v", c.HttpOnly, c.SameSite, c.Path, c.Secure)
 	}
 
-	rec = e.do(http.MethodPost, "/api/v2/setup", `{"account":{"password":"`+testPassword+`"}}`, write(nil), false)
+	// The library's first scan started, with the workflow setup just made.
+	scanned := e.nextScan()
+	if scanned.WorkflowID == nil {
+		t.Fatal("the scanned library has no workflow")
+	}
+	wf, err := e.flows.Get(context.Background(), *scanned.WorkflowID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if wf.Name != "Shrink videos" || wf.CurrentRev != 1 {
+		t.Fatalf("workflow %+v; want Shrink videos at revision 1", wf)
+	}
+	if scanned.Path != clips {
+		t.Fatalf("scanned library path %q, want %q", scanned.Path, clips)
+	}
+
+	rec = post(setupNoLibrary)
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("second setup: %d, want 409", rec.Code)
 	}
@@ -307,10 +450,63 @@ func TestSetupRulesAndCookie(t *testing.T) {
 	}
 }
 
+// Setup is all or nothing: a failure while the workflow is made leaves no account, no workflow and
+// no library. A retry then sets everything up.
+func TestSetupAllOrNothing(t *testing.T) {
+	e := newEnv(t, false)
+	clips := t.TempDir()
+	deps := e.deps()
+	deps.Workflows = failingWorkflows{Workflows: e.flows}
+	e.srv.Ready(deps)
+
+	rec := e.do(http.MethodPost, "/api/v2/setup",
+		`{"account":{"password":"`+testPassword+`"},"library":{"name":"Clips","path":"`+clips+`"},"starter":{"id":"shrink-videos","answers":{}}}`,
+		write(nil), false)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("broken workflow step: %d %s, want 500", rec.Code, rec.Body)
+	}
+	if need, _ := e.access.NeedsAccount(context.Background()); !need {
+		t.Fatal("the rolled-back setup left an account")
+	}
+	if libs, _ := e.catalog.ListLibraries(context.Background()); len(libs) != 0 {
+		t.Fatalf("the rolled-back setup left a library: %v", libs)
+	}
+	var workflows int
+	if err := e.db.Read().QueryRow(`SELECT COUNT(*) FROM workflows`).Scan(&workflows); err != nil {
+		t.Fatal(err)
+	}
+	if workflows != 0 {
+		t.Fatalf("the rolled-back setup left %d workflows", workflows)
+	}
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == sessionCookie && c.Value != "" {
+			t.Fatal("a failed setup must not sign the browser in")
+		}
+	}
+
+	e.ready()
+	rec = e.do(http.MethodPost, "/api/v2/setup",
+		`{"account":{"password":"`+testPassword+`"},"library":{"name":"Clips","path":"`+clips+`"},"starter":{"id":"shrink-videos","answers":{}}}`,
+		write(nil), false)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("retried setup: %d %s", rec.Code, rec.Body)
+	}
+	if scanned := e.nextScan(); scanned.WorkflowID == nil {
+		t.Fatal("the retried setup's scan has no workflow")
+	}
+}
+
+// failingWorkflows makes setup's workflow step fail.
+type failingWorkflows struct{ Workflows }
+
+func (failingWorkflows) CreateFromStarterTx(context.Context, *sql.Tx, string, string) (int64, int, error) {
+	return 0, 0, errors.New("the workflow store is unavailable")
+}
+
 // Over TLS the cookie is Secure (L-ACC-1).
 func TestCookieSecureOverTLS(t *testing.T) {
 	e := newEnv(t, true)
-	rec := e.do(http.MethodPost, "/api/v2/setup", `{"account":{"password":"`+testPassword+`"}}`, write(nil), true)
+	rec := e.do(http.MethodPost, "/api/v2/setup", setupNoLibrary, write(nil), true)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("setup over TLS: %d", rec.Code)
 	}

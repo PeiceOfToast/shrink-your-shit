@@ -40,7 +40,7 @@ export function FirstRun() {
   const [name, setName] = useState("");
   const [nameTouched, setNameTouched] = useState(false);
   const [starter, setStarter] = useState<string | null>(null);
-  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [answers, setAnswers] = useState<Record<string, unknown>>({});
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<Problem | null>(null);
 
