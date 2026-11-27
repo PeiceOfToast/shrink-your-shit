@@ -571,7 +571,7 @@ export interface Doctor {
 export type LogLevel = "debug" | "info" | "warn" | "error";
 export type LogKind =
   | "run_start" | "run_end" | "step_start" | "step_end" | "decision" | "command" | "probe" | "progress"
-  | "size" | "variable" | "move" | "warning" | "error" | "note"
+  | "size" | "move" | "warning" | "error" | "note"
   | "queued" | "picked" | "retry" | "requeued" | "cancelled" | "notified" | "original";
 
 export interface LogEvent {
