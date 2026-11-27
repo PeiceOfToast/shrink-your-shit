@@ -12,9 +12,9 @@ import (
 // Job is one row of jobs. Text columns that may be NULL read as "".
 type Job struct {
 	ID         int64
-	FileID     string
-	LibraryID  string
-	WorkflowID string
+	FileID     int64
+	LibraryID  int64
+	WorkflowID int64
 	Path       string
 	State      State
 	Top        bool
@@ -52,7 +52,7 @@ type Attempt struct {
 // ignoring ASCII case. BeforeID pages: only jobs with a smaller id. Limit 0 means 100, and the cap is 500.
 type ListFilter struct {
 	Shown      string
-	LibraryID  string
+	LibraryID  int64
 	PathSearch string
 	BeforeID   int64
 	Limit      int
@@ -130,7 +130,7 @@ func (q *Queue) List(ctx context.Context, f ListFilter) ([]Job, error) {
 	default:
 		return nil, fmt.Errorf("jobs: unknown list state %q", f.Shown)
 	}
-	if f.LibraryID != "" {
+	if f.LibraryID != 0 {
 		conds = append(conds, `library_id = ?`)
 		args = append(args, f.LibraryID)
 	}

@@ -18,9 +18,9 @@ func createJobs(tx *sql.Tx) error {
 	stmts := []string{
 		`CREATE TABLE jobs (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			file_id TEXT NOT NULL,
-			library_id TEXT NOT NULL,
-			workflow_id TEXT NOT NULL DEFAULT '',
+			file_id INTEGER NOT NULL,
+			library_id INTEGER NOT NULL,
+			workflow_id INTEGER NOT NULL DEFAULT 0,
 			workflow_rev INTEGER,
 			path TEXT NOT NULL,
 			state TEXT NOT NULL CHECK (state IN ('waiting', 'retry_wait', 'running', 'done', 'failed', 'skipped', 'cancelled')),

@@ -5,6 +5,7 @@ package jobs
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"testing"
 	"time"
 
@@ -12,13 +13,13 @@ import (
 	"github.com/PeiceOfToast/shrink-your-shit/internal/store"
 )
 
-// Test-only stand-in for R1-3's migration 4 (libraries and files). It has only the columns jobs reads. Swap it for
-// the real migration when R1-3 merges.
+// Test-only stand-in for R1-3's migration 4 (libraries and files). It has only the columns jobs reads, typed as the
+// real one types them (INTEGER ids and sizes). Dropped once #806 is on the base (orch-lead's R1-4 change, 11-27).
 func init() {
 	store.Register(store.Migration{Version: 4, Name: "fixture libraries and files", Up: func(tx *sql.Tx) error {
 		for _, s := range []string{
-			`CREATE TABLE libraries (id TEXT PRIMARY KEY, paused INTEGER NOT NULL DEFAULT 0)`,
-			`CREATE TABLE files (id TEXT PRIMARY KEY, library_id TEXT NOT NULL)`,
+			`CREATE TABLE libraries (id INTEGER PRIMARY KEY, paused INTEGER NOT NULL DEFAULT 0)`,
+			`CREATE TABLE files (id INTEGER PRIMARY KEY, library_id INTEGER NOT NULL, size INTEGER NOT NULL)`,
 		} {
 			if _, err := tx.Exec(s); err != nil {
 				return err
@@ -73,26 +74,34 @@ func (e *testEnv) exec(t *testing.T, q string, args ...any) {
 }
 
 // addLibrary inserts a library row, paused or not.
-func (e *testEnv) addLibrary(t *testing.T, id string, paused bool) {
+func (e *testEnv) addLibrary(t *testing.T, id int64, paused bool) {
 	t.Helper()
 	e.exec(t, `INSERT INTO libraries (id, paused) VALUES (?, ?)`, id, b2i(paused))
 }
 
 // setPaused flips a library's paused flag.
-func (e *testEnv) setPaused(t *testing.T, id string, paused bool) {
+func (e *testEnv) setPaused(t *testing.T, id int64, paused bool) {
 	t.Helper()
 	e.exec(t, `UPDATE libraries SET paused = ? WHERE id = ?`, b2i(paused), id)
 }
 
-// enqueue is Enqueue with a fixed workflow, failing the test on error or on an already-open file.
-func (e *testEnv) enqueue(t *testing.T, file, library string) int64 {
+// addFile inserts a files row with the given size, as migration 4's library would.
+func (e *testEnv) addFile(t *testing.T, id, library, size int64) {
 	t.Helper()
-	id, open, err := e.q.Enqueue(context.Background(), file, library, "wf-1", "/media/"+file+".mkv", "test")
+	e.exec(t, `INSERT INTO files (id, library_id, size) VALUES (?, ?, ?)`, id, library, size)
+}
+
+// enqueue is Enqueue with a fixed workflow, failing the test on error or on an already-open file. A file that has no
+// row yet gets one with size file*1000, so the default order is by id.
+func (e *testEnv) enqueue(t *testing.T, file, library int64) int64 {
+	t.Helper()
+	e.exec(t, `INSERT OR IGNORE INTO files (id, library_id, size) VALUES (?, ?, ?)`, file, library, file*1000)
+	id, open, err := e.q.Enqueue(context.Background(), file, library, 1, fmt.Sprintf("/media/%d.mkv", file), "test")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if open {
-		t.Fatalf("enqueue %s: unexpectedly already open", file)
+		t.Fatalf("enqueue %d: unexpectedly already open", file)
 	}
 	return id
 }

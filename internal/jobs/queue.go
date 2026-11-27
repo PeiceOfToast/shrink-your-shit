@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/PeiceOfToast/shrink-your-shit/internal/events"
@@ -52,7 +53,7 @@ func (q *Queue) now() time.Time { return q.clock().UTC() }
 // alreadyOpen true and no new row. A paused or missing library gets ErrLibraryUnavailable and no row.
 //
 // TODO(L-SCAN-5): refuse a workflow that is not published. The workflows table comes in stage 2.
-func (q *Queue) Enqueue(ctx context.Context, fileID, libraryID, workflowID, path, by string) (int64, bool, error) {
+func (q *Queue) Enqueue(ctx context.Context, fileID, libraryID, workflowID int64, path, by string) (int64, bool, error) {
 	var id int64
 	open := false
 	now := q.now()
@@ -112,11 +113,11 @@ const (
 type ClaimOptions struct {
 	Order     Order
 	Except    []int64
-	Libraries []string
+	Libraries []int64
 }
 
-// orderBy is the ORDER BY for a claim. top always comes first. Size ordering reads size_before, which nothing
-// fills yet, so those orders fall back to queue time until a size source exists.
+// orderBy is the ORDER BY for a claim. top always comes first. Size ordering reads files.size through the job's
+// file_id (the file's size as the library knows it), not size_before, which is the output's size.
 func (o ClaimOptions) orderBy() (string, error) {
 	switch o.Order {
 	case "", OrderNewest:
@@ -124,12 +125,15 @@ func (o ClaimOptions) orderBy() (string, error) {
 	case OrderOldest:
 		return "top DESC, queued_at ASC, id ASC", nil
 	case OrderLargest:
-		return "top DESC, COALESCE(size_before, 0) DESC, queued_at ASC, id ASC", nil
+		return "top DESC, " + fileSize + " DESC, queued_at ASC, id ASC", nil
 	case OrderSmallest:
-		return "top DESC, COALESCE(size_before, 0) ASC, queued_at ASC, id ASC", nil
+		return "top DESC, " + fileSize + " ASC, queued_at ASC, id ASC", nil
 	}
 	return "", fmt.Errorf("jobs: unknown queue order %q", o.Order)
 }
+
+// fileSize is the size of the job's file, read from files. A file the library has not recorded sorts as 0.
+const fileSize = `COALESCE((SELECT f.size FROM files f WHERE f.id = jobs.file_id), 0)`
 
 // Claim gives workerID the next job it may run, or returns nil when none is ready. The pick reads the queue; the
 // change itself is one guarded move, so when two claimers pick the same job only one wins and the other re-picks.
@@ -257,7 +261,7 @@ func (q *Queue) Finish(ctx context.Context, id int64, attempt int, r Result) err
 	if err := r.validate(); err != nil {
 		return err
 	}
-	var libraryID string
+	var libraryID int64
 	var reason string
 	var tries, newTries int
 	var to State
@@ -356,7 +360,7 @@ func attemptOutcome(r Result) string {
 // Requeue puts a running job back to waiting. It is not a try (L-Q-5). Startup recovery and a worker that lost its
 // lease both use it.
 func (q *Queue) Requeue(ctx context.Context, id int64, why string) error {
-	var libraryID string
+	var libraryID int64
 	var attempt int
 	err := q.db.Tx(ctx, func(tx *sql.Tx) error {
 		if err := tx.QueryRow(`SELECT attempt, library_id FROM jobs WHERE id = ?`, id).Scan(&attempt, &libraryID); err != nil {
@@ -391,7 +395,7 @@ type CancelResult struct {
 // Cancel moves a waiting, retry_wait or running job to cancelled.
 func (q *Queue) Cancel(ctx context.Context, id int64) (CancelResult, error) {
 	var res CancelResult
-	var libraryID string
+	var libraryID int64
 	var state State
 	now := q.now()
 	err := q.db.Tx(ctx, func(tx *sql.Tx) error {
@@ -425,10 +429,10 @@ func (q *Queue) Cancel(ctx context.Context, id int64) (CancelResult, error) {
 // Retry puts a failed or cancelled job back to waiting on the same row. Its tries start again at zero, and the
 // next claim makes a new attempt row. It is refused while the file has another open job.
 func (q *Queue) Retry(ctx context.Context, id int64) error {
-	var libraryID string
+	var libraryID int64
 	var attempt int
 	err := q.db.Tx(ctx, func(tx *sql.Tx) error {
-		var fileID string
+		var fileID int64
 		if err := tx.QueryRow(
 			`SELECT file_id, library_id, attempt FROM jobs WHERE id = ?`, id,
 		).Scan(&fileID, &libraryID, &attempt); err != nil {
@@ -505,7 +509,7 @@ func (q *Queue) Recover(ctx context.Context, sweep func(context.Context, Job) er
 }
 
 // emit sends a History event. It runs after the commit that made the change.
-func (q *Queue) emit(kind events.Kind, level events.Level, id int64, attempt int, libraryID, reason, message string) error {
+func (q *Queue) emit(kind events.Kind, level events.Level, id int64, attempt int, libraryID int64, reason, message string) error {
 	if q.bus == nil {
 		return nil
 	}
@@ -515,7 +519,7 @@ func (q *Queue) emit(kind events.Kind, level events.Level, id int64, attempt int
 		Level:     level,
 		Kind:      kind,
 		Source:    "jobs",
-		LibraryID: libraryID,
+		LibraryID: strconv.FormatInt(libraryID, 10),
 		Reason:    reason,
 		Message:   message,
 	})

@@ -29,8 +29,8 @@ func TestTransitionTable(t *testing.T) {
 			}
 			t.Run(fmt.Sprintf("%s/%s->%s/from-%s", e.verb, e.from, e.to, from), func(t *testing.T) {
 				env := newEnv(t)
-				env.addLibrary(t, "lib1", false)
-				id := env.enqueue(t, "f1", "lib1")
+				env.addLibrary(t, 1, false)
+				id := env.enqueue(t, 10, 1)
 				env.setState(t, id, from)
 
 				err := env.db.Tx(context.Background(), func(tx *sql.Tx) error {
@@ -63,8 +63,8 @@ func TestTransitionTable(t *testing.T) {
 // TestClaimIsAtomic: eight claimers race for one job; exactly one wins.
 func TestClaimIsAtomic(t *testing.T) {
 	env := newEnv(t)
-	env.addLibrary(t, "lib1", false)
-	env.enqueue(t, "f1", "lib1")
+	env.addLibrary(t, 1, false)
+	env.enqueue(t, 10, 1)
 
 	var wg sync.WaitGroup
 	var mu sync.Mutex
@@ -107,10 +107,10 @@ func TestClaimOrder(t *testing.T) {
 	ctx := context.Background()
 	t.Run("newest", func(t *testing.T) {
 		env := newEnv(t)
-		env.addLibrary(t, "lib1", false)
-		first := env.enqueue(t, "a", "lib1")
+		env.addLibrary(t, 1, false)
+		first := env.enqueue(t, 1, 1)
 		env.clk.advance(time.Minute)
-		second := env.enqueue(t, "b", "lib1")
+		second := env.enqueue(t, 2, 1)
 		job, err := env.q.Claim(ctx, "w", ClaimOptions{Order: OrderNewest})
 		if err != nil || job == nil || job.ID != second {
 			t.Fatalf("newest took %v (err %v), want %d; first was %d", job, err, second, first)
@@ -118,10 +118,10 @@ func TestClaimOrder(t *testing.T) {
 	})
 	t.Run("oldest", func(t *testing.T) {
 		env := newEnv(t)
-		env.addLibrary(t, "lib1", false)
-		first := env.enqueue(t, "a", "lib1")
+		env.addLibrary(t, 1, false)
+		first := env.enqueue(t, 1, 1)
 		env.clk.advance(time.Minute)
-		env.enqueue(t, "b", "lib1")
+		env.enqueue(t, 2, 1)
 		job, err := env.q.Claim(ctx, "w", ClaimOptions{Order: OrderOldest})
 		if err != nil || job == nil || job.ID != first {
 			t.Fatalf("oldest took %v (err %v), want %d", job, err, first)
@@ -129,27 +129,39 @@ func TestClaimOrder(t *testing.T) {
 	})
 	t.Run("top", func(t *testing.T) {
 		env := newEnv(t)
-		env.addLibrary(t, "lib1", false)
-		first := env.enqueue(t, "a", "lib1")
+		env.addLibrary(t, 1, false)
+		first := env.enqueue(t, 1, 1)
 		env.clk.advance(time.Minute)
-		env.enqueue(t, "b", "lib1")
+		env.enqueue(t, 2, 1)
 		env.exec(t, `UPDATE jobs SET top = 1 WHERE id = ?`, first)
 		job, err := env.q.Claim(ctx, "w", ClaimOptions{Order: OrderNewest})
 		if err != nil || job == nil || job.ID != first {
 			t.Fatalf("top job not first: took %v (err %v), want %d", job, err, first)
 		}
 	})
-	t.Run("size orders run without a size source", func(t *testing.T) {
-		// size_before is not filled at enqueue yet, so both size orders fall back to queue time.
-		for _, o := range []Order{OrderLargest, OrderSmallest} {
+	t.Run("size orders read files.size, not size_before", func(t *testing.T) {
+		// File 1 is the bigger source (900) and file 2 the smaller (100), queued in that order. size_before
+		// is set the other way round on the jobs, so a sort on size_before would pick the wrong job.
+		for _, c := range []struct {
+			o    Order
+			want int // which job is first: 1 for the first queued, 2 for the second
+		}{{OrderLargest, 1}, {OrderSmallest, 2}} {
 			env := newEnv(t)
-			env.addLibrary(t, "lib1", false)
-			first := env.enqueue(t, "a", "lib1")
+			env.addLibrary(t, 1, false)
+			env.addFile(t, 1, 1, 900)
+			env.addFile(t, 2, 1, 100)
+			first := env.enqueue(t, 1, 1)
 			env.clk.advance(time.Minute)
-			env.enqueue(t, "b", "lib1")
-			job, err := env.q.Claim(ctx, "w", ClaimOptions{Order: o})
-			if err != nil || job == nil || job.ID != first {
-				t.Fatalf("%s took %v (err %v), want %d", o, job, err, first)
+			second := env.enqueue(t, 2, 1)
+			env.exec(t, `UPDATE jobs SET size_before = 1 WHERE id = ?`, first)
+			env.exec(t, `UPDATE jobs SET size_before = 999 WHERE id = ?`, second)
+			want := first
+			if c.want == 2 {
+				want = second
+			}
+			job, err := env.q.Claim(ctx, "w", ClaimOptions{Order: c.o})
+			if err != nil || job == nil || job.ID != want {
+				t.Fatalf("%s took %v (err %v), want %d", c.o, job, err, want)
 			}
 		}
 	})
@@ -165,9 +177,9 @@ func TestClaimOrder(t *testing.T) {
 func TestClaimSkipsExceptPausedAndFutureRetry(t *testing.T) {
 	ctx := context.Background()
 	env := newEnv(t)
-	env.addLibrary(t, "lib1", false)
-	a := env.enqueue(t, "a", "lib1")
-	b := env.enqueue(t, "b", "lib1")
+	env.addLibrary(t, 1, false)
+	a := env.enqueue(t, 1, 1)
+	b := env.enqueue(t, 2, 1)
 
 	job, err := env.q.Claim(ctx, "w", ClaimOptions{Except: []int64{a}})
 	if err != nil || job == nil || job.ID != b {
@@ -177,12 +189,12 @@ func TestClaimSkipsExceptPausedAndFutureRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	env.setPaused(t, "lib1", true)
+	env.setPaused(t, 1, true)
 	job, err = env.q.Claim(ctx, "w", ClaimOptions{})
 	if err != nil || job != nil {
 		t.Fatalf("paused library: took %v (err %v), want nothing", job, err)
 	}
-	env.setPaused(t, "lib1", false)
+	env.setPaused(t, 1, false)
 
 	env.exec(t, `UPDATE jobs SET state = 'retry_wait', next_try_at = ? WHERE id = ?`, ms(env.q.now())+5*60_000, a)
 	job, err = env.q.Claim(ctx, "w", ClaimOptions{Except: []int64{b}})
@@ -199,16 +211,16 @@ func TestClaimSkipsExceptPausedAndFutureRetry(t *testing.T) {
 func TestClaimLibraryFilter(t *testing.T) {
 	ctx := context.Background()
 	env := newEnv(t)
-	env.addLibrary(t, "lib1", false)
-	env.addLibrary(t, "lib2", false)
-	env.enqueue(t, "a", "lib1")
-	b := env.enqueue(t, "b", "lib2")
+	env.addLibrary(t, 1, false)
+	env.addLibrary(t, 2, false)
+	env.enqueue(t, 1, 1)
+	b := env.enqueue(t, 2, 2)
 
-	job, err := env.q.Claim(ctx, "w", ClaimOptions{Libraries: []string{"lib2"}})
+	job, err := env.q.Claim(ctx, "w", ClaimOptions{Libraries: []int64{2}})
 	if err != nil || job == nil || job.ID != b {
 		t.Fatalf("library filter took %v (err %v), want %d", job, err, b)
 	}
-	job, err = env.q.Claim(ctx, "w", ClaimOptions{Libraries: []string{}})
+	job, err = env.q.Claim(ctx, "w", ClaimOptions{Libraries: []int64{}})
 	if err != nil || job != nil {
 		t.Fatalf("empty library list took %v (err %v), want nothing", job, err)
 	}
@@ -218,9 +230,9 @@ func TestClaimLibraryFilter(t *testing.T) {
 func TestEnqueueAlreadyOpen(t *testing.T) {
 	ctx := context.Background()
 	env := newEnv(t)
-	env.addLibrary(t, "lib1", false)
-	first := env.enqueue(t, "a", "lib1")
-	id, open, err := env.q.Enqueue(ctx, "a", "lib1", "wf-1", "/media/a.mkv", "test")
+	env.addLibrary(t, 1, false)
+	first := env.enqueue(t, 1, 1)
+	id, open, err := env.q.Enqueue(ctx, 1, 1, 1, "/media/a.mkv", "test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,11 +248,11 @@ func TestEnqueueAlreadyOpen(t *testing.T) {
 func TestEnqueueRefusesPausedOrMissingLibrary(t *testing.T) {
 	ctx := context.Background()
 	env := newEnv(t)
-	env.addLibrary(t, "paused", true)
-	for _, lib := range []string{"paused", "missing"} {
-		_, _, err := env.q.Enqueue(ctx, "a-"+lib, lib, "wf-1", "/m/a.mkv", "test")
+	env.addLibrary(t, 3, true)
+	for _, lib := range []int64{3, 99} { // 3 is paused, 99 is not there at all
+		_, _, err := env.q.Enqueue(ctx, 50+lib, lib, 1, "/m/a.mkv", "test")
 		if !errors.Is(err, ErrLibraryUnavailable) {
-			t.Fatalf("%s: err = %v, want ErrLibraryUnavailable", lib, err)
+			t.Fatalf("library %d: err = %v, want ErrLibraryUnavailable", lib, err)
 		}
 	}
 	if n := env.countJobs(t); n != 0 {
@@ -252,8 +264,8 @@ func TestEnqueueRefusesPausedOrMissingLibrary(t *testing.T) {
 func TestRetryBackoffThenFailed(t *testing.T) {
 	ctx := context.Background()
 	env := newEnv(t)
-	env.addLibrary(t, "lib1", false)
-	id := env.enqueue(t, "a", "lib1")
+	env.addLibrary(t, 1, false)
+	id := env.enqueue(t, 1, 1)
 	retry := Result{Verdict: VerdictRetry, Reason: "encoder fell over"}
 
 	for try, wait := range []time.Duration{5 * time.Minute, 30 * time.Minute} {
@@ -295,8 +307,8 @@ func TestRetryBackoffThenFailed(t *testing.T) {
 func TestRetryReusesRowAndNextClaimIsAttemptTwo(t *testing.T) {
 	ctx := context.Background()
 	env := newEnv(t)
-	env.addLibrary(t, "lib1", false)
-	id := env.enqueue(t, "a", "lib1")
+	env.addLibrary(t, 1, false)
+	id := env.enqueue(t, 1, 1)
 	job := mustClaim(t, env, id)
 	if err := env.q.Finish(ctx, id, job.Attempt, Result{Verdict: VerdictFail, Reason: "bad input", FailedStep: "encode"}); err != nil {
 		t.Fatal(err)
@@ -321,8 +333,8 @@ func TestRetryReusesRowAndNextClaimIsAttemptTwo(t *testing.T) {
 func TestSkipIsNeverAFailure(t *testing.T) {
 	ctx := context.Background()
 	env := newEnv(t)
-	env.addLibrary(t, "lib1", false)
-	id := env.enqueue(t, "a", "lib1")
+	env.addLibrary(t, 1, false)
+	id := env.enqueue(t, 1, 1)
 	job := mustClaim(t, env, id)
 	if err := env.q.Finish(ctx, id, job.Attempt, Result{Verdict: VerdictSkip, SkipReason: "already_smaller", Reason: "already small enough"}); err != nil {
 		t.Fatal(err)
@@ -350,8 +362,8 @@ func TestSkipIsNeverAFailure(t *testing.T) {
 func TestSkipDoesNotRetry(t *testing.T) {
 	ctx := context.Background()
 	env := newEnv(t)
-	env.addLibrary(t, "lib1", false)
-	id := env.enqueue(t, "a", "lib1")
+	env.addLibrary(t, 1, false)
+	id := env.enqueue(t, 1, 1)
 	job := mustClaim(t, env, id)
 	if err := env.q.Finish(ctx, id, job.Attempt, Result{Verdict: VerdictSkip, SkipReason: "x", Reason: "y"}); err != nil {
 		t.Fatal(err)
@@ -367,8 +379,8 @@ func TestSkipDoesNotRetry(t *testing.T) {
 func TestSkipWritesOnlyTheSkipFields(t *testing.T) {
 	ctx := context.Background()
 	env := newEnv(t)
-	env.addLibrary(t, "lib1", false)
-	id := env.enqueue(t, "a", "lib1")
+	env.addLibrary(t, 1, false)
+	id := env.enqueue(t, 1, 1)
 	job := mustClaim(t, env, id)
 	if err := env.q.Finish(ctx, id, job.Attempt, Result{Verdict: VerdictSkip, SkipReason: "x", Reason: "y"}); err != nil {
 		t.Fatal(err)
@@ -383,8 +395,8 @@ func TestSkipWritesOnlyTheSkipFields(t *testing.T) {
 func TestRecoverRequeuesWithoutATry(t *testing.T) {
 	ctx := context.Background()
 	env := newEnv(t)
-	env.addLibrary(t, "lib1", false)
-	id := env.enqueue(t, "a", "lib1")
+	env.addLibrary(t, 1, false)
+	id := env.enqueue(t, 1, 1)
 	mustClaim(t, env, id)
 
 	ch, stop := env.bus.Subscribe(events.Filter{JobID: id, Kind: events.KindRequeued})
@@ -419,8 +431,8 @@ func TestRecoverRequeuesWithoutATry(t *testing.T) {
 func TestRequeueDoesNotCountATry(t *testing.T) {
 	ctx := context.Background()
 	env := newEnv(t)
-	env.addLibrary(t, "lib1", false)
-	id := env.enqueue(t, "a", "lib1")
+	env.addLibrary(t, 1, false)
+	id := env.enqueue(t, 1, 1)
 	mustClaim(t, env, id)
 	if err := env.q.Requeue(ctx, id, "worker went away"); err != nil {
 		t.Fatal(err)
@@ -439,8 +451,8 @@ func TestRequeueDoesNotCountATry(t *testing.T) {
 func TestFinishTwiceRefused(t *testing.T) {
 	ctx := context.Background()
 	env := newEnv(t)
-	env.addLibrary(t, "lib1", false)
-	id := env.enqueue(t, "a", "lib1")
+	env.addLibrary(t, 1, false)
+	id := env.enqueue(t, 1, 1)
 	job := mustClaim(t, env, id)
 	done := Result{Verdict: VerdictDone, Outcome: "smaller", SizeBefore: 100, SizeAfter: 40, OutputPath: "/out/a.mkv"}
 	if err := env.q.Finish(ctx, id, job.Attempt, done); err != nil {
@@ -461,8 +473,8 @@ func TestFinishTwiceRefused(t *testing.T) {
 func TestFinishRefusesStaleAttempt(t *testing.T) {
 	ctx := context.Background()
 	env := newEnv(t)
-	env.addLibrary(t, "lib1", false)
-	id := env.enqueue(t, "a", "lib1")
+	env.addLibrary(t, 1, false)
+	id := env.enqueue(t, 1, 1)
 	mustClaim(t, env, id)
 	err := env.q.Finish(ctx, id, 7, Result{Verdict: VerdictDone, Outcome: "smaller"})
 	var ce *ErrChangedSince
@@ -478,8 +490,8 @@ func TestFinishRefusesStaleAttempt(t *testing.T) {
 func TestCancelRunningReturnsWorker(t *testing.T) {
 	ctx := context.Background()
 	env := newEnv(t)
-	env.addLibrary(t, "lib1", false)
-	id := env.enqueue(t, "a", "lib1")
+	env.addLibrary(t, 1, false)
+	id := env.enqueue(t, 1, 1)
 	if _, err := env.q.Claim(ctx, "worker-7", ClaimOptions{}); err != nil {
 		t.Fatal(err)
 	}
@@ -503,13 +515,13 @@ func TestCancelRunningReturnsWorker(t *testing.T) {
 func TestRetryRefusedWhileFileOpen(t *testing.T) {
 	ctx := context.Background()
 	env := newEnv(t)
-	env.addLibrary(t, "lib1", false)
-	id := env.enqueue(t, "a", "lib1")
+	env.addLibrary(t, 1, false)
+	id := env.enqueue(t, 1, 1)
 	job := mustClaim(t, env, id)
 	if err := env.q.Finish(ctx, id, job.Attempt, Result{Verdict: VerdictFail, Reason: "bad"}); err != nil {
 		t.Fatal(err)
 	}
-	other := env.enqueue(t, "a", "lib1")
+	other := env.enqueue(t, 1, 1)
 	err := env.q.Retry(ctx, id)
 	var busy *ErrFileBusy
 	if !errors.As(err, &busy) || busy.JobID != other {
@@ -521,10 +533,10 @@ func TestRetryRefusedWhileFileOpen(t *testing.T) {
 func TestListFilters(t *testing.T) {
 	ctx := context.Background()
 	env := newEnv(t)
-	env.addLibrary(t, "lib1", false)
-	a := env.enqueue(t, "a", "lib1")
+	env.addLibrary(t, 1, false)
+	a := env.enqueue(t, 1, 1)
 	env.setState(t, a, RetryWait)
-	env.enqueue(t, "b", "lib1")
+	env.enqueue(t, 2, 1)
 	waiting, err := env.q.List(ctx, ListFilter{Shown: "waiting"})
 	if err != nil || len(waiting) != 2 {
 		t.Fatalf("waiting = %d rows (err %v), want 2", len(waiting), err)
@@ -532,7 +544,7 @@ func TestListFilters(t *testing.T) {
 	if _, err := env.q.List(ctx, ListFilter{Shown: "cancelled"}); err == nil {
 		t.Fatal("cancelled accepted as a list state")
 	}
-	hits, _ := env.q.List(ctx, ListFilter{PathSearch: "/MEDIA/B"})
+	hits, _ := env.q.List(ctx, ListFilter{PathSearch: "/MEDIA/2.MKV"}) // file 2 is /media/2.mkv; the search ignores case
 	if len(hits) != 1 {
 		t.Fatalf("path search = %d rows, want 1", len(hits))
 	}
