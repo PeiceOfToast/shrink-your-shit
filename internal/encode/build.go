@@ -88,14 +88,6 @@ func Build(plan Plan, info media.Info, rung Rung) (Result, error) {
 
 	// The streams: the video, then audio and subtitles in input order. Only streams the plan
 	// keeps are mapped; data and attachment streams are never mapped.
-	audioActions, err := namedActions(plan.Audio, audioIndexes(info.Audio))
-	if err != nil {
-		return res, err
-	}
-	subtitleActions, err := namedActions(plan.Subtitles, subtitleIndexes(info.Subtitles))
-	if err != nil {
-		return res, err
-	}
 
 	for _, v := range info.Video {
 		if v.Index == main.Index {
@@ -108,28 +100,11 @@ func Build(plan Plan, info media.Info, rung Rung) (Result, error) {
 		res.Notes = append(res.Notes, fmt.Sprintf("dropped video stream #%d (%s): only one video stream is converted", v.Index, v.Codec))
 	}
 
-	var audioKept []media.AudioTrack
-	for _, a := range info.Audio {
-		if audioActions[a.Index] == StreamDrop {
-			continue
-		}
-		if why := audioFits(plan.Container, a.Codec); why != "" {
-			res.Notes = append(res.Notes, fmt.Sprintf("dropped audio stream #%d (%s): %s", a.Index, a.Codec, why))
-			continue
-		}
-		audioKept = append(audioKept, a)
+	audioKept, subtitlesKept, notes, err := keptTracks(plan, info)
+	if err != nil {
+		return res, err
 	}
-	var subtitlesKept []media.SubtitleTrack
-	for _, s := range info.Subtitles {
-		if subtitleActions[s.Index] == StreamDrop {
-			continue
-		}
-		if why := subtitleFits(plan.Container, s.Codec); why != "" {
-			res.Notes = append(res.Notes, fmt.Sprintf("dropped subtitle stream #%d (%s): %s", s.Index, s.Codec, why))
-			continue
-		}
-		subtitlesKept = append(subtitlesKept, s)
-	}
+	res.Notes = append(res.Notes, notes...)
 
 	argv := []string{
 		"-y", "-nostdin", "-progress", "pipe:1", "-nostats", "-loglevel", "error",
@@ -163,6 +138,56 @@ func Build(plan Plan, info media.Info, rung Rung) (Result, error) {
 
 	res.Argv = argv
 	return res, nil
+}
+
+// keptTracks is the one rule for which input streams reach the output: the plan does not drop
+// them, and the container can hold them. Build maps exactly these, and KeptStreams reports them.
+func keptTracks(plan Plan, info media.Info) (audioKept []media.AudioTrack, subtitlesKept []media.SubtitleTrack, notes []string, err error) {
+	audioActions, err := namedActions(plan.Audio, audioIndexes(info.Audio))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	subtitleActions, err := namedActions(plan.Subtitles, subtitleIndexes(info.Subtitles))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	for _, a := range info.Audio {
+		if audioActions[a.Index] == StreamDrop {
+			continue
+		}
+		if why := audioFits(plan.Container, a.Codec); why != "" {
+			notes = append(notes, fmt.Sprintf("dropped audio stream #%d (%s): %s", a.Index, a.Codec, why))
+			continue
+		}
+		audioKept = append(audioKept, a)
+	}
+	for _, s := range info.Subtitles {
+		if subtitleActions[s.Index] == StreamDrop {
+			continue
+		}
+		if why := subtitleFits(plan.Container, s.Codec); why != "" {
+			notes = append(notes, fmt.Sprintf("dropped subtitle stream #%d (%s): %s", s.Index, s.Codec, why))
+			continue
+		}
+		subtitlesKept = append(subtitlesKept, s)
+	}
+	return audioKept, subtitlesKept, notes, nil
+}
+
+// KeptStreams lists the audio and subtitle stream indexes the output keeps, by ffprobe index.
+// The flow engine asks for this list so its result check expects exactly the streams Build mapped.
+func KeptStreams(plan Plan, info media.Info) (audio, subtitles []int, err error) {
+	a, s, _, err := keptTracks(plan, info)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, t := range a {
+		audio = append(audio, t.Index)
+	}
+	for _, t := range s {
+		subtitles = append(subtitles, t.Index)
+	}
+	return audio, subtitles, nil
 }
 
 // videoOptions is the video encoder's part of the table. It also appends any HDR note and the
