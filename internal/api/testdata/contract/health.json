@@ -1,0 +1,10 @@
+{
+  "body": {
+    "ok": true,
+    "starting": false
+  },
+  "method": "GET",
+  "path": "/api/v2/health",
+  "status": 200,
+  "type": "Health"
+}

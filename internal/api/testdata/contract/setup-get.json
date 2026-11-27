@@ -1,0 +1,10 @@
+{
+  "body": {
+    "needsAccount": true,
+    "starting": false
+  },
+  "method": "GET",
+  "path": "/api/v2/setup",
+  "status": 200,
+  "type": "Setup"
+}
