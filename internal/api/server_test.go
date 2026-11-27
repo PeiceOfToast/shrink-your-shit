@@ -280,7 +280,16 @@ func TestSetupRulesAndCookie(t *testing.T) {
 		t.Fatal("a refused setup must not set the password")
 	}
 
-	rec = e.do(http.MethodPost, "/api/v2/setup", `{"account":{"password":"`+testPassword+`"},"library":null}`, write(nil), false)
+	rec = e.do(http.MethodPost, "/api/v2/setup", `{"account":{"password":"`+testPassword+`"},"library":null,"starter":{"id":"other","answers":{}}}`, write(nil), false)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("unknown starter: %d, want 400", rec.Code)
+	}
+	if code, _, env := errorBody(t, rec); code != "invalid_request" || env["field"] != "starter" {
+		t.Fatalf("unknown starter: %v", env)
+	}
+
+	// The body the Start page sends on its skip path (Start.tsx always sends a starter).
+	rec = e.do(http.MethodPost, "/api/v2/setup", `{"account":{"password":"`+testPassword+`"},"library":null,"starter":{"id":"shrink-videos","answers":{}}}`, write(nil), false)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("setup: %d %s", rec.Code, rec.Body)
 	}

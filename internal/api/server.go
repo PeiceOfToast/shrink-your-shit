@@ -188,8 +188,12 @@ func (s *Server) getSetup(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"needsAccount": needs, "starting": false})
 }
 
-// postSetup sets the password and signs the browser in. The library and starter parts are not built yet:
-// a non-null library or starter is refused, so nothing is half set up.
+// fixedStarterID is stage 1's one starter (build-order stage 1 item 5). The Start page always sends a
+// starter, so setup accepts this one; item 9 makes the workflow from it in the same call.
+const fixedStarterID = "shrink-videos"
+
+// postSetup sets the password and signs the browser in. The library part is not built yet: a non-null
+// library, or any starter but the fixed one, is refused, so nothing is half set up.
 func (s *Server) postSetup(w http.ResponseWriter, r *http.Request) {
 	rs := s.ready.Load()
 	var body struct {
@@ -207,8 +211,13 @@ func (s *Server) postSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !isNull(body.Starter) {
-		writeError(w, http.StatusBadRequest, "invalid_request", "A starter can't be set up yet. Leave starter out.", "starter", 0)
-		return
+		var st struct {
+			ID string `json:"id"`
+		}
+		if json.Unmarshal(body.Starter, &st) != nil || st.ID != fixedStarterID {
+			writeError(w, http.StatusBadRequest, "invalid_request", "Only the Shrink videos starter can be set up for now.", "starter", 0)
+			return
+		}
 	}
 	ctx := r.Context()
 	err := rs.access.SetPassword(ctx, body.Account.Password)
