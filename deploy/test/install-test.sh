@@ -157,6 +157,8 @@ pve-api5 POST "/nodes/$NODE/lxc" \
   --data-urlencode "description=R1-11 install test; deleted by deploy/test/install-test.sh" \
   --data-urlencode "ssh-public-keys=$(cat "$KEY.pub")" >>"$LOG_TMP" 2>&1 \
   || { fail "the create call failed (the API's answer is in $LOG_TMP)"; exit 1; }
+# The API's answer has no trailing newline; without one the first PASS lands on the same line in the log.
+printf '\n' >>"$LOG_TMP"
 i=0
 while [ "$i" -lt 60 ]; do
   if ct true >/dev/null 2>&1; then break; fi
