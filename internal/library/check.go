@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -30,7 +31,24 @@ const (
 	ProblemAlreadyWatched = "already_watched"
 	// ProblemUnreadable is a part of the folder the check could not read.
 	ProblemUnreadable = "unreadable"
+	// ProblemUnwritable is a folder the app cannot write in, so converted videos could not be saved.
+	ProblemUnwritable = "unwritable"
 )
+
+// checkWritable proves the app can write in the folder by creating and removing a temp file. A folder
+// it can read but not write is refused up front rather than at the first conversion.
+func checkWritable(path string) error {
+	f, err := os.CreateTemp(path, ".syp-check-*")
+	if err != nil {
+		return err
+	}
+	name := f.Name()
+	if err := f.Close(); err != nil {
+		_ = os.Remove(name)
+		return err
+	}
+	return os.Remove(name)
+}
 
 // videoExts are the file names the library treats as video. The list is the scanner's: a folder
 // check counts what a scan would find.
@@ -64,6 +82,12 @@ func (c *Catalog) CheckFolder(ctx context.Context, path string) (FolderCheck, er
 		} else {
 			return FolderCheck{}, err
 		}
+	}
+	if err := checkWritable(abs); err != nil {
+		out.Problems = append(out.Problems, FolderProblem{
+			Code:    ProblemUnwritable,
+			Message: "The app can't write in this folder, so converted videos couldn't be saved here. It runs as the user syp: give syp access (for example add syp to this folder's group), or choose a folder outside your home.",
+		})
 	}
 	walkErr := filepath.WalkDir(abs, func(p string, d fs.DirEntry, err error) error {
 		if cerr := ctx.Err(); cerr != nil {

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/PeiceOfToast/shrink-your-shit/internal/flow"
@@ -207,6 +208,26 @@ func TestCheckLibraryFolder(t *testing.T) {
 	}
 	if len(check.Problems) != 1 || check.Problems[0].Code != "already_watched" || check.Problems[0].Message == "" {
 		t.Fatalf("watched check %+v", check)
+	}
+
+	// A folder the app cannot write in is said plainly, before a conversion would fail on it. The
+	// read-only mode does not stop a Windows file creation, and root ignores it, so those skip.
+	if runtime.GOOS != "windows" && os.Geteuid() != 0 {
+		locked := t.TempDir()
+		if err := os.Chmod(locked, 0o555); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { os.Chmod(locked, 0o755) })
+		rec = e.do(http.MethodPost, "/api/v2/libraries/check", mustJSON(t, map[string]any{"path": locked}), write(withSession(cookie)), false)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("unwritable check: %d %s", rec.Code, rec.Body)
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &check); err != nil {
+			t.Fatal(err)
+		}
+		if len(check.Problems) != 1 || check.Problems[0].Code != "unwritable" || check.Problems[0].Message == "" {
+			t.Fatalf("unwritable check %+v", check)
+		}
 	}
 
 	rec = e.do(http.MethodPost, "/api/v2/libraries/check", `{"path":"/no/such/folder"}`, write(withSession(cookie)), false)
