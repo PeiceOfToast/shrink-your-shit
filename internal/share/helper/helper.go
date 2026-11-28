@@ -140,7 +140,12 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 
 // handleConn checks who is asking, reads one bounded JSON request and answers once.
 func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
-	defer conn.Close()
+	drained := false
+	defer func() {
+		if !drained {
+			_ = conn.Close()
+		}
+	}()
 	uc, ok := conn.(*net.UnixConn)
 	if !ok {
 		_ = writeResponse(conn, refused("This request is not allowed."))
@@ -158,9 +163,14 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 		_ = writeResponse(conn, refused("This request is not allowed."))
 		// The request is never decoded, but it is read off (capped, under the deadline) so the close is
 		// a clean end: closing with it unread lets a client's write fail with a broken pipe before it
-		// reads this answer.
-		_ = conn.SetReadDeadline(time.Now().Add(requestTimeout))
-		_, _ = io.Copy(io.Discard, io.LimitReader(conn, maxRequest+1))
+		// reads this answer. That happens off the accept loop, so a refused caller holding its
+		// connection open can't delay an allowed one.
+		drained = true
+		go func() {
+			defer conn.Close()
+			_ = conn.SetReadDeadline(time.Now().Add(requestTimeout))
+			_, _ = io.Copy(io.Discard, io.LimitReader(conn, maxRequest+1))
+		}()
 		return
 	}
 	_ = conn.SetReadDeadline(time.Now().Add(requestTimeout))
