@@ -187,8 +187,9 @@ func (d *Detector) pass(ctx context.Context, runID, workerID string) {
 	d.report(inv)
 }
 
-// probe is one encoder's result as page 10's probe event: the log line in words, and the run it belongs to in the
-// data, so the page can tell two tests of the same encoder apart.
+// probe is one encoder's result as page 10's probe event: the log line in words, with the run's id and the finding in
+// the event's data. The streamed line has no data field, so a page follows a run through worker.test rather than the
+// events.
 func (d *Detector) probe(v Verdict, runID, workerID string) {
 	if d.bus == nil {
 		return

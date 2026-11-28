@@ -365,6 +365,7 @@ func TestTestRunReportsEachEncoderAsAProbe(t *testing.T) {
 	if next := d.TestRun("local"); next == "" || next == id {
 		t.Errorf("the second run's id = %q; want a new id, not %q", next, id)
 	}
+	waitIdle(t, d)
 }
 
 // One run at a time per worker: a second ask while a run is going is that run, so two clicks do not test twice.
@@ -380,19 +381,7 @@ func TestTestRunWhileRunningIsTheSameRun(t *testing.T) {
 		t.Fatalf("run ids = %q then %q; want the one run while it is going", first, second)
 	}
 	// Let the hung test time out, so no goroutine outlives the test.
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		d.mu.Lock()
-		running := d.running
-		d.mu.Unlock()
-		if !running {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("the run did not end after its test timed out")
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	waitIdle(t, d)
 }
 
 // A run's successes are the pause rules' own success: the failure count starts again. A failed test is not a job
@@ -411,9 +400,12 @@ func TestTestRunFeedsThePauseRules(t *testing.T) {
 	p := NewPauses(db, func() time.Time { return now }, nil)
 	ctx := context.Background()
 
-	// One failure, then a passing test: the count starts again, so the next failure is only the second in a row.
-	if _, err := p.Record(ctx, "local", encode.FamilyQSV, false); err != nil {
-		t.Fatal(err)
+	// Two failures, then a passing test: the count starts again, so the next failure is only the first in a row. With
+	// no reset it would be the third, and pause — this is what makes the check bite.
+	for i := 0; i < FailLimit-1; i++ {
+		if _, err := p.Record(ctx, "local", encode.FamilyQSV, false); err != nil {
+			t.Fatal(err)
+		}
 	}
 	m := &fake.Media{
 		Runs: []fake.RunScript{{}},
@@ -520,6 +512,25 @@ func TestMultiWordTagMustStartWithLavc(t *testing.T) {
 	}
 	if !namedBy("Lavc61.3.100 hevc_qsv", "hevc_qsv") {
 		t.Error("the real Lavc form was refused")
+	}
+}
+
+// waitIdle waits for the detector's pass to end, so a test that started a run leaves no goroutine reading the package
+// knobs (TestTimeout) while the next test writes them.
+func waitIdle(t *testing.T, d *Detector) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		d.mu.Lock()
+		running := d.running
+		d.mu.Unlock()
+		if !running {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the pass did not end")
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 
