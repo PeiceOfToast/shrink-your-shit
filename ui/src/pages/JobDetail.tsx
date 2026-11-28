@@ -199,7 +199,7 @@ export function JobDetail({ id, initialTab }: { id: string; initialTab: "summary
             <button type="button" className="btn ghost sm" aria-label="Previous job" disabled={!nb.data?.prev} onClick={() => go(nb.data?.prev ?? null)}>‹</button>
             <button type="button" className="btn ghost sm" aria-label="Next job" disabled={!nb.data?.next} onClick={() => go(nb.data?.next ?? null)}>›</button>
             {/* An empty actionLabel means retrying isn't the right move (a replace that needs a look). */}
-            {state === "failed" && d?.failure?.actionLabel !== "" && (
+            {((state === "failed" && d?.failure?.actionLabel !== "") || state === "cancelled") && (
               <button type="button" className="btn sm" disabled={busy} onClick={() => jobAct("retry", "Queued to try again.")}>Retry</button>
             )}
             <div className={`jd-more${more ? " open" : ""}`}>

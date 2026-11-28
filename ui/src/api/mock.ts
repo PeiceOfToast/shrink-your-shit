@@ -122,9 +122,16 @@ export function getJobs(params: JobsParams = {}): Promise<JobsPage> {
 
 // POST /api/v2/jobs/actions: {done, refused[{id, code, message}]}. The mock refuses nothing.
 export function runJobsAction(action: "retry" | "cancel" | "top", ids: string[]): Promise<JobsActionDone> {
-  // The mock refuses nothing, so every id is done.
-  void action;
-  return respond(() => ({ done: [...ids], refused: [] }));
+  // The mock refuses nothing, so every id is done. Cancel and retry move the job the way the server does.
+  return respond(() => {
+    for (const id of ids) {
+      const i = JOBS.findIndex((j) => j.id === id);
+      if (i < 0) continue;
+      if (action === "cancel") JOBS[i] = { ...JOBS[i], state: "cancelled", step: null, progress: null };
+      if (action === "retry") JOBS[i] = { ...JOBS[i], state: "waiting", step: null, progress: null, startedAt: null, finishedAt: null };
+    }
+    return { done: [...ids], refused: [] };
+  });
 }
 
 export function scanAllLibraries(): Promise<ScanAllDone> {

@@ -1,7 +1,8 @@
 
 // Response shapes for the routes in each page's "Data and API" section (Plan/pages).
 
-export type JobState = "waiting" | "running" | "done" | "failed" | "skipped";
+// "cancelled" is a job someone stopped (POST /jobs/actions cancel); the server returns it as-is.
+export type JobState = "waiting" | "running" | "done" | "failed" | "skipped" | "cancelled";
 
 export interface Series {
   c: "ok" | "accent" | "text2" | "bad" | "trash";

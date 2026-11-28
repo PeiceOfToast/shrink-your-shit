@@ -21,6 +21,7 @@ export const PILL: Record<JobState, { cls: string; label: string }> = {
   done: { cls: "ok", label: "Done" },
   failed: { cls: "bad", label: "Failed" },
   skipped: { cls: "skip", label: "Skipped" },
+  cancelled: { cls: "skip", label: "Stopped" },
 };
 
 export function JobRow({ j, filter }: { j: Job; filter: string }) {

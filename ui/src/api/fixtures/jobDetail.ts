@@ -42,6 +42,7 @@ function outcomesFor(job: Job): StepOutcome[] {
       return ["done", "done", "running", "waiting", "waiting", "waiting"];
     case "skipped":
     case "waiting":
+    case "cancelled":
       return STEP_NAMES.map(() => (job.state === "skipped" ? "skipped" : "waiting"));
   }
 }

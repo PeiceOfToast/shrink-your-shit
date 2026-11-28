@@ -48,3 +48,11 @@ test("a job action returns the ids that were done and which were refused", async
   assert.deepEqual(await runJobsAction("retry", ["a", "b"]), { done: ["a", "b"], refused: [] });
 });
 
+
+test("Stop leaves the job cancelled, as the server returns it, and Retry puts it back to waiting", async () => {
+  const open = JOBS.find((j) => j.state === "waiting")!;
+  await runJobsAction("cancel", [open.id]);
+  assert.equal((await getJob(open.id)).job.state, "cancelled");
+  await runJobsAction("retry", [open.id]);
+  assert.equal((await getJob(open.id)).job.state, "waiting");
+});
