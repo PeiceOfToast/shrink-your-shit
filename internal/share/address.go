@@ -237,7 +237,8 @@ func CheckOptions(t Type, opts []string) error {
 
 func checkOption(t Type, opt string) error {
 	if opt == "" || strings.TrimSpace(opt) != opt || strings.Contains(opt, ",") {
-		return fmt.Errorf("the mount option %q can't be used", opt)
+		// Never echo the option: a comma can hide a password after it (review of #921).
+		return fmt.Errorf("a mount option can't be empty, or contain a comma or spaces")
 	}
 	name, value, hasValue := strings.Cut(opt, "=")
 	if strings.Contains(strings.ToLower(name), "password") {
@@ -285,7 +286,8 @@ func checkOption(t Type, opt string) error {
 			}
 		}
 	}
-	return fmt.Errorf("the mount option %q is not one this app uses", opt)
+	// Name only, never the value: an unknown option may carry a secret (review of #921).
+	return fmt.Errorf("the mount option %q is not one this app uses", name)
 }
 
 func addressError(message string) error {

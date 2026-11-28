@@ -124,8 +124,8 @@ func TestCheckOptions(t *testing.T) {
 		}
 	}
 	bad := []struct {
-		typ  Type
-		opt  string
+		typ Type
+		opt string
 	}{
 		{SMB, "password=hunter2"},
 		{SMB, "credentials=/tmp/x"},
@@ -138,10 +138,49 @@ func TestCheckOptions(t *testing.T) {
 		{NFS, "timeo=0"},
 		{NFS, "retrans=999"},
 		{NFS, "password=x"},
+		// A comma would split one option into two once the helper joins them (review of #921).
+		{SMB, "domain=x,password=y"},
+		{NFS, "soft,password=y"},
 	}
 	for _, tc := range bad {
 		if err := CheckOptions(tc.typ, []string{tc.opt}); err == nil {
 			t.Errorf("%s option %q was accepted", tc.typ, tc.opt)
 		}
+	}
+}
+
+// A comma refusal never echoes the option, since a password can hide after the comma.
+func TestCheckOptionsCommaRefusalEchoesNothing(t *testing.T) {
+	err := CheckOptions(SMB, []string{"domain=x,password=s3cret"})
+	if err == nil {
+		t.Fatal("a comma option was accepted")
+	}
+	if strings.Contains(err.Error(), "s3cret") {
+		t.Errorf("the refusal echoes the hidden password: %q", err)
+	}
+}
+
+// An unknown option's refusal names it but never echoes its value.
+func TestCheckOptionsUnknownRefusalEchoesNoValue(t *testing.T) {
+	err := CheckOptions(SMB, []string{"pass=s3cret"})
+	if err == nil {
+		t.Fatal("an unknown option was accepted")
+	}
+	if strings.Contains(err.Error(), "s3cret") {
+		t.Errorf("the refusal echoes the value: %q", err)
+	}
+}
+
+// A password as an option is refused by its name, and the refusal never echoes the value.
+func TestCheckOptionsRefusesAPasswordByName(t *testing.T) {
+	err := CheckOptions(SMB, []string{"password=hunter2"})
+	if err == nil {
+		t.Fatal("password=hunter2 was accepted")
+	}
+	if strings.Contains(err.Error(), "hunter2") {
+		t.Errorf("the refusal echoes the password: %q", err)
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "password") {
+		t.Errorf("the refusal doesn't say why: %q", err)
 	}
 }
