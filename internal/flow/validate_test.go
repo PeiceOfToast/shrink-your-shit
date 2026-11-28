@@ -33,7 +33,7 @@ func TestValidateStarterHasNoProblems(t *testing.T) {
 	}
 	want := map[string]string{
 		"video": "HEVC · quality 3 · graphics card off",
-		"audio": "Same as the source · same channels as the source · my languages · subtitles: keep all",
+		"audio": "Same as the source · same channels as the source · every language · subtitles: keep all",
 		"save":  "MKV · next to the original",
 	}
 	for id, text := range want {
