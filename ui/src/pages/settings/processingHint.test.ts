@@ -6,6 +6,6 @@ import { readFileSync } from "node:fs";
 
 test("Files at once says it is the default for new workers and links to the Workers page", () => {
   const src = readFileSync(new URL("./Processing.tsx", import.meta.url), "utf8");
-  assert.match(src, /Files at once for new workers\. Each worker's own setting is on the <Link to="\/workers">Workers page<\/Link>\./);
+  assert.match(src, /Files at once for new workers\. This computer's own setting is on the <Link to="\/workers">Workers page<\/Link>\./);
   assert.doesNotMatch(src, /How many files convert at the same time/);
 });

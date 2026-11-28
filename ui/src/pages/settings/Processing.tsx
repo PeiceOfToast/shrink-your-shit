@@ -31,7 +31,7 @@ export function Processing() {
       <Row
         id="p-par"
         label="Files at once"
-        hint={<>Files at once for new workers. Each worker's own setting is on the <Link to="/workers">Workers page</Link>.</>}
+        hint={<>Files at once for new workers. This computer's own setting is on the <Link to="/workers">Workers page</Link>.</>}
         field="processing.parallelJobs"
         problem={f.problem}
       >
