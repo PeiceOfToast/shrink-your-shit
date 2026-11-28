@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { request } from "../http.ts";
 import { ApiError } from "../errors.ts";
 import { convertAgain, getJobNeighbours, getJobs, runJobsAction } from "./jobs.ts";
-import { getLibraries, createLibrary } from "./libraries.ts";
+import { getLibraries, createLibrary, patchLibrary } from "./libraries.ts";
 import { getSettings, patchSettings } from "./settings.ts";
 import { getTrash, restoreTrash } from "./trash.ts";
 import { getAttention, getOverview } from "./overview.ts";
@@ -215,4 +215,10 @@ test("trash: GET the list, POST a restore by id, a refusal keeps its code", asyn
   assert.equal(calls[0].init.method, "POST");
   stub(409, JSON.stringify({ error: { code: "original_gone", message: "The original isn't in the trash folder any more." } }));
   await assert.rejects(restoreTrash("7"), (e: unknown) => e instanceof ApiError && e.code === "original_gone");
+});
+
+test("saving a library says it is not connected yet, and sends nothing", async () => {
+  const calls = stub(200, "{}");
+  await assert.rejects(patchLibrary("1", { name: "Films" }), { code: "not_yet", message: "Saving a library isn't connected yet." });
+  assert.equal(calls.length, 0);
 });
