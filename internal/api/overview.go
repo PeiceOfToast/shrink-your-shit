@@ -5,6 +5,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"math"
 	"net/http"
 	"time"
 
@@ -23,8 +24,8 @@ type overviewJSON struct {
 		NextReleaseAt    *string `json:"nextReleaseAt"`
 	} `json:"freed"`
 	Converted struct {
-		Total  int     `json:"total"`
-		PerDay float64 `json:"perDay"` // the average of done jobs per day over the last 7 local days
+		Total  int `json:"total"`
+		PerDay int `json:"perDay"` // done jobs per day over the last 7 local days, rounded to a whole number
 	} `json:"converted"`
 	Last24h struct {
 		Done    int `json:"done"`
@@ -51,7 +52,8 @@ type overviewJSON struct {
 	WorkersOn bool         `json:"workersOn"`
 }
 
-// seriesDay is one day of the charts. A day with no data is null in every figure (types.ts: "null = no data that day").
+// seriesDay is one day of the charts. Before the first finished job a day is null in every figure; from then on a day
+// with nothing is 0 (types.ts: "null = no data that day", and the first job is the first data).
 type seriesDay struct {
 	Day        string `json:"day"`
 	FreedBytes *int64 `json:"freedBytes"`
@@ -73,8 +75,25 @@ type finishedRow struct {
 	hasSizes   bool
 }
 
+// savedOf is what a finished job freed: the source minus its output, never below zero (a job whose output came out
+// bigger frees nothing, so such jobs add 0 to every saving).
+func savedOf(row finishedRow) int64 {
+	if !row.hasSizes {
+		return 0
+	}
+	if s := row.before - row.after; s > 0 {
+		return s
+	}
+	return 0
+}
+
 // localDay is the server's local calendar day of a millisecond time, as YYYY-MM-DD.
 func localDay(ms int64) string { return time.UnixMilli(ms).In(time.Local).Format("2006-01-02") }
+
+// dayCounts is what one local day adds up to in the series.
+type dayCounts struct {
+	freed, done, skipped, failed int64
+}
 
 // getOverview is GET /overview.
 func (s *Server) getOverview(w http.ResponseWriter, r *http.Request) {
@@ -95,85 +114,81 @@ func (s *Server) getOverview(w http.ResponseWriter, r *http.Request) {
 	var out overviewJSON
 	out.WorkersOn = true // Stage 1 has one worker and no all-workers switch (summary.go), so it is on.
 
-	// All-time figures, and the day buckets, from the finished rows.
-	weekAgo := nowMS - 7*24*60*60*1000
-	dayDone := map[string]int{}
-	var seriesIdx = map[string]int{}
+	// The 30 series days, oldest first, and the seven perDay days.
 	var series []seriesDay
-	var seriesRaw []struct {
-		freed, trash, done, skipped, failed int64
-		any                                 bool
-	}
+	seriesIdx := map[string]int{}
+	counts := make([]dayCounts, 30)
 	for i := 29; i >= 0; i-- {
 		d := now.AddDate(0, 0, -i).In(time.Local).Format("2006-01-02")
 		seriesIdx[d] = len(series)
 		series = append(series, seriesDay{Day: d})
-		seriesRaw = append(seriesRaw, struct {
-			freed, trash, done, skipped, failed int64
-			any                                 bool
-		}{})
 	}
-	var weekBefore, weekSecs, allBefore, allSaved int64
+	dayDone := map[string]int{}
+	weekAgo := nowMS - 7*24*60*60*1000
+	var weekBefore, weekSaved, weekMS int64
+	var firstMS int64 = -1
 	for _, row := range rows {
 		day := localDay(row.finishedMS)
+		if firstMS < 0 || row.finishedMS < firstMS {
+			firstMS = row.finishedMS
+		}
 		if row.state == "done" {
 			out.Converted.Total++
 			dayDone[day]++
 		}
-		if row.state == "done" && row.outcome == "smaller" && row.hasSizes {
-			saved := row.before - row.after
+		if row.state == "done" && row.outcome == "smaller" {
+			saved := savedOf(row)
 			out.Freed.TotalBytes += saved
-			allBefore += row.before
-			allSaved += saved
 			if day == todayStr {
 				out.Freed.TodayBytes += saved
 			}
 		}
 		if i, ok := seriesIdx[day]; ok {
-			raw := &seriesRaw[i]
+			c := &counts[i]
 			switch row.state {
 			case "done":
-				raw.done++
-				raw.any = true
-				if row.outcome == "smaller" && row.hasSizes {
-					raw.freed += row.before - row.after
+				c.done++
+				if row.outcome == "smaller" {
+					c.freed += savedOf(row)
 				}
 			case "skipped":
-				raw.skipped++
-				raw.any = true
+				c.skipped++
 			case "failed":
-				raw.failed++
-				raw.any = true
+				c.failed++
 			}
 		}
 		if row.state == "done" && row.finishedMS >= weekAgo {
 			weekBefore += row.before
-			weekSecs += (row.finishedMS - row.startedMS) / 1000
+			weekSaved += savedOf(row)
+			weekMS += row.finishedMS - row.startedMS
 		}
 	}
-	// perDay is the average of done jobs per day over the last seven local days.
+	// perDay: done jobs per day over the last seven local days, rounded to a whole number.
 	var sevenDone int
 	for i := 6; i >= 0; i-- {
 		sevenDone += dayDone[now.AddDate(0, 0, -i).In(time.Local).Format("2006-01-02")]
 	}
-	out.Converted.PerDay = float64(sevenDone) / 7
+	out.Converted.PerDay = int(math.Round(float64(sevenDone) / 7))
+	// secPerGB and pct read the same window: the done jobs of the last seven local days. GB is 1e9 bytes.
 	if weekBefore > 0 {
-		out.AvgShrink.SecPerGB = float64(weekSecs) / (float64(weekBefore) / (1 << 30))
+		out.AvgShrink.SecPerGB = (float64(weekMS) / 1000) / (float64(weekBefore) / 1e9)
+		out.AvgShrink.Pct = 100 * float64(weekSaved) / float64(weekBefore)
 	}
-	if allBefore > 0 {
-		out.AvgShrink.Pct = 100 * float64(allSaved) / float64(allBefore)
-	}
-	// A day with nothing in it is null in every figure; the Dashboard draws no point for it.
-	for i := range series {
-		raw := seriesRaw[i]
-		if !raw.any && raw.trash == 0 && raw.freed == 0 {
-			continue
+
+	// From the first finished job's day on, a day with nothing is 0; days before it are null, and with no job at all
+	// every day is null. trashBytes stays null: the journal keeps no per-day source for it (documented in the PR).
+	if firstMS >= 0 {
+		firstDay := localDay(firstMS)
+		for i := range series {
+			if series[i].Day < firstDay {
+				continue
+			}
+			c := counts[i]
+			freed := c.freed
+			done, skipped, failed := int(c.done), int(c.skipped), int(c.failed)
+			series[i].FreedBytes = &freed
+			series[i].Done, series[i].Skipped, series[i].Failed = &done, &skipped, &failed
 		}
-		// trashBytes has no per-day source yet (the journal keeps no purge day), so it stays null.
-		freed := raw.freed
-		done, skipped, failed := int(raw.done), int(raw.skipped), int(raw.failed)
-		series[i].FreedBytes = &freed
-		series[i].Done, series[i].Skipped, series[i].Failed = &done, &skipped, &failed
 	}
 	out.Series.Days = series
 
@@ -250,8 +265,6 @@ func (s *Server) getOverview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var next *time.Time
-	var nextBytes int64
-	nextDay := ""
 	for _, e := range entries {
 		// A saving is never negative: a converted file bigger than its original saves nothing.
 		if saving := e.OrigBytes - e.NewBytes; saving > 0 {
@@ -263,7 +276,8 @@ func (s *Server) getOverview(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if next != nil {
-		nextDay = next.In(time.Local).Format("2006-01-02")
+		nextDay := next.In(time.Local).Format("2006-01-02")
+		var nextBytes int64
 		for _, e := range entries {
 			until := e.When.Add(time.Duration(keep) * 24 * time.Hour)
 			if until.In(time.Local).Format("2006-01-02") == nextDay {
@@ -276,14 +290,14 @@ func (s *Server) getOverview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// The Libraries page's rows, the same as GET /libraries.
-	counts, err := rs.Catalog.CountFiles(ctx)
+	counts2, err := rs.Catalog.CountFiles(ctx)
 	if err != nil {
 		internalError(w)
 		return
 	}
 	out.Libraries = []libraryRow{}
 	for _, lib := range libs {
-		row, err := s.libraryRowOf(r, lib, counts[lib.ID])
+		row, err := s.libraryRowOf(r, lib, counts2[lib.ID])
 		if err != nil {
 			internalError(w)
 			return
