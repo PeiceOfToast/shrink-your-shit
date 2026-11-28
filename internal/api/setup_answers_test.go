@@ -137,12 +137,12 @@ func TestSetupRefusesABadAnswerWithoutSaving(t *testing.T) {
 	}
 }
 
-// TestSetupRefusesAGreyedAnswer: a choice the guide greys today (replace the original) is refused
+// TestSetupRefusesAGreyedAnswer: a choice the guide greys today (a different folder) is refused
 // the way the guide refuses it, on the answer's own field.
 func TestSetupRefusesAGreyedAnswer(t *testing.T) {
 	e := newEnv(t, true)
 	answers := starterOwnAnswers(t)
-	answers["original"] = "replace"
+	answers["original"] = "one_folder"
 
 	rec := e.do(http.MethodPost, "/api/v2/setup", setupAnswersBody(t, answers), write(nil), false)
 	if rec.Code != http.StatusBadRequest {
@@ -155,8 +155,8 @@ func TestSetupRefusesAGreyedAnswer(t *testing.T) {
 	if field, _ := raw["field"].(string); field != "starter.answers.original" {
 		t.Errorf("field = %q; want starter.answers.original", field)
 	}
-	if message != flow.ReplaceWhy {
-		t.Errorf("message = %q; want the guide's reason %q", message, flow.ReplaceWhy)
+	if message != flow.FolderWhy {
+		t.Errorf("message = %q; want the guide's reason %q", message, flow.FolderWhy)
 	}
 }
 

@@ -148,7 +148,7 @@ func TestSaveValidate(t *testing.T) {
 		t.Errorf("summary = %q", check.Summary)
 	}
 
-	for where, why := range map[string]string{"replace": flow.ReplaceWhy, "folder": flow.FolderWhy} {
+	for where, why := range map[string]string{"folder": flow.FolderWhy} {
 		check = SaveStep{}.Validate(saveSettings("mkv", where, "shrunk"), flow.ValidateContext{})
 		if len(check.Problems) == 0 || check.Problems[0].Field != "where" ||
 			check.Problems[0].Code != "save.not_yet" || check.Problems[0].Message != why {
@@ -203,7 +203,7 @@ func TestSaveChoicesAreGreyed(t *testing.T) {
 		}
 		formWhy[fmt.Sprint(o.Value)] = o.Why
 	}
-	for value, why := range map[string]string{"replace": replaceWhy, "folder": folderWhy} {
+	for value, why := range map[string]string{"folder": folderWhy} {
 		if formWhy[value] != why {
 			t.Errorf("form greys %s with %q, want %q", value, formWhy[value], why)
 		}
@@ -216,7 +216,7 @@ func TestSaveChoicesAreGreyed(t *testing.T) {
 			checkWhy[d.Value] = d.Why
 		}
 	}
-	for value, why := range map[string]string{"replace": replaceWhy, "folder": folderWhy} {
+	for value, why := range map[string]string{"folder": folderWhy} {
 		if checkWhy[value] != why {
 			t.Errorf("check greys %s with %q, want the form's %q", value, checkWhy[value], why)
 		}
@@ -224,7 +224,7 @@ func TestSaveChoicesAreGreyed(t *testing.T) {
 
 	// A stored value is still a problem, with its own sentence: the greyed choice is a promise,
 	// not a silent rewrite of what was saved.
-	for where, why := range map[string]string{"replace": replaceWhy, "folder": folderWhy} {
+	for where, why := range map[string]string{"folder": folderWhy} {
 		check = SaveStep{}.Validate(saveSettings("mkv", where, "shrunk"), flow.ValidateContext{})
 		blocked := false
 		for _, p := range check.Problems {

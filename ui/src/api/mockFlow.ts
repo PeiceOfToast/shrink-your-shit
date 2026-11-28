@@ -34,7 +34,6 @@ const changedSince = () => new ApiError("changed_since", CHANGED_SINCE);
 
 // Why the guide and the editor grey replacing the original and saving to a chosen folder until item
 // 10. The server says the same sentences (internal/flow/answers.go); design's wording is "new file".
-const REPLACE_WHY = "Replacing the original comes in a later update; for now the new file is saved next to it.";
 const FOLDER_WHY = "Saving to a different folder comes in a later update; for now the new file is saved next to it.";
 
 const FORMAT_LABEL: Record<string, string> = { hevc: "HEVC", h264: "H.264", av1: "AV1" };
@@ -205,7 +204,7 @@ const GUIDE: GuideDoc = {
           label: "Where the new file goes",
           type: "choice",
           choices: [
-            { value: "replace", label: "Replace the original", available: false, why: REPLACE_WHY },
+            { value: "replace", label: "Replace the original", available: true },
             { value: "next_to_original", label: "Next to the original", available: true },
             { value: "one_folder", label: "A different folder", available: false, why: FOLDER_WHY },
             { value: "beside_library", label: "A folder beside the library", available: false, why: FOLDER_WHY },
@@ -342,13 +341,10 @@ export function checkFlow(flow: Flow): FlowCheck {
     disabled.push({ stepId: "video", field: "bitDepth", value: "10", why });
     if (v.bitDepth === 10) problems.push({ stepId: "video", field: "bitDepth", code: "video.bitdepth_h264", message: why });
   }
-  // Replacing the original and a chosen folder arrive with item 10: the choices are greyed with the
-  // same sentences the server uses, and a stored pick is a problem with its own sentence.
-  disabled.push({ stepId: "save", field: "where", value: "replace", why: REPLACE_WHY });
+  // A chosen folder arrives with a later update: it is greyed with the sentence the server uses, and a stored pick is
+  // a problem with its own sentence. Replacing the original is built, so it is not greyed.
   disabled.push({ stepId: "save", field: "where", value: "folder", why: FOLDER_WHY });
-  if (sv.where === "replace") {
-    problems.push({ stepId: "save", field: "where", code: "save.not_yet", message: REPLACE_WHY });
-  } else if (sv.where === "folder") {
+  if (sv.where === "folder") {
     problems.push({ stepId: "save", field: "where", code: "save.not_yet", message: FOLDER_WHY });
   }
   if (sv.where === "folder" && !sv.folder) {

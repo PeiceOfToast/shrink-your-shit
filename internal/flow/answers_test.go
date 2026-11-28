@@ -342,7 +342,6 @@ func TestTheGuideGreysWhereItCannotSave(t *testing.T) {
 		t.Errorf("default original = %v, want next_to_original", got)
 	}
 	want := map[string]string{
-		"replace":        flow.ReplaceWhy,
 		"one_folder":     flow.FolderWhy,
 		"beside_library": flow.FolderWhy,
 	}

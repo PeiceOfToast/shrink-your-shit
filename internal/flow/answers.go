@@ -19,10 +19,6 @@ import (
 // smaller sibling folder and the speed choice are the parts that need a rule of their own, and they
 // are documented where each is read or written.
 
-// ReplaceWhy is why page 06 greys "Replace the original" until stage 2 item 10, and why the Save
-// step's check greys it. One sentence, so the guide and the editor say the same thing.
-const ReplaceWhy = "Replacing the original comes in a later update; for now the new file is saved next to it."
-
 // FolderWhy is why page 06 greys "A different folder" (and its beside-the-library sibling) until
 // stage 2 item 10, and why the Save step's check greys the choice. The guide and the editor read
 // the same sentence. "New file" is design's wording (11-27 20:19Z).
