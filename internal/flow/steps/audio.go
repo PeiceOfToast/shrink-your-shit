@@ -736,9 +736,12 @@ func audioCopyConflicts(set AudioSettings) []flow.Problem {
 // audioSummary is the closed card's line in page 07's words: the codec, the channels, the
 // languages to keep and the subtitles choice.
 func audioSummary(set AudioSettings) string {
-	langs := "my languages"
-	if len(set.wantedList()) > 0 {
-		langs = languageNames(set.wantedList())
+	langs := "every language"
+	if !set.AllLanguages {
+		langs = "my languages"
+		if len(set.Languages) > 0 {
+			langs = languageNames(set.Languages)
+		}
 	}
 	subLangs := langs
 	if len(set.SubtitleLanguages) > 0 {
