@@ -88,6 +88,8 @@ export interface WorkflowDraft {
   flow: Flow;
   rev: number;
   fitsGuided: boolean;
+  // The three lines (page 09), from the flow's own settings. Empty when the draft's settings do not read yet.
+  summary: { converts: string; leavesAlone: string; original: string };
 }
 
 // GET /workflows/{id}/answers: the answers the guided page opens on, and whether the workflow is
