@@ -62,6 +62,15 @@ func (e *engine) convert(ctx context.Context, plan encode.Plan, info media.Info,
 			e.note(card.Line)
 		}
 	}
+	if !picked && stop {
+		// No picker is the same answer as a picker that found no card: there is no card here for
+		// this step, and it stops rather than convert on the processor (L-HW-9).
+		return Result{
+			Outcome: OutcomeFatal, Reason: "encode.gpu_unavailable",
+			Message: noCardLine("no graphics card detector is running"), FailedStep: e.encodeOwner(d),
+			NextAction: stopNextAction,
+		}
+	}
 	if picked && len(card.Rungs) == 0 {
 		// L-HW-9: the processor converts the file, and the log says why no card took it.
 		if note := processorNote(card.Reason); note != "" {
@@ -97,6 +106,13 @@ func (e *engine) convert(ctx context.Context, plan encode.Plan, info media.Info,
 				// A rung Build refuses is one the card cannot take this plan with; the next rung
 				// still converts the file (L-HW-11).
 				e.warn(rungNotBuiltNote(rung, err))
+				continue
+			}
+			if errors.Is(err, encode.ErrNotBuiltYet) && rung.Family != encode.FamilyCPU {
+				// The picker refuses what it already knows a card cannot do this stage (a set
+				// bitrate, L-HW-10); this is the safety net for a refusal that reaches Build any
+				// way, so a card rung can never fail the whole job over a flag it has none of.
+				e.warn(notBuiltNote(rung, err))
 				continue
 			}
 			return fatal("encode.plan_failed", err.Error(), e.encodeOwner(d), NextFixWorkflow)
@@ -194,10 +210,15 @@ func gpuChoice(d Decisions) (useGpu bool, ifFails string) {
 }
 
 // wantFor is what this attempt asks of a card (L-HW-9): the codec it writes, whether the output is
-// ten bits, whether HDR mastering data must survive, whether it scales, and whether nothing in the
-// plan needs the processor's frames (L-HW-11).
+// ten bits, whether HDR mastering data must survive, whether it scales, whether nothing in the
+// plan needs the processor's frames (L-HW-11), and whether it carries a set bitrate rather than a
+// quality slider.
 func wantFor(plan encode.Plan, info media.Info) Want {
-	want := Want{Codec: plan.Video.Codec, Scales: plan.Video.Scale != (encode.Scale{})}
+	want := Want{
+		Codec:   plan.Video.Codec,
+		Scales:  plan.Video.Scale != (encode.Scale{}),
+		Bitrate: plan.RateControl != nil,
+	}
 	main := info.MainVideo()
 	if main == nil {
 		return want
@@ -222,4 +243,11 @@ func (e *engine) note(message string) {
 func rungNotBuiltNote(rung encode.Rung, err error) string {
 	detail := strings.TrimPrefix(err.Error(), encode.ErrRungNotBuilt.Error()+": ")
 	return "The graphics card's " + rung.Encoder + " cannot run this file (" + detail + "); the next rung converts it."
+}
+
+// notBuiltNote is the log line for a card rung this stage has no flags for yet, such as a set
+// bitrate (L-HW-10): the next rung converts the file rather than the job failing.
+func notBuiltNote(rung encode.Rung, err error) string {
+	detail := strings.TrimPrefix(err.Error(), encode.ErrNotBuiltYet.Error()+": ")
+	return "The graphics card's " + rung.Encoder + " cannot do this yet (" + detail + "); the next rung converts it."
 }

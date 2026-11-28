@@ -104,6 +104,49 @@ func TestProbeScaleFailureIsCantNotACrash(t *testing.T) {
 	}
 }
 
+// A scale run that succeeded but whose output cannot be probed fails the scale step with the plain
+// reason (N3, #880): a missing or unreadable output is not a working scale.
+func TestProbeScaleProbeErrorIsCant(t *testing.T) {
+	answerHDR(t, media.HDR{MasteringDisplay: true, ContentLight: true})
+	dir := t.TempDir()
+	c := Candidate{Encoder: "hevc_vaapi", Family: encode.FamilyVAAPI, Codec: "hevc", Device: "/dev/dri/renderD128"}
+	m := probeMedia(dir, c, 240, "Lavc61.3.100 hevc_vaapi")
+	m.ProbeErrors = map[string]error{
+		filepath.Join(dir, c.Encoder+".scale.mkv"): errString("the scaled file was not written"),
+	}
+	rec := Probe(context.Background(), m, dir, c)
+	if rec.Scale {
+		t.Fatal("scale passed after its output could not be read")
+	}
+	want := "can't scale on this card: the driver refused: the scaled file was not written"
+	if rec.Reasons["scale"] != want {
+		t.Errorf("scale reason = %q, want %q", rec.Reasons["scale"], want)
+	}
+}
+
+// The same for the 10-bit encode's output: unreadable is a failed step with its own prefix, and the
+// HDR step still waits on a 10-bit encode that passed (N3, #880).
+func TestProbeTenBitProbeErrorSaysItCouldNotBeRead(t *testing.T) {
+	answerHDR(t, media.HDR{MasteringDisplay: true, ContentLight: true})
+	dir := t.TempDir()
+	c := Candidate{Encoder: "hevc_vaapi", Family: encode.FamilyVAAPI, Codec: "hevc", Device: "/dev/dri/renderD128"}
+	m := probeMedia(dir, c, 240, "Lavc61.3.100 hevc_vaapi")
+	m.ProbeErrors = map[string]error{
+		filepath.Join(dir, c.Encoder+".10bit.mkv"): errString("the 10-bit file was not written"),
+	}
+	rec := Probe(context.Background(), m, dir, c)
+	if rec.Encode10 || rec.Decode10 || rec.HDRSurvives {
+		t.Errorf("record = %+v; want nothing past the unreadable 10-bit output", rec)
+	}
+	want := "the 10-bit output could not be read: the driver refused: the 10-bit file was not written"
+	if rec.Reasons["encode10"] != want {
+		t.Errorf("encode10 reason = %q, want %q", rec.Reasons["encode10"], want)
+	}
+	if !strings.Contains(rec.Reasons["decode10"], "not tried") || !strings.Contains(rec.Reasons["hdr"], "not tried") {
+		t.Errorf("later reasons = %q / %q; want not tried", rec.Reasons["decode10"], rec.Reasons["hdr"])
+	}
+}
+
 // A scaled output that is not 240 high is not a scale.
 func TestProbeScaleWrongHeightFails(t *testing.T) {
 	answerHDR(t, media.HDR{MasteringDisplay: true, ContentLight: true})
