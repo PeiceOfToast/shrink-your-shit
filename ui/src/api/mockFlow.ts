@@ -281,7 +281,8 @@ export function answersToFlow(a: Answers, meta: { name: string; description: str
       step("audio", "audio.tracks", {
         format: audio.format,
         channels: audio.channels,
-        languages: Array.isArray(a.languages) ? a.languages : [],
+        allLanguages: a.allLanguages !== false,
+        languages: a.allLanguages !== false ? [] : Array.isArray(a.languages) ? a.languages : [],
         codec: audio.codec,
         bitrateKbps: null,
         bitratePer: "channel",
@@ -404,7 +405,7 @@ function sentencesFor(flow: Flow, a: Answers): string[] {
     : "Keeps every subtitle.";
   const out = [
     `Converts video to ${FORMAT_LABEL[String(v.format)]} at quality ${v.quality}, ${v.size ? `at most ${String(v.size)}p` : "keeping the picture size"}${v.useGpu ? ", on the graphics card when it can" : ""}.`,
-    `Audio: ${CODEC_LABEL[String(au.codec || au.format)]}, ${CHANNEL_LABEL[String(au.channels)]}${list(au.languages) ? `, in ${list(au.languages)}` : ", every language"}.`,
+    `Audio: ${CODEC_LABEL[String(au.codec || au.format)]}, ${CHANNEL_LABEL[String(au.channels)]}${list(au.languages) ? `, in ${list(au.languages)}` : au.allLanguages === false ? ", your languages" : ", every language"}.`,
     subtitles,
     a.fileType === "keep" ? "The file keeps its container." : `Saves as ${({ mkv: "MKV", mp4: "MP4", webm: "WebM" } as Record<string, string>)[String(a.fileType)] ?? String(a.fileType)}.`,
   ];
