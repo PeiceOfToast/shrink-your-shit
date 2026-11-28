@@ -4,6 +4,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -165,5 +166,50 @@ func TestReplaceLineReadsTheSettingEachTime(t *testing.T) {
 		if got := getSummary(t, e, cookie, id).Summary.Original; got != want {
 			t.Errorf("original with %d days = %q, want %q", days, got, want)
 		}
+	}
+}
+
+// When the keep-days setting cannot be read, the workflow still answers, its converts and leave-alone lines are kept,
+// and the original line is empty: no number is named for a setting that did not read.
+func TestHandlerOriginalEmptyWhenKeepDaysDoesNotRead(t *testing.T) {
+	e := newEnv(t, true)
+	cookie := e.setup()
+	ctx := context.Background()
+	f := starterWithFormat(t, "hevc")
+	for i, ref := range f.Steps {
+		if ref.Type != "file.save" {
+			continue
+		}
+		var settings map[string]any
+		if err := json.Unmarshal(ref.Settings, &settings); err != nil {
+			t.Fatal(err)
+		}
+		settings["where"] = "replace"
+		raw, err := json.Marshal(settings)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.Steps[i].Settings = raw
+	}
+	id, _, err := e.flows.Create(ctx, f, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.flows.Publish(ctx, id, nil, flow.ValidateContext{Env: flow.Env{}}); err != nil {
+		t.Fatal(err)
+	}
+	// The settings table is the read that fails; the workflows are still there.
+	if err := e.db.Tx(ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec(`DROP TABLE app_settings`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got := getSummary(t, e, cookie, id)
+	if got.Summary.Original != "" {
+		t.Errorf("original = %q with the setting unread, want empty", got.Summary.Original)
+	}
+	if got.Summary.Converts == "" || got.Summary.LeavesAlone == "" {
+		t.Errorf("converts/leavesAlone = %q / %q, want them kept", got.Summary.Converts, got.Summary.LeavesAlone)
 	}
 }
