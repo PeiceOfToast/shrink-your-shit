@@ -102,7 +102,8 @@ func wantInvalid(t *testing.T, e *env, path, field string) {
 	}
 }
 
-// The list is app-wide only, newest first, with the counts for the whole filter; a job line is not in it.
+// The list is app-wide only, oldest first (the newest page, new lines last), with the counts for the whole filter; a job
+// line is not in it.
 func TestLogListsAppLinesNewestFirstWithCounts(t *testing.T) {
 	e := newEnv(t, true)
 	seedLog(t, e,
@@ -113,7 +114,7 @@ func TestLogListsAppLinesNewestFirstWithCounts(t *testing.T) {
 		events.Event{Source: "Scanner", Level: events.LevelDebug, Message: "debug line", TS: logT0},
 	)
 	got := getLog(t, e, "/api/v2/log")
-	want := []string{"disk full", "sign-in failed", "scan started"}
+	want := []string{"scan started", "sign-in failed", "disk full"}
 	if strings.Join(messages(got), "|") != strings.Join(want, "|") {
 		t.Errorf("items = %v, want %v (no job line, no debug line)", messages(got), want)
 	}
@@ -142,8 +143,8 @@ func TestLogDetailGateAndLevelFilter(t *testing.T) {
 	if m := messages(getLog(t, e, "/api/v2/log?level=warn")); strings.Join(m, "|") != "warn line" {
 		t.Errorf("level=warn items = %v, want the warning only (an exact level, as the tab)", m)
 	}
-	if m := messages(getLog(t, e, "/api/v2/log")); strings.Join(m, "|") != "error line|warn line|info line" {
-		t.Errorf("empty level items = %v, want info, warnings and errors", m)
+	if m := messages(getLog(t, e, "/api/v2/log")); strings.Join(m, "|") != "info line|warn line|error line" {
+		t.Errorf("empty level items = %v, want info, warnings and errors, oldest first", m)
 	}
 	if m := messages(getLog(t, e, "/api/v2/log?level=error")); strings.Join(m, "|") != "error line" {
 		t.Errorf("level=error items = %v, want the error only", m)
@@ -183,20 +184,20 @@ func TestLogPagingBeforeAndSince(t *testing.T) {
 	}
 	seedLog(t, e, lines...)
 	first := getLog(t, e, "/api/v2/log?limit=2")
-	if strings.Join(messages(first), "|") != "five|four" || first.NextBefore == nil {
-		t.Fatalf("first page = %v next %v, want five|four with a nextBefore", messages(first), first.NextBefore)
+	if strings.Join(messages(first), "|") != "four|five" || first.NextBefore == nil {
+		t.Fatalf("first page = %v next %v, want four|five (oldest first) with a nextBefore", messages(first), first.NextBefore)
 	}
 	second := getLog(t, e, "/api/v2/log?limit=2&before="+itoa(*first.NextBefore))
-	if strings.Join(messages(second), "|") != "three|two" {
-		t.Errorf("second page = %v, want three|two", messages(second))
+	if strings.Join(messages(second), "|") != "two|three" {
+		t.Errorf("second page = %v, want two|three", messages(second))
 	}
 	last := getLog(t, e, "/api/v2/log?limit=2&before="+itoa(*second.NextBefore))
 	if strings.Join(messages(last), "|") != "one" || last.NextBefore != nil {
 		t.Errorf("last page = %v next %v, want one with no nextBefore", messages(last), last.NextBefore)
 	}
 	newer := getLog(t, e, "/api/v2/log?since="+itoa(*second.NextBefore))
-	if strings.Join(messages(newer), "|") != "five|four|three" {
-		t.Errorf("since %d = %v, want the three newer lines", *second.NextBefore, messages(newer))
+	if strings.Join(messages(newer), "|") != "three|four|five" {
+		t.Errorf("since %d = %v, want the three newer lines, oldest first", *second.NextBefore, messages(newer))
 	}
 }
 
@@ -212,12 +213,12 @@ func TestLogFoldsRepeats(t *testing.T) {
 	)
 	got := getLog(t, e, "/api/v2/log")
 	if len(got.Items) != 2 {
-		t.Fatalf("items = %d, want 2: the 30-minute line, and the folded run", len(got.Items))
+		t.Fatalf("items = %d, want 2: the folded run, then the 30-minute line", len(got.Items))
 	}
-	if got.Items[0].Repeat != nil {
-		t.Errorf("the 30-minute line folded: %+v", got.Items[0].Repeat)
+	if got.Items[1].Repeat != nil {
+		t.Errorf("the 30-minute line folded: %+v", got.Items[1].Repeat)
 	}
-	r := got.Items[1].Repeat
+	r := got.Items[0].Repeat
 	if r == nil || r.Count != 3 {
 		t.Fatalf("the run = %+v, want count 3", r)
 	}
@@ -237,7 +238,7 @@ func TestLogSourceNamesMatchTheFilter(t *testing.T) {
 		events.Event{Source: "settings", Level: events.LevelInfo, Message: "setting saved", TS: logT0.Add(time.Minute)},
 	)
 	got := getLog(t, e, "/api/v2/log")
-	if len(got.Items) != 2 || got.Items[1].Source != "Scanner" || got.Items[0].Source != "Web" {
+	if len(got.Items) != 2 || got.Items[0].Source != "Scanner" || got.Items[1].Source != "Web" {
 		t.Fatalf("items = %+v, want the library line shown as Scanner and the settings line as Web", got.Items)
 	}
 	if m := messages(getLog(t, e, "/api/v2/log?source=Scanner")); strings.Join(m, "|") != "scan done" {
@@ -328,7 +329,7 @@ func TestLogSeenFeedsTheSummaryNewErrors(t *testing.T) {
 	if len(list.Items) != 2 {
 		t.Fatalf("errors = %d, want 2", len(list.Items))
 	}
-	firstFailure := list.Items[1].Seq
+	firstFailure := list.Items[0].Seq
 	rec := e.do("POST", "/api/v2/log/seen", `{"seq":`+itoa(firstFailure)+`}`, logHeaders(), false)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("seen = %d: %s", rec.Code, rec.Body.String())

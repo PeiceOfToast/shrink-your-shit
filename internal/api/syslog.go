@@ -207,8 +207,14 @@ func (s *Server) getLog(w http.ResponseWriter, r *http.Request) {
 		internalError(w)
 		return
 	}
+	// The page reads top to bottom with new lines last, so the newest page comes back oldest first. The query walks
+	// newest first to find it; before pages back from the oldest line on it.
+	items := foldRepeats(evs)
+	for i, j := 0, len(items)-1; i < j; i, j = i+1, j-1 {
+		items[i], items[j] = items[j], items[i]
+	}
 	out := logPage{
-		Items:  foldRepeats(evs),
+		Items:  items,
 		Counts: logCounts{Info: counts[events.LevelInfo], Warn: counts[events.LevelWarn], Error: counts[events.LevelError]},
 	}
 	if len(evs) == lq.limit {

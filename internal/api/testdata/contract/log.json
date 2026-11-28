@@ -11,26 +11,10 @@
         "kind": "note",
         "level": "info",
         "libraryId": null,
-        "message": "still scanning",
-        "repeat": {
-          "count": 2,
-          "firstAt": "2026-11-28T06:03:00.000Z",
-          "lastAt": "2026-11-28T06:04:00.000Z"
-        },
-        "seq": 5,
+        "message": "scan started",
+        "seq": 1,
         "source": "Scanner",
-        "ts": "2026-11-28T06:04:00.000Z",
-        "workerId": null
-      },
-      {
-        "jobId": null,
-        "kind": "note",
-        "level": "error",
-        "libraryId": null,
-        "message": "disk full",
-        "seq": 3,
-        "source": "Scanner",
-        "ts": "2026-11-28T06:02:00.000Z",
+        "ts": "2026-11-28T06:00:00.000Z",
         "workerId": null
       },
       {
@@ -47,12 +31,28 @@
       {
         "jobId": null,
         "kind": "note",
+        "level": "error",
+        "libraryId": null,
+        "message": "disk full",
+        "seq": 3,
+        "source": "Scanner",
+        "ts": "2026-11-28T06:02:00.000Z",
+        "workerId": null
+      },
+      {
+        "jobId": null,
+        "kind": "note",
         "level": "info",
         "libraryId": null,
-        "message": "scan started",
-        "seq": 1,
+        "message": "still scanning",
+        "repeat": {
+          "count": 2,
+          "firstAt": "2026-11-28T06:03:00.000Z",
+          "lastAt": "2026-11-28T06:04:00.000Z"
+        },
+        "seq": 5,
         "source": "Scanner",
-        "ts": "2026-11-28T06:00:00.000Z",
+        "ts": "2026-11-28T06:04:00.000Z",
         "workerId": null
       }
     ]
