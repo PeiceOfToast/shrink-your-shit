@@ -60,7 +60,11 @@ func convertsSentence(video *VideoSettings, audio *AudioSettings) string {
 		case "copy", "":
 			parts = append(parts, "Keeps the audio as it is.")
 		default:
-			parts = append(parts, fmt.Sprintf("Converts audio to %s.", audioCodecLabel(audio.AudioCodec())))
+			// The exceptions are the audio step's keep rule (keepAsIs): a track already in this codec stays, and so does a
+			// lossy track already at or below the target bitrate. The channel, sample rate and loudness settings can
+			// still force a conversion; the line states the rule, not each track.
+			parts = append(parts, fmt.Sprintf("Converts audio to %s, except tracks already in %s and lossy tracks already at or below the target bitrate.",
+				audioCodecLabel(audio.AudioCodec()), audioCodecLabel(audio.AudioCodec())))
 		}
 	}
 	if len(parts) == 0 {

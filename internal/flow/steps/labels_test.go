@@ -47,7 +47,7 @@ func TestAudioWordFollowsTheChoices(t *testing.T) {
 	f := setStep(t, starter(t), "audio.tracks", "codec", "opus")
 	c, _, _ := sentencesOf(t, f, 7)
 	want := choiceLabelOf(choices, "opus")
-	if want == "" || !strings.Contains(c, "Converts audio to "+want+".") {
+	if want == "" || !strings.Contains(c, "Converts audio to "+want+", except") {
 		t.Errorf("converts = %q, want the choice's label %q", c, want)
 	}
 }
