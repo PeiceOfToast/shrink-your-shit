@@ -33,3 +33,15 @@ test("every code the synonyms map to is in the offered list", () => {
     assert.ok(codes.has(normalizeLanguage(two)), `${two} maps to ${normalizeLanguage(two)}, which is not offered`);
   }
 });
+
+test("keptAudioLanguages follows allLanguages: all, my languages for an empty list, else the codes", async () => {
+  const { keptAudioLanguages, pickAudioLanguages } = await import("./language.ts");
+  assert.equal(keptAudioLanguages(true, []).summary, "all");
+  assert.equal(keptAudioLanguages(undefined, []).summary, "all");
+  assert.equal(keptAudioLanguages(false, []).summary, "my languages");
+  assert.match(keptAudioLanguages(false, []).hint ?? "", /my languages/);
+  assert.equal(keptAudioLanguages(false, ["eng", "ger"]).summary, "English and German");
+  assert.equal(keptAudioLanguages(false, ["eng"]).hint, undefined);
+  assert.deepEqual(pickAudioLanguages(["eng"]), { languages: ["eng"], allLanguages: false });
+  assert.deepEqual(pickAudioLanguages([]), { languages: [], allLanguages: true });
+});
