@@ -55,7 +55,7 @@ type Deps struct {
 
 // Workflows is flow.Store as the api uses it.
 type Workflows interface {
-	CreateFromStarterTx(ctx context.Context, tx *sql.Tx, starterID, name string) (int64, int, error)
+	CreateFromStarterTx(ctx context.Context, tx *sql.Tx, starterID, name string, answers flow.Answers) (int64, int, error)
 	Get(ctx context.Context, id int64) (flow.Workflow, error)
 	// S2-3: the list, create, the editor's draft, publish, revisions and restore, duplicate, delete.
 	List(ctx context.Context) ([]flow.ListItem, error)

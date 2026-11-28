@@ -52,6 +52,23 @@ func (s *Server) postSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Page 13's chips are page 06's answers: the starter's own answers under the person's. A choice
+	// the guide does not offer, or greys today, is refused before anything is saved. No answers
+	// keeps the starter exactly (nil, not an empty object, which still means the starter's own).
+	var starterAnswers flow.Answers
+	if body.Starter.Answers != nil {
+		starterAnswers = flow.Answers(body.Starter.Answers)
+		base := flow.StarterAnswers(starter)
+		if _, problems := flow.FromAnswers(starterAnswers, base); len(problems) > 0 {
+			writeSetupAnswerProblem(w, problems[0])
+			return
+		}
+		if p, greyed := flow.GreyedAnswer(starterAnswers, base); greyed {
+			writeSetupAnswerProblem(w, p)
+			return
+		}
+	}
+
 	var lib *library.PreparedLibrary
 	if body.Library != nil {
 		if body.Library.ShareID != "" {
@@ -84,7 +101,7 @@ func (s *Server) postSetup(w http.ResponseWriter, r *http.Request) {
 		if err := rs.Access.SetPasswordTx(ctx, tx, password); err != nil {
 			return err
 		}
-		workflowID, _, err := rs.Workflows.CreateFromStarterTx(ctx, tx, starter.ID, starter.Name)
+		workflowID, _, err := rs.Workflows.CreateFromStarterTx(ctx, tx, starter.ID, starter.Name, starterAnswers)
 		if err != nil {
 			return err
 		}
@@ -144,6 +161,12 @@ func writeSetupLibraryError(w http.ResponseWriter, err error) {
 		message = "Pick hourly, daily or weekly."
 	}
 	writeError(w, http.StatusBadRequest, "invalid_request", message, "library.path", 0)
+}
+
+// writeSetupAnswerProblem is page 13's refusal of the starter's answers: page 06's invalid_answer
+// sentence on the field the guide would show it under.
+func writeSetupAnswerProblem(w http.ResponseWriter, p flow.Problem) {
+	writeError(w, http.StatusBadRequest, "invalid_answer", p.Message, "starter.answers."+p.Field, 0)
 }
 
 func writeSetupPasswordError(w http.ResponseWriter) {
