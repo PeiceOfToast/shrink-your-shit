@@ -38,6 +38,7 @@ var storedToDisplay = map[string]string{
 	"library":  "Scanner",
 	"safety":   "Scanner",
 	"settings": "Web",
+	"api":      "Web", // page 12: API errors are under Web
 }
 
 func displayOf(stored string) string {

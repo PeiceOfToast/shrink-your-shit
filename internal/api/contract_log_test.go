@@ -25,10 +25,10 @@ func TestContractLogGoldens(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET log = %d", rec.Code)
 	}
-	writeGolden(t, "log", "AppLogPage", "GET", "/api/v2/log", rec)
+	writeGolden(t, "log", "LogPage", "GET", "/api/v2/log", rec)
 
 	rec = e.do("GET", "/api/v2/log/sources", "", logHeaders(), false)
-	writeGolden(t, "log-sources", "string[]", "GET", "/api/v2/log/sources", rec)
+	writeGolden(t, "log-sources", "LogSources", "GET", "/api/v2/log/sources", rec)
 
 	seq := getLog(t, e, "/api/v2/log?level=error").Items[0].Seq
 	rec = e.do("POST", "/api/v2/log/seen", `{"seq":`+itoa(seq)+`}`, logHeaders(), false)

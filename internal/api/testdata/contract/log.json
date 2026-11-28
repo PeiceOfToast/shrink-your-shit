@@ -60,5 +60,5 @@
   "method": "GET",
   "path": "/api/v2/log",
   "status": 200,
-  "type": "AppLogPage"
+  "type": "LogPage"
 }

@@ -636,6 +636,14 @@ export interface LogPage {
   counts: LogCounts;
 }
 
+// GET /api/v2/log/sources: the source filter's names, in the words a person reads (page 12).
+export type LogSources = string[];
+
+// POST /api/v2/log/seen {seq} answers the seq the shell's "new errors" now counts from (page 01, page 12).
+export interface LogSeen {
+  seenSeq: number;
+}
+
 export interface LogParams {
   level?: "info" | "warn" | "error";
   source?: string;

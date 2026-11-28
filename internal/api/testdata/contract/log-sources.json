@@ -9,5 +9,5 @@
   "method": "GET",
   "path": "/api/v2/log/sources",
   "status": 200,
-  "type": "string[]"
+  "type": "LogSources"
 }

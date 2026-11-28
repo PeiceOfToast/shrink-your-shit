@@ -236,16 +236,18 @@ func TestLogSourceNamesMatchTheFilter(t *testing.T) {
 	seedLog(t, e,
 		events.Event{Source: "library", Level: events.LevelInfo, Message: "scan done", TS: logT0},
 		events.Event{Source: "settings", Level: events.LevelInfo, Message: "setting saved", TS: logT0.Add(time.Minute)},
+		events.Event{Source: "api", Level: events.LevelError, Message: "bad request", TS: logT0.Add(2 * time.Minute)},
 	)
 	got := getLog(t, e, "/api/v2/log")
-	if len(got.Items) != 2 || got.Items[0].Source != "Scanner" || got.Items[1].Source != "Web" {
-		t.Fatalf("items = %+v, want the library line shown as Scanner and the settings line as Web", got.Items)
+	if len(got.Items) != 3 || got.Items[0].Source != "Scanner" || got.Items[1].Source != "Web" || got.Items[2].Source != "Web" {
+		t.Fatalf("items = %+v, want the library line shown as Scanner, and the settings and API lines as Web", got.Items)
 	}
 	if m := messages(getLog(t, e, "/api/v2/log?source=Scanner")); strings.Join(m, "|") != "scan done" {
 		t.Errorf("source=Scanner = %v, want the library line", m)
 	}
-	if m := messages(getLog(t, e, "/api/v2/log?source=Web")); strings.Join(m, "|") != "setting saved" {
-		t.Errorf("source=Web = %v, want the settings line", m)
+	// Page 12 puts API errors under Web (review of #905).
+	if m := messages(getLog(t, e, "/api/v2/log?source=Web")); strings.Join(m, "|") != "setting saved|bad request" {
+		t.Errorf("source=Web = %v, want the settings line and the API error", m)
 	}
 }
 
