@@ -151,7 +151,7 @@ export function LibraryPanel({ id, onChange }: { id: string; onChange?: () => vo
         </div>
 
         <div className="ovb">
-          <SampleBanner text="changes here aren't saved yet. Editing, removing and the workflow preview aren't connected." />
+          <SampleBanner text="the workflow preview and reconnecting a share aren't connected yet." />
           {err && <p className="err" role="alert">{err}</p>}
           {lib.error && !L && (
             <p className="bad">
