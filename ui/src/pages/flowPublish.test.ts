@@ -38,3 +38,19 @@ for (const [label, makeDraftFor] of variants) {
     assert.equal(drafts[0].state, "published");
   });
 }
+
+// The helper returns the draft it published: on a first-try publish that is the draft it made.
+test("publishFlowOnce returns the id of the draft it published on a first-try publish", async () => {
+  const made: string[] = [];
+  const id = await publishFlowOnce({ publishFlow }, {
+    isNew: true,
+    draftId: "new",
+    flow: fixed("Pin return"),
+    makeDraft: async () => {
+      const c = await createDraft({ name: "Pin return", flow: fixed("Pin return") });
+      made.push(c.id);
+      return c;
+    },
+  }, () => {});
+  assert.equal(id, made[0]);
+});

@@ -15,6 +15,11 @@ export function navigate(to: string): void {
   go(to);
 }
 
+// Puts a URL in the address bar without a move: the page stays as it is, and a reload opens that URL.
+export function replaceUrl(to: string): void {
+  if (to !== location.pathname + location.search) history.replaceState(null, "", to);
+}
+
 function subscribe(cb: () => void): () => void {
   window.addEventListener("popstate", cb);
   return () => window.removeEventListener("popstate", cb);
