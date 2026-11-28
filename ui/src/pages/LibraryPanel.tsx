@@ -220,6 +220,7 @@ export function LibraryPanel({ id, onChange }: { id: string; onChange?: () => vo
                     With this workflow: {formatCount(prev.data.wouldConvert)} of {formatCount(prev.data.total)} would be converted
                   </span>
                 )}
+                {prev.error && <span className="hint">Couldn&apos;t work out the preview: {prev.error}</span>}
                 <div className="row">
                   {form.workflowId && <Link to={`/workflows/${form.workflowId}`}>Edit this workflow</Link>}
                   <Link to="/workflows/new">New workflow</Link>
