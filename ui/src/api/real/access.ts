@@ -19,3 +19,9 @@ export const getFolders: typeof mock.getFolders = (path) =>
 export const getHealth: typeof mock.getHealth = () => request<Out<typeof mock.getHealth>>("GET", "/health");
 export const checkFolder: typeof mock.checkFolder = (target) =>
   request<Out<typeof mock.checkFolder>>("POST", "/libraries/check", target);
+// Settings > Access: the password (a session stays signed in; 204), and the access token (get, and rotate: the old one
+// stops working at once). Session cookie only.
+export const changePassword: typeof mock.changePassword = (password) =>
+  request<void>("POST", "/access/password", { password });
+export const getToken: typeof mock.getToken = () => request<Out<typeof mock.getToken>>("GET", "/access/token");
+export const rotateToken: typeof mock.rotateToken = () => request<Out<typeof mock.rotateToken>>("POST", "/access/token/rotate");

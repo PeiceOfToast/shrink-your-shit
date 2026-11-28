@@ -661,3 +661,4 @@ export interface LogParams {
 
 // The body of any refusal (4xx/5xx): http.ts turns it into an ApiError.
 export type ErrorReply = { error: { code: string; message: string; field?: string } };
+

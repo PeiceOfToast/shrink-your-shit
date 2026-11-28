@@ -18,6 +18,6 @@ test("Workers, a worker, and System log are the Not built yet placeholder while 
 
 test("Settings > Access says Not built yet while sample data is shown, with no token or password form", () => {
   const page = src("../pages/settings/SettingsPage.tsx");
-  assert.match(page, /case "access":\n\s*return sampleOnly\(\) \? \(/);
+  assert.match(page, /case "access":\n\s*return sampleOnly\("access"\) \? \(/);
   assert.match(page, /Not built yet\. Changing the password and the access token come in a later batch\./);
 });
