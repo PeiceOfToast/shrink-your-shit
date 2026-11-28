@@ -1,5 +1,5 @@
 // Shared by the Job log (page 03) and the System log (page 12): the level words, copying and saving text.
-import type { JobStep, LogEvent, LogLine, LogStep } from "../api/types.ts";
+import type { JobStep, LogCounts, LogEvent, LogLine, LogStep } from "../api/types.ts";
 
 export type LogLevelName = "info" | "warn" | "error" | "detail";
 
@@ -79,3 +79,10 @@ export function addLiveLine(lines: LogEvent[], e: LogEvent): LogEvent[] {
 export function showLines(loaded: LogEvent[], live: LogEvent[]): LogEvent[] {
   return live.reduce((acc, e) => (acc.some((l) => l.seq === e.seq) ? acc : addLiveLine(acc, e)), loaded);
 }
+
+// The level badges: the server's counts for this filter. The live lines are not added to them: a count the server gave
+// already includes the lines the page has seen, so adding the live ones counts them twice.
+export function levelBadges(server: LogCounts, _live: LogEvent[]): LogCounts {
+  return server;
+}
+
