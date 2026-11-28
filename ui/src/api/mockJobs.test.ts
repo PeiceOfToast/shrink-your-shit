@@ -45,7 +45,10 @@ test("events and history for an unknown job say so", async () => {
 });
 
 test("a job action returns the ids that were done and which were refused", async () => {
-  assert.deepEqual(await runJobsAction("retry", ["a", "b"]), { done: ["a", "b"], refused: [] });
+  assert.deepEqual(await runJobsAction("retry", ["j11", "missing-job"]), {
+    done: ["j11"],
+    refused: [{ id: "missing-job", code: "job_not_found", message: "That job doesn't exist." }],
+  });
 });
 
 

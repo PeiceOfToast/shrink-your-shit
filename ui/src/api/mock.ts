@@ -3,9 +3,10 @@ import { ATTENTION, OVERVIEW, SUMMARY } from "./fixtures/index.ts";
 import { JOBS } from "./fixtures/jobs.ts";
 import { jobDetail } from "./fixtures/jobDetail.ts";
 import { ApiError } from "./errors.ts";
+import { actionOutcome } from "./actionReply.ts";
 import { getForcedState, noLibrariesYet, respond } from "./mockState.ts";
 import { currentLibraries, reconnectShare } from "./mockLibraries.ts";
-import { workerName, workersSwitch } from "./mockWorkers.ts";
+import { startEncoderTest, workerName, workersSwitch } from "./mockWorkers.ts";
 import { healthFailing } from "./mockSettings.ts";
 import { getSeenAt, getSeenSeq, newErrorCount } from "./mockLog.ts";
 import { LANGUAGES } from "../format/languages.ts";
@@ -121,8 +122,9 @@ export function getJobs(params: JobsParams = {}): Promise<JobsPage> {
   });
 }
 
-// POST /api/v2/jobs/actions: {done, refused[{id, code, message}]}. Like the server, Move to top refuses a job that
-// isn't waiting (not_movable); nothing else is refused. Cancel, retry and top change the job the way the server does.
+// POST /api/v2/jobs/actions: {done, refused[{id, code, message}]}. Like the server, an id with no job is refused
+// (job_not_found) and Move to top refuses a job that isn't waiting (not_movable). Cancel, retry and top change the job
+// the way the server does.
 export function runJobsAction(action: "retry" | "cancel" | "top", ids: string[]): Promise<JobsActionDone> {
   return respond(() => {
     const done: string[] = [];
@@ -130,7 +132,7 @@ export function runJobsAction(action: "retry" | "cancel" | "top", ids: string[])
     for (const id of ids) {
       const i = JOBS.findIndex((j) => j.id === id);
       if (i < 0) {
-        done.push(id); // the mock has no not-found refusal
+        refused.push({ id, code: "job_not_found", message: "That job doesn't exist." });
         continue;
       }
       if (action === "top") {
@@ -158,9 +160,9 @@ export function scanAllLibraries(): Promise<ScanAllDone> {
   return respond(() => ({ ok: true as const }));
 }
 
-// Test the encoders on one worker (POST /api/v2/workers/{id}/capabilities/test). The result is one line.
-export function testEncoders(workerId: string): Promise<{ line: string }> {
-  return respond(() => ({ line: `Test finished: the graphics encoder failed on ${workerName(workerId) ?? workerId}.` }));
+// Test the encoders on one worker (POST /api/v2/workers/{id}/capabilities/test): a run id; the result shows on the worker.
+export function testEncoders(workerId: string): Promise<{ runId: string }> {
+  return respond(() => startEncoderTest(workerId));
 }
 
 // The generic action behind a Needs attention row: it calls the method and path the server named, sending the
@@ -168,7 +170,8 @@ export function testEncoders(workerId: string): Promise<{ line: string }> {
 // row shows as it is. The encoder test answers with one result sentence; the other routes answer with nothing to show.
 export function runAction(method: string, path: string, body?: unknown): Promise<{ line?: string }> {
   const enc = /^\/api\/v2\/workers\/([^/]+)\/capabilities\/test$/.exec(path);
-  if (method === "POST" && enc) return testEncoders(enc[1]);
+  // The Dashboard row shows "Started." (the result shows on the worker), so the run id is not a line.
+  if (method === "POST" && enc) return testEncoders(enc[1]).then(() => ({}));
   const share = /^\/api\/v2\/shares\/([^/]+)\/reconnect$/.exec(path);
   if (method === "POST" && share) {
     // The path carries the share's id; the library it belongs to is what reconnects.
@@ -181,7 +184,7 @@ export function runAction(method: string, path: string, body?: unknown): Promise
     if (!b || b.action !== "retry" || !Array.isArray(b.ids) || b.ids.length === 0) {
       return Promise.reject(new ApiError("bad_request", "Pick the jobs to retry."));
     }
-    return respond(() => ({}));
+    return runJobsAction("retry", b.ids as string[]).then(actionOutcome);
   }
   return Promise.reject(new ApiError("unknown_action", "That action isn't available here."));
 }

@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, type CheckStatus, type Doctor, type HealthCheck } from "../../api/index.ts";
 import { useApi } from "../../api/useApi.ts";
 import { LoadState, errText } from "./parts.tsx";
+import { retryWhileStarting } from "../startingRetry.ts";
 
 // Tells the shell to re-fetch the summary, so the red dot clears without a reload.
 const refreshSummary = () => window.dispatchEvent(new Event("summary:refresh"));
@@ -40,7 +41,16 @@ export function Health() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const current = doc ?? s.data;
-  if (!current) return <><h2 className="set-title">Health check</h2><LoadState s={s} /></>;
+  // While the server is starting, ask again every 2 s; the page shows "Starting up…" meanwhile, not an error.
+  useEffect(() => retryWhileStarting(s.code, s.reload), [s.code, s.reload]);
+  if (!current) {
+    return (
+      <>
+        <h2 className="set-title">Health check</h2>
+        {s.code === "starting" ? <p className="muted">Starting up…</p> : <LoadState s={s} />}
+      </>
+    );
+  }
   const again = () => {
     setBusy(true);
     setErr(null);
