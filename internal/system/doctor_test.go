@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -443,6 +444,9 @@ func TestDoctorLibraryWriteProbeIsBad(t *testing.T) {
 // TestDoctorLibraryFolderThatRefusesFilesIsBad: with the real probe, a folder the library would refuse for writing
 // is bad on the health page too, and a folder it accepts is left exactly as it was.
 func TestDoctorLibraryFolderThatRefusesFilesIsBad(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a read-only mode bit does not stop new files in a Windows folder")
+	}
 	if os.Geteuid() == 0 {
 		t.Skip("root writes into a read-only folder")
 	}
