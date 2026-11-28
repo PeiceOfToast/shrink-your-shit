@@ -20,10 +20,9 @@ import (
 	"github.com/PeiceOfToast/shrink-your-shit/internal/flow"
 	_ "github.com/PeiceOfToast/shrink-your-shit/internal/flow/steps"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/fsx"
-	// The hardware detector's migration (7) is registered by this package's init. Nothing calls the
-	// detector until stage 3 item 3 wires it in, but the import must stay: without it a database
-	// that reached flow's migration 8 could never get 7.
-	_ "github.com/PeiceOfToast/shrink-your-shit/internal/hw"
+	// The hardware detector's migration (7) is registered by this package's init; the detector
+	// itself is wired below to choose a card for a job.
+	"github.com/PeiceOfToast/shrink-your-shit/internal/hw"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/jobs"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/library"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/media"
@@ -33,6 +32,7 @@ import (
 	"github.com/PeiceOfToast/shrink-your-shit/internal/system"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/ui"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/worker"
+	"github.com/PeiceOfToast/shrink-your-shit/internal/workers"
 )
 
 // version is set at build time with -ldflags "-X main.version=...".
@@ -109,9 +109,8 @@ func run(dataDir, listen string) error {
 			Source: "safety", Code: "replace.recover_failed", Message: err.Error()})
 	} else {
 		// A restore a crash left was finished now: its job's History says so (page 03), as a live restore does.
-		for _, job := range rep.Restored {
-			_ = bus.Emit(events.Event{JobID: job, Level: events.LevelInfo, Kind: events.KindRestored,
-				Source: "safety", Code: "replace.restored", Message: safety.RestoredSentence})
+		for _, ev := range recoveredRestoreEvents(rep.Restored) {
+			_ = bus.Emit(ev)
 		}
 		if rep.Attention > 0 {
 			_ = bus.Emit(events.Event{Level: events.LevelWarn, Kind: events.KindWarning,
@@ -141,11 +140,47 @@ func run(dataDir, listen string) error {
 		_ = bus.Emit(events.Event{Level: events.LevelWarn, Kind: events.KindWarning,
 			Source: "safety", Code: "sidecar.recovered", Message: said})
 	}
-	// parallelJobs is the default a new worker starts with (page 11); it is read once, at start, and clamped to 1-8.
+	// The card detector: one background pass over the encoders this machine lists, with a device
+	// probe for each one it finds, so a job can choose a card rung only for the tests the card
+	// passed (L-HW-3, L-HW-9). A job that starts before the pass ends converts on the processor and
+	// says so in its log.
+	scratch := filepath.Join(dataDir, "tmp")
+	var cards *hw.Detector
+	var pick func(flow.Want) (flow.Attempt, error)
+	if err := os.MkdirAll(scratch, 0o700); err != nil {
+		_ = bus.Emit(events.Event{Level: events.LevelWarn, Kind: events.KindWarning,
+			Source: "hw", Code: "hw.no_temp",
+			Message: "The graphics card cannot be tested, so every job runs on the processor: " + err.Error()})
+	} else {
+		cards = hw.NewDetector(
+			media.MediaFuncs{ProbeFunc: media.Probe, RunFunc: media.Run, CaptureFunc: media.Capture},
+			scratch,
+			hw.Candidates(hw.ReadRenderNodes("/sys/class/drm", "/dev/dri")),
+			bus,
+		).WithDevices()
+		cards.Start(ctx)
+		pick = cardPicker(cards)
+	}
+	// The worker's own settings (page 10): the files it runs at once are its setting at start, its
+	// graphics slots are read per job, and its hours decide whether a slot may take a new job. The
+	// migration created the built-in row, so a read that fails is a real problem worth stopping for.
+	// The worker's row is the authority for files at once (the brief's reading): page 11's
+	// processing.parallelJobs is only the default a new worker row is created with.
+	media.SetLowPriority(settings.Get(ctx, db, "processing.lowPriority", true))
+	workerStore := workers.Open(db)
+	local, err := workerStore.Get(ctx, workers.LocalID)
+	if err != nil {
+		httpSrv.Close()
+		bus.Close(context.Background())
+		return fmt.Errorf("read the worker's settings: %w", err)
+	}
+	env := workerEnv(flows, bus, db, pick)
+	env.GPUSlots = gpuSlots(workerStore)
 	wk := worker.New(worker.Config{
-		Slots: startSlots(ctx, db), WorkerID: "local", DataDir: dataDir, Bus: bus,
-		Source: worker.Builtin{Queue: q, DB: db, Flows: flows},
-		Run:    flow.Run, Env: workerEnv(flows, bus, db),
+		Slots: local.Slots, WorkerID: local.ID, DataDir: dataDir, Bus: bus,
+		MayClaim: mayClaim(workerStore),
+		Source:   worker.Builtin{Queue: q, DB: db, Flows: flows},
+		Run:      flow.Run, Env: env,
 	})
 	wctx, stopWorker := context.WithCancel(ctx)
 	workerDone := make(chan struct{})
@@ -158,6 +193,12 @@ func run(dataDir, listen string) error {
 	// finished; the same Wake is what the api's setup uses after the first scan.
 	catalog := library.NewCatalog(db)
 	reportLibraryOverlaps(ctx, catalog, bus)
+	// A detector that could not be built leaves the card answers nil, not a nil pointer behind the
+	// interface: the Workers page then shows no card.
+	var cardAnswer api.CardAnswer
+	if cards != nil {
+		cardAnswer = cards
+	}
 	srv.Ready(api.Deps{
 		Access:     access,
 		Events:     bus,
@@ -168,6 +209,8 @@ func run(dataDir, listen string) error {
 		Jobs:       q,
 		Scanner:    newScanner(catalog, flows, q, bus, wk.Wake),
 		Wake:       wk.Wake,
+		Workers:    workerStore,
+		Cards:      cardAnswer,
 		// Cancel of a running job (S3-6a): the api marks the row cancelled, then this ends the run's
 		// context, which kills ffmpeg and lets the flow remove its staging.
 		StopJob:  func(id int64) { wk.CancelJob(id) },
@@ -184,7 +227,7 @@ func run(dataDir, listen string) error {
 			if err := os.MkdirAll(scratch, 0o700); err != nil {
 				return flow.TryResult{}, fmt.Errorf("make the try folder: %w", err)
 			}
-			return flow.Try(ctx, f, file, engineEnv(), scratch)
+			return flow.Try(ctx, f, file, engineEnv(pick), scratch)
 		},
 	})
 	fmt.Fprintln(os.Stderr, "syp serving on", ln.Addr())
@@ -238,16 +281,6 @@ func loadRevisionFor(flows *flow.Store, db *store.DB) func(ctx context.Context, 
 		}
 		return flow.ResolveMyLanguages(r.Flow, settings.Languages(ctx, db)), nil
 	}
-}
-
-// startSlots is the number of slots a new worker starts with: processing.parallelJobs, read once at start and clamped
-// to 1 to 8.
-func startSlots(ctx context.Context, db *store.DB) int {
-	slots := settings.Get(ctx, db, "processing.parallelJobs", 1)
-	if slots < 1 || slots > 8 {
-		return 1
-	}
-	return slots
 }
 
 // trashSweepLoop runs the trash sweep at start and then every day until the app stops.
@@ -331,21 +364,56 @@ func sweepTryFolder(ctx context.Context, dir string, started time.Time, warn fun
 	}
 }
 
-// workerEnv is what a real job runs with: the real media tools, the real safety steps, the processor encoder
-// until stage 2 adds the hardware picker, and the job events on the bus.
-// engineEnv is the world the flow engine runs in: the real media tools, the real safety check,
-// the processor picker and the clock. The worker adds its log and revision loader; a try adds
-// neither, so its events answer the page and nothing reaches a job's log.
-func engineEnv() flow.Env {
+// engineEnv is the world the flow engine runs in: the real media tools, the real safety check, the
+// card picker and the clock. The worker adds its log and revision loader; a try adds neither, so
+// its events answer the page and nothing reaches a job's log. A nil pick runs every job on the
+// processor, which is what a machine with no detector has.
+func engineEnv(pick func(flow.Want) (flow.Attempt, error)) flow.Env {
 	return flow.Env{
 		Media:  media.MediaFuncs{ProbeFunc: media.Probe, RunFunc: media.Run, CaptureFunc: media.Capture},
-		Safety: flow.RealSafety{}, Pick: flow.ProcessorPick,
+		Safety: flow.RealSafety{}, Pick: pick,
 		Now: time.Now, Sleep: time.Sleep, AppVersion: version,
 	}
 }
 
-func workerEnv(flows *flow.Store, bus *events.Bus, db *store.DB) flow.Env {
-	env := engineEnv()
+// cardPicker answers a job from the detector's last finished pass: the rungs the card's own tests
+// allow (L-HW-9). Before the first pass ends it answers "not yet", so the job converts on the
+// processor and its log says why.
+func cardPicker(cards *hw.Detector) func(flow.Want) (flow.Attempt, error) {
+	return func(want flow.Want) (flow.Attempt, error) {
+		ans, ok := cards.Current()
+		if !ok {
+			return flow.Attempt{Reason: "the graphics card has not been tested yet"}, nil
+		}
+		return flow.PickFromAnswer(ans, want), nil
+	}
+}
+
+// gpuSlots is the built-in worker's graphics slots, read before each job's first card encode (L-HW-8).
+// A read that fails leaves the card without a limit rather than failing the job: the setting is a
+// schedule of the card, and the job's log already has the database's problem.
+func gpuSlots(store *workers.Store) func() int {
+	return func() int {
+		w, err := store.Get(context.Background(), workers.LocalID)
+		if err != nil {
+			return -1
+		}
+		return w.GPUSlots
+	}
+}
+
+// mayClaim says whether the built-in worker's hours allow a new job now (page 10). A read that fails
+// allows it, for the same reason as gpuSlots.
+func mayClaim(store *workers.Store) func() bool {
+	return func() bool {
+		w, err := store.Get(context.Background(), workers.LocalID)
+		return err != nil || w.AllowsWork(time.Now())
+	}
+}
+
+// workerEnv is what a real job runs with: engineEnv and the job's own events on the bus.
+func workerEnv(flows *flow.Store, bus *events.Bus, db *store.DB, pick func(flow.Want) (flow.Attempt, error)) flow.Env {
+	env := engineEnv(pick)
 	env.Replacer = flow.RealReplacer{Journal: safety.NewJournal(db)}
 	env.LoadRevision = loadRevisionFor(flows, db)
 	env.Bus = bus

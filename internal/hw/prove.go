@@ -45,6 +45,13 @@ type Inventory struct {
 // Prove runs one real test encode through c and reports whether the result counts. The output is the test's own
 // file: it is removed whatever the answer, since a test keeps nothing (L-HW-1).
 func Prove(ctx context.Context, m media.Media, dir string, c Candidate) Verdict {
+	return ProveOn(ctx, m, dir, c, false)
+}
+
+// ProveOn is Prove for a candidate whose family already proved another encoder (familyWorks). That is what tells a
+// driver's "Conversion failed!" on AV1 apart from the rest: on a card that works for something else it means the card
+// has no AV1 encoder, and on a card that proved nothing it does not.
+func ProveOn(ctx context.Context, m media.Media, dir string, c Candidate, familyWorks bool) Verdict {
 	if c.Family == encode.FamilyVAAPI {
 		if _, err := os.Stat(c.Device); err != nil {
 			return no(c, "no render node "+c.Device)
@@ -64,7 +71,7 @@ func Prove(ctx context.Context, m media.Media, dir string, c Candidate) Verdict 
 		if errors.Is(tctx.Err(), context.DeadlineExceeded) {
 			return no(c, fmt.Sprintf("the test encode did not finish in %d s", int(TestTimeout.Seconds())))
 		}
-		return no(c, plainReason(c, err))
+		return no(c, plainReasonOn(c, err, familyWorks))
 	}
 	info, err := m.Probe(ctx, out)
 	if err != nil {
@@ -115,13 +122,20 @@ func testArgs(c Candidate, out string) []string {
 // comes from ffmpeg as it fails on real hardware (the proofs in slices/15-rebuild/s3-1b-hw-proofs.md). Anything not
 // recognised keeps its own words, capped at 300 characters.
 func plainReason(c Candidate, err error) string {
+	return plainReasonOn(c, err, false)
+}
+
+// plainReasonOn is plainReason for a card whose family already proved another encoder (familyWorks). The drivers say
+// "Conversion failed!" both when the card has no AV1 encoder and for failures of their own, so that reading waits for
+// proof that the card works at all.
+func plainReasonOn(c Candidate, err error, familyWorks bool) string {
 	msg := err.Error()
 	low := strings.ToLower(msg)
 	switch {
 	case strings.Contains(low, "error creating a mfx session"),
 		strings.Contains(low, "error parsing global options") && c.Family == encode.FamilyQSV:
 		return "no QSV runtime for this chip on this system"
-	case strings.Contains(low, "conversion failed") && c.Codec == "av1":
+	case strings.Contains(low, "conversion failed") && c.Codec == "av1" && familyWorks:
 		return "this card has no AV1 encoder"
 	case strings.Contains(low, "no usable encoding entrypoint"):
 		return fmt.Sprintf("this card's VA-API driver has no %s encoder", codecName(c.Codec))

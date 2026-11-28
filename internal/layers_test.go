@@ -28,6 +28,7 @@ var layers = map[string]int{
 	"internal/safety":     1,
 	"internal/library":    2,
 	"internal/jobs":       2,
+	"internal/workers":    2,
 	"internal/flow":       2,
 	"internal/flow/steps": 2,
 	"internal/worker":     3,

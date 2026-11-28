@@ -21,6 +21,9 @@ func startTree(cmd *exec.Cmd) (*tree, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
+	if LowPriority() {
+		lowerPriority(cmd.Process.Pid)
+	}
 	return &tree{pid: cmd.Process.Pid}, nil
 }
 
