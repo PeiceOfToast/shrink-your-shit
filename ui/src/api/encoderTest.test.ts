@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { testEncoders, getWorker, getWorkers, runAction } from "./mock.ts";
 import { ApiError } from "./errors.ts";
-import { testFinished, waitUntil } from "../pages/encoderTest.ts";
+import { disablesEncoderTest, testFinished, waitUntil } from "../pages/encoderTest.ts";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -46,4 +46,18 @@ test("waitUntil stops as soon as the check is done, and gives up after its tries
 test("the Dashboard's test row shows Started, not a line, when the test starts", async () => {
   const [w] = await getWorkers();
   assert.deepEqual(await runAction("POST", `/api/v2/workers/${w.id}/capabilities/test`), {});
+});
+
+test("a machine with no encoder detector turns the test off; a busy worker leaves it on", () => {
+  assert.equal(disablesEncoderTest("encoder_test_unavailable"), true);
+  assert.equal(disablesEncoderTest("worker_busy"), false);
+  assert.equal(disablesEncoderTest("worker_offline"), false);
+  assert.equal(disablesEncoderTest(undefined), false);
+});
+
+test("the worker page turns the test off only through that decision, and disables the button with it", async () => {
+  const { readFileSync } = await import("node:fs");
+  const page = readFileSync(new URL("../pages/WorkerPage.tsx", import.meta.url), "utf8");
+  assert.match(page, /if \(e instanceof ApiError && disablesEncoderTest\(e\.code\)\) setEncodersOff\(true\);/);
+  assert.match(page, /disabled=\{busy \|\| encodersOff\}>Test the encoders/);
 });

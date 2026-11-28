@@ -27,3 +27,9 @@ export async function waitUntil(done: () => Promise<boolean>, opts: PollOptions)
   }
   return false;
 }
+
+// A refused test. encoder_test_unavailable means this machine has no encoder detector: the button stays off until the page
+// reloads. worker_busy (the startup pass, no run to join) leaves it on to try again. Anything else shows its sentence.
+export function disablesEncoderTest(code: string | undefined): boolean {
+  return code === "encoder_test_unavailable";
+}
