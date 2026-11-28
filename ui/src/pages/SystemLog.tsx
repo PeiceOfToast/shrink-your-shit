@@ -226,7 +226,8 @@ export function SystemLog() {
     try {
       const p = await api.getLog({ ...paramsFor(), before: oldest, limit: api.LOG_PAGE_SIZE });
       setOlder((o) => [...p.items, ...o]);
-      if (p.items.length < api.LOG_PAGE_SIZE) setHasMore(false);
+      // The server's limit counts raw lines and a page folds, so a short page is not the end: an empty page is.
+      if (p.items.length === 0) setHasMore(false);
     } catch (e) {
       setMsg(e instanceof Error ? e.message : "Couldn't load older lines. Try again.");
     }
@@ -359,7 +360,7 @@ export function SystemLog() {
 
       {log.data && items.length > 0 && (
         <div className="log syslog syslog-list" ref={listRef} onScroll={onScroll} aria-label="System log lines" role="log">
-          {hasMore && base.length >= api.LOG_PAGE_SIZE && (
+          {hasMore && items.length > 0 && (
             <button type="button" className="btn ghost sm" onClick={loadOlder}>
               Load older lines
             </button>
