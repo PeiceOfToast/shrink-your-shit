@@ -356,6 +356,14 @@ func TestFullGPURefusesAChangeThatNeedsTheProcessor(t *testing.T) {
 		}{
 			{"frame rate", func() Plan { p := basePlan(CodecHEVC); p.Video.FPS = 30; return p }(), baseInfo()},
 			{"tone mapping", func() Plan { p := basePlan(CodecHEVC); p.Video.HDR = HDRTonemap; return p }(), hdr},
+			// Ten bits in and ten bits out: the depth guard sees no change, so only the tone-map
+			// guard refuses this one (review 872, FAIL 2).
+			{"tone mapping at ten bits", func() Plan {
+				p := basePlan(CodecHEVC)
+				p.Video.HDR = HDRTonemap
+				p.Video.BitDepth = Depth10
+				return p
+			}(), hdr},
 			{"depth change", func() Plan { p := basePlan(CodecHEVC); p.Video.BitDepth = Depth8; return p }(), sdr10},
 		}
 		for _, c := range cases {
