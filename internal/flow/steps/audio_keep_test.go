@@ -81,3 +81,44 @@ func audioWorkWith(t *testing.T, f flow.Flow, bitRate int64) bool {
 	t.Fatal("no audio step decision")
 	return false
 }
+
+// Each branch of the converts line matches the run. A channel layout that matches a stereo track keeps it (the clause
+// applies); a layout that differs converts it; loudness converts every track, and its line has no clause.
+func TestChannelBranchesMatchTheRun(t *testing.T) {
+	stereo := setStep(t, setStep(t, starter(t), "audio.tracks", "codec", "opus"), "audio.tracks", "channels", "stereo")
+	c, _, _ := sentencesOf(t, stereo, 7)
+	if !strings.Contains(c, "except tracks already in Opus") || !strings.Contains(c, "a channel layout or sample rate that differs from a track converts that track") {
+		t.Errorf("stereo layout: converts = %q", c)
+	}
+	if audioWorkWith(t, stereo, 32_000) {
+		t.Error("a stereo layout keeps a low-bitrate stereo AAC track, and the line's clause says it stays")
+	}
+	mono := setStep(t, setStep(t, starter(t), "audio.tracks", "codec", "opus"), "audio.tracks", "channels", "mono")
+	if !audioWorkWith(t, mono, 32_000) {
+		t.Error("a mono layout keeps a stereo track: the line's condition says a differing layout converts it")
+	}
+}
+
+// The HDR wording is the video's alone: a file whose video is HDR with HDR set to skip gets no video work, and the run
+// still plans its audio.
+func TestHDRLineClaimsOnlyTheVideo(t *testing.T) {
+	f := setStep(t, starter(t), "video.convert", "hdr", "skip")
+	_, leave, _ := sentencesOf(t, f, 7)
+	if !strings.Contains(leave, "Leaves the video in HDR files alone.") {
+		t.Errorf("leavesAlone = %q, want the video-only HDR claim", leave)
+	}
+	hdr := media.Info{
+		Format: media.Format{Names: []string{"matroska", "webm"}, Duration: time.Hour, Size: 900_000_000},
+		Video:  []media.VideoTrack{{Codec: "hevc", Profile: "Main10", Width: 3840, Height: 2160, FrameRate: media.Rational{Num: 24, Den: 1}, PixelFormat: "yuv420p10le", BitDepth: 10, ColorTransfer: "smpte2084"}},
+		Audio:  []media.AudioTrack{{Codec: "aac", Channels: 2, SampleRate: 48000, Language: "eng", BitRate: 32_000}},
+	}
+	d, _, err := flow.PlanFile(flow.Revision{WorkflowID: 1, Rev: 1, Flow: f}, hdr, flow.Env{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range d.Steps {
+		if s.ID == "video" && s.Decision.Work {
+			t.Errorf("an HDR video with skip gets video work: %s", s.Decision.Reason)
+		}
+	}
+}

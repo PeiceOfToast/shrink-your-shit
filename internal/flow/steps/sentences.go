@@ -64,9 +64,14 @@ func convertsSentence(video *VideoSettings, audio *AudioSettings) string {
 			// lossy track already at or below the target bitrate. A channel layout, a sample rate or loudness evening
 			// forces the conversion (keepAsIs returns no keep for them), so the clause is left out then.
 			codec := audioCodecLabel(audio.AudioCodec())
-			if audioSettingForcesConversion(*audio) {
+			switch {
+			case audio.Loudnorm:
+				// Loudness evening converts every track, so the keep clause does not apply.
 				parts = append(parts, fmt.Sprintf("Converts audio to %s.", codec))
-			} else {
+			case audio.SampleRate != nil || (audio.Channels != "" && audio.Channels != "source"):
+				// A channel layout or a sample rate converts a track only when it differs from the track's own.
+				parts = append(parts, fmt.Sprintf("Converts audio to %s, except tracks already in %s and lossy tracks already at or below the target bitrate; a channel layout or sample rate that differs from a track converts that track.", codec, codec))
+			default:
 				parts = append(parts, fmt.Sprintf("Converts audio to %s, except tracks already in %s and lossy tracks already at or below the target bitrate.", codec, codec))
 			}
 		}
@@ -100,7 +105,7 @@ func leavesAloneSentence(video *VideoSettings) string {
 	parts = append(parts, fmt.Sprintf("Leaves the video alone when it is already in %s.",
 		codecName(encode.Codec(video.Format))))
 	if video.HDR != nil && *video.HDR == "skip" {
-		parts = append(parts, "Leaves HDR files alone.")
+		parts = append(parts, "Leaves the video in HDR files alone.")
 	}
 	return strings.Join(parts, " ")
 }
@@ -169,10 +174,4 @@ func fieldTag(t reflect.Type, field, tag string) string {
 		return ""
 	}
 	return f.Tag.Get(tag)
-}
-
-// audioSettingForcesConversion is true when a setting makes the step convert a track whatever its codec or bitrate: an
-// explicit channel layout (it may differ from the track's), a sample rate (the same), or loudness evening.
-func audioSettingForcesConversion(a AudioSettings) bool {
-	return a.Loudnorm || a.SampleRate != nil || (a.Channels != "" && a.Channels != "source")
 }
