@@ -74,7 +74,9 @@ type env struct {
 	queue   *jobs.Queue
 	scans   *scanRecorder
 	// try answers the try route when a test sets it; the real flow.Try is not run here.
-	try       func(ctx context.Context, f flow.Flow, file string) (flow.TryResult, error)
+	try func(ctx context.Context, f flow.Flow, file string) (flow.TryResult, error)
+	// stopJob records the worker stop a running job's Cancel asks for (S3-6a); a test sets it, then ready().
+	stopJob   func(int64)
 	closeOnce sync.Once
 	clock     *clock
 	dir       string
@@ -160,6 +162,7 @@ func (e *env) deps() Deps {
 		Access: e.access, Events: e.bus, DB: e.db,
 		Workflows: e.flows, Catalog: e.catalog, Jobs: e.queue, Scanner: e.scans,
 		Wake:     e.scans.wake,
+		StopJob:  e.stopJob,
 		Try:      e.try,
 		DiskFree: func(string) (uint64, error) { return 123456789, nil },
 	}

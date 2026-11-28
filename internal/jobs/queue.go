@@ -21,6 +21,11 @@ const maxTries = 3
 // retryWaits[i] is how long a job waits after its try i+1 failed: 5 minutes, then 30 (L-Q-3).
 var retryWaits = []time.Duration{5 * time.Minute, 30 * time.Minute}
 
+// usedUpTries is what a job says when its last automatic try failed. The sentence a may-pass failure
+// carries says the file will be tried again, which is no longer true (S3-6a); a manual retry is what is
+// left, and Retry is offered for this case.
+const usedUpTries = "The automatic tries are used up. Press Retry to try the file again."
+
 // claimRaces bounds how often Claim re-picks after losing a race before it gives up for this call.
 const claimRaces = 16
 
@@ -161,7 +166,9 @@ func (q *Queue) Claim(ctx context.Context, workerID string, opts ClaimOptions) (
 		now := q.now()
 		err = q.db.Tx(ctx, func(tx *sql.Tx) error {
 			if err := move(tx, id, verbClaim, Running, change{
-				set:  ", started_at = ?, worker_id = ?, attempt = attempt + 1",
+				// top is used up by the claim: it puts this job first once, and a retry of it later
+				// starts in its turn again.
+				set:  ", started_at = ?, worker_id = ?, attempt = attempt + 1, top = 0",
 				args: []any{ms(now), workerID},
 			}); err != nil {
 				return err
@@ -246,6 +253,9 @@ type Result struct {
 	// SkipReason is a short code for a skip; Reason is the sentence the person reads.
 	SkipReason string
 	Reason     string
+	// Code is the failure's stable code ("encode.failed", "replace.record_unsettled"). It is kept next to
+	// Reason's sentence, because a retry's decision and the job page's button need the code, not the words.
+	Code       string
 	FailedStep string
 	NextAction string
 	SizeBefore int64
@@ -284,6 +294,7 @@ func (q *Queue) Finish(ctx context.Context, id int64, attempt int, r Result) err
 			return err
 		}
 		newTries = tries
+		nextAction := r.NextAction
 		var finishedAt any = ms(now)
 		switch r.Verdict {
 		case VerdictDone:
@@ -302,14 +313,17 @@ func (q *Queue) Finish(ctx context.Context, id int64, attempt int, r Result) err
 				reason = fmt.Sprintf("try %d of %d failed; again after %s", newTries, maxTries, retryWaits[newTries-1])
 			} else {
 				to = Failed
+				// The may-pass sentence says the file will be tried again; after the last try that is
+				// no longer true, and what is left is a manual retry.
+				nextAction = usedUpTries
 			}
 		}
 		if err := move(tx, id, verbFinish, to, change{
-			set: `, outcome = ?, failed_step = ?, reason = ?, next_action = ?, skip_reason = ?,
+			set: `, outcome = ?, failed_step = ?, reason = ?, failure_code = ?, next_action = ?, skip_reason = ?,
 				size_before = ?, size_after = ?, output_path = ?, tries = ?, next_try_at = ?,
 				finished_at = ?, worker_id = NULL`,
 			args: []any{
-				nz(r.Outcome), nz(r.FailedStep), nz(r.Reason), nz(r.NextAction), nz(r.SkipReason),
+				nz(r.Outcome), nz(r.FailedStep), nz(r.Reason), nz(r.Code), nz(nextAction), nz(r.SkipReason),
 				nzInt(r.SizeBefore), nzInt(r.SizeAfter), nz(r.OutputPath), newTries, nullInt(nextTry), finishedAt,
 			},
 			cond:     ` AND attempt = ?`,
@@ -443,19 +457,28 @@ func (q *Queue) Cancel(ctx context.Context, id int64) (CancelResult, error) {
 }
 
 // Retry puts a failed or cancelled job back to waiting on the same row. Its tries start again at zero, and the
-// next claim makes a new attempt row. It is refused while the file has another open job.
+// next claim makes a new attempt row. It is refused while the file has another open job, and for the failures a
+// retry cannot help (see retryRefused).
+//
+// A manual retry runs the workflow as it is published now, not the revision the job was queued with: a person
+// who fixed the workflow and pressed Retry expects the fix to be used (S3-6a). The automatic retries behind the
+// five and thirty minute waits keep the revision the job was queued with.
 func (q *Queue) Retry(ctx context.Context, id int64) error {
 	var libraryID int64
 	var attempt int
 	err := q.db.Tx(ctx, func(tx *sql.Tx) error {
 		var fileID int64
+		var failureCode string
 		if err := tx.QueryRow(
-			`SELECT file_id, library_id, attempt FROM jobs WHERE id = ?`, id,
-		).Scan(&fileID, &libraryID, &attempt); err != nil {
+			`SELECT file_id, library_id, attempt, COALESCE(failure_code, '') FROM jobs WHERE id = ?`, id,
+		).Scan(&fileID, &libraryID, &attempt, &failureCode); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return ErrNotFound
 			}
 			return err
+		}
+		if message, refused := RetryRefused(failureCode); refused {
+			return &ErrNotRetryable{Message: message}
 		}
 		var other int64
 		err := tx.QueryRow(
@@ -469,14 +492,47 @@ func (q *Queue) Retry(ctx context.Context, id int64) error {
 			return err
 		}
 		return move(tx, id, verbRetry, Waiting, change{
+			// The old attempt's result goes with it: the page must not show the previous run's output
+			// while the new attempt has not written one (L-Q-3).
 			set: `, tries = 0, next_try_at = NULL, finished_at = NULL, outcome = NULL,
-				failed_step = NULL, reason = NULL, next_action = NULL, skip_reason = NULL`,
+				failed_step = NULL, failure_code = NULL, reason = NULL, next_action = NULL, skip_reason = NULL,
+				output_path = NULL, size_before = NULL, size_after = NULL, workflow_rev = NULL, top = 0`,
 		})
 	})
 	if err != nil {
 		return err
 	}
 	return q.emit(events.KindQueued, events.LevelInfo, id, attempt, libraryID, "retry", "queued again")
+}
+
+// Top moves a waiting job first in the claim order (page 02: Move to the top). A running job cannot jump.
+// A retry_wait job may: the page shows it as waiting, so the person can pick it, but it keeps its next try
+// time, so "top" only puts it first once the wait is over. The claim clears top when it takes the job, so
+// "top" lasts one turn in the queue.
+func (q *Queue) Top(ctx context.Context, id int64) error {
+	var state State
+	err := q.db.Tx(ctx, func(tx *sql.Tx) error {
+		if err := tx.QueryRow(`SELECT state FROM jobs WHERE id = ?`, id).Scan(&state); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrNotFound
+			}
+			return err
+		}
+		res, err := tx.Exec(
+			`UPDATE jobs SET top = 1 WHERE id = ? AND state IN (?, ?)`,
+			id, string(Waiting), string(RetryWait),
+		)
+		if err != nil {
+			return err
+		}
+		if n, err := res.RowsAffected(); err != nil {
+			return err
+		} else if n == 0 {
+			return &ErrChangedSince{JobID: id, Verb: "top", State: state}
+		}
+		return nil
+	})
+	return err
 }
 
 // Recover runs at startup. Every running job goes back to waiting as a requeue, which is not a try. sweep, when

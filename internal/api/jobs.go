@@ -467,8 +467,13 @@ func (s *Server) detail(ctx context.Context, d *jobDeps, j jobs.Job) (jobDetailJ
 	}
 	if j.State == jobs.Failed {
 		// actionLabel is the failure button's short text, not the next-step sentence, which the page shows
-		// as its own line. The retry action itself is not served yet (jobs actions are a later slice).
-		out.Failure = &failureJSON{Step: j.FailedStep, Reason: j.Reason, NextAction: j.NextAction, ActionLabel: "Retry"}
+		// as its own line. The three replace failures are refused a retry (S3-6a), so they get no button:
+		// an empty label is how the page knows to hide it.
+		label := "Retry"
+		if _, refused := jobs.RetryRefused(j.FailureCode); refused {
+			label = ""
+		}
+		out.Failure = &failureJSON{Step: j.FailedStep, Reason: j.Reason, NextAction: j.NextAction, ActionLabel: label}
 	}
 	return out, nil
 }

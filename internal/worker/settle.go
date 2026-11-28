@@ -36,13 +36,13 @@ func settle(res flow.Result, stopping bool) (jobs.Result, End) {
 		}, EndFinish
 	case flow.OutcomeMayPass:
 		return jobs.Result{
-			Verdict: jobs.VerdictRetry, Reason: sentenceOr(res, "run.may_pass"), FailedStep: res.FailedStep,
-			NextAction: res.NextAction,
+			Verdict: jobs.VerdictRetry, Reason: sentenceOr(res, "run.may_pass"), Code: res.Reason,
+			FailedStep: res.FailedStep, NextAction: res.NextAction,
 		}, EndFinish
 	case flow.OutcomeFatal:
 		return jobs.Result{
-			Verdict: jobs.VerdictFail, Reason: sentenceOr(res, "run.fatal"), FailedStep: res.FailedStep,
-			NextAction: res.NextAction,
+			Verdict: jobs.VerdictFail, Reason: sentenceOr(res, "run.fatal"), Code: res.Reason,
+			FailedStep: res.FailedStep, NextAction: res.NextAction,
 		}, EndFinish
 	case flow.OutcomeRequeue:
 		return jobs.Result{}, EndRequeue
@@ -54,8 +54,8 @@ func settle(res flow.Result, stopping bool) (jobs.Result, End) {
 	}
 	// Run promises a non-empty outcome; an empty one is a bug in flow, so the job fails loudly.
 	return jobs.Result{
-		Verdict: jobs.VerdictFail, Reason: "internal_error", FailedStep: "worker",
-		NextAction: "report_bug",
+		Verdict: jobs.VerdictFail, Reason: "internal_error", Code: "internal_error", FailedStep: "worker",
+		NextAction: flow.NextBug,
 	}, EndFinish
 }
 

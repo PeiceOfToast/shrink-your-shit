@@ -81,3 +81,47 @@ func humanBytes(n int64) string {
 func trimFloat(f float64) string {
 	return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.1f", f), "0"), ".")
 }
+
+// The next-action sentences: the failure card's line saying what to do now (page 03, S3-6a). The job row keeps the
+// sentence, not a code, because the page shows it as it is. Each one ends in the action the person can take; a
+// workflow fix ends "then press Retry", so the button the page shows is the one the sentence names.
+const (
+	// NextRetry is for a failure where trying the file again is the whole answer.
+	NextRetry = "Press Retry to try the file again."
+	// NextRetryLog is for the encoder stopping: the log is where a second failure is explained.
+	NextRetryLog = "Press Retry to try the file again; if it fails again, the job log has the details."
+	// NextTriedAgain is for a may-pass: the worker tries again on its own in a few minutes.
+	NextTriedAgain = "This file will be tried again in a few minutes."
+	// NextFixWorkflow is for a flow that does not fit this file: the person changes it, then retries.
+	NextFixWorkflow = "Change the workflow so it fits this file, then press Retry."
+	// NextOpenWorkflow is for a saved workflow the engine cannot run at all.
+	NextOpenWorkflow = "Open the workflow and fix what it reports, then press Retry."
+	// NextFixSettings is for a step whose saved settings could not be read.
+	NextFixSettings = "Fix the step settings in the workflow, then press Retry."
+	// NextFreeName is for a new file whose name another file took.
+	NextFreeName = "Another file has the new file's name. Move or rename it, then press Retry."
+	// NextMoveSrt is for a subtitle file's name taken before anything was written.
+	NextMoveSrt = "Move or rename that .srt file, then press Retry."
+	// NextDestination is for the save step failing to write or read its own staging.
+	NextDestination = "Check the destination folder, then press Retry."
+	// NextEncoder is for no encoder being available on the worker that ran the job.
+	NextEncoder = "Check the video encoder on the computer that ran this job, then press Retry."
+	// NextFileReadable is for a file that cannot be read or identified at all.
+	NextFileReadable = "Check that the file is still there and readable, then press Retry."
+	// NextWorker is for the worker failing to build the run before flow starts (the file or its workflow is gone).
+	NextWorker = "Check that the file and its workflow are still there, then press Retry."
+	// NextBug is for an internal error: the person can do nothing about it but send the log.
+	NextBug = "This is a bug, not a problem with your file. Download this job's log and report it."
+)
+
+// nextForPlan is the sentence for a step's plan refusing: a saved workflow or a step's settings that need a look,
+// or a flow that does not fit this file.
+func nextForPlan(code string) string {
+	switch code {
+	case "invalid_flow":
+		return NextOpenWorkflow
+	case "invalid_settings":
+		return NextFixSettings
+	}
+	return NextFixWorkflow
+}

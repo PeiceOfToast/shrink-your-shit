@@ -13,9 +13,20 @@ import (
 //
 // Migration 9 records the .srt files a job writes beside its new file before they are placed
 // (L-AUD-25), and keeps their names on the job once the new file is in place.
+//
+// Migration 11 keeps the failure's stable code next to its sentence. The retry action and the job
+// page's button text need the code (the three replace failures are refused and have no Retry button,
+// #865); the row used to keep only the sentence (S3-6a). Migration 10 is the replace journal
+// (internal/safety).
 func init() {
 	store.Register(store.Migration{Version: 5, Name: "jobs", Up: createJobs})
 	store.Register(store.Migration{Version: 9, Name: "sidecars", Up: createSidecars})
+	store.Register(store.Migration{Version: 11, Name: "failure-code", Up: addFailureCode})
+}
+
+func addFailureCode(tx *sql.Tx) error {
+	_, err := tx.Exec(`ALTER TABLE jobs ADD COLUMN failure_code TEXT`)
+	return err
 }
 
 func createSidecars(tx *sql.Tx) error {

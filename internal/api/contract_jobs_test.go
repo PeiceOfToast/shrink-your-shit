@@ -35,4 +35,10 @@ func TestContractGoldensForJobs(t *testing.T) {
 		scrub(f.get(fmt.Sprintf("/api/v2/jobs/%d/events", f.done))))
 	writeGolden(t, "job-history", "HistoryLine[]", http.MethodGet, fmt.Sprintf("/api/v2/jobs/%d/history", f.done),
 		scrub(f.get(fmt.Sprintf("/api/v2/jobs/%d/history", f.done))))
+	// The actions answer (S3-6a): one id done and one refused, from the live route. Move to the top changes
+	// the waiting job's pick order, which no other golden shows.
+	writeGolden(t, "jobs-actions", "JobsActionDone", http.MethodPost, "/api/v2/jobs/actions",
+		f.e.do(http.MethodPost, "/api/v2/jobs/actions",
+			fmt.Sprintf(`{"action":"top","ids":[%d,%d]}`, f.waiting, f.done),
+			write(map[string]string{"Cookie": f.cookie.String()}), false))
 }

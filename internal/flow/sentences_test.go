@@ -43,3 +43,45 @@ func TestStepSentenceIsNumberedAsThePagesCountThem(t *testing.T) {
 		t.Errorf("stepSentence = %q, want \"2. Audio\"", got)
 	}
 }
+
+// TestNextActionSentencesArePinned pins the failure card's next-action line (S3-6a): ui-shop wrote these words, so
+// a rewording shows up here rather than on a page. Each names the action the person can take, and a workflow fix
+// ends "then press Retry", the button the page shows.
+func TestNextActionSentencesArePinned(t *testing.T) {
+	cases := []struct{ got, want string }{
+		{NextRetry, "Press Retry to try the file again."},
+		{NextRetryLog, "Press Retry to try the file again; if it fails again, the job log has the details."},
+		{NextTriedAgain, "This file will be tried again in a few minutes."},
+		{NextFixWorkflow, "Change the workflow so it fits this file, then press Retry."},
+		{NextOpenWorkflow, "Open the workflow and fix what it reports, then press Retry."},
+		{NextFixSettings, "Fix the step settings in the workflow, then press Retry."},
+		{NextFreeName, "Another file has the new file's name. Move or rename it, then press Retry."},
+		{NextMoveSrt, "Move or rename that .srt file, then press Retry."},
+		{NextDestination, "Check the destination folder, then press Retry."},
+		{NextEncoder, "Check the video encoder on the computer that ran this job, then press Retry."},
+		{NextFileReadable, "Check that the file is still there and readable, then press Retry."},
+		{NextWorker, "Check that the file and its workflow are still there, then press Retry."},
+		{NextBug, "This is a bug, not a problem with your file. Download this job's log and report it."},
+	}
+	for _, c := range cases {
+		if c.got != c.want {
+			t.Errorf("sentence = %q, want %q", c.got, c.want)
+		}
+	}
+}
+
+// TestNextForPlanPicksByCode: a workflow that cannot run and a step with bad settings each say what to fix; every
+// other refusal is the flow not fitting this file.
+func TestNextForPlanPicksByCode(t *testing.T) {
+	cases := map[string]string{
+		"invalid_flow":              NextOpenWorkflow,
+		"invalid_settings":          NextFixSettings,
+		"video.no_video":            NextFixWorkflow,
+		"save.would_land_on_source": NextFixWorkflow,
+	}
+	for code, want := range cases {
+		if got := nextForPlan(code); got != want {
+			t.Errorf("nextForPlan(%q) = %q, want %q", code, got, want)
+		}
+	}
+}

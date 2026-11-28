@@ -368,3 +368,11 @@ func mustWrite(t *testing.T, p string) {
 		t.Fatal(err)
 	}
 }
+
+// TestKeepOriginalSentenceIsPinned pins the line every "no" leaves on the job (S3-6a): the page shows it as the
+// person's next step, so it is a sentence, not a code, and its words are ui-shop's.
+func TestKeepOriginalSentenceIsPinned(t *testing.T) {
+	if want := "The original is untouched; the new file was not used."; NextKeepOriginal != want {
+		t.Fatalf("NextKeepOriginal = %q, want %q", NextKeepOriginal, want)
+	}
+}

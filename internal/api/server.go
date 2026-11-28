@@ -46,6 +46,10 @@ type Deps struct {
 	// Wake asks the worker to pick up newly queued jobs. Stage 1 has no worker loop; cmd wires a
 	// no-op. nil means no wake.
 	Wake func()
+	// StopJob stops a job this process's worker is running, for Cancel (S3-6a). The row is cancelled
+	// before it is called, so the worker's own cancel then finds nothing to do. nil means no worker
+	// to stop, as in a test.
+	StopJob func(id int64)
 	// DiskFree reads the free space of the volume that holds a folder. nil reports 0.
 	DiskFree func(path string) (uint64, error)
 	// Try is flow.Try with the real media and safety behind it (S2-5): the flow run on one file,
@@ -100,6 +104,9 @@ func New(version string) *Server {
 	s.mux.HandleFunc("POST /api/v2/signin", s.signin)
 	s.mux.HandleFunc("POST /api/v2/signout", s.signout)
 	s.mux.HandleFunc("GET /api/v2/jobs", s.listJobs)
+	// Job actions (S3-6a): Retry, Cancel and Move to the top for a list of jobs. Literal, so it wins
+	// over the {id} subtree below.
+	s.mux.HandleFunc("POST /api/v2/jobs/actions", s.jobActions)
 	s.mux.HandleFunc("GET /api/v2/jobs/{id}", s.getJob)
 	s.mux.HandleFunc("GET /api/v2/jobs/{id}/neighbours", s.neighbours)
 	s.mux.HandleFunc("GET /api/v2/jobs/{id}/events", s.jobLog)

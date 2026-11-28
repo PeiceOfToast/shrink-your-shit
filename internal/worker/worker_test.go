@@ -26,6 +26,17 @@ type fakeSource struct {
 	finishIDs []int64
 	requeued  []string
 	cancelled []int64
+	// running is what Running answers; nil means the job is still running.
+	running *bool
+}
+
+func (f *fakeSource) Running(ctx context.Context, id int64) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.running == nil {
+		return true, nil
+	}
+	return *f.running, nil
 }
 
 func (f *fakeSource) Claim(ctx context.Context, workerID string) (*Work, error) {
@@ -256,6 +267,65 @@ func TestShutdownPastGraceRequeuesWithoutATry(t *testing.T) {
 	}
 	if len(requeued) != 1 || requeued[0] != "shutdown" {
 		t.Errorf("requeued = %v; want one requeue for shutdown", requeued)
+	}
+}
+
+// TestCancelJobStopsTheRunningRun: the api's cancel ends the run's context, the run reports cancelled, and the queue
+// records it (S3-6a). The stop is looked up by job id while the job runs.
+func TestCancelJobStopsTheRunningRun(t *testing.T) {
+	src := &fakeSource{queue: []Work{job(4)}}
+	started := make(chan struct{})
+	run := func(ctx context.Context, in flow.RunInput, env flow.Env) flow.Result {
+		close(started)
+		<-ctx.Done()
+		return flow.Result{Outcome: flow.OutcomeCancelled}
+	}
+	w := New(Config{Source: src, Run: run, Tick: 5 * time.Millisecond})
+	stop := start(t, w)
+	defer stop()
+
+	<-started
+	if !w.CancelJob(4) {
+		t.Fatal("CancelJob did not find the running job")
+	}
+	waitFor(t, "the cancelled job to be recorded", func() bool {
+		_, _, cancelled, _ := src.snapshot()
+		return len(cancelled) == 1 && cancelled[0] == 4
+	})
+	f, _, _, _ := src.snapshot()
+	if len(f) != 0 {
+		t.Fatalf("finished = %v; a cancelled run must not write a result", f)
+	}
+	if w.CancelJob(4) {
+		t.Fatal("CancelJob still found the job after its run ended")
+	}
+}
+
+// TestCancelBeforeTheRunStartsStopsIt: a cancel between the claim and the run leaves the row cancelled, so the worker
+// asks the queue before it runs and stops at once rather than encoding a job the person cancelled (L-Q-7).
+func TestCancelBeforeTheRunStartsStopsIt(t *testing.T) {
+	notRunning := false
+	src := &fakeSource{queue: []Work{job(5)}, running: &notRunning}
+	entered := make(chan struct{})
+	run := func(ctx context.Context, in flow.RunInput, env flow.Env) flow.Result {
+		close(entered)
+		if ctx.Err() == nil {
+			return flow.Result{Outcome: flow.OutcomeSmaller}
+		}
+		return flow.Result{Outcome: flow.OutcomeCancelled}
+	}
+	w := New(Config{Source: src, Run: run, Tick: 5 * time.Millisecond})
+	stop := start(t, w)
+	defer stop()
+
+	waitFor(t, "the cancelled row to be recorded", func() bool {
+		_, _, cancelled, _ := src.snapshot()
+		return len(cancelled) == 1 && cancelled[0] == 5
+	})
+	<-entered
+	f, _, _, _ := src.snapshot()
+	if len(f) != 0 {
+		t.Fatalf("finished = %v; the run was already cancelled by the row", f)
 	}
 }
 
