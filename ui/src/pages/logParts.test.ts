@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { JobStep, LogEvent, LogKind, LogLevel } from "../api/types.ts";
-import { addLiveLine, levelBadges, logsFromEvents, olderCursorAfter, pagingCursor, showLines, showLoadOlder } from "./logParts.ts";
+import { addLiveLine, followsBottom, keptScrollTop, levelBadges, logsFromEvents, olderCursorAfter, pagingCursor, showLines, showLoadOlder } from "./logParts.ts";
 import { readFileSync } from "node:fs";
 
 const steps: JobStep[] = [
@@ -268,5 +268,24 @@ test("Load older pages by the paging cursor, not the first row's seq (a fold's s
   assert.match(src, /api\.getLog\(\{ \.\.\.paramsFor\(\), before, limit: api\.LOG_PAGE_SIZE \}\)/);
   assert.doesNotMatch(src, /before: oldest/);
   assert.doesNotMatch(src, /items\[0\]\?\.seq;\s*if \(oldest/);
+});
+
+test("Follow scrolls to the bottom only for a new line at the end, and only while following and not paused", () => {
+  assert.equal(followsBottom(10, 11, true, false), true, "a new newest line while following");
+  assert.equal(followsBottom(10, 10, true, false), false, "older lines prepended: the newest is unchanged");
+  assert.equal(followsBottom(10, 11, true, true), false, "paused: the person scrolled up");
+  assert.equal(followsBottom(10, 11, false, false), false, "not following");
+});
+
+test("Load older keeps the distance from the bottom", () => {
+  // The view was 300 px above the bottom; 40 rows (800 px) are added above it.
+  assert.equal(keptScrollTop(2000 + 800, 300), 2500);
+});
+
+test("the page scrolls through followsBottom and keeps the distance from the bottom through keptScrollTop", () => {
+  const src = readFileSync(new URL("./SystemLog.tsx", import.meta.url), "utf8");
+  assert.match(src, /followsBottom\(seenNewest\.current, newestSeq, follow, paused\)/);
+  assert.match(src, /keptScrollTop\(el\.scrollHeight, keepFromBottom\.current\)/);
+  assert.doesNotMatch(src, /\[items\.length, follow, paused\]/);
 });
 

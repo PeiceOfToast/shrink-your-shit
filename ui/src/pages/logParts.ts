@@ -102,3 +102,13 @@ export function showLoadOlder(hasMore: boolean, shownCount: number): boolean {
   return hasMore && shownCount > 0;
 }
 
+// Follow scrolls to the bottom when a new line arrives at the end (the newest line changed) and the view is following.
+export function followsBottom(prevNewest: number | undefined, newest: number | undefined, follow: boolean, paused: boolean): boolean {
+  return follow && !paused && newest !== prevNewest;
+}
+
+// The scrollTop that keeps the same distance from the bottom after lines are added above.
+export function keptScrollTop(scrollHeight: number, distanceFromBottom: number): number {
+  return scrollHeight - distanceFromBottom;
+}
+
