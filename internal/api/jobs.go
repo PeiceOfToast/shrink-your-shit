@@ -126,10 +126,22 @@ func (s *Server) view(ctx context.Context, d *jobDeps, j jobs.Job) jobJSON {
 
 // latestStep is the step a running job reached last, with the workflow's step count. nil when no step has started.
 func (s *Server) latestStep(ctx context.Context, d *jobDeps, j jobs.Job) *stepRefJSON {
-	if d.bus == nil {
+	return latestStepOf(ctx, d.bus, d.flows, j)
+}
+
+// workflowReader is what a step's count needs: the workflow, and one revision of it.
+type workflowReader interface {
+	Get(ctx context.Context, id int64) (flow.Workflow, error)
+	Revision(ctx context.Context, id int64, rev int) (flow.Revision, error)
+}
+
+// latestStepOf is the step a running job reached last, with the workflow's step count. nil when no
+// step has started or the event store is not there. The Workers page ("Now") and the Jobs list share it.
+func latestStepOf(ctx context.Context, bus *events.Bus, flows workflowReader, j jobs.Job) *stepRefJSON {
+	if bus == nil {
 		return nil
 	}
-	evs, _, err := d.bus.Query(ctx, events.Filter{JobID: j.ID, Kind: events.KindStepStart}, events.Page{Limit: 1, Newest: true})
+	evs, _, err := bus.Query(ctx, events.Filter{JobID: j.ID, Kind: events.KindStepStart}, events.Page{Limit: 1, Newest: true})
 	if err != nil || len(evs) == 0 {
 		return nil
 	}
@@ -137,12 +149,12 @@ func (s *Server) latestStep(ctx context.Context, d *jobDeps, j jobs.Job) *stepRe
 	// The revision this job ran, not the workflow's current one: a publish since it was queued
 	// may have changed the step count.
 	rev := j.WorkflowRev
-	if wf, err := d.flows.Get(ctx, j.WorkflowID); err == nil {
+	if wf, err := flows.Get(ctx, j.WorkflowID); err == nil {
 		if rev == 0 {
 			rev = wf.CurrentRev
 		}
 		if rev > 0 {
-			if r, err := d.flows.Revision(ctx, j.WorkflowID, rev); err == nil {
+			if r, err := flows.Revision(ctx, j.WorkflowID, rev); err == nil {
 				ref.Count = len(r.Flow.Steps)
 			}
 		}

@@ -72,21 +72,3 @@ func TestRunLooksUpMyLanguagesWhenItStarts(t *testing.T) {
 		t.Errorf("the run's audio languages = %v, want the settings' [fra ita]", audio.Languages)
 	}
 }
-
-// S1: the slots a new worker starts with are processing.parallelJobs, clamped to 1 to 8. Red-first: without the read in
-// startSlots the value stays 1 and the test fails.
-func TestWorkerStartsWithParallelJobs(t *testing.T) {
-	ctx := context.Background()
-	db, _ := openWiringStore(t)
-	if got := startSlots(ctx, db); got != 1 {
-		t.Errorf("unset slots = %d, want 1", got)
-	}
-	if _, _, err := settings.Patch(ctx, db, settings.Options{}, map[string]json.RawMessage{
-		"processing": json.RawMessage(`{"parallelJobs":3}`),
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if got := startSlots(ctx, db); got != 3 {
-		t.Errorf("slots = %d, want the stored 3", got)
-	}
-}

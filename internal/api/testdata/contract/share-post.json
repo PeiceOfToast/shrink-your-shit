@@ -1,0 +1,18 @@
+{
+  "body": {
+    "address": "//nas/media",
+    "connected": true,
+    "guest": false,
+    "hasPassword": true,
+    "id": "1",
+    "name": "media",
+    "point": "$DIR/1",
+    "since": "2026-11-27T04:00:00Z",
+    "type": "smb",
+    "username": "viewer"
+  },
+  "method": "POST",
+  "path": "/api/v2/shares",
+  "status": 201,
+  "type": "Share"
+}

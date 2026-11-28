@@ -365,11 +365,13 @@ func TestLibraryRoutes(t *testing.T) {
 	if code, _, env := errorBody(t, rec); code != "invalid_request" || env["field"] != "path" {
 		t.Fatalf("bad path: %v", env)
 	}
+	// A shareId that is not a row answers like any other id that is not one. The share a real add
+	// uses is exercised in shares_test.go.
 	rec = e.do(http.MethodPost, "/api/v2/libraries", `{"name":"Share","shareId":"s1"}`, write(withSession(cookie)), false)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("share: %d, want 400", rec.Code)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("share: %d, want 404", rec.Code)
 	}
-	if code, _, env := errorBody(t, rec); code != "invalid_request" || env["field"] != "shareId" {
+	if code, _, env := errorBody(t, rec); code != "not_found" || env["field"] != "shareId" {
 		t.Fatalf("share: %v", env)
 	}
 	rec = e.do(http.MethodPost, "/api/v2/libraries", mustJSON(t, map[string]any{"name": "Watch", "path": t.TempDir(), "watch": "sometimes"}), write(withSession(cookie)), false)

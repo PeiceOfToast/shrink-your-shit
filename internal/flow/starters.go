@@ -23,12 +23,12 @@ type Starter struct {
 
 // Starters is the list the Start page offers. Stop 1 has one: "Shrink videos", the fixed starter
 // the setup call already accepts by id. Its choices are workshop's, made 11-27
-// for stop 1: HEVC at quality 3 on the processor, audio copied, an MKV next to the original with
-// "-shrunk" added to its name.
+// for stop 1: HEVC at quality 3 on a graphics card when the worker has one (and on the processor
+// when it does not), audio copied, an MKV next to the original with "-shrunk" added to its name.
 func Starters() []Starter {
 	steps := []StepRef{
 		{ID: "video", Type: "video.convert", Version: 1,
-			Settings: json.RawMessage(`{"format":"hevc","quality":3,"useGpu":false,"ifGpuFails":"cpu"}`)},
+			Settings: json.RawMessage(`{"format":"hevc","quality":3,"useGpu":true,"ifGpuFails":"cpu"}`)},
 		{ID: "audio", Type: "audio.tracks", Version: 1,
 			Settings: json.RawMessage(`{"format":"copy"}`)},
 		{ID: "save", Type: "file.save", Version: 1,
