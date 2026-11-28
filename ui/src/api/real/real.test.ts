@@ -6,6 +6,7 @@ import { ApiError } from "../errors.ts";
 import { convertAgain, getJobNeighbours, getJobs, runJobsAction } from "./jobs.ts";
 import { getLibraries, createLibrary } from "./libraries.ts";
 import { getSettings, patchSettings } from "./settings.ts";
+import { getTrash, restoreTrash } from "./trash.ts";
 import { getAttention, getOverview } from "./overview.ts";
 import { createDraft, deleteWorkflow, duplicateWorkflow, exportWorkflow, getFlow, getGuideAnswers, guidePreview, listWorkflows, publishFlow, putAnswers, putDraft, tryFlow, validateFlow } from "./workflows.ts";
 
@@ -200,4 +201,18 @@ test("settings: GET the whole document, PATCH only the changed fields nested by 
   stub(400, JSON.stringify({ error: { code: "invalid_setting", field: "general.languages", message: "Use three-letter codes like eng, ger, fra." } }));
   await assert.rejects(patchSettings({ general: { languages: ["english"] } }), (e: unknown) =>
     e instanceof ApiError && e.code === "invalid_setting" && e.field === "general.languages");
+});
+
+test("trash: GET the list, POST a restore by id, a refusal keeps its code", async () => {
+  let calls = stub(200, JSON.stringify([{ id: "7", file: "a.mkv", library: "Films", trashedAt: "2026-11-27T10:00:00Z", daysLeft: 6 }]));
+  const items = await getTrash();
+  assert.equal(calls[0].url, "/api/v2/trash");
+  assert.equal(calls[0].init.method, "GET");
+  assert.equal(items[0].daysLeft, 6);
+  calls = stub(200, JSON.stringify({ ok: true }));
+  await restoreTrash("7");
+  assert.equal(calls[0].url, "/api/v2/trash/7/restore");
+  assert.equal(calls[0].init.method, "POST");
+  stub(409, JSON.stringify({ error: { code: "original_gone", message: "The original isn't in the trash folder any more." } }));
+  await assert.rejects(restoreTrash("7"), (e: unknown) => e instanceof ApiError && e.code === "original_gone");
 });

@@ -9,6 +9,7 @@ export const REAL = {
   workflows: true,
   overview: false,
   settings: true,
+  trash: true,
 } as const;
 
 export type Group = keyof typeof REAL;
