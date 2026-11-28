@@ -26,10 +26,16 @@ type Builtin struct {
 
 // Claim takes the next job, or returns nil when none is ready.
 func (b Builtin) Claim(ctx context.Context, workerID string) (*Work, error) {
-	// The claim order is the queueOrder setting (page 11); an unset or unknown value is newest.
+	// The claim order is the queueOrder setting (page 11); an unset value is newest, and so is one the
+	// settings page would never save (a hand-edited database), rather than every claim failing.
 	var opts jobs.ClaimOptions
 	if b.DB != nil {
-		opts.Order = jobs.Order(settings.Get(ctx, b.DB, "processing.queueOrder", "newest"))
+		opts.Order = jobs.Order(settings.Get(ctx, b.DB, "processing.queueOrder", string(jobs.OrderNewest)))
+		switch opts.Order {
+		case jobs.OrderNewest, jobs.OrderOldest, jobs.OrderLargest, jobs.OrderSmallest:
+		default:
+			opts.Order = jobs.OrderNewest
+		}
 	}
 	j, err := b.Queue.Claim(ctx, workerID, opts)
 	if err != nil || j == nil {

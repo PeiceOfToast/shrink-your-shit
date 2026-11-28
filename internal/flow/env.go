@@ -18,6 +18,36 @@ type Emitter interface {
 	Emit(events.Event) error
 }
 
+// Want is what the runner must be able to encode for one attempt (L-HW-9): the codec and the
+// properties that decide whether a graphics card may take the job.
+type Want struct {
+	Codec encode.Codec
+	// TenBit is true when the output picture is ten bits.
+	TenBit bool
+	// HDR is true when the source's mastering data must survive the encode.
+	HDR bool
+	// Scales is true when the plan scales the picture.
+	Scales bool
+	// FullOK is true when nothing in the plan needs the processor's frames: no frame-rate change,
+	// no tone map, no bit-depth change.
+	FullOK bool
+	// Bitrate is true when the plan carries a set bitrate rather than a quality slider. The card
+	// encoders cannot follow one yet (L-HW-10 is quality-only), so such a job converts on the
+	// processor.
+	Bitrate bool
+}
+
+// Attempt is a picker's answer: the rungs to try in order (L-HW-5), the line the job log shows for
+// the card it chose, and, when it chose none, why in plain words (L-HW-9). Skipped says why a card
+// was passed over when another one took the job; the job log shows each sentence. A picker may name
+// the processor rung itself; the engine adds it otherwise, unless the step's ifGpuFails stops first.
+type Attempt struct {
+	Rungs   []encode.Rung
+	Line    string
+	Reason  string
+	Skipped []string
+}
+
 // Env is the world a flow is planned and run against: what this worker can encode, and the
 // services the engine needs. A step reads only Encoders and CardFamily from it; the rest belongs
 // to the engine.
@@ -36,9 +66,13 @@ type Env struct {
 	Sidecars safety.SidecarStore
 	// Replacer swaps the original for the new file when the save step replaces (S2-10b). nil in a try.
 	Replacer Replacer
-	// Pick chooses the encoder for one attempt (hw.Pick in stage 2). Stage 1 passes a picker that
-	// answers with the processor only.
-	Pick func(Want) (encode.Rung, error)
+	// Pick chooses the graphics card's rungs for one attempt (the worker passes flow.PickFromAnswer
+	// over the hardware detector's answer). nil means this worker has no card and every job runs on
+	// the processor.
+	Pick func(Want) (Attempt, error)
+	// GPUSlots is the worker's graphics slots (the Workers page): how many jobs may encode on the card
+	// at once. nil means no limit is set; the card still counts the jobs that use it (L-HW-8).
+	GPUSlots func() int
 	// LoadRevision reads one saved revision; the store's Revision method has this shape.
 	LoadRevision func(ctx context.Context, workflowID int64, rev int) (Flow, error)
 	// Progress receives ffmpeg's progress blocks. It is live only and never stored.

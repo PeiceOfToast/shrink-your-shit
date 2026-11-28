@@ -5,6 +5,7 @@ package jobs
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -121,6 +122,32 @@ func (q *Queue) Get(ctx context.Context, id int64) (Job, error) {
 		return Job{}, ErrNotFound
 	}
 	return j, err
+}
+
+// RunningFor returns the job a worker is on now: the one it started most recently. nil means none.
+func (q *Queue) RunningFor(ctx context.Context, workerID string) (*Job, error) {
+	j, err := scanJob(q.db.Read().QueryRowContext(ctx, `SELECT `+jobColumns+` FROM jobs
+		WHERE state = 'running' AND worker_id = ?
+		ORDER BY started_at DESC, id DESC LIMIT 1`, workerID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &j, nil
+}
+
+// DoneSince counts the jobs a worker finished successfully since a moment: the Workers page's "Done
+// today". The row clears its worker when it finishes, so the last attempt is the record of who ran it.
+func (q *Queue) DoneSince(ctx context.Context, workerID string, since time.Time) (int, error) {
+	var n int
+	err := q.db.Read().QueryRowContext(ctx, `
+		SELECT COUNT(DISTINCT j.id) FROM jobs j
+		JOIN job_attempts a ON a.job_id = j.id
+		WHERE j.state = 'done' AND j.finished_at >= ? AND a.worker_id = ?`,
+		ms(since), workerID).Scan(&n)
+	return n, err
 }
 
 // List returns jobs newest first, by id.

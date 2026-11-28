@@ -367,10 +367,14 @@ export interface Worker {
   slots: number; // files at once
   gpuSlots: number;
   gpu: { name: string; family: GpuFamily } | null;
-  now: { jobId: string; file: string; step: JobStepRef } | null;
+  // The latest step the running job reached; null before the job's first step starts.
+  now: { jobId: string; file: string; step: JobStepRef | null } | null;
   doneToday: number;
   // True while the all-workers switch is off. The worker's own state is kept, so it returns when the switch goes back on.
   pausedGlobally: boolean;
+  // The latest encoder test this page asked for (POST .../capabilities/test): null before the first one. Poll until
+  // runId is the one POST answered and running is false; finishedAt is then an RFC 3339 time.
+  test: { runId: string; running: boolean; finishedAt: string | null } | null;
 }
 
 export interface WorkerLibrary {
@@ -397,6 +401,12 @@ export interface WorkerDetail extends Worker {
   libraries: WorkerLibrary[];
   // Libraries added since this worker's list was last saved and not on it. The next PATCH {libraries} clears it.
   newLibraries: { libraryId: string; name: string }[];
+}
+
+// POST /api/v2/workers/{id}/capabilities/test: the run's id. Its results arrive as `probe` events on
+// /api/v2/events, scoped to the worker, and are kept in the System log.
+export interface WorkerTest {
+  runId: string;
 }
 
 export interface Pairing {

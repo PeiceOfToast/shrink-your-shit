@@ -58,7 +58,7 @@ const STARTER_ANSWERS: Record<string, Record<string, unknown>> = {
     slower: false,
     subtitleLanguages: [],
     subtitles: "keep_all",
-    useGpu: false,
+    useGpu: true,
   },
 };
 
