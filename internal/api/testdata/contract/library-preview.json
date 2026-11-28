@@ -16,5 +16,5 @@
   "method": "GET",
   "path": "/api/v2/libraries/{id}/preview",
   "status": 200,
-  "type": "LibraryPreview"
+  "type": "Preview"
 }

@@ -44,5 +44,5 @@ func TestContractLibraryPreviewGolden(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("preview = %d: %s", rec.Code, rec.Body)
 	}
-	writeGolden(t, "library-preview", "LibraryPreview", "GET", "/api/v2/libraries/{id}/preview", rec)
+	writeGolden(t, "library-preview", "Preview", "GET", "/api/v2/libraries/{id}/preview", rec)
 }
