@@ -212,3 +212,8 @@ test("with HEVC, ten-bit is not greyed and not a problem", () => {
   assert.equal(check.problems.find((x) => x.code === "video.bitdepth_h264"), undefined);
   assert.equal(check.disabled.find((x) => x.field === "bitDepth"), undefined);
 });
+
+test("the audio summary follows Keep every language", () => {
+  assert.match(checkFlow(withAnswers({ allLanguages: true, languages: [] })).summaries.audio, / · every language · /);
+  assert.match(checkFlow(withAnswers({ allLanguages: false, languages: [] })).summaries.audio, / · my languages · /);
+});

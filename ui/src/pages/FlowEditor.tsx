@@ -186,6 +186,9 @@ function Editor({ id, initial }: { id: string; initial: Loaded }) {
 
   const video = settings("video");
   const audio = settings("audio");
+  const audioLanguages = (audio.languages as string[] | undefined) ?? [];
+  // Keep every language (#883). A flow saved before the flag has none: a list then means only those languages.
+  const keepAll = audio.allLanguages === undefined ? audioLanguages.length === 0 : audio.allLanguages !== false;
   const save_ = settings("save");
 
   // The file types the picked video can't go in: the server's reasons, by choice key.
@@ -261,17 +264,29 @@ function Editor({ id, initial }: { id: string; initial: Loaded }) {
             </p>
           </div>
         )}
-        <Row
-          label="Languages"
-          full
-          hint={
-            ((audio.languages as string[] | undefined) ?? []).length === 0
-              ? "None picked keeps every language."
-              : "Other tracks are removed; if none match, the main track stays. Original language keeps the film's own language, whatever it is."
-          }
-        >
-          <LanguageChips label="Languages" value={(audio.languages as string[] | undefined) ?? []} onChange={(languages) => set("audio", { languages })} />
+        <Row label="Languages">
+          <label style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
+            <input
+              type="checkbox"
+              checked={keepAll}
+              onChange={(e) => set("audio", e.target.checked ? { allLanguages: true, languages: [] } : { allLanguages: false })}
+            />
+            Keep every language
+          </label>
         </Row>
+        {!keepAll && (
+          <Row
+            label="Keep these languages"
+            full
+            hint={
+              audioLanguages.length === 0
+                ? "None picked keeps my languages (Settings, General)."
+                : "Other tracks are removed; if none match, the main track stays. Original language keeps the film's own language, whatever it is."
+            }
+          >
+            <LanguageChips label="Keep these languages" value={audioLanguages} onChange={(languages) => set("audio", { languages })} />
+          </Row>
+        )}
         <Advanced summary="Advanced" description="Codec, bitrate, sample rate, stereo from surround, loudness, commentary, default track, original track">
           <AudioAdvanced s={audio} set={(patch) => set("audio", patch)} greyed={(field) => greyed("audio", field)} />
         </Advanced>
