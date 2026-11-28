@@ -189,6 +189,30 @@ func TestFFmpegArgsFullGPUHasNoUpload(t *testing.T) {
 	}
 }
 
+// TestQSVFullPipelineReservesDecoderFrames: the QSV decoder's default surface pool is too small when
+// its frames go straight into hevc_qsv, so ffmpeg fails every allocation ("Cannot allocate memory",
+// "get_buffer() failed") and writes a file that is missing most of its frames and repeats
+// timestamps. The full rung asks for spare decoded frames on its input the way the hybrid row asks
+// for spare upload frames in its filter (L-HW-11). VA-API's pool did not starve in the proof, so it
+// is left alone.
+func TestQSVFullPipelineReservesDecoderFrames(t *testing.T) {
+	res := buildOK(t, basePlan(CodecHEVC), baseInfo(), fullRung(FamilyQSV, CodecHEVC, ""))
+	input := argAt(res.Argv, "-i")
+	if input < 0 {
+		t.Fatalf("no input in %v", res.Argv)
+	}
+	wantPair(t, res.Argv, "-extra_hw_frames", "16", input)
+
+	hybrid := buildOK(t, basePlan(CodecHEVC), baseInfo(), cardRung(FamilyQSV, CodecHEVC, ""))
+	if argAt(hybrid.Argv, "-extra_hw_frames") >= 0 {
+		t.Errorf("the hybrid row decodes on the processor, so it needs no decoder pool: %v", hybrid.Argv)
+	}
+	vaapi := buildOK(t, basePlan(CodecHEVC), baseInfo(), fullRung(FamilyVAAPI, CodecHEVC, renderNode))
+	if argAt(vaapi.Argv, "-extra_hw_frames") >= 0 {
+		t.Errorf("VA-API's full pipeline did not starve in the proof, so it is unchanged: %v", vaapi.Argv)
+	}
+}
+
 // TestFFmpegArgsFullGPUOnlyForQSVAndVAAPI: NVENC never decodes (L-HW-17), and the processor is not
 // a card (L-HW-11).
 func TestFFmpegArgsFullGPUOnlyForQSVAndVAAPI(t *testing.T) {

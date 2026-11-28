@@ -214,7 +214,11 @@ func rungSetup(rung Rung) (setup, decode []string) {
 	case FamilyQSV:
 		setup = []string{"-init_hw_device", "qsv=qsv:hw", "-filter_hw_device", "qsv"}
 		if rung.Decode == DecodeHardware {
-			decode = []string{"-hwaccel", "qsv", "-hwaccel_output_format", "qsv"}
+			// The decoder's default pool is too small to feed the encoder directly: every
+			// allocation then fails ("Cannot allocate memory") and ffmpeg drops most of the
+			// frames, writing repeated timestamps (proven on gen9 with iHD 24.1). The hybrid row
+			// gives its upload the same spare surfaces (L-HW-11).
+			decode = []string{"-hwaccel", "qsv", "-hwaccel_output_format", "qsv", "-extra_hw_frames", "16"}
 		}
 	case FamilyVAAPI:
 		setup = []string{"-init_hw_device", "vaapi=va:" + rung.Device, "-filter_hw_device", "va"}
