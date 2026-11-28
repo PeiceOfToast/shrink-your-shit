@@ -7,25 +7,55 @@ import (
 )
 
 // ResolveMyLanguages is the run-time lookup of "my languages" (page 07): an audio step with "keep every language" off
-// and an empty list keeps the person's languages, the codes in general.languages as they are when the run starts. A
-// flow with no "allLanguages" flag is an older one, where an empty list meant every language, and is left alone.
+// and an empty list keeps the person's languages, the codes in general.languages as they are when the run starts. An
+// empty result is kept as every language, and the caller notes it (decisions.md, 11-28).
+//
+// A flow saved before the flag had none: an empty list then meant every language, and a list meant that list. Its
+// flag is written here with that meaning, so the engine reads an explicit value for every audio step.
 func ResolveMyLanguages(f Flow, mine []string) Flow {
 	return rewriteAudio(f, func(m map[string]json.RawMessage) bool {
-		var all bool
-		raw, ok := m["allLanguages"]
-		if !ok || json.Unmarshal(raw, &all) != nil || all {
-			return false
-		}
-		// A list left out of the flow is an empty one.
 		var list []string
 		if raw, ok := m["languages"]; ok && json.Unmarshal(raw, &list) != nil {
 			return false
 		}
-		if len(list) != 0 {
-			return false
+		if raw, ok := m["allLanguages"]; !ok {
+			// The older meaning: no list is every language, a list is that list.
+			return setFlag(m, len(list) == 0)
+		} else {
+			var all bool
+			if json.Unmarshal(raw, &all) != nil || all || len(list) != 0 {
+				return false
+			}
 		}
 		return setList(m, "languages", dedupe(mine))
 	})
+}
+
+// MineIsEmpty reports whether a flow keeps "my languages" with nothing set, so the run keeps every language and notes
+// it. It reads the same settings ResolveMyLanguages does.
+func MineIsEmpty(f Flow, mine []string) bool {
+	return len(mine) == 0 && HasMyLanguagesStep(f)
+}
+
+// HasMyLanguagesStep reports whether an audio step keeps "my languages" (the flag off and no list of its own).
+func HasMyLanguagesStep(f Flow) bool {
+	for _, st := range f.Steps {
+		if st.Type != "audio.tracks" {
+			continue
+		}
+		var m map[string]json.RawMessage
+		if json.Unmarshal(st.Settings, &m) != nil {
+			continue
+		}
+		var all bool
+		var list []string
+		if raw, ok := m["allLanguages"]; ok && json.Unmarshal(raw, &all) == nil && !all {
+			if raw, ok := m["languages"]; !ok || json.Unmarshal(raw, &list) != nil || len(list) == 0 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // rewriteAudio applies change to each audio step's settings and reports whether it changed one.
@@ -72,4 +102,13 @@ func dedupe(list []string) []string {
 		}
 	}
 	return out
+}
+
+func setFlag(m map[string]json.RawMessage, all bool) bool {
+	b, err := json.Marshal(all)
+	if err != nil {
+		return false
+	}
+	m["allLanguages"] = b
+	return true
 }

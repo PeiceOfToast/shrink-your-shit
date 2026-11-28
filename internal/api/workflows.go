@@ -463,6 +463,8 @@ func (s *Server) tryWorkflow(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "The request is missing a flow.", "flow", 0)
 		return
 	}
+	// "My languages" is looked up as a run looks it up, so the try shows what the run will keep (review item 4).
+	f = flow.ResolveMyLanguages(f, s.myLanguages(r))
 	if rep := flow.Validate(f, flow.ValidateContext{Env: flow.Env{}}); len(rep.Problems) > 0 {
 		writeError(w, http.StatusConflict, "has_problems", "Fix this first: "+rep.Problems[0].Message, "", 0)
 		return

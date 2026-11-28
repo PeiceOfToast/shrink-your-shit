@@ -157,6 +157,14 @@ func applyDefaults(v reflect.Value, present map[string]bool) error {
 		if name == "" || present[name] {
 			continue
 		}
+		// defaultFrom names a list field: a flag left out of an older flow is true when that list is empty and false
+		// when it has codes, so an older flow keeps the meaning it had (review item 6; see audio's allLanguages).
+		if from := sf.Tag.Get("defaultFrom"); from != "" {
+			if index, ok := settingsField(typ, from); ok && v.Field(index).Kind() == reflect.Slice && sf.Type.Kind() == reflect.Bool {
+				v.Field(i).SetBool(v.Field(index).Len() == 0)
+				continue
+			}
+		}
 		text, ok := sf.Tag.Lookup("default")
 		if !ok {
 			continue

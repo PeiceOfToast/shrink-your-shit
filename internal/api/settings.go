@@ -42,8 +42,7 @@ func (s *Server) patchSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body map[string]json.RawMessage
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "The request is not valid JSON.", "", 0)
+	if !decode(w, r, &body) {
 		return
 	}
 	doc, changes, err := settings.Patch(r.Context(), rs.DB, s.settingsOptions(rs), body)

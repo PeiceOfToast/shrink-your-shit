@@ -81,3 +81,40 @@ func TestSettingsPatchWritesOneEventPerChange(t *testing.T) {
 		t.Errorf("settings.changed events = %d, want one per change (2)", n)
 	}
 }
+
+// M1: a null list is refused with its field, and nothing is saved; the page's list stays a list.
+func TestSettingsRefusesNullListsAndSavesNothing(t *testing.T) {
+	e := newEnv(t, true)
+	cookie := e.setup()
+	h := map[string]string{"Cookie": cookie.String()}
+	rec := e.do(http.MethodPatch, "/api/v2/settings", `{"general":{"languages":null}}`, write(h), false)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status %d, want 400; body %s", rec.Code, rec.Body)
+	}
+	var env struct {
+		Error struct {
+			Code  string `json:"code"`
+			Field string `json:"field"`
+		} `json:"error"`
+	}
+	decodeInto(t, rec, &env)
+	if env.Error.Code != "invalid_setting" || env.Error.Field != "general.languages" {
+		t.Errorf("error = %+v, want invalid_setting on general.languages", env.Error)
+	}
+	rec = e.do(http.MethodGet, "/api/v2/settings", "", h, false)
+	if strings.Contains(rec.Body.String(), `"languages":null`) {
+		t.Errorf("the page's languages became null: %s", rec.Body)
+	}
+}
+
+// M2: the PATCH body is capped like every other body route: an oversized body is refused, not read whole.
+func TestSettingsPatchBodyIsCapped(t *testing.T) {
+	e := newEnv(t, true)
+	cookie := e.setup()
+	h := map[string]string{"Cookie": cookie.String()}
+	big := `{"general":{"serverName":"` + strings.Repeat("x", 70<<10) + `"}}`
+	rec := e.do(http.MethodPatch, "/api/v2/settings", big, write(h), false)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status %d for a 70 KiB body, want 400; body %s", rec.Code, rec.Body)
+	}
+}

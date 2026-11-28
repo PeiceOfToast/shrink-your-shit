@@ -11,7 +11,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"regexp"
+	"strings"
 
 	"github.com/PeiceOfToast/shrink-your-shit/internal/store"
 )
@@ -270,6 +272,15 @@ func applyField(d *Doc, key string, raw json.RawMessage) error {
 	f, ok := fieldByKey(key)
 	if !ok {
 		return &Refusal{Code: "unknown_setting", Field: key, Message: "There is no setting called " + key + "."}
+	}
+	// null is a value only where the field is a pointer (the accent colour): a list, a number, a flag or a text would
+	// be saved as null and crash the page that reads it (review M1).
+	if strings.TrimSpace(string(raw)) == "null" {
+		switch reflect.ValueOf(f.get(*d)).Kind() {
+		case reflect.Ptr, reflect.Interface, reflect.Invalid:
+		default:
+			return refuse(key, "Use a value for "+key+", not nothing.")
+		}
 	}
 	if err := f.set(d, raw); err != nil {
 		return &Refusal{Code: "invalid_setting", Field: key, Message: "Use a value of the right kind for " + key + "."}
