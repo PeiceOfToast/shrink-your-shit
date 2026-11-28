@@ -465,7 +465,7 @@ export function currentToken(): string | null {
 
 export function changePassword(password: string): Promise<void> {
   return respond(() => {
-    if (password.length < 8) throw new ApiError("password_too_short", "Use at least 8 characters.", "password");
+    if ([...password].length < 8) throw new ApiError("password_too_short", "Use at least 8 characters.", "password");
     if (new TextEncoder().encode(password).length > 72) throw new ApiError("password_too_long", "Use 72 bytes or fewer.", "password");
   });
 }

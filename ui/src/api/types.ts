@@ -661,3 +661,8 @@ export interface LogParams {
 
 // The body of any refusal (4xx/5xx): http.ts turns it into an ApiError.
 export type ErrorReply = { error: { code: string; message: string; field?: string } };
+
+// The access token (GET /api/v2/access/token, POST /api/v2/access/token/rotate): the token the sign-in link carries.
+export interface AccessToken {
+  token: string;
+}

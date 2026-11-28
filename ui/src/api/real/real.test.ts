@@ -1,11 +1,13 @@
 // The real client's request paths and bodies, with a stubbed fetch (no server). Every call carries X-SYP: 1 and same-origin.
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { request } from "../http.ts";
 import { ApiError } from "../errors.ts";
 import { convertAgain, getJobNeighbours, getJobs, runJobsAction } from "./jobs.ts";
 import { getLibraries, createLibrary, patchLibrary, deleteLibrary } from "./libraries.ts";
 import { getSettings, patchSettings } from "./settings.ts";
+import { changePassword, getToken, rotateToken } from "./access.ts";
 import { getTrash, restoreTrash } from "./trash.ts";
 import { getAttention, getOverview } from "./overview.ts";
 import { createDraft, deleteWorkflow, duplicateWorkflow, exportWorkflow, getFlow, getGuideAnswers, guidePreview, listWorkflows, publishFlow, putAnswers, putDraft, tryFlow, validateFlow } from "./workflows.ts";
@@ -237,4 +239,48 @@ test("removing a library sends DELETE and returns ok", async () => {
   assert.deepEqual(await deleteLibrary("2"), { ok: true });
   assert.equal(calls[0].url, "/api/v2/libraries/2");
   assert.equal(calls[0].init.method, "DELETE");
+});
+
+// Settings > Access against the server: the password (204), the token (get and rotate), with the goldens' bodies.
+const accessGolden = (name: string) => JSON.parse(readFileSync(new URL(`../../../../internal/api/testdata/contract/${name}`, import.meta.url), "utf8"));
+
+test("changing the password posts it and expects a 204 with nothing back", async () => {
+  const calls: { url: string; init: RequestInit }[] = [];
+  globalThis.fetch = (async (url: string, init: RequestInit) => {
+    calls.push({ url, init });
+    return new Response(null, { status: 204 });
+  }) as typeof fetch;
+  assert.equal(await changePassword("correct horse battery"), null);
+  assert.equal(calls[0].url, "/api/v2/access/password");
+  assert.equal(calls[0].init.method, "POST");
+  assert.deepEqual(JSON.parse(String(calls[0].init.body)), { password: "correct horse battery" });
+});
+
+test("a password the server refuses shows its sentence on the password field", async () => {
+  stub(400, JSON.stringify({ error: { code: "password_too_short", message: "Use at least 8 characters.", field: "password" } }));
+  await assert.rejects(changePassword("short"), (e: unknown) =>
+    e instanceof ApiError && e.code === "password_too_short" && e.field === "password" && e.message === "Use at least 8 characters.");
+});
+
+test("the access token is read from its path, and has the golden's shape", async () => {
+  const golden = accessGolden("access-token.json");
+  const calls = stub(200, JSON.stringify(golden.body));
+  const out = await getToken();
+  assert.equal(calls[0].url, "/api/v2/access/token");
+  assert.equal(calls[0].init.method, "GET");
+  assert.deepEqual(Object.keys(out), Object.keys(golden.body));
+});
+
+test("no token yet is the server's no_token refusal", async () => {
+  stub(404, JSON.stringify({ error: { code: "no_token", message: "There's no access token yet." } }));
+  await assert.rejects(getToken(), (e: unknown) => e instanceof ApiError && e.code === "no_token");
+});
+
+test("rotating the token posts to its path and answers the new token", async () => {
+  const golden = accessGolden("access-token-rotate.json");
+  const calls = stub(200, JSON.stringify(golden.body));
+  const out = await rotateToken();
+  assert.equal(calls[0].url, "/api/v2/access/token/rotate");
+  assert.equal(calls[0].init.method, "POST");
+  assert.deepEqual(Object.keys(out), Object.keys(golden.body));
 });

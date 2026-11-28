@@ -26,3 +26,9 @@ test("the dev state 'update' shows a newer release with its notes link", async (
     setForcedState("none");
   }
 });
+
+test("the password length counts characters: seven emoji are seven, and too short", async () => {
+  const { changePassword } = await import("./mockSettings.ts");
+  await assert.rejects(changePassword("\u{1F600}".repeat(7)), (e: unknown) => e instanceof ApiError && e.code === "password_too_short");
+  await changePassword("\u{1F600}".repeat(8));
+});
