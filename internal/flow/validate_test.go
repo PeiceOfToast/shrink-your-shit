@@ -52,15 +52,23 @@ func TestValidateStarterHasNoProblems(t *testing.T) {
 	if !found {
 		t.Errorf("disabled = %+v, want the WebM choice greyed with its reason", rep.Disabled)
 	}
-	// Replacing the original is item 10's; the page greys that choice with a plain why.
+	// A different folder waits for a later update, so the page greys that choice with a plain why. Replacing the
+	// original is built, so it is not greyed.
 	found = false
+	replaceGreyed := false
 	for _, d := range rep.Disabled {
-		if d.StepID == "save" && d.Field == "where" && d.Value == "replace" {
+		if d.StepID == "save" && d.Field == "where" && d.Value == "folder" {
 			found = d.Why != ""
+		}
+		if d.StepID == "save" && d.Field == "where" && d.Value == "replace" {
+			replaceGreyed = true
 		}
 	}
 	if !found {
-		t.Errorf("disabled = %+v, want Replace the original greyed with its reason", rep.Disabled)
+		t.Errorf("disabled = %+v, want A different folder greyed with its reason", rep.Disabled)
+	}
+	if replaceGreyed {
+		t.Errorf("disabled = %+v, want Replace the original not greyed", rep.Disabled)
 	}
 }
 

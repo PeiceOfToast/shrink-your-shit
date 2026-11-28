@@ -94,9 +94,7 @@ func TestEverySentenceIsPinned(t *testing.T) {
 			problems: []string{`keepOriginal|audio.not_yet|Keeping the original track as well is not built yet.`}},
 
 		// Save's own rules and the file types the flow rules out.
-		{name: "save replace", save: `{"container":"mkv","where":"replace"}`,
-			problems: []string{`where|save.not_yet|Replacing the original comes in a later update; for now the new file is saved next to it.`},
-			disabled: []string{`save|where|replace|Replacing the original comes in a later update; for now the new file is saved next to it.`}},
+		{name: "save replace is built", save: `{"container":"mkv","where":"replace"}`},
 		{name: "save folder", save: `{"container":"mkv","where":"folder","folder":"/library/Shrunk"}`,
 			problems: []string{`where|save.not_yet|Saving to a different folder comes in a later update; for now the new file is saved next to it.`},
 			disabled: []string{`save|where|folder|Saving to a different folder comes in a later update; for now the new file is saved next to it.`}},
@@ -137,7 +135,6 @@ func TestEverySentenceIsPinned(t *testing.T) {
 		"Advanced is set: FLAC. It replaces Format above.",
 		"Making stereo from surround happens when the channels go down to Stereo or Mono; pick one above.",
 		"FLAC is lossless, so it has no bitrate to set.",
-		"Replacing the original comes in a later update; for now the new file is saved next to it.",
 		"Saving to a different folder comes in a later update; for now the new file is saved next to it.",
 		"WebM needs AV1 video. Pick AV1 in Video to use it.",
 		"WebM needs Opus audio. Pick Opus in Audio to use it.",

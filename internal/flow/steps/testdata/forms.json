@@ -471,8 +471,7 @@
               {
                 "value": "replace",
                 "label": "Replace the original",
-                "available": false,
-                "why": "Replacing the original comes in a later update; for now the new file is saved next to it."
+                "available": true
               },
               {
                 "value": "next_to",
