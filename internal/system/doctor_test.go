@@ -122,6 +122,16 @@ func TestDoctorSaysWhatIsWrong(t *testing.T) {
 		{"libraries unreadable", func(s *Sources) {
 			s.Libraries = func(context.Context) ([]Library, error) { return nil, errors.New("database is locked") }
 		}, "libraries", Bad, "database is locked"},
+		{"library disk low", func(s *Sources) {
+			s.DiskFree = func(string) (uint64, error) { return 3 << 30, nil }
+		}, "library-1", Warn, "low space"},
+		{"library disk low against a raised limit", func(s *Sources) {
+			s.DiskFree = func(string) (uint64, error) { return 40 << 30, nil }
+			s.LowSpaceGB = func() int { return 50 }
+		}, "library-1", Warn, "low space"},
+		{"library free space unreadable", func(s *Sources) {
+			s.DiskFree = func(string) (uint64, error) { return 0, errors.New("no such volume") }
+		}, "library-1", Warn, "couldn't be read"},
 		{"card failed its test", func(s *Sources) {
 			s.Cards = func() ([]string, bool, bool) { return nil, true, true }
 		}, "gpu", Bad, "did not pass"},
@@ -195,7 +205,13 @@ func TestDoctorSaysOnlyOnAChange(t *testing.T) {
 // is not.
 func TestDoctorFirstRunSaysWhatIsWrong(t *testing.T) {
 	src, sink := healthy(t)
-	src.DiskFree = func(string) (uint64, error) { return 3 << 30, nil }
+	dataDir := src.DataDir
+	src.DiskFree = func(path string) (uint64, error) {
+		if path == dataDir {
+			return 3 << 30, nil
+		}
+		return 400 << 30, nil
+	}
 	NewDoctor(src).Run(context.Background())
 	said := sink.all()
 	if len(said) != 1 || said[0].Code != "health.failed" || !strings.Contains(said[0].Message, "Disk space") {
@@ -302,13 +318,13 @@ func TestDoctorStartRunsNowAndOnASchedule(t *testing.T) {
 func hangingLibrary(t *testing.T, entered, release chan struct{}) {
 	t.Helper()
 	old := checkLibrary
-	checkLibrary = func(lib Library) Check {
+	checkLibrary = func(d *Doctor, lib Library) Check {
 		select {
 		case entered <- struct{}{}:
 		default:
 		}
 		<-release
-		return old(lib)
+		return old(d, lib)
 	}
 	t.Cleanup(func() { checkLibrary = old })
 }
@@ -400,6 +416,78 @@ func TestDoctorLibraryThatDoesNotAnswerIsBad(t *testing.T) {
 	}
 	if c.Status != Bad || !strings.Contains(c.Detail, "did not answer in time") {
 		t.Errorf("library-1 = %q %q, want bad with 'did not answer in time'", c.Status, c.Detail)
+	}
+}
+
+// TestDoctorLibraryWriteProbeIsBad: the folder check uses the library's own write probe, so a folder that takes the
+// file but refuses to give it back is a problem, not an ok check with a hidden file left behind.
+func TestDoctorLibraryWriteProbeIsBad(t *testing.T) {
+	old := checkWritable
+	checkWritable = func(string) error { return errors.New("remove .syp-check-1: permission denied") }
+	t.Cleanup(func() { checkWritable = old })
+	src, _ := healthy(t)
+	c := find(NewDoctor(src).Run(context.Background()), "library-1")
+	if c == nil || c.Status != Bad || !strings.Contains(c.Detail, "permission denied") {
+		t.Errorf("library-1 = %+v, want bad with the probe's error", c)
+	}
+}
+
+// TestDoctorLibraryFolderThatRefusesFilesIsBad: with the real probe, a folder the library would refuse for writing
+// is bad on the health page too, and a folder it accepts is left exactly as it was.
+func TestDoctorLibraryFolderThatRefusesFilesIsBad(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root writes into a read-only folder")
+	}
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+	src, _ := healthy(t)
+	src.Libraries = func(context.Context) ([]Library, error) { return []Library{{ID: 1, Name: "Films", Path: dir}}, nil }
+	c := find(NewDoctor(src).Run(context.Background()), "library-1")
+	if c == nil || c.Status != Bad || !strings.Contains(c.Detail, "can't be written") {
+		t.Errorf("library-1 = %+v, want bad because the folder refuses a new file", c)
+	}
+	if entries, err := os.ReadDir(dir); err != nil || len(entries) != 0 {
+		t.Errorf("the refused folder holds %v (err %v), want it untouched", entries, err)
+	}
+}
+
+// TestDoctorLibraryFolderIsLeftClean: the probe's file is gone once the check answers, so a passing folder does not
+// collect hidden files.
+func TestDoctorLibraryFolderIsLeftClean(t *testing.T) {
+	dir := t.TempDir()
+	src, _ := healthy(t)
+	src.Libraries = func(context.Context) ([]Library, error) { return []Library{{ID: 1, Name: "Films", Path: dir}}, nil }
+	c := find(NewDoctor(src).Run(context.Background()), "library-1")
+	if c == nil || c.Status != OK {
+		t.Fatalf("library-1 = %+v, want ok for a writable folder", c)
+	}
+	if entries, err := os.ReadDir(dir); err != nil || len(entries) != 0 {
+		t.Errorf("the checked folder holds %v (err %v), want it left empty", entries, err)
+	}
+}
+
+// TestDoctorLibraryFreeSpaceIsTheFoldersDisk: each library is measured where its folder is, not on the data disk.
+func TestDoctorLibraryFreeSpaceIsTheFoldersDisk(t *testing.T) {
+	src, _ := healthy(t)
+	lib := t.TempDir()
+	src.Libraries = func(context.Context) ([]Library, error) { return []Library{{ID: 1, Name: "Films", Path: lib}}, nil }
+	var asked []string
+	src.DiskFree = func(path string) (uint64, error) {
+		asked = append(asked, path)
+		return 400 << 30, nil
+	}
+	NewDoctor(src).Run(context.Background())
+	var atLib bool
+	for _, p := range asked {
+		if p == lib {
+			atLib = true
+		}
+	}
+	if !atLib {
+		t.Errorf("the free space was read at %v, want the library's own folder %s", asked, lib)
 	}
 }
 

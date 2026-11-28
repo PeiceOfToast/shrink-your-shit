@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/PeiceOfToast/shrink-your-shit/internal/events"
+	"github.com/PeiceOfToast/shrink-your-shit/internal/library"
 )
 
 // Status is one health check's answer (page 11): ok, a warning, a problem, or a thing that is not there.
@@ -96,7 +97,12 @@ var LibraryEvery = time.Hour
 var LibraryTimeout = 10 * time.Second
 
 // checkLibrary is one folder's check, a variable so a test can make one hang.
-var checkLibrary = libraryCheck
+var checkLibrary = (*Doctor).libraryCheck
+
+// checkWritable proves a folder takes a new file and gives the file back. It is the library's own probe
+// (library.CheckWritable), so this check and "Check this folder" agree; a variable so a test can make a folder
+// refuse.
+var checkWritable = library.CheckWritable
 
 // The fix for the graphics card check: page 10's Test the encoders, which starts the pass whose result the check
 // reports. Its POST answers the run's id, not a doctor: a page asks GET /doctor once the run has finished.
@@ -270,7 +276,7 @@ func (d *Doctor) libraries(ctx context.Context) []Check {
 	}
 	out := make([]Check, 0, len(libs))
 	for _, lib := range libs {
-		out = append(out, folderCheckWithin(lib, LibraryTimeout))
+		out = append(out, d.folderCheckWithin(lib, LibraryTimeout))
 	}
 	return out
 }
@@ -278,9 +284,9 @@ func (d *Doctor) libraries(ctx context.Context) []Check {
 // folderCheckWithin is one library folder's check, given until timeout to answer. The check reads a folder the OS may
 // hold in a way that does not end (a share that has gone away), so it runs beside a timer: an answer that is late is
 // a problem, not a pass that waits.
-func folderCheckWithin(lib Library, timeout time.Duration) Check {
+func (d *Doctor) folderCheckWithin(lib Library, timeout time.Duration) Check {
 	done := make(chan Check, 1)
-	go func() { done <- checkLibrary(lib) }()
+	go func() { done <- checkLibrary(d, lib) }()
 	select {
 	case c := <-done:
 		return c
@@ -295,8 +301,9 @@ func folderCheck(lib Library) Check {
 	return Check{ID: fmt.Sprintf("library-%d", lib.ID), Label: "Library " + lib.Name}
 }
 
-// libraryCheck is one library folder's answer.
-func libraryCheck(lib Library) Check {
+// libraryCheck is one library folder's answer: it is there, the app can write in it (the library's own probe), and
+// the disk under it has room for what processing will write, against page 11's processing.lowSpaceGB.
+func (d *Doctor) libraryCheck(lib Library) Check {
 	c := folderCheck(lib)
 	fi, err := os.Stat(lib.Path)
 	if err != nil {
@@ -307,14 +314,29 @@ func libraryCheck(lib Library) Check {
 		return badCheck(c, "The folder "+lib.Path+" is not a folder.",
 			"Change the folder on the Libraries page.")
 	}
-	f, err := os.CreateTemp(lib.Path, ".health-*")
-	if err != nil {
+	if err := checkWritable(lib.Path); err != nil {
 		return badCheck(c, "The folder "+lib.Path+" can't be written: "+err.Error()+".",
 			"Check the folder's permissions, or change it on the Libraries page.")
 	}
-	f.Close()
-	os.Remove(f.Name())
 	c.Status, c.Detail = OK, "The folder "+lib.Path+" is there and can be written."
+	if d.src.DiskFree == nil {
+		return c
+	}
+	free, err := d.src.DiskFree(lib.Path)
+	low := LowSpaceDefault
+	if d.src.LowSpaceGB != nil {
+		low = d.src.LowSpaceGB()
+	}
+	switch {
+	case err != nil:
+		c.Status, c.Detail, c.Hint = Warn,
+			"The folder "+lib.Path+" is there and can be written, but its free space couldn't be read: "+err.Error()+".",
+			hint("Check the drive is connected.")
+	case free < uint64(low)<<30:
+		c.Status, c.Detail, c.Hint = Warn,
+			"The folder "+lib.Path+" is there and can be written, but its disk has low space: "+gb(free)+" free.",
+			hint("Free some space on that drive, or lower the limit in Processing.")
+	}
 	return c
 }
 
