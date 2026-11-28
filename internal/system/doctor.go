@@ -84,25 +84,17 @@ type Emitter interface {
 // LowSpaceDefault is page 11's low-space limit when nothing is configured.
 const LowSpaceDefault = 10
 
-// Every is how often the checks run after the start's first run. A variable so a test can shorten it.
-var Every = 5 * time.Minute
-
-// LibraryEvery is how often the library folders are checked. A folder check writes a small file into the person's
-// media, so it runs once an hour rather than with every pass (and on ?retest=1). A variable so a test can shorten it.
-var LibraryEvery = time.Hour
-
-// LibraryTimeout is how long one library folder gets to answer before the check calls it a problem. A folder on a
-// share that has gone away can hold a read for a long time; the pass must not wait with it. A variable so a test
-// can shorten it.
-var LibraryTimeout = 10 * time.Second
-
-// checkLibrary is one folder's check, a variable so a test can make one hang.
-var checkLibrary = (*Doctor).libraryCheck
-
-// checkWritable proves a folder takes a new file and gives the file back. It is the library's own probe
-// (library.CheckWritable), so this check and "Check this folder" agree; a variable so a test can make a folder
-// refuse.
-var checkWritable = library.CheckWritable
+// The cadences. They are a Doctor's own fields (below); these are what NewDoctor starts a doctor with.
+const (
+	// every is how often the checks run after the start's first run.
+	every = 5 * time.Minute
+	// libEvery is how often the library folders are checked. A folder check writes a small file into the person's
+	// media, so it runs once an hour rather than with every pass (and on ?retest=1).
+	libEvery = time.Hour
+	// libTimeout is how long one library folder gets to answer before the check calls it a problem. A folder on a
+	// share that has gone away can hold a read for a long time; the pass must not wait with it.
+	libTimeout = 10 * time.Second
+)
 
 // The fix for the graphics card check: page 10's Test the encoders, which starts the pass whose result the check
 // reports. Its POST answers the run's id, not a doctor: a page asks GET /doctor once the run has finished.
@@ -119,6 +111,14 @@ type Doctor struct {
 	ran    bool
 	libs   []Check
 	libsAt time.Time
+
+	// The pass's own knobs. They are fields, never package state: a test changes one doctor, so nothing it leaves
+	// running can race with another test.
+	every    time.Duration       // how often a pass runs after the first
+	libEvery time.Duration       // how often the library folders are checked
+	libTime  time.Duration       // how long one library folder gets to answer
+	folder   func(Library) Check // one library folder's check
+	writable func(string) error  // a folder takes a new file and gives it back
 }
 
 // NewDoctor makes the health check. now nil is time.Now.
@@ -126,15 +126,18 @@ func NewDoctor(src Sources) *Doctor {
 	if src.Now == nil {
 		src.Now = time.Now
 	}
-	return &Doctor{src: src}
+	d := &Doctor{src: src, every: every, libEvery: libEvery, libTime: libTimeout, writable: library.CheckWritable}
+	d.folder = d.libraryCheck
+	return d
 }
 
-// Start runs the checks in the background now, then every Every until ctx ends. It returns at once: the checks read
-// the machine (a library folder on a share can be slow to answer) and the API must not wait for the first pass.
+// Start runs the checks in the background now, then on the doctor's interval until ctx ends. It returns at once:
+// the checks read the machine (a library folder on a share can be slow to answer) and the API must not wait for the
+// first pass.
 func (d *Doctor) Start(ctx context.Context) {
 	go func() {
 		d.Run(ctx)
-		t := time.NewTicker(Every)
+		t := time.NewTicker(d.every)
 		defer t.Stop()
 		for {
 			select {
@@ -179,7 +182,7 @@ func (d *Doctor) run(ctx context.Context, withLibs bool) Result {
 	fresh := false
 	if d.src.Libraries != nil {
 		libs = cached
-		if withLibs || libsAt.IsZero() || !now.Before(libsAt.Add(LibraryEvery)) {
+		if withLibs || libsAt.IsZero() || !now.Before(libsAt.Add(d.libEvery)) {
 			libs, fresh = d.libraries(ctx), true
 		}
 		out = append(out, libs...)
@@ -276,21 +279,23 @@ func (d *Doctor) libraries(ctx context.Context) []Check {
 	}
 	out := make([]Check, 0, len(libs))
 	for _, lib := range libs {
-		out = append(out, d.folderCheckWithin(lib, LibraryTimeout))
+		out = append(out, d.folderCheckWithin(lib))
 	}
 	return out
 }
 
-// folderCheckWithin is one library folder's check, given until timeout to answer. The check reads a folder the OS may
-// hold in a way that does not end (a share that has gone away), so it runs beside a timer: an answer that is late is
-// a problem, not a pass that waits.
-func (d *Doctor) folderCheckWithin(lib Library, timeout time.Duration) Check {
+// folderCheckWithin is one library folder's check, given until d.libTime to answer. The check reads a folder the OS
+// may hold in a way that does not end (a share that has gone away), so it runs beside a timer: an answer that is late
+// is a problem, not a pass that waits. The check is captured before the goroutine starts, so a check left waiting
+// past the answer holds its own function and reads nothing the doctor may change under it.
+func (d *Doctor) folderCheckWithin(lib Library) Check {
+	folder := d.folder
 	done := make(chan Check, 1)
-	go func() { done <- checkLibrary(d, lib) }()
+	go func() { done <- folder(lib) }()
 	select {
 	case c := <-done:
 		return c
-	case <-time.After(timeout):
+	case <-time.After(d.libTime):
 		return badCheck(folderCheck(lib), "The folder "+lib.Path+" did not answer in time.",
 			"Check the drive is connected, then run the check again.")
 	}
@@ -301,8 +306,9 @@ func folderCheck(lib Library) Check {
 	return Check{ID: fmt.Sprintf("library-%d", lib.ID), Label: "Library " + lib.Name}
 }
 
-// libraryCheck is one library folder's answer: it is there, the app can write in it (the library's own probe), and
-// the disk under it has room for what processing will write, against page 11's processing.lowSpaceGB.
+// libraryCheck is one library folder's answer: it is there, the app can write in it (the library's own probe, which
+// takes a file and gives it back), and the disk under it has room for what processing will write, against page 11's
+// processing.lowSpaceGB.
 func (d *Doctor) libraryCheck(lib Library) Check {
 	c := folderCheck(lib)
 	fi, err := os.Stat(lib.Path)
@@ -314,7 +320,7 @@ func (d *Doctor) libraryCheck(lib Library) Check {
 		return badCheck(c, "The folder "+lib.Path+" is not a folder.",
 			"Change the folder on the Libraries page.")
 	}
-	if err := checkWritable(lib.Path); err != nil {
+	if err := d.writable(lib.Path); err != nil {
 		return badCheck(c, "The folder "+lib.Path+" can't be written: "+err.Error()+".",
 			"Check the folder's permissions, or change it on the Libraries page.")
 	}

@@ -292,9 +292,6 @@ func TestDoctorFixOnlyWhereARouteExists(t *testing.T) {
 // TestDoctorStartRunsNowAndOnASchedule: Start checks straight away in the background, then again on the interval,
 // until ctx ends.
 func TestDoctorStartRunsNowAndOnASchedule(t *testing.T) {
-	old := Every
-	Every = 5 * time.Millisecond
-	defer func() { Every = old }()
 	src, _ := healthy(t)
 	var runs atomic.Int32
 	src.Tools = func(context.Context) (string, string, error) {
@@ -303,7 +300,9 @@ func TestDoctorStartRunsNowAndOnASchedule(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	NewDoctor(src).Start(ctx)
+	d := NewDoctor(src)
+	d.every = 5 * time.Millisecond
+	d.Start(ctx)
 	deadline := time.Now().Add(2 * time.Second)
 	// Start returns before its first pass ends, so the first run is waited for rather than assumed done.
 	for runs.Load() < 2 {
@@ -314,36 +313,43 @@ func TestDoctorStartRunsNowAndOnASchedule(t *testing.T) {
 	}
 }
 
-// hangingLibrary makes every library check wait until release is closed, and reports when one has started.
-func hangingLibrary(t *testing.T, entered, release chan struct{}) {
-	t.Helper()
-	old := checkLibrary
-	checkLibrary = func(d *Doctor, lib Library) Check {
+// hangFolder makes d's library checks wait until release is closed. entered says one has started, finished says the
+// released one has returned. The check is d's own field, so nothing here is shared with another test.
+func hangFolder(d *Doctor, entered, release, finished chan struct{}) {
+	inner := d.folder
+	d.folder = func(lib Library) Check {
 		select {
 		case entered <- struct{}{}:
 		default:
 		}
 		<-release
-		return old(d, lib)
+		c := inner(lib)
+		select {
+		case finished <- struct{}{}:
+		default:
+		}
+		return c
 	}
-	t.Cleanup(func() { checkLibrary = old })
 }
 
 // TestDoctorStartDoesNotWaitForTheFirstRun: a library folder that does not answer must not hold up the start of the
 // app: Start returns at once and the checks answer later.
 func TestDoctorStartDoesNotWaitForTheFirstRun(t *testing.T) {
-	old := LibraryTimeout
-	LibraryTimeout = time.Hour
-	defer func() { LibraryTimeout = old }()
-	release := make(chan struct{})
-	defer close(release)
-	hangingLibrary(t, make(chan struct{}, 1), release)
 	src, _ := healthy(t)
+	d := NewDoctor(src)
+	d.libTime = time.Hour
+	release := make(chan struct{})
+	finished := make(chan struct{}, 1)
+	hangFolder(d, make(chan struct{}, 1), release, finished)
+	defer func() {
+		close(release)
+		<-finished
+	}()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	started := make(chan struct{})
 	go func() {
-		NewDoctor(src).Start(ctx)
+		d.Start(ctx)
 		close(started)
 	}()
 	select {
@@ -364,7 +370,7 @@ func TestDoctorReportAnswersDuringARun(t *testing.T) {
 	// A retest runs now and forces the library folders, so it is the pass that is waiting on the folder.
 	entered := make(chan struct{}, 1)
 	release := make(chan struct{})
-	hangingLibrary(t, entered, release)
+	hangFolder(d, entered, release, make(chan struct{}, 1))
 	retestDone := make(chan struct{})
 	go func() {
 		defer close(retestDone)
@@ -402,14 +408,17 @@ func TestDoctorReportAnswersDuringARun(t *testing.T) {
 // TestDoctorLibraryThatDoesNotAnswerIsBad: a folder that does not answer within its time is a problem, not a pass
 // that waits for it.
 func TestDoctorLibraryThatDoesNotAnswerIsBad(t *testing.T) {
-	old := LibraryTimeout
-	LibraryTimeout = 20 * time.Millisecond
-	defer func() { LibraryTimeout = old }()
-	release := make(chan struct{})
-	defer close(release)
-	hangingLibrary(t, make(chan struct{}, 1), release)
 	src, _ := healthy(t)
-	res := NewDoctor(src).Run(context.Background())
+	d := NewDoctor(src)
+	d.libTime = 20 * time.Millisecond
+	release := make(chan struct{})
+	finished := make(chan struct{}, 1)
+	hangFolder(d, make(chan struct{}, 1), release, finished)
+	defer func() {
+		close(release)
+		<-finished
+	}()
+	res := d.Run(context.Background())
 	c := find(res, "library-1")
 	if c == nil {
 		t.Fatalf("no library-1 check in %+v", res.Checks)
@@ -422,11 +431,10 @@ func TestDoctorLibraryThatDoesNotAnswerIsBad(t *testing.T) {
 // TestDoctorLibraryWriteProbeIsBad: the folder check uses the library's own write probe, so a folder that takes the
 // file but refuses to give it back is a problem, not an ok check with a hidden file left behind.
 func TestDoctorLibraryWriteProbeIsBad(t *testing.T) {
-	old := checkWritable
-	checkWritable = func(string) error { return errors.New("remove .syp-check-1: permission denied") }
-	t.Cleanup(func() { checkWritable = old })
 	src, _ := healthy(t)
-	c := find(NewDoctor(src).Run(context.Background()), "library-1")
+	d := NewDoctor(src)
+	d.writable = func(string) error { return errors.New("remove .syp-check-1: permission denied") }
+	c := find(d.Run(context.Background()), "library-1")
 	if c == nil || c.Status != Bad || !strings.Contains(c.Detail, "permission denied") {
 		t.Errorf("library-1 = %+v, want bad with the probe's error", c)
 	}
