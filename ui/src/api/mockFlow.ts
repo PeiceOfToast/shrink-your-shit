@@ -428,17 +428,46 @@ interface Doc {
 }
 const DOCS = new Map<string, Doc>();
 
+// The server's starter, "Shrink videos" (internal/flow/starters.go, as the contract golden workflow.json pins it): the
+// answers the guide opens on, and the flow they make, with the contract's keys only.
+const STARTER_ANSWERS: Answers = {
+  ...DEFAULT_ANSWERS,
+  quality: 3,
+  format: "hevc",
+  useGpu: false,
+  ifGpuFails: "cpu",
+  audio: "as_is",
+  allLanguages: true,
+  subtitles: "keep_all",
+  resolution: "keep",
+  original: "next_to_original",
+  fileType: "mkv",
+  nameSuffix: "shrunk",
+} as Answers;
+
+function starterFlow(name: string, description: string): Flow {
+  return {
+    name,
+    description,
+    steps: [
+      { id: "video", type: "video.convert", version: 1, settings: { format: "hevc", ifGpuFails: "cpu", keepDolbyVision: false, preset: "normal", quality: 3, size: null, useGpu: false } },
+      { id: "audio", type: "audio.tracks", version: 1, settings: { allLanguages: true, channels: "source", format: "copy", subtitles: "keep_all" } },
+      { id: "save", type: "file.save", version: 1, settings: { container: "mkv", folder: null, nameSuffix: "shrunk", where: "next_to" } },
+    ],
+  };
+}
+
 function docFor(id: string): Doc {
   const hit = DOCS.get(id);
   if (hit) return hit;
   const row = peekWorkflowRow(id);
   if (!row) throw new ApiError("workflow_not_found", "That workflow doesn't exist.");
   const doc: Doc = {
-    flow: answersToFlow(DEFAULT_ANSWERS, { name: row.name, description: row.description }),
-    answers: { ...DEFAULT_ANSWERS },
+    flow: starterFlow(row.name, row.description),
+    answers: { ...STARTER_ANSWERS },
     rev: 1,
     fitsGuided: row.fitsGuided,
-    published: row.state === "published" ? structuredClone(answersToFlow(DEFAULT_ANSWERS, { name: row.name, description: row.description })) : undefined,
+    published: row.state === "published" ? starterFlow(row.name, row.description) : undefined,
   };
   DOCS.set(id, doc);
   return doc;

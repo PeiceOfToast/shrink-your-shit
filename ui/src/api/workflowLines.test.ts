@@ -17,10 +17,20 @@ test("the golden's flow (audio copied) gives the golden's three lines, word for 
   assert.deepEqual(linesFor(answersToFlow({ audio: "as_is" } as never, meta), 7), golden);
 });
 
-test("the sample workflow's published flow gives its three lines from the same rules", async () => {
-  const { summary } = await getFlow("shrink-videos");
-  assert.match(summary!.converts, /^Converts video to HEVC at the Balanced setting, on the graphics card, or the processor if the card can't do the file\. Converts audio to AAC\.$/);
-  assert.equal(summary!.original, "The original stays next to the new file.");
+test("the sample workflow is the server's starter: its lines, and its flow keys (internal/flow/starters.go)", async () => {
+  const { summary, flow } = await getFlow("shrink-videos");
+  assert.deepEqual(summary, {
+    converts: "Converts video to HEVC at the Balanced setting, on the processor. Keeps the audio as it is.",
+    leavesAlone: "Leaves the video alone when it is already in HEVC.",
+    original: "The original stays next to the new file.",
+  });
+  assert.deepEqual(flow.steps.map((st) => [st.id, Object.keys(st.settings).sort()]), [
+    ["video", ["format", "ifGpuFails", "keepDolbyVision", "preset", "quality", "size", "useGpu"]],
+    ["audio", ["allLanguages", "channels", "format", "subtitles"]],
+    ["save", ["container", "folder", "nameSuffix", "where"]],
+  ]);
+  assert.equal(flow.steps[0].settings.useGpu, false);
+  assert.equal(flow.steps[2].settings.nameSuffix, "shrunk");
 });
 
 test("a flow with no published revision gives three empty lines (a draft the library does not run)", () => {
