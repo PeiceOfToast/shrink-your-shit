@@ -1,8 +1,8 @@
 // Libraries, workflows and folders for the mock. Writes change an in-memory copy, so a session behaves like the app.
-import type { FolderCheck, FolderListing, Library, LibraryDetail, LibraryInput, LibraryPatch, Preview, Watch, WorkflowSummary } from "./types.ts";
+import type { FolderCheck, FolderListing, Library, LibraryDetail, LibraryInput, LibraryPatch, Preview, Watch } from "./types.ts";
 import { ApiError } from "./errors.ts";
 import { getForcedState, noLibrariesYet, respond, setFreshInstall } from "./mockState.ts";
-import { FOLDERS, LIBRARIES, PREVIEW, SHARE_FOLDERS, WORKFLOW_SUMMARY } from "./fixtures/libraries.ts";
+import { FOLDERS, LIBRARIES, PREVIEW, SHARE_FOLDERS } from "./fixtures/libraries.ts";
 import { WORKFLOW_ROWS } from "./fixtures/workflowRows.ts";
 import { nextScanFor } from "./schedule.ts";
 import { workersTaking } from "./mockWorkers.ts";
@@ -203,14 +203,6 @@ export function testShare(input: { address: string; user?: string; password?: st
 
 export function createShare(input: { address: string; user?: string; password?: string }): Promise<{ id: string; address: string }> {
   return respond(() => ({ id: `share-${input.address.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`, address: input.address }));
-}
-
-export function getWorkflow(id: string): Promise<WorkflowSummary> {
-  return respond(() => {
-    const wf = WORKFLOW_ROWS.find((w) => w.id === id);
-    if (!wf) throw new ApiError("workflow_not_found", "That workflow doesn't exist.");
-    return { id: wf.id, name: wf.name, summary: WORKFLOW_SUMMARY[id] };
-  });
 }
 
 // The preview counts this library's own files: the workflow's share of them, so "of N" matches the library's videos.

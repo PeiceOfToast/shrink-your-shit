@@ -88,6 +88,15 @@ export interface WorkflowDraft {
   flow: Flow;
   rev: number;
   fitsGuided: boolean;
+  // The library panel's three lines, built from the flow. Optional until the server's golden pins it.
+  summary?: WorkflowLines;
+}
+
+// The three lines a library panel shows for its workflow (converts, leaves alone, original).
+export interface WorkflowLines {
+  converts: string;
+  leavesAlone: string;
+  original: string;
 }
 
 // GET /workflows/{id}/answers: the answers the guided page opens on, and whether the workflow is

@@ -18,11 +18,6 @@ test("a plain error from the page is not a connection problem", () => {
   assert.equal(connectionAfterError(new Error("boom")), null);
 });
 
-test("the library page asks for a workflow summary only off the real build", () => {
-  const src = readFileSync(new URL("../pages/LibraryPanel.tsx", import.meta.url), "utf8");
-  assert.match(src, /wfId && !isReal\("workflows"\) \? api\.getWorkflow\(wfId\)/);
-});
-
 test("a failed load asks connectionAfterError, not a blanket false", () => {
   const src = readFileSync(new URL("./useApi.ts", import.meta.url), "utf8");
   assert.match(src, /connectionAfterError\(e\)/);

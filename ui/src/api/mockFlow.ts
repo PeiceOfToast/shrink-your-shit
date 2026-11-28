@@ -1,6 +1,6 @@
 // Workflow flow calls for the mock (pages 06 and 07): the guide, the answers, the three-step flow, the check,
 // the recommended bitrates, saves, publish and the try. A session's edits live in memory, as the app's do.
-import type { Answers, BitrateLadder, Flow, FlowCheck, FlowProblem, FlowStep, GuideDoc, GuidePreview, StepDefinition, StepId, TryLine } from "./flowTypes.ts";
+import type { Answers, BitrateLadder, Flow, FlowCheck, FlowProblem, FlowStep, GuideDoc, GuidePreview, StepDefinition, StepId, TryLine, WorkflowDraft, WorkflowLines } from "./flowTypes.ts";
 import { STEP_DEFINITIONS } from "./fixtures/stepDefinitions.ts";
 import { ApiError } from "./errors.ts";
 import { respond } from "./mockState.ts";
@@ -491,11 +491,30 @@ export function putAnswers(id: string, answers: Answers, baseRev: number): Promi
 }
 
 // The editor's load: the flow and the draft's revision.
-export function getFlow(id: string): Promise<{ flow: Flow; rev: number; fitsGuided: boolean }> {
+export function getFlow(id: string): Promise<WorkflowDraft> {
   return respond(() => {
     const d = docFor(id);
-    return { flow: d.flow, rev: d.rev, fitsGuided: d.fitsGuided };
+    return { flow: d.flow, rev: d.rev, fitsGuided: d.fitsGuided, summary: linesFor(d.flow) };
   });
+}
+
+// The library panel's three lines, from the flow's own settings only: the format and quality, the file that is
+// already in the target format, and where the original goes. No size or sample rule: the flow has none.
+export function linesFor(flow: Flow): WorkflowLines {
+  const v = flow.steps[0].settings;
+  const sv = flow.steps[2].settings;
+  const format = FORMAT_LABEL[String(v.format)] ?? "HEVC";
+  const q = Number(v.quality);
+  const quality = LADDER.slider.find((s) => s.position === q)?.name ?? `quality ${q}`;
+  const size = v.size ? `, at most ${String(v.size)}p` : "";
+  const original = sv.where === "replace"
+    ? "The old file goes to the trash."
+    : "The original stays where it is.";
+  return {
+    converts: `Converts video to ${format}, at ${quality} quality${size}.`,
+    leavesAlone: `Leaves alone files already in ${format}.`,
+    original,
+  };
 }
 
 // Save as a draft from the editor. A draft saved elsewhere since baseRev is refused (dev's changed_since).
