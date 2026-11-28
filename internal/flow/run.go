@@ -334,7 +334,11 @@ func (e *engine) run(ctx context.Context) (res Result) {
 	}
 	sidecars, res := e.placeSidecars(plan, extracts, staged)
 	if res.Outcome != "" {
-		e.restoreTrashed()
+		if !e.restoreTrashed() && res.Reason == "save.srt_exists" {
+			// The earlier subtitle could not go back, so "nothing was changed" is not true: say where it is (review #869).
+			res.Message = strings.Replace(res.Message, "Nothing was changed. ", "", 1) +
+				" The earlier subtitle could not go back, so it is in the library's trash folder."
+		}
 		return res
 	}
 	if e.replace {
@@ -1060,9 +1064,11 @@ type trashedSub struct {
 
 // restoreTrashed puts back the earlier subtitles a refused replace moved to the trash: each goes to its name again
 // (no-replace) and its record comes back. A name taken meanwhile leaves the file in the trash and says so.
-func (e *engine) restoreTrashed() {
+func (e *engine) restoreTrashed() (allBack bool) {
+	allBack = true
 	for _, t := range e.trashed {
 		if err := safety.RestoreSubtitle(t.trash, t.path); err != nil {
+			allBack = false
 			e.warn("The earlier subtitle " + filepath.Base(t.path) + " stays in the trash folder: " + err.Error() + ".")
 			continue
 		}
@@ -1071,4 +1077,5 @@ func (e *engine) restoreTrashed() {
 		}
 	}
 	e.trashed = nil
+	return allBack
 }

@@ -502,3 +502,46 @@ func TestEveryRefusedSwapPutsTheEarlierSubtitleBack(t *testing.T) {
 		})
 	}
 }
+
+// takingJournal writes a stranger's file at path the first time subtitle records are added: the name is taken between
+// the earlier subtitle's move to the trash and the placement of the new subtitles.
+type takingJournal struct {
+	*fakeJournal
+	path  string
+	taken bool
+}
+
+func (j *takingJournal) AddSidecars(list []safety.Sidecar) error {
+	if !j.taken {
+		j.taken = true
+		if err := os.WriteFile(j.path, []byte("TAKEN"), 0o644); err != nil {
+			return err
+		}
+	}
+	return j.fakeJournal.AddSidecars(list)
+}
+
+// TestRunSubtitleNameTakenDuringPlacementSaysWhereTheEarlierOneIs (review #869): the name is taken before the new
+// subtitles are placed, and the earlier subtitle cannot go back. The message must not say nothing changed.
+func TestRunSubtitleNameTakenDuringPlacementSaysWhereTheEarlierOneIs(t *testing.T) {
+	root, src, info, rev, earlier, rec := earlierSubtitleRun(t)
+	journal := &takingJournal{fakeJournal: &fakeJournal{recs: []safety.Sidecar{rec}}, path: earlier}
+	m := &srtWriting{Media: &fake.Media{Probes: map[string]media.Info{src: info}}}
+	sf := &fakeSafety{verify: safety.Verdict{OK: true}}
+	env := newEnv(m, sf, &recorder{}, rev, nil)
+	env.Replacer = &fakeReplacer{}
+	env.Sidecars = journal
+	res := flow.Run(context.Background(), runInput(t, root, src), env)
+	if res.Outcome != flow.OutcomeFatal || res.Reason != "save.srt_exists" {
+		t.Fatalf("result = %+v, want the taken-name refusal", res)
+	}
+	if strings.Contains(res.Message, "Nothing was changed") {
+		t.Errorf("message = %q, says nothing changed though the earlier subtitle is in the trash", res.Message)
+	}
+	if !strings.Contains(res.Message, "trash") {
+		t.Errorf("message = %q, want it to say where the earlier subtitle is", res.Message)
+	}
+	if b, _ := os.ReadFile(earlier); string(b) != "TAKEN" {
+		t.Errorf("clip.eng.srt = %q, want the stranger's file kept", b)
+	}
+}
