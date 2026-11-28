@@ -29,6 +29,7 @@ import (
 	"github.com/PeiceOfToast/shrink-your-shit/internal/safety"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/settings"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/share"
+	"github.com/PeiceOfToast/shrink-your-shit/internal/share/helper"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/store"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/system"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/ui"
@@ -44,12 +45,16 @@ func main() {
 		fmt.Println("syp", version)
 		return
 	}
+	// The root helper is the same binary, run as root by syp-mount.service (S3-7).
+	if len(os.Args) >= 2 && os.Args[1] == "helper" {
+		os.Exit(helper.Main(os.Args[2:]))
+	}
 	fs := flag.NewFlagSet("syp", flag.ContinueOnError)
 	dataDir := fs.String("data", "", "the data folder (required)")
 	listen := fs.String("listen", "127.0.0.1:8484", "the address to serve on")
 	ffmpegDir := fs.String("ffmpeg", "", "the folder with ffmpeg and ffprobe (default: $SYP_FFMPEG_DIR, then PATH)")
 	if err := fs.Parse(os.Args[1:]); err != nil || *dataDir == "" {
-		fmt.Fprintln(os.Stderr, "usage: syp version | syp -data <dir> [-listen <addr>] [-ffmpeg <dir>]")
+		fmt.Fprintln(os.Stderr, "usage: syp version | syp helper [-socket <path>] | syp -data <dir> [-listen <addr>] [-ffmpeg <dir>]")
 		os.Exit(2)
 	}
 	dir := *ffmpegDir

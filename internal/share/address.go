@@ -218,7 +218,7 @@ func validSegment(p string) bool {
 func SafeOptions(t Type) []string {
 	opts := []string{"nosuid", "nodev", "noexec"}
 	if t == NFS {
-		opts = append(opts, "soft", "timeo=100", "retrans=2")
+		opts = append(opts, "tcp", "soft", "timeo=100", "retrans=2")
 	}
 	return opts
 }

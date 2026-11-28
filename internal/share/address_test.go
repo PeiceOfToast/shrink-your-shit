@@ -102,7 +102,7 @@ func TestSafeOptions(t *testing.T) {
 		t.Errorf("SMB options = %q", smb)
 	}
 	nfs := strings.Join(SafeOptions(NFS), ",")
-	if nfs != "nosuid,nodev,noexec,soft,timeo=100,retrans=2" {
+	if nfs != "nosuid,nodev,noexec,tcp,soft,timeo=100,retrans=2" {
 		t.Errorf("NFS options = %q", nfs)
 	}
 }

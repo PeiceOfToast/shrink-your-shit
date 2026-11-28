@@ -260,43 +260,74 @@ func prepare(in Input) (prepared, error) {
 		return prepared{}, err
 	}
 	p := prepared{address: addr, guest: in.Guest}
-	if addr.Type == NFS {
-		if in.Password != "" || in.Username != "" || in.Domain != "" || in.Guest {
-			return prepared{}, &InvalidError{Code: "invalid_request", Field: "password",
-				Message: "An NFS share takes no username or password."}
-		}
-		return p, nil
-	}
 	// The username is kept as typed: a form with no domain field can still say DOMAIN\user, and
 	// the page shows it back. The mount splits the two.
 	p.username = strings.TrimSpace(in.Username)
 	p.domain = strings.TrimSpace(in.Domain)
-	if p.username != "" && !validUser(p.username) {
-		return prepared{}, &InvalidError{Code: "invalid_request", Field: "username", Message: "That username can't be used."}
+	if err := CheckSignIn(addr.Type, p.username, p.domain, in.Guest, in.Password); err != nil {
+		return prepared{}, err
 	}
-	if i := strings.IndexByte(p.username, '\\'); i >= 0 {
-		if !validDomain(p.username[:i]) || !validUser(p.username[i+1:]) {
-			return prepared{}, &InvalidError{Code: "invalid_request", Field: "username", Message: "That username can't be used."}
+	if in.Password != "" {
+		p.password = []byte(in.Password)
+	}
+	return p, nil
+}
+
+// CheckSignIn checks the sign-in a mount may carry. It is the form's rules and the root helper's
+// together, so a request that reaches /bin/mount has passed the same checks whichever way it came.
+// The username may still say DOMAIN\user; splitUser separates the two for the mount.
+func CheckSignIn(t Type, username, domain string, guest bool, password string) error {
+	if t == NFS {
+		if password != "" || username != "" || domain != "" || guest {
+			return &InvalidError{Code: "invalid_request", Field: "password",
+				Message: "An NFS share takes no username or password."}
+		}
+		return nil
+	}
+	if username != "" {
+		if !validUser(username) {
+			return &InvalidError{Code: "invalid_request", Field: "username", Message: "That username can't be used."}
+		}
+		if i := strings.IndexByte(username, '\\'); i >= 0 {
+			if !validDomain(username[:i]) || !validUser(username[i+1:]) {
+				return &InvalidError{Code: "invalid_request", Field: "username", Message: "That username can't be used."}
+			}
 		}
 	}
-	if p.domain != "" && !validDomain(p.domain) {
-		return prepared{}, &InvalidError{Code: "invalid_request", Field: "domain", Message: "That domain can't be used."}
+	if domain != "" && !validDomain(domain) {
+		return &InvalidError{Code: "invalid_request", Field: "domain", Message: "That domain can't be used."}
 	}
-	if in.Guest {
-		if in.Password != "" {
-			return prepared{}, &InvalidError{Code: "invalid_request", Field: "password", Message: "A guest share takes no password."}
+	if guest {
+		if password != "" {
+			return &InvalidError{Code: "invalid_request", Field: "password", Message: "A guest share takes no password."}
 		}
-		if p.username != "" {
-			return prepared{}, &InvalidError{Code: "invalid_request", Field: "username", Message: "A guest share takes no username."}
+		if username != "" {
+			return &InvalidError{Code: "invalid_request", Field: "username", Message: "A guest share takes no username."}
 		}
-		return p, nil
+		return nil
 	}
-	if in.Password == "" {
-		return prepared{}, &InvalidError{Code: "missing_password", Field: "password",
+	if password == "" {
+		return &InvalidError{Code: "missing_password", Field: "password",
 			Message: "Type the share's password, or tick Guest."}
 	}
-	p.password = []byte(in.Password)
-	return p, nil
+	// The password becomes one line of the credentials file, so a newline would start another
+	// line there, and the file is small by design.
+	if !validPassword(password) {
+		return &InvalidError{Code: "invalid_request", Field: "password", Message: "That password can't be used."}
+	}
+	return nil
+}
+
+func validPassword(password string) bool {
+	if len(password) > 4096 {
+		return false
+	}
+	for _, r := range password {
+		if r < 0x20 || r == 0x7f {
+			return false
+		}
+	}
+	return true
 }
 
 // splitUser separates DOMAIN\user, which a form without a domain field may type, for the mount.
