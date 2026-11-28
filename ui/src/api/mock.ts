@@ -212,19 +212,19 @@ export function getJobNeighbours(id: string, state?: string): Promise<JobNeighbo
   });
 }
 
-// POST /api/v2/jobs/{id}/convert-again: a finished job (done or skipped) makes a NEW job with a new id, so the
-// old job keeps its record. (Retry on a failed job keeps the id; see runJobsAction.) The panel moves to the new job.
-let againSeq = 0;
-export function convertAgain(id: string): Promise<{ ok: true; jobId: string }> {
+// POST /api/v2/jobs/{id}/convert-again: a finished job (done or skipped) runs again as the SAME job with a new attempt,
+// and the answer is that job's detail, so the panel stays on it (page 03). Refusals use the server's sentences.
+export function convertAgain(id: string): Promise<JobDetail> {
   return respond(() => {
-    const job = JOBS.find((j) => j.id === id);
-    if (!job) throw new ApiError("job_not_found", "That job doesn't exist.");
-    if (job.state !== "done" && job.state !== "skipped") throw new ApiError("not_finished", "Only a finished job can run again.");
-    const jobId = `${id}-again-${++againSeq}`;
-    const fresh = {
+    const i = JOBS.findIndex((j) => j.id === id);
+    if (i < 0) throw new ApiError("job_not_found", "That job doesn't exist.");
+    const job = JOBS[i];
+    if (job.state === "failed") throw new ApiError("not_runnable", "This job did not finish. Use Retry.");
+    if (job.state === "running") throw new ApiError("not_runnable", "This job is running now.");
+    if (job.state !== "done" && job.state !== "skipped") throw new ApiError("not_runnable", "This job has not finished yet.");
+    JOBS[i] = {
       ...job,
-      id: jobId,
-      state: "waiting" as const,
+      state: "waiting",
       step: null,
       progress: null,
       queuedAt: new Date().toISOString(),
@@ -233,7 +233,6 @@ export function convertAgain(id: string): Promise<{ ok: true; jobId: string }> {
       tookMs: null,
       result: { ...job.result, sizeAfter: null, outcome: null, failedStep: null, reason: null },
     };
-    JOBS.unshift(fresh);
-    return { ok: true as const, jobId };
+    return jobDetail(JOBS[i]);
   });
 }
