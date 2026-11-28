@@ -103,7 +103,11 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 		next, err := catchUp(ctx, d.bus, filter, cursor, func(e events.Event) error {
 			name := logKind(e.Kind)
 			if filter.JobID == 0 {
-				// The global stream speaks the contract's names; other job-log kinds stay on ?job=.
+				// The global stream speaks the contract's names; other job-log kinds stay on ?job=. A probe of a
+				// file is part of its job's log, so only a worker's encoder test reaches the system log.
+				if e.Kind == events.KindProbe && e.JobID != 0 {
+					return nil
+				}
 				n, ok := contractKind(e.Kind)
 				if !ok {
 					return nil
@@ -220,6 +224,10 @@ func contractKind(k events.Kind) (string, bool) {
 	case events.KindFailed:
 		return "job.failed", true
 	case events.KindScanStart, events.KindScanProgress, events.KindScanEnd, events.KindLibraryChanged:
+		return string(k), true
+	case events.KindProbe:
+		// A worker's encoder test (page 10) reports as probe. A file probe is a job's own line, and the
+		// stream keeps it off the global log by its job id.
 		return string(k), true
 	}
 	return "", false

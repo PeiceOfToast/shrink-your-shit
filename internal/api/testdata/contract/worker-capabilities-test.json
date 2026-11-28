@@ -1,0 +1,9 @@
+{
+  "body": {
+    "runId": "1"
+  },
+  "method": "POST",
+  "path": "/api/v2/workers/local/capabilities/test",
+  "status": 200,
+  "type": "WorkerTest"
+}

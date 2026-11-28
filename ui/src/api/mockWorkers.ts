@@ -22,6 +22,7 @@ const JOINER: WorkerDetail = {
   now: null,
   doneToday: 0,
   pausedGlobally: false,
+  test: null,
   hours: null,
   primaryEncoder: null,
   encoders: [],
@@ -42,6 +43,7 @@ const summary = (w: WorkerDetail): Worker => ({
   now: w.now,
   doneToday: w.doneToday,
   pausedGlobally: globalPaused,
+  test: w.test,
 });
 
 function copy(w: WorkerDetail): WorkerDetail {
@@ -251,4 +253,26 @@ export function waitForPathTest(id: string, libraryId: string): Promise<WorkerLi
       resolve({ ...l.test });
     }, 1500);
   });
+}
+
+// Test the encoders (POST /api/v2/workers/{id}/capabilities/test): the server answers a run id at once, and the result
+// lands on the worker a moment later. The mock's encoders pass, so each one's testOk becomes true.
+export const ENCODER_TEST_MS = 1500;
+let runSeq = 0;
+export function startEncoderTest(id: string): { runId: string } {
+  const w = find(id);
+  if (w.state === "offline") throw new ApiError("worker_offline", "That worker is offline. Bring it back, then test again.");
+  const runId = `encoder-test-${++runSeq}`;
+  // The worker's test state (workshop #904): this run, running until it finishes.
+  const set = (test: WorkerDetail["test"]) => {
+    const cur = rows.find((r) => r.id === id);
+    if (cur) cur.test = test;
+  };
+  set({ runId, running: true, finishedAt: null });
+  setTimeout(() => {
+    const cur = rows.find((r) => r.id === id);
+    if (cur) cur.encoders = cur.encoders.map((e) => ({ ...e, testOk: true }));
+    set({ runId, running: false, finishedAt: new Date().toISOString() });
+  }, ENCODER_TEST_MS);
+  return { runId };
 }

@@ -206,6 +206,25 @@ func fullPipelineOK(plan Plan, rung Rung) error {
 	return nil
 }
 
+// FullPipelineOK reports whether a plan can run with the card decoding and encoding: no frame-rate
+// change, no tone map, and no bit-depth change. The picker asks before it offers the full rung
+// (L-HW-9, L-HW-11), so a job that needs the processor's frames is not offered a rung Build would
+// refuse; Build still refuses the rung it actually got.
+func FullPipelineOK(plan Plan, main media.VideoTrack) bool {
+	if plan.Video.FPS > 0 || plan.Video.HDR == HDRTonemap {
+		return false
+	}
+	depth, capped, err := outputDepth(plan, main)
+	if err != nil || capped {
+		return false
+	}
+	src := 8
+	if main.BitDepth >= 10 {
+		src = 10
+	}
+	return depth == src
+}
+
 // rungSetup is the device arguments a card rung needs before its input: the device the card's
 // filters and encoder use, and for the full pipeline the card's decoder (L-HW-10). The names are
 // the ones the card probe proved (internal/hw).
@@ -438,14 +457,7 @@ func videoOptions(plan Plan, main media.VideoTrack, rung Rung, encoder string, r
 		return nil, fmt.Errorf("%w: %s is left alone by this flow", ErrSkip, main.HDRKind())
 	}
 
-	// The source's transfer. A Dolby Vision stream whose transfer line is missing is still HDR, as
-	// its HDR10 base.
-	transfer := main.ColorTransfer
-	isHDR := transfer == "smpte2084" || transfer == "arib-std-b67"
-	if !isHDR && main.HDR.DolbyVision {
-		isHDR = true
-		transfer = "smpte2084"
-	}
+	transfer, _, tonemapping, keepHDR := hdrFacts(plan, main)
 	primaries := main.ColorPrimaries
 	if primaries == "" {
 		primaries = "bt2020"
@@ -454,44 +466,12 @@ func videoOptions(plan Plan, main media.VideoTrack, rung Rung, encoder string, r
 	if colorspace == "" {
 		colorspace = "bt2020nc"
 	}
-	// tonemap converts an HDR picture to SDR BT.709 (L-HW-16); keep writes the HDR metadata through.
-	tonemapping := plan.Video.HDR == HDRTonemap && isHDR
-	keepHDR := isHDR && plan.Video.HDR != HDRSkip && !tonemapping
-
-	depth := 8
-	switch plan.Video.BitDepth {
-	case DepthSource:
-		if main.BitDepth >= 10 {
-			depth = 10
-		}
-	case Depth8:
-		depth = 8
-	case Depth10:
-		depth = 10
-	default:
-		return nil, fmt.Errorf("%w: bit depth %d is not source, 8 or 10", ErrInvalidPlan, plan.Video.BitDepth)
+	depth, capped, err := outputDepth(plan, main)
+	if err != nil {
+		return nil, err
 	}
-	if keepHDR {
-		// Ten-bit output on an HDR source is a fact, not a setting (L-HW-16).
-		depth = 10
-	}
-	if tonemapping && plan.Video.BitDepth == DepthSource {
-		// A tone-mapped picture is SDR: 8-bit unless the person asked for ten.
-		depth = 8
-	}
-	if plan.Video.Codec == CodecH264 {
-		// H.264 is 8-bit by choice (10-bit and HDR H.264 play on few devices): no ten-bit H.264 is offered, and HDR cannot be kept in it. A plan that asks
-		// for either is refused; a ten-bit SDR source is written as 8-bit, and the log says so (#855).
-		if keepHDR {
-			return nil, fmt.Errorf("%w: H.264 is not used for HDR", ErrInvalidPlan)
-		}
-		if plan.Video.BitDepth == Depth10 {
-			return nil, fmt.Errorf("%w: 10-bit H.264 is not offered", ErrInvalidPlan)
-		}
-		if depth == 10 {
-			depth = 8
-			res.Notes = append(res.Notes, "H.264 is written as 8-bit: 10-bit H.264 plays on few devices")
-		}
+	if capped {
+		res.Notes = append(res.Notes, "H.264 is written as 8-bit: 10-bit H.264 plays on few devices")
 	}
 
 	if rung.Decode == DecodeHardware {
@@ -647,6 +627,76 @@ func videoOptions(plan Plan, main media.VideoTrack, rung Rung, encoder string, r
 		argv = append(argv, "-metadata:s:v:0", key+"=")
 	}
 	return argv, nil
+}
+
+// hdrFacts is the source's HDR state and what the plan does with it: the transfer to write, whether
+// the source is HDR, whether it is tone-mapped to SDR, and whether its picture is kept. A Dolby Vision
+// stream whose transfer line is missing is still HDR, as its HDR10 base.
+func hdrFacts(plan Plan, main media.VideoTrack) (transfer string, isHDR, tonemapping, keepHDR bool) {
+	transfer = main.ColorTransfer
+	isHDR = transfer == "smpte2084" || transfer == "arib-std-b67"
+	if !isHDR && main.HDR.DolbyVision {
+		isHDR = true
+		transfer = "smpte2084"
+	}
+	// tonemap converts an HDR picture to SDR BT.709 (L-HW-16); keep writes the HDR metadata through.
+	tonemapping = plan.Video.HDR == HDRTonemap && isHDR
+	keepHDR = isHDR && plan.Video.HDR != HDRSkip && !tonemapping
+	return transfer, isHDR, tonemapping, keepHDR
+}
+
+// outputDepth is the plan's output picture depth. capped says H.264 was asked for ten bits by the
+// source and written as eight, so the log can say so (#855).
+func outputDepth(plan Plan, main media.VideoTrack) (depth int, capped bool, err error) {
+	_, _, tonemapping, keepHDR := hdrFacts(plan, main)
+	depth = 8
+	switch plan.Video.BitDepth {
+	case DepthSource:
+		if main.BitDepth >= 10 {
+			depth = 10
+		}
+	case Depth8:
+		depth = 8
+	case Depth10:
+		depth = 10
+	default:
+		return 0, false, fmt.Errorf("%w: bit depth %d is not source, 8 or 10", ErrInvalidPlan, plan.Video.BitDepth)
+	}
+	if keepHDR {
+		// Ten-bit output on an HDR source is a fact, not a setting (L-HW-16).
+		depth = 10
+	}
+	if tonemapping && plan.Video.BitDepth == DepthSource {
+		// A tone-mapped picture is SDR: 8-bit unless the person asked for ten.
+		depth = 8
+	}
+	if plan.Video.Codec == CodecH264 {
+		// H.264 is 8-bit by choice (10-bit and HDR H.264 play on few devices): no ten-bit H.264 is offered, and HDR cannot be kept in it. A plan that asks
+		// for either is refused; a ten-bit SDR source is written as 8-bit, and the log says so (#855).
+		if keepHDR {
+			return 0, false, fmt.Errorf("%w: H.264 is not used for HDR", ErrInvalidPlan)
+		}
+		if plan.Video.BitDepth == Depth10 {
+			return 0, false, fmt.Errorf("%w: 10-bit H.264 is not offered", ErrInvalidPlan)
+		}
+		if depth == 10 {
+			depth, capped = 8, true
+		}
+	}
+	return depth, capped, nil
+}
+
+// OutputDepth is the bit depth the plan writes for the source. The picker asks it whether the card's
+// ten-bit encode is needed (L-HW-9).
+func OutputDepth(plan Plan, main media.VideoTrack) (int, error) {
+	depth, _, err := outputDepth(plan, main)
+	return depth, err
+}
+
+// HDRKept reports whether the plan writes the source's HDR picture through untouched.
+func HDRKept(plan Plan, main media.VideoTrack) bool {
+	_, _, _, keepHDR := hdrFacts(plan, main)
+	return keepHDR
 }
 
 // rateArgs is page 07's bitrate part of the table. The average is the encoder's target; the
