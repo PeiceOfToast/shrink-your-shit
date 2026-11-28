@@ -25,12 +25,13 @@ test("a working share says Connected with no folder count", () => {
 
 test("the banner tells the truth: the test is real, and this build can't add shares yet", () => {
   assert.doesNotMatch(src, /made up/);
-  assert.match(src, /can't be added on this build yet\. The test is real/);
+  assert.match(src, /can't be added on this build yet, so use a folder on this server for now\./);
 });
 
 test("the share note is not the sample banner: no 'Sample data' label on the real build", () => {
   assert.doesNotMatch(src, /SampleBanner/);
   assert.doesNotMatch(src, /Sample data/);
-  assert.match(src, /Network shares can't be added on this build yet\. The test is real/);
+  assert.match(src, /Network shares can't be added on this build yet, so use a folder on this server for now\./);
+  assert.doesNotMatch(src, /The test is real/);
 });
 

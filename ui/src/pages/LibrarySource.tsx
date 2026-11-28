@@ -102,7 +102,7 @@ export function LibrarySource({
       ) : (
         <div className="field">
           <div className="note" role="note" style={{ margin: "0 0 12px" }}>
-            <span>Network shares can't be added on this build yet. The test is real and says so, so use a folder on this server for now.</span>
+            <span>Network shares can't be added on this build yet, so use a folder on this server for now.</span>
           </div>
           <input
             className="inp mono"
