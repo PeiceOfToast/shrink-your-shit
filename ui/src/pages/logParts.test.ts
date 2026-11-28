@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { JobStep, LogEvent, LogKind, LogLevel } from "../api/types.ts";
-import { addLiveLine, badgeCounts, logsFromEvents, showLines } from "./logParts.ts";
+import { addLiveLine, logsFromEvents, showLines } from "./logParts.ts";
 import { readFileSync } from "node:fs";
 
 const steps: JobStep[] = [
@@ -177,23 +177,7 @@ test("the system log page builds its lines with showLines (a source check)", asy
   const { readFileSync } = await import("node:fs");
   const src = readFileSync(new URL("./SystemLog.tsx", import.meta.url), "utf8");
   assert.match(src, /showLines\(loaded, live\)/);
-  assert.match(src, /badgeCounts\(/);
-});
-
-test("a folded live line counts its occurrences in the badge, not once", () => {
-  const fold = { ...liveEv(4, "2026-11-28T07:00:09Z", "sign-in refused", { count: 2, firstAt: "2026-11-28T07:00:00Z", lastAt: "2026-11-28T07:00:09Z" }), level: "warn" } as LogEvent;
-  assert.deepEqual(badgeCounts({ info: 0, warn: 0, error: 0 }, [], [fold]), { info: 0, warn: 2, error: 0 });
-});
-
-test("a fold over a line the page already counts adds only its extra occurrences", () => {
-  const loadedWarn = { ...liveEv(3, "2026-11-28T07:00:00Z", "sign-in refused"), level: "warn" } as LogEvent;
-  const fold = { ...liveEv(4, "2026-11-28T07:00:09Z", "sign-in refused", { count: 2, firstAt: "2026-11-28T07:00:00Z", lastAt: "2026-11-28T07:00:09Z" }), level: "warn" } as LogEvent;
-  assert.deepEqual(badgeCounts({ info: 0, warn: 1, error: 0 }, [loadedWarn], [fold]), { info: 0, warn: 2, error: 0 });
-});
-
-test("a live line already on the page is not counted twice", () => {
-  const warn = { ...liveEv(3, "2026-11-28T07:00:00Z", "sign-in refused"), level: "warn" } as LogEvent;
-  assert.deepEqual(badgeCounts({ info: 0, warn: 1, error: 0 }, [warn], [warn]), { info: 0, warn: 1, error: 0 });
+  assert.match(src, /const counts = log\.data\?\.counts/);
 });
 
 test("an older live fold does not replace a newer fold the page already holds", () => {
@@ -214,13 +198,3 @@ test("a run longer than the poll window holds one row across polls (base page 20
   assert.equal(shown[0].seq, 64);
   assert.equal(shown[0].repeat?.count, 50);
 });
-
-test("a late, older live fold does not lower a reloaded fold's badge", () => {
-  // Server counts warn 4. The reload holds the fold at seq 6 (count 4); a late live fold of the same run is seq 5 (count 3).
-  const newer = { ...liveEv(6, "2026-11-28T07:00:15Z", "sign-in refused", { count: 4, firstAt: "2026-11-28T07:00:00Z", lastAt: "2026-11-28T07:00:15Z" }), level: "warn" } as LogEvent;
-  const older = { ...liveEv(5, "2026-11-28T07:00:12Z", "sign-in refused", { count: 3, firstAt: "2026-11-28T07:00:00Z", lastAt: "2026-11-28T07:00:12Z" }), level: "warn" } as LogEvent;
-  const loaded = [newer];
-  const shown = showLines(loaded, [older]);
-  assert.deepEqual(badgeCounts({ info: 0, warn: 4, error: 0 }, loaded, shown), { info: 0, warn: 4, error: 0 });
-});
-
