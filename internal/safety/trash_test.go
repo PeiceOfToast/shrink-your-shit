@@ -269,21 +269,43 @@ func TestRestoreCrashBeforeTheRemovalRecoversToDone(t *testing.T) {
 	}
 }
 
-// A crash after the converted file is removed and before the original is back is finished by recovery: the original
-// returns to its name and the row is rolled back, so a restart never leaves the original in the trash.
-func TestRestoreCrashPartWayRecoversTheOriginal(t *testing.T) {
-	f, id := doneSwap(t)
-	crashAt(t, 2)
-	restoreUntilCrash(f, id)
-	rep, err := Recover(context.Background(), f.j)
-	if err != nil {
-		t.Fatal(err)
+// A crash after the converted file is moved aside and before the original is back leaves the name empty. Recovery
+// settles it from the files: the restore is undone, the converted file returns to its name, and the row is done.
+// Nothing is lost and the name is not left empty.
+func TestRestoreCrashPartWayRecoversTheConvertedFile(t *testing.T) {
+	for _, mp4 := range []bool{false, true} {
+		f, id := doneSwapAs(t, mp4)
+		crashAt(t, 2)
+		restoreUntilCrash(f, id)
+		if _, err := Recover(context.Background(), f.j); err != nil {
+			t.Fatal(err)
+		}
+		if got := readFile(t, f.final); got != newBytes {
+			t.Errorf("mp4=%v: the converted file is %q at its name after recovery, want its own bytes", mp4, got)
+		}
+		if stateOf(t, f, id) != StateDone {
+			t.Errorf("mp4=%v: state = %s, want done", mp4, stateOf(t, f, id))
+		}
 	}
-	if rep.Attention != 0 {
-		t.Fatalf("recovery left %d row(s) in attention", rep.Attention)
+}
+
+// A crash after the original is back, before the restore is recorded, is finished by recovery: the original is at its
+// name, the converted copy is removed, and the row is rolled back.
+func TestRestoreCrashAfterTheOriginalIsBackFinishesIt(t *testing.T) {
+	f, id := doneSwap(t)
+	crashAt(t, 3)
+	restoreUntilCrash(f, id)
+	if _, err := Recover(context.Background(), f.j); err != nil {
+		t.Fatal(err)
 	}
 	if got := readFile(t, f.original); got != origBytes {
 		t.Errorf("the original is %q after recovery, want its own bytes", got)
+	}
+	entries, _ := os.ReadDir(f.lib + "/" + TrashDir)
+	for _, e := range entries {
+		if readFile(t, f.lib+"/"+TrashDir+"/"+e.Name()) == newBytes {
+			t.Errorf("the converted copy %s is still in the trash after the restore finished", e.Name())
+		}
 	}
 	if stateOf(t, f, id) != StateRolledBack {
 		t.Errorf("state = %s, want rolled_back", stateOf(t, f, id))

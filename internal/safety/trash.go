@@ -304,3 +304,53 @@ func Restore(ctx context.Context, j *Journal, id int64) error {
 
 // RestoredSentence is the History line for a restored original.
 const RestoredSentence = "Original restored"
+
+// settleRestore settles a restore a crash left partway (L-SAFE-19). Restore moves the converted file aside before the
+// original returns to its name, so a crash in between leaves the name empty and the converted copy in the trash. The
+// copy is found by its identity, not its name. The restore is finished when the original is back, and undone when it
+// is not: the converted file returns to its name and the row is done, as if the restore never began. The second
+// result is false when no such copy exists, and the caller settles the row as before.
+func settleRestore(r Row) (string, bool) {
+	holding, ok := findHolding(r)
+	if !ok {
+		return "", false
+	}
+	switch {
+	case matches(r.Original, r.Orig):
+		// The original is back at its name, so the restore reached its last step: the converted copy goes.
+		if err := os.Remove(holding); err != nil {
+			return StateAttention, true
+		}
+		return StateRolledBack, true
+	case matches(r.Trash, r.Orig) && !exists(r.Final):
+		// The original is still in the trash: the restore is undone, and the converted file returns to its name.
+		if err := fsx.RenameNoReplace(holding, r.Final); err != nil {
+			return StateAttention, true
+		}
+		return StateDone, true
+	default:
+		return StateAttention, true
+	}
+}
+
+// findHolding is the trash file, other than the original's trash copy, whose identity is the converted file's.
+func findHolding(r Row) (string, bool) {
+	if matches(r.Final, r.New) {
+		return "", false
+	}
+	dir := filepath.Dir(r.Trash)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", false
+	}
+	for _, e := range entries {
+		path := filepath.Join(dir, e.Name())
+		if path == r.Trash || !e.Type().IsRegular() {
+			continue
+		}
+		if matches(path, r.New) {
+			return path, true
+		}
+	}
+	return "", false
+}

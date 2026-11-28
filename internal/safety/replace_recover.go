@@ -29,13 +29,17 @@ func Recover(ctx context.Context, j *Journal) (RecoverReport, error) {
 		if err := ctx.Err(); err != nil {
 			return rep, err
 		}
-		state := settle(r)
-		if state == StateRolledBack {
-			// Put the original back when it is in the trash and its name is free: nothing else is touched.
-			if putBackOriginal(r) {
-				state = StateRolledBack
-			} else {
-				state = StateAttention
+		// A restore that stopped partway is settled from where its files are (see settleRestore).
+		state, restored := settleRestore(r)
+		if !restored {
+			state = settle(r)
+			if state == StateRolledBack {
+				// Put the original back when it is in the trash and its name is free: nothing else is touched.
+				if putBackOriginal(r) {
+					state = StateRolledBack
+				} else {
+					state = StateAttention
+				}
 			}
 		}
 		if err := j.SetState(ctx, r.ID, state); err != nil {
