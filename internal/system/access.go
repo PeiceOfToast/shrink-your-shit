@@ -65,8 +65,11 @@ var (
 	ErrSetupDone       = errors.New("setup is already done")
 	ErrNoAccount       = errors.New("setup has not been done")
 	ErrInvalidPassword = errors.New("the password must be 8 to 72 bytes")
-	ErrBadPassword     = errors.New("that password is not right")
-	ErrBadToken        = errors.New("that token is not right")
+	// The two ways a password is out of range. Both are ErrInvalidPassword too, so setup's checks still match.
+	ErrPasswordTooShort = fmt.Errorf("%w: too short", ErrInvalidPassword)
+	ErrPasswordTooLong  = fmt.Errorf("%w: too long", ErrInvalidPassword)
+	ErrBadPassword      = errors.New("that password is not right")
+	ErrBadToken         = errors.New("that token is not right")
 )
 
 // LockedError means sign-in is refused until the lock lifts. RetryAfter is the wait in seconds.
@@ -504,8 +507,11 @@ func (a *Access) ensureKeyLocked() error {
 
 // checkPasswordRules applies page 13's limits: at least 8 characters, at most 72 bytes.
 func checkPasswordRules(password string) error {
-	if utf8.RuneCountInString(password) < minPasswordChars || len(password) > maxPasswordBytes {
-		return ErrInvalidPassword
+	if utf8.RuneCountInString(password) < minPasswordChars {
+		return ErrPasswordTooShort
+	}
+	if len(password) > maxPasswordBytes {
+		return ErrPasswordTooLong
 	}
 	return nil
 }
