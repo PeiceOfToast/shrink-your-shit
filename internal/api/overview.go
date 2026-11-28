@@ -124,7 +124,8 @@ func (s *Server) getOverview(w http.ResponseWriter, r *http.Request) {
 		series = append(series, seriesDay{Day: d})
 	}
 	dayDone := map[string]int{}
-	weekAgo := nowMS - 7*24*60*60*1000
+	// The last seven local calendar days start at local midnight six days back (not a rolling 168 hours).
+	weekStart := time.Date(now.Year(), now.Month(), now.Day()-6, 0, 0, 0, 0, time.Local).UnixMilli()
 	var weekBefore, weekSaved, weekMS int64
 	var firstMS int64 = -1
 	for _, row := range rows {
@@ -157,7 +158,7 @@ func (s *Server) getOverview(w http.ResponseWriter, r *http.Request) {
 				c.failed++
 			}
 		}
-		if row.state == "done" && row.finishedMS >= weekAgo {
+		if row.state == "done" && row.finishedMS >= weekStart {
 			weekBefore += row.before
 			weekSaved += savedOf(row)
 			weekMS += row.finishedMS - row.startedMS

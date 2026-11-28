@@ -245,3 +245,19 @@ func TestOverviewSavingIsClampedAtZero(t *testing.T) {
 		t.Errorf("totalBytes = %v, want 200 (the bigger output adds nothing)", got)
 	}
 }
+
+// The seven-day window is the last seven local calendar days: a job finished just after local midnight six days back
+// is in it; one finished just before that midnight is out, even though it is within 168 hours of now.
+func TestOverviewWindowStartsAtLocalMidnightSixDaysBack(t *testing.T) {
+	e := newEnv(t, true)
+	cookie := e.setup().String()
+	now := time.Now()
+	start := time.Date(now.Year(), now.Month(), now.Day()-6, 0, 0, 0, 0, time.Local)
+	inside := start.Add(30 * time.Second).UnixMilli()
+	outside := start.Add(-30 * time.Second).UnixMilli()
+	insertJob(t, e, "done", "smaller", inside-10_000, inside, 1000, 500, 1)
+	insertJob(t, e, "done", "smaller", outside-10_000, outside, 1000, 0, 2)
+	if got := num(overviewOf(t, e, cookie), "avgShrink", "pct"); got != 50 {
+		t.Errorf("pct = %v, want 50: only the job inside the local-day window counts", got)
+	}
+}
