@@ -215,3 +215,12 @@ test("a run longer than the poll window holds one row across polls (base page 20
   assert.equal(shown[0].repeat?.count, 50);
 });
 
+test("a late, older live fold does not lower a reloaded fold's badge", () => {
+  // Server counts warn 4. The reload holds the fold at seq 6 (count 4); a late live fold of the same run is seq 5 (count 3).
+  const newer = { ...liveEv(6, "2026-11-28T07:00:15Z", "sign-in refused", { count: 4, firstAt: "2026-11-28T07:00:00Z", lastAt: "2026-11-28T07:00:15Z" }), level: "warn" } as LogEvent;
+  const older = { ...liveEv(5, "2026-11-28T07:00:12Z", "sign-in refused", { count: 3, firstAt: "2026-11-28T07:00:00Z", lastAt: "2026-11-28T07:00:12Z" }), level: "warn" } as LogEvent;
+  const loaded = [newer];
+  const shown = showLines(loaded, [older]);
+  assert.deepEqual(badgeCounts({ info: 0, warn: 4, error: 0 }, loaded, shown), { info: 0, warn: 4, error: 0 });
+});
+
