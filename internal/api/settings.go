@@ -9,6 +9,7 @@ import (
 
 	"github.com/PeiceOfToast/shrink-your-shit/internal/events"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/flow"
+	"github.com/PeiceOfToast/shrink-your-shit/internal/media"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/safety"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/settings"
 )
@@ -63,6 +64,16 @@ func (s *Server) patchSettings(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		internalError(w)
 		return
+	}
+	// Low priority applies to tools started from now on: running ffmpeg keeps the priority it started
+	// with (dev-review on #896).
+	for _, c := range changes {
+		if c.Key == "processing.lowPriority" {
+			var on bool
+			if json.Unmarshal(c.New, &on) == nil {
+				media.SetLowPriority(on)
+			}
+		}
 	}
 	if rs.Events != nil {
 		for _, c := range changes {

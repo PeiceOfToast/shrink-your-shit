@@ -14,7 +14,7 @@
             "preset": "normal",
             "quality": 3,
             "size": null,
-            "useGpu": false
+            "useGpu": true
           },
           "type": "video.convert",
           "version": 1

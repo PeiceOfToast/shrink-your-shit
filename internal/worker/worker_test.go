@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -360,6 +361,107 @@ func TestIdleSlotWakesOnEnqueueWithoutSpinning(t *testing.T) {
 	_, _, _, after := src.snapshot()
 	if after-idleClaims > 5 {
 		t.Fatalf("claims rose from %d to %d with no work; the slot is spinning", idleClaims, after)
+	}
+}
+
+// Every slot claims its own job: with work for three, one Wake starts all three at once instead of one slot
+// draining the queue while the others stay parked.
+func TestFilesAtOnceRunThatManyJobsAtOnce(t *testing.T) {
+	const n = 3
+	src := &fakeSource{}
+	started := make(chan int64, n)
+	release := make(chan struct{})
+	var once sync.Once
+	letGo := func() { once.Do(func() { close(release) }) }
+
+	run := func(ctx context.Context, in flow.RunInput, env flow.Env) flow.Result {
+		started <- in.JobID
+		<-release
+		return flow.Result{Outcome: flow.OutcomeSmaller}
+	}
+	// The tick is an hour: only a wake can start the jobs inside the test's time, and a slot that misses the
+	// wake would fail here rather than in the field.
+	w := New(Config{Slots: n, Source: src, Run: run, Tick: time.Hour})
+	stop := start(t, w)
+	defer stop()
+	defer letGo() // before stop: a failure must not leave a job waiting on release
+
+	// Every slot makes its first, empty claim, so they are all parked when the work arrives: a slot still on its
+	// first claim would take a job without any wake and hide a wake that reached one slot only.
+	waitFor(t, "every slot to park", func() bool {
+		_, _, _, claims := src.snapshot()
+		return claims >= n
+	})
+	for id := int64(1); id <= n; id++ {
+		src.push(job(id))
+	}
+	w.Wake()
+	seen := map[int64]bool{}
+	for len(seen) < n {
+		select {
+		case id := <-started:
+			seen[id] = true
+		case <-time.After(2 * time.Second):
+			t.Fatalf("%d of %d jobs started; a wake reached one slot only", len(seen), n)
+		}
+	}
+	letGo()
+	waitFor(t, "every job to finish", func() bool {
+		f, _, _, _ := src.snapshot()
+		return len(f) == n
+	})
+}
+
+// Outside its hours the worker takes no new job; a job already running still finishes, and the next look
+// after the hours open picks up the work waiting (page 10's "a running job finishes").
+func TestHoursHoldNewJobsAndLetRunningOnesFinish(t *testing.T) {
+	src := &fakeSource{}
+	var open atomic.Bool
+	started := make(chan int64, 2)
+	release := make(chan struct{})
+	var once sync.Once
+	letGo := func() { once.Do(func() { close(release) }) }
+	run := func(ctx context.Context, in flow.RunInput, env flow.Env) flow.Result {
+		started <- in.JobID
+		<-release
+		return flow.Result{Outcome: flow.OutcomeSmaller}
+	}
+	w := New(Config{Source: src, Run: run, Tick: 5 * time.Millisecond, MayClaim: open.Load})
+	stop := start(t, w)
+	defer stop()
+	defer letGo()
+
+	src.push(job(1))
+	src.push(job(2))
+	time.Sleep(50 * time.Millisecond)
+	if _, _, _, claims := src.snapshot(); claims != 0 {
+		t.Fatalf("claimed %d jobs outside the hours, want none", claims)
+	}
+
+	// The hours open: the waiting file starts. The hours closing again does not stop it.
+	open.Store(true)
+	w.Wake()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the file did not start once the hours opened")
+	}
+	open.Store(false)
+	letGo()
+	waitFor(t, "the running file to finish", func() bool {
+		f, _, _, _ := src.snapshot()
+		return len(f) == 1
+	})
+	f, requeued, cancelled, _ := src.snapshot()
+	if f[0].Verdict != jobs.VerdictDone {
+		t.Errorf("result = %+v, want the running file done", f[0])
+	}
+	if len(requeued) != 0 || len(cancelled) != 0 {
+		t.Errorf("requeued %v, cancelled %v; closing the hours must not stop a running file", requeued, cancelled)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if _, _, _, claims := src.snapshot(); claims != 1 {
+		t.Errorf("claimed %d jobs, want 1: the second file waits outside the hours", claims)
 	}
 }
 

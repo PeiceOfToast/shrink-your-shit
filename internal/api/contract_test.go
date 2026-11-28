@@ -12,6 +12,7 @@ import (
 	"github.com/PeiceOfToast/shrink-your-shit/internal/flow"
 	// The real steps, so the step-definitions golden is the registry the binary serves.
 	_ "github.com/PeiceOfToast/shrink-your-shit/internal/flow/steps"
+	"github.com/PeiceOfToast/shrink-your-shit/internal/share"
 )
 
 // writeGolden writes internal/api/testdata/contract/<slug>.json from a real response. The UI's `npm run contract`
@@ -114,6 +115,31 @@ func TestContractGoldens(t *testing.T) {
 	writeGolden(t, "library-delete", "LibraryRemoved", http.MethodDelete, "/api/v2/libraries/2",
 		e.do(http.MethodDelete, "/api/v2/libraries/2", "", write(withSession(cookie)), false), dir)
 
+	// Shares (S3-7): Add, the list, Test's two answers, Try again and Remove. The fake mounter is
+	// the API tests' stand-in for the root helper, so this golden run needs no privilege.
+	shareBody := mustJSON(t, map[string]any{
+		"address": "//nas/media", "username": "viewer", "password": "share-password",
+	})
+	writeGolden(t, "share-post", "Share", http.MethodPost, "/api/v2/shares",
+		e.do(http.MethodPost, "/api/v2/shares", shareBody, write(withSession(cookie)), false))
+	writeGolden(t, "shares", "Shares", http.MethodGet, "/api/v2/shares",
+		e.do(http.MethodGet, "/api/v2/shares", "", withSession(cookie), false))
+	writeGolden(t, "share-test", "ShareTest", http.MethodPost, "/api/v2/shares/test",
+		e.do(http.MethodPost, "/api/v2/shares/test", shareBody, write(withSession(cookie)), false))
+	e.mounter.failOn("//offline/media", &share.MountError{
+		Reason: share.ReasonUnreachable, Message: "The share did not answer.",
+	})
+	offlineBody := mustJSON(t, map[string]any{
+		"address": "//offline/media", "username": "viewer", "password": "share-password",
+	})
+	writeGolden(t, "share-test-failed", "ShareTest", http.MethodPost, "/api/v2/shares/test",
+		e.do(http.MethodPost, "/api/v2/shares/test", offlineBody, write(withSession(cookie)), false))
+	e.mounter.heal()
+	writeGolden(t, "share-reconnect", "Share", http.MethodPost, "/api/v2/shares/1/reconnect",
+		e.do(http.MethodPost, "/api/v2/shares/1/reconnect", "", write(withSession(cookie)), false))
+	writeGolden(t, "share-delete", "none", http.MethodDelete, "/api/v2/shares/1",
+		e.do(http.MethodDelete, "/api/v2/shares/1", "", write(withSession(cookie)), false))
+
 	// The steps' cards (S2-1): page 07's form, from the registry.
 	writeGolden(t, "step-definitions", "StepDefinition[]", http.MethodGet, "/api/v2/step-definitions",
 		e.do(http.MethodGet, "/api/v2/step-definitions", "", withSession(cookie), false))
@@ -181,4 +207,19 @@ func TestContractGoldens(t *testing.T) {
 		e.do(http.MethodGet, "/api/v2/summary", "", withSession(cookie), false), dir)
 	writeGolden(t, "attention", "Attention[]", http.MethodGet, "/api/v2/attention",
 		e.do(http.MethodGet, "/api/v2/attention", "", withSession(cookie), false), dir)
+
+	// The Workers page's goldens come from an env whose detector found an Intel card, so the detail
+	// carries the card and its encoders rather than the empty-answer shape.
+	w := newEnv(t, false)
+	w.cards = qsvCards()
+	w.ready()
+	wcookie := w.setup()
+	writeGolden(t, "workers", "Worker[]", http.MethodGet, "/api/v2/workers",
+		w.do(http.MethodGet, "/api/v2/workers", "", withSession(wcookie), false))
+	writeGolden(t, "worker", "WorkerDetail", http.MethodGet, "/api/v2/workers/local",
+		w.do(http.MethodGet, "/api/v2/workers/local", "", withSession(wcookie), false))
+	writeGolden(t, "worker-patch", "WorkerDetail", http.MethodPatch, "/api/v2/workers/local",
+		w.do(http.MethodPatch, "/api/v2/workers/local",
+			`{"slots":2,"gpuSlots":0,"hours":{"from":"22:00","to":"06:00"},"primaryEncoder":"hevc_qsv"}`,
+			write(withSession(wcookie)), false))
 }

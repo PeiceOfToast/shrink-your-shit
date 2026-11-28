@@ -493,7 +493,8 @@ func (s *Server) libraryRowOf(r *http.Request, lib library.Library, files int) (
 	return row, nil
 }
 
-// libraryID reads the {id} part of a library route. A non-number is no library, so it answers 404.
+// libraryID reads the {id} part of a route whose id is a row (libraries, shares). A non-number is
+// no row, so the caller answers 404.
 func libraryID(r *http.Request) (int64, bool) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || id <= 0 {

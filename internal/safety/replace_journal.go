@@ -63,8 +63,11 @@ type Row struct {
 	Staged   string
 	Final    string
 	State    string
-	Orig     Ident
-	New      Ident
+	// Kind is "replace" for a swap and "restore" for a restore (migration 14). Recovery reads it to tell a finished
+	// restore from a rolled-back replace, which can leave the same files behind (review M2).
+	Kind string
+	Orig Ident
+	New  Ident
 }
 
 // Begin writes the "moving" row before anything moves, and returns its id.
@@ -89,17 +92,32 @@ func (j *Journal) Begin(ctx context.Context, r Row) (int64, error) {
 }
 
 // SetState moves a row to a state.
+// stateTimesSQL sets the two trash times with a state change (migration 15): trashed_at is the first time a swap settled
+// with its original in the trash, and it is kept across a purge revert. left_at is when the copy left (purged or
+// restored), and a return to done clears it. Every state write goes through it: SetState and claim.
+const stateTimesSQL = `trashed_at = CASE WHEN ? = 'done' THEN COALESCE(trashed_at, ?) ELSE trashed_at END,
+		left_at = CASE WHEN ? IN ('purged', 'rolled_back') THEN COALESCE(left_at, ?)
+		               WHEN ? = 'done' THEN NULL ELSE left_at END`
+
+// stateTimesArgs are stateTimesSQL's five placeholders for a move to state at now.
+func stateTimesArgs(state string, now int64) []any {
+	return []any{state, now, state, now, state}
+}
+
+// SetState moves a row to a state.
 func (j *Journal) SetState(ctx context.Context, id int64, state string) error {
+	now := j.now().Unix()
 	return j.db.Tx(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, `UPDATE replace_journal SET state = ?, updated_at = ? WHERE id = ?`,
-			state, j.now().Unix(), id)
+		args := append([]any{state, now}, stateTimesArgs(state, now)...)
+		_, err := tx.ExecContext(ctx, `UPDATE replace_journal SET state = ?, updated_at = ?, `+stateTimesSQL+`
+			WHERE id = ?`, append(args, id)...)
 		return err
 	})
 }
 
 // Moving lists the rows whose swap has not been settled, the ones recovery must decide.
 func (j *Journal) Moving(ctx context.Context) ([]Row, error) {
-	rows, err := j.db.Read().QueryContext(ctx, `SELECT id, job_id, original, trash, staged, final, state,
+	rows, err := j.db.Read().QueryContext(ctx, `SELECT id, job_id, original, trash, staged, final, state, kind,
 		orig_file_id, orig_size, orig_mtime, orig_ctime, orig_hash,
 		new_file_id, new_size, new_mtime, new_hash
 		FROM replace_journal WHERE state = 'moving' ORDER BY id`)
@@ -110,7 +128,7 @@ func (j *Journal) Moving(ctx context.Context) ([]Row, error) {
 	var out []Row
 	for rows.Next() {
 		var r Row
-		if err := rows.Scan(&r.ID, &r.JobID, &r.Original, &r.Trash, &r.Staged, &r.Final, &r.State,
+		if err := rows.Scan(&r.ID, &r.JobID, &r.Original, &r.Trash, &r.Staged, &r.Final, &r.State, &r.Kind,
 			&r.Orig.FileID, &r.Orig.Size, &r.Orig.MTime, &r.Orig.CTime, &r.Orig.Hash,
 			&r.New.FileID, &r.New.Size, &r.New.MTime, &r.New.Hash); err != nil {
 			return nil, err
