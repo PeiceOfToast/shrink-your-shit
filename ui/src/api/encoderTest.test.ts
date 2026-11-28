@@ -30,10 +30,10 @@ test("the worker carries the run until it finishes; the page's check is done onl
   assert.equal(testFinished(await getWorker(w.id), "some-other-run"), false);
 });
 
-test("a test still running is not finished", () => {
+test("a test still running is not finished; a worker that never ran (null) is not finished", () => {
   assert.equal(testFinished({ test: { runId: "r1", running: true, finishedAt: null } }, "r1"), false);
   assert.equal(testFinished({ test: { runId: "r1", running: false, finishedAt: "2026-11-28T07:00:00Z" } }, "r1"), true);
-  assert.equal(testFinished({}, "r1"), false);
+  assert.equal(testFinished({ test: null }, "r1"), false);
 });
 
 test("waitUntil stops as soon as the check is done, and gives up after its tries", async () => {
