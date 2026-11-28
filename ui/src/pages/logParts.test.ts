@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { JobStep, LogEvent, LogKind, LogLevel } from "../api/types.ts";
-import { addLiveLine, levelBadges, logsFromEvents, olderPageEnds, showLines, showLoadOlder } from "./logParts.ts";
+import { addLiveLine, levelBadges, logsFromEvents, olderCursorAfter, pagingCursor, showLines, showLoadOlder } from "./logParts.ts";
 import { readFileSync } from "node:fs";
 
 const steps: JobStep[] = [
@@ -206,13 +206,48 @@ test("the level badges are the server's counts: live lines are not added on top"
   assert.deepEqual(levelBadges(server, []), server);
 });
 
-test("Load older: a short folded page keeps the button; only an empty page ends it", () => {
-  const PAGE = 20;
-  const fold = { ...liveEv(30, "2026-11-28T07:00:30Z", "sign-in refused", { count: 40, firstAt: "2026-11-28T06:59:00Z", lastAt: "2026-11-28T07:00:30Z" }) } as LogEvent;
-  const short = [fold];
-  assert.ok(short.length < PAGE, "a folded page can be shorter than the page size");
-  assert.equal(olderPageEnds(short), false);
-  assert.equal(olderPageEnds([]), true);
+test("paging older lines follows the server's cursor and reaches every distinct line once", () => {
+  // A fake server with the server's rules: a page is the newest `limit` raw lines before `before`, folded (a run of the same
+  // line is one row whose seq is its newest raw line), with nextBefore set only when the raw page was full.
+  type Raw = { seq: number; message: string };
+  const raw: Raw[] = [];
+  for (let s = 1; s <= 10; s++) raw.push({ seq: s, message: `line ${s}` });
+  for (let s = 11; s <= 40; s++) raw.push({ seq: s, message: "sign-in refused" });
+  const LIMIT = 20;
+  const serve = (before?: number): LogPage => {
+    const hit = raw.filter((r) => before == null || r.seq < before);
+    const page = hit.slice(-LIMIT);
+    const rows: LogEvent[] = [];
+    for (const r of page) {
+      const last = rows[rows.length - 1];
+      if (last && last.message === r.message && r.message === "sign-in refused") {
+        rows[rows.length - 1] = { ...last, seq: r.seq, repeat: { count: (last.repeat?.count ?? 1) + 1, firstAt: last.repeat?.firstAt ?? "", lastAt: "" } } as LogEvent;
+      } else {
+        rows.push({ ...liveEv(r.seq, "2026-11-28T07:00:00Z", r.message) });
+      }
+    }
+    const full = page.length === LIMIT;
+    return { items: rows, counts: { info: 0, warn: 0, error: 0 }, ...(full ? { nextBefore: page[0].seq } : {}) };
+  };
+  const first = serve();
+  let shown = first.items;
+  let cursor = pagingCursor(undefined, first.nextBefore);
+  for (let guard = 0; cursor != null && guard < 10; guard++) {
+    const p = serve(cursor);
+    shown = [...p.items, ...shown];
+    cursor = pagingCursor(olderCursorAfter(p), first.nextBefore);
+  }
+  const seqs = shown.map((e) => e.seq);
+  assert.equal(new Set(seqs).size, seqs.length, "no row appears twice");
+  for (let s = 1; s <= 10; s++) assert.ok(shown.some((e) => e.message === `line ${s}`), `line ${s} is reached`);
+});
+
+test("the older-page cursor is the server's nextBefore, not the first row's seq", () => {
+  assert.equal(olderCursorAfter({ items: [], counts: { info: 0, warn: 0, error: 0 }, nextBefore: 7 }), 7);
+  assert.equal(olderCursorAfter({ items: [], counts: { info: 0, warn: 0, error: 0 } }), null, "a short page without a cursor ends it");
+  assert.equal(pagingCursor(undefined, 21), 21, "the first page's cursor");
+  assert.equal(pagingCursor(4, 21), 4, "once an older page is loaded, its cursor");
+  assert.equal(pagingCursor(null, 21), null, "an older page that ended ends the paging");
 });
 
 test("the Load older button: a short folded first page shows it; hasMore=false hides it; no lines hides it", () => {
@@ -223,7 +258,7 @@ test("the Load older button: a short folded first page shows it; hasMore=false h
 
 test("the page shows the Load older button through showLoadOlder (a revert to the folded-length guard is caught)", () => {
   const src = readFileSync(new URL("./SystemLog.tsx", import.meta.url), "utf8");
-  assert.match(src, /\{showLoadOlder\(hasMore, items\.length\) && \(/);
+  assert.match(src, /\{showLoadOlder\(pagingCursor\(olderCursor, log\.data\?\.nextBefore\) != null, items\.length\) && \(/);
   assert.doesNotMatch(src, /base\.length >= api\.LOG_PAGE_SIZE/);
 });
 

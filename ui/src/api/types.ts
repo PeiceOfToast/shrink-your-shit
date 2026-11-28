@@ -634,6 +634,9 @@ export interface LogPage {
   // Oldest first; the newest line is last.
   items: LogEvent[];
   counts: LogCounts;
+  // The cursor for the next older page (the server's nextBefore): set only when the raw page was full. A fold can make
+  // a page shorter than its limit, so the length is not the test; the cursor is.
+  nextBefore?: number;
 }
 
 // GET /api/v2/log/sources: the source filter's names, in the words a person reads (page 12).
