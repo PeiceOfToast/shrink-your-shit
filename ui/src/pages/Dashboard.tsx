@@ -5,6 +5,7 @@ import { ApiError, api, formatBytes, formatCount, formatGB, type Attention, type
 import type { DaySeries, Series } from "../api/types.ts";
 import { useApi } from "../api/useApi.ts";
 import { Bars } from "../ui/Bars.tsx";
+import { SampleBanner } from "../ui/SampleBanner.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { libraryStatus } from "../ui/libraryStatus.ts";
 import { Link, navigate } from "../router.tsx";
@@ -179,6 +180,7 @@ export function Dashboard() {
         </button>
       </div>
 
+      <SampleBanner group="overview" text="these numbers and the Needs attention list are made up. The dashboard isn't connected yet." />
       {overview.loading && !o && <p className="muted">Loading…</p>}
       {overview.error && !o && (
         <section className="card">

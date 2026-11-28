@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { api, ApiError, type GuideChoice } from "../api/index.ts";
+import { api, ApiError, sampleOnly, type GuideChoice } from "../api/index.ts";
 import type { BitrateLadder } from "../api/flowTypes.ts";
 import type { GpuFamily } from "../api/types.ts";
 import { useApi } from "../api/useApi.ts";
@@ -24,7 +24,8 @@ export function useBitrateLadder(): BitrateLadder | null {
 // no-card answer) gives none, so the line shows only the processor CRF. null while the workers load.
 export function useCardFamilies(useGpu: boolean): GpuFamily[] {
   const workers = useApi(() => api.getWorkers(), []).data;
-  if (!useGpu || !workers) return [];
+  // The workers list has no server route yet; the sample cards would add made-up GPU lines.
+  if (!useGpu || !workers || sampleOnly()) return [];
   return cardFamilies(workers);
 }
 

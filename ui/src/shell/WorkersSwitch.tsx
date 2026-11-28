@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api, type Summary } from "../api/index.ts";
+import { api, sampleOnly, type Summary } from "../api/index.ts";
 import { notifySummaryChanged } from "../api/summaryBus.ts";
 
 // The all-workers switch in the top bar. Off: no new jobs start and the files running finish first.
@@ -8,7 +8,8 @@ import { notifySummaryChanged } from "../api/summaryBus.ts";
 export function WorkersSwitch({ summary }: { summary?: Summary }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  if (!summary) return null;
+  // Pause/resume all has no server route yet: the switch would only flip the sample workers, so it stays hidden.
+  if (!summary || sampleOnly()) return null;
   const { paused, finishing } = summary.workers;
   const label = !paused ? "Workers on" : finishing > 0 ? `Workers paused · ${finishing} finishing` : "Workers paused";
   const toggle = () => {

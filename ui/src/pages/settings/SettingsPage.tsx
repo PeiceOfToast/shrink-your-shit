@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { api, type SettingsSection } from "../../api/index.ts";
+import { api, sampleOnly, type SettingsSection } from "../../api/index.ts";
+import { SampleBanner } from "../../ui/SampleBanner.tsx";
 import { useApi } from "../../api/useApi.ts";
 import { Link, navigate } from "../../router.tsx";
 import { hasChanges, setAsker } from "../../settings/leaveGuard.ts";
@@ -31,18 +32,26 @@ function Body({ section }: { section: SettingsSection }) {
     case "appearance": return <Appearance />;
     case "processing": return <Processing />;
     case "trash": return <Trash />;
-    case "connections": return <Connections />;
-    case "notifications": return <Notifications />;
-    case "backup": return <Backup />;
-    case "health": return <Health />;
-    case "access": return <Access />;
+    case "connections": return <><SampleBanner /><Connections /></>;
+    case "notifications": return <><SampleBanner /><Notifications /></>;
+    case "backup": return <><SampleBanner /><Backup /></>;
+    case "health": return <><SampleBanner text="these checks are made up. The health check isn't connected yet." /><Health /></>;
+    // Token and password changes have no server route yet; a made-up token would read as real.
+    case "access":
+      return sampleOnly() ? (
+        <>
+          <h2 className="set-title">Access</h2>
+          <p className="muted">Not built yet. Changing the password and the access token come in a later batch.</p>
+        </>
+      ) : <Access />;
   }
 }
 
 // Settings (page 11): a section list on the left, the section on the right. On a phone the list is the first screen.
 export function SettingsPage({ section }: { section: SettingsSection | null }) {
   const doctor = useApi(() => api.getDoctor(false), []);
-  const healthBad = doctor.data?.checks.some((c) => c.status === "bad") ?? false;
+  // The sample checks include a problem; its red dot would read as real.
+  const healthBad = !sampleOnly() && (doctor.data?.checks.some((c) => c.status === "bad") ?? false);
   const [leave, setLeave] = useState<(() => void) | null>(null);
 
   useEffect(() => {
