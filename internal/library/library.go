@@ -175,8 +175,11 @@ type File struct {
 // NewLibrary is what Add takes. WorkflowID is nil for a library with no workflow yet; the HTTP
 // layer does not send one on Add, Update sets it later.
 type NewLibrary struct {
-	Name       string
-	Path       string
+	Name string
+	Path string
+	// ShareID is the share this library lives on (S3-7), nil for a folder on this computer. The
+	// path is then the helper's mount point plus the address's subfolder.
+	ShareID    *int64
 	WorkflowID *int64
 	Watch      Watch
 }
@@ -214,6 +217,7 @@ func (c *Catalog) clock() time.Time {
 type PreparedLibrary struct {
 	Name       string
 	Path       string
+	ShareID    *int64
 	WorkflowID *int64
 	Watch      Watch
 	NextScanAt time.Time
@@ -238,7 +242,7 @@ func (c *Catalog) PrepareLibrary(ctx context.Context, in NewLibrary) (PreparedLi
 		return PreparedLibrary{}, err
 	}
 	return PreparedLibrary{
-		Name: name, Path: path, WorkflowID: in.WorkflowID, Watch: watch,
+		Name: name, Path: path, ShareID: in.ShareID, WorkflowID: in.WorkflowID, Watch: watch,
 		// Due at once: the caller starts its first scan (page 09 Add).
 		NextScanAt: c.clock().UTC().Truncate(time.Millisecond),
 	}, nil
@@ -248,8 +252,8 @@ func (c *Catalog) PrepareLibrary(ctx context.Context, in NewLibrary) (PreparedLi
 // the same all-or-nothing call as the account and the workflow.
 func (c *Catalog) AddLibraryTx(ctx context.Context, tx *sql.Tx, p PreparedLibrary) (int64, error) {
 	res, err := tx.ExecContext(ctx,
-		`INSERT INTO libraries(name, path, workflow_id, watch, paused, next_scan_at) VALUES(?, ?, ?, ?, 0, ?)`,
-		p.Name, p.Path, p.WorkflowID, string(p.Watch), p.NextScanAt.UnixMilli())
+		`INSERT INTO libraries(name, path, share_id, workflow_id, watch, paused, next_scan_at) VALUES(?, ?, ?, ?, ?, 0, ?)`,
+		p.Name, p.Path, p.ShareID, p.WorkflowID, string(p.Watch), p.NextScanAt.UnixMilli())
 	if err != nil {
 		return 0, fmt.Errorf("add the library %s: %w", p.Path, err)
 	}

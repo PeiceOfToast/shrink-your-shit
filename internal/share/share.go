@@ -26,6 +26,9 @@ var (
 	ErrNotFound   = errors.New("share: no such share")
 	ErrInUse      = errors.New("share: a library uses it")
 	ErrNotMounted = errors.New("share: not mounted")
+	// ErrDown is a share that stayed down after a mount attempt: a library cannot be added on it.
+	// The share it comes with carries the sentence why.
+	ErrDown = errors.New("share: not connected")
 )
 
 // Share is one SMB or NFS share the app knows. HasPassword says a sealed password is kept; the

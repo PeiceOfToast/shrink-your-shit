@@ -9,6 +9,8 @@ import (
 	"errors"
 	"math"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -17,6 +19,7 @@ import (
 	"github.com/PeiceOfToast/shrink-your-shit/internal/flow"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/jobs"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/library"
+	"github.com/PeiceOfToast/shrink-your-shit/internal/share"
 )
 
 // The libraries group (page 09): the list, one library, Add, the panel's Save and Remove, and the two
@@ -102,7 +105,9 @@ func (s *Server) getLibrary(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, row)
 }
 
-// libraryInput is page 09's Add: the folder, a name, and the watch. Shares are not in stage 1.
+// libraryInput is page 09's Add: the folder, a name, and the watch. A shareId adds a library on the
+// share's own folder instead of a folder on this computer; the share decides the path then, and
+// path is only the folder inside the share.
 type libraryInput struct {
 	Name    string `json:"name"`
 	Path    string `json:"path"`
@@ -116,12 +121,18 @@ func (s *Server) postLibrary(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &body) {
 		return
 	}
-	if body.ShareID != "" {
-		writeError(w, http.StatusBadRequest, "invalid_request", "Shares aren't available yet. Choose a folder on this computer.", "shareId", 0)
-		return
+	name, path := body.Name, body.Path
+	var shareID *int64
+	if strings.TrimSpace(body.ShareID) != "" {
+		id, ok := s.libraryShare(w, r, body.ShareID, &name, &path)
+		if !ok {
+			// libraryShare already answered the page.
+			return
+		}
+		shareID = &id
 	}
 	lib, err := rs.Catalog.AddLibrary(r.Context(), library.NewLibrary{
-		Name: body.Name, Path: body.Path, Watch: library.Watch(body.Watch),
+		Name: name, Path: path, ShareID: shareID, Watch: library.Watch(body.Watch),
 	})
 	if err != nil {
 		if !writeLibraryFolderError(w, err) {
@@ -144,6 +155,63 @@ func (s *Server) postLibrary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, row)
+}
+
+// libraryShare turns Add's shareId into the folder to add. The helper mounts the share (leaving one
+// it already mounted alone, so a dropped share is healed here too), and the library's folder is the
+// share's point with the share's own subfolder inside it. name is filled in from the share when the
+// form left it empty. In host mode there is no helper to mount with, so this refuses with the same
+// sentence GET /shares carries; verifying a person's own mount is slice 6.
+func (s *Server) libraryShare(w http.ResponseWriter, r *http.Request, raw string, name, path *string) (int64, bool) {
+	rs := s.ready.Load()
+	id, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(w, http.StatusNotFound, "not_found", "That share doesn't exist.", "shareId", 0)
+		return 0, false
+	}
+	if rs.Shares == nil {
+		internalError(w)
+		return 0, false
+	}
+	if rs.Shares.Mode() != share.ModeHelper {
+		writeError(w, http.StatusBadRequest, "invalid_request", share.NoHelperReason, "shareId", 0)
+		return 0, false
+	}
+	sh, err := rs.Shares.EnsureMounted(r.Context(), id)
+	switch {
+	case errors.Is(err, share.ErrNotFound):
+		writeError(w, http.StatusNotFound, "not_found", "That share doesn't exist.", "shareId", 0)
+		return 0, false
+	case errors.Is(err, share.ErrDown):
+		writeError(w, http.StatusConflict, "share_down", shareDownSentence(sh), "shareId", 0)
+		return 0, false
+	case err != nil:
+		internalError(w)
+		return 0, false
+	}
+	point := sh.Point
+	if sh.Sub != "" {
+		point = filepath.Join(point, filepath.FromSlash(sh.Sub))
+		if fi, err := os.Stat(point); err != nil || !fi.IsDir() {
+			writeError(w, http.StatusBadRequest, "invalid_request",
+				"The share has no folder named "+sh.Sub+".", "shareId", 0)
+			return 0, false
+		}
+	}
+	*path = point
+	if strings.TrimSpace(*name) == "" {
+		*name = sh.Name
+	}
+	return id, true
+}
+
+// shareDownSentence is why a library cannot be added on a down share: the share's own words, or the
+// plain fact when the store has none.
+func shareDownSentence(sh share.Share) string {
+	if sh.Reason != "" {
+		return sh.Reason
+	}
+	return "The share is not connected."
 }
 
 // libraryPatchInput is page 09's Save: only the changed fields are sent. workflowId is raw JSON
@@ -453,8 +521,8 @@ func (s *Server) libraryRowOf(r *http.Request, lib library.Library, files int) (
 		LastScan: nil,
 	}
 	if lib.ShareID != nil {
-		share := strconv.FormatInt(*lib.ShareID, 10)
-		row.ShareID = &share
+		shareID := strconv.FormatInt(*lib.ShareID, 10)
+		row.ShareID = &shareID
 	}
 	if lib.NextScanAt != nil {
 		next := rfc3339(*lib.NextScanAt)

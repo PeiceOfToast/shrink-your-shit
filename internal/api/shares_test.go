@@ -7,8 +7,10 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -17,18 +19,20 @@ import (
 	"github.com/PeiceOfToast/shrink-your-shit/internal/share"
 )
 
-// fakeMounter stands in for the root helper: it records what it was asked, mounts nothing, and
-// answers a real folder for a test mount so the service's stat succeeds.
+// fakeMounter stands in for the root helper: it records what it was asked, makes a real folder for
+// each share (so a library can be added on the point, as with the helper) and answers a real folder
+// for a test mount so the service's stat succeeds.
 type fakeMounter struct {
 	mu       sync.Mutex
+	base     string
 	testAt   string
 	fail     map[string]*share.MountError
 	mounts   []share.Spec
 	unmounts []share.Spec
 }
 
-func newFakeMounter(testAt string) *fakeMounter {
-	return &fakeMounter{testAt: testAt, fail: map[string]*share.MountError{}}
+func newFakeMounter(base string) *fakeMounter {
+	return &fakeMounter{base: base, testAt: base, fail: map[string]*share.MountError{}}
 }
 
 // failOn makes the fake refuse one source, as a helper that cannot reach the server would.
@@ -55,7 +59,11 @@ func (m *fakeMounter) Mount(_ context.Context, spec share.Spec) (string, error) 
 	if spec.ID == 0 {
 		return m.testAt, nil
 	}
-	return fmt.Sprintf("/var/lib/syp/shares/%d", spec.ID), nil
+	point := filepath.Join(m.base, strconv.FormatInt(spec.ID, 10))
+	if err := os.MkdirAll(point, 0o755); err != nil {
+		return "", err
+	}
+	return point, nil
 }
 
 func (m *fakeMounter) Unmount(_ context.Context, spec share.Spec) error {
@@ -142,7 +150,7 @@ func TestAddShareSealsThePasswordAndNeverLeaksIt(t *testing.T) {
 	if !row.HasPassword {
 		t.Error("hasPassword = false, want true")
 	}
-	if !row.Connected || row.Point != "/var/lib/syp/shares/1" || row.Since == "" {
+	if !row.Connected || row.Point != filepath.Join(e.mounter.base, "1") || row.Since == "" {
 		t.Errorf("connection = %+v, want it mounted with since", row)
 	}
 	specs := e.mounter.mountCalls()
@@ -362,7 +370,7 @@ func TestReconnectAnswersTheShareAndRecordsTheOutcome(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &row); err != nil {
 		t.Fatal(err)
 	}
-	if row.ID != "1" || !row.Connected || row.Point != "/var/lib/syp/shares/1" || row.Reason != "" {
+	if row.ID != "1" || !row.Connected || row.Point != filepath.Join(e.mounter.base, "1") || row.Reason != "" {
 		t.Errorf("reconnected share = %+v", row)
 	}
 	if rec := e.do(http.MethodPost, "/api/v2/shares/99/reconnect", "", write(shareHeaders(cookie)), false); rec.Code != http.StatusNotFound {
@@ -409,5 +417,150 @@ func TestDeleteShareRefusesWhileALibraryUsesIt(t *testing.T) {
 	}
 	if rec := e.do(http.MethodDelete, "/api/v2/shares/1", "", write(shareHeaders(cookie)), false); rec.Code != http.StatusNotFound {
 		t.Errorf("deleting twice: status %d, body %s", rec.Code, rec.Body)
+	}
+}
+
+// mustAddShare adds one share through the API and answers its row's point.
+func mustAddShare(t *testing.T, e *env, cookie *http.Cookie, address, username, password string) string {
+	t.Helper()
+	body := mustJSON(t, map[string]any{"address": address, "username": username, "password": password})
+	rec := e.do(http.MethodPost, "/api/v2/shares", body, write(shareHeaders(cookie)), false)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("add share %s: %d %s", address, rec.Code, rec.Body)
+	}
+	var row struct {
+		Point string `json:"point"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &row); err != nil {
+		t.Fatal(err)
+	}
+	return row.Point
+}
+
+// TestAddLibraryOnAShareTakesTheSharesFolder: Add with a shareId mounts the share (the helper leaves
+// a mounted one alone), and the library is added on the point the helper chose, with the share's own
+// name when the form left it empty and the shareId on the row.
+func TestAddLibraryOnAShareTakesTheSharesFolder(t *testing.T) {
+	e := newEnv(t, true)
+	cookie := e.setup()
+	point := mustAddShare(t, e, cookie, `\\nas\media`, "viewer", "pw-1234-5678")
+
+	rec := e.do(http.MethodPost, "/api/v2/libraries", `{"shareId":"1"}`, write(withSession(cookie)), false)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("add library: %d %s", rec.Code, rec.Body)
+	}
+	var row struct {
+		Name    string  `json:"name"`
+		Path    string  `json:"path"`
+		ShareID *string `json:"shareId"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &row); err != nil {
+		t.Fatal(err)
+	}
+	if row.Path != point {
+		t.Errorf("path = %q, want the share's point %q", row.Path, point)
+	}
+	if row.Name != "media" {
+		t.Errorf("name = %q, want the share's own name", row.Name)
+	}
+	if row.ShareID == nil || *row.ShareID != "1" {
+		t.Errorf("shareId = %v, want 1", row.ShareID)
+	}
+	// The add mounts it again: the helper answers a share it already mounted with the same point.
+	specs := e.mounter.mountCalls()
+	if len(specs) < 2 || specs[len(specs)-1].ID != 1 || specs[len(specs)-1].Address.Sub != "" {
+		t.Errorf("last mount = %+v, want the share's whole source", specs)
+	}
+}
+
+// TestAddLibraryOnAShareUsesTheAddressesSubfolder: a share saved on //nas/media/Films is mounted
+// whole and its folder is inside the mount, so the library's path is the point plus Films. A share
+// without that folder is refused with a sentence that names it.
+func TestAddLibraryOnAShareUsesTheAddressesSubfolder(t *testing.T) {
+	e := newEnv(t, true)
+	cookie := e.setup()
+	point := mustAddShare(t, e, cookie, `\\nas\media\Films`, "viewer", "pw-1234-5678")
+
+	rec := e.do(http.MethodPost, "/api/v2/libraries", `{"shareId":"1"}`, write(withSession(cookie)), false)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("missing subfolder: %d %s", rec.Code, rec.Body)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, "no folder named Films") || !strings.Contains(body, `"field":"shareId"`) {
+		t.Fatalf("missing subfolder answer = %s", body)
+	}
+	if err := os.MkdirAll(filepath.Join(point, "Films"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rec = e.do(http.MethodPost, "/api/v2/libraries", `{"shareId":"1"}`, write(withSession(cookie)), false)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("add library: %d %s", rec.Code, rec.Body)
+	}
+	var row struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &row); err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(point, "Films"); row.Path != want {
+		t.Errorf("path = %q, want %q", row.Path, want)
+	}
+}
+
+// TestAddLibraryOnADownShareIsRefused: a share the helper could not mount has no folder to add, and
+// the answer says what the helper said. Nothing is added.
+func TestAddLibraryOnADownShareIsRefused(t *testing.T) {
+	e := newEnv(t, true)
+	cookie := e.setup()
+	mustAddShare(t, e, cookie, `\\nas\media`, "viewer", "pw-1234-5678")
+	const sentence = "The server did not answer. Check its address and try again."
+	e.mounter.failOn("//nas/media", &share.MountError{Reason: share.ReasonUnreachable, Message: sentence})
+
+	rec := e.do(http.MethodPost, "/api/v2/libraries", `{"shareId":"1"}`, write(withSession(cookie)), false)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("down share: %d %s", rec.Code, rec.Body)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, "share_down") || !strings.Contains(body, sentence) {
+		t.Fatalf("down share answer = %s", body)
+	}
+	if rec := e.do(http.MethodGet, "/api/v2/libraries", "", write(withSession(cookie)), false); !strings.Contains(rec.Body.String(), `[]`) {
+		t.Errorf("the refused add still added a library: %s", rec.Body)
+	}
+	rec = e.do(http.MethodPost, "/api/v2/libraries", `{"shareId":"9"}`, write(withSession(cookie)), false)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("unknown share: %d %s", rec.Code, rec.Body)
+	}
+}
+
+// TestHostModeSaysSoAndRefusesAShareAdd: without the root helper GET /shares names host mode with
+// its sentence, and Add cannot mount the share for the person, so it refuses instead of guessing at
+// a folder that may not be the share at all.
+func TestHostModeSaysSoAndRefusesAShareAdd(t *testing.T) {
+	e := newEnv(t, true)
+	cookie := e.setup()
+	mustAddShare(t, e, cookie, `\\nas\media`, "viewer", "pw-1234-5678")
+	e.shares.HostMode(share.NoHelperReason)
+
+	rec := e.do(http.MethodGet, "/api/v2/shares", "", shareHeaders(cookie), false)
+	var body struct {
+		Mode       string `json:"mode"`
+		ModeReason string `json:"modeReason"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Mode != "host" || body.ModeReason != share.NoHelperReason {
+		t.Errorf("mode = %q reason = %q, want host mode with its sentence", body.Mode, body.ModeReason)
+	}
+
+	before := len(e.mounter.mountCalls())
+	rec = e.do(http.MethodPost, "/api/v2/libraries", `{"shareId":"1"}`, write(withSession(cookie)), false)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("host add: %d %s", rec.Code, rec.Body)
+	}
+	if b := rec.Body.String(); !strings.Contains(b, "no share helper") || !strings.Contains(b, `"field":"shareId"`) {
+		t.Fatalf("host add answer = %s", b)
+	}
+	if got := len(e.mounter.mountCalls()); got != before {
+		t.Errorf("host mode tried to mount: %d calls, want %d", got, before)
 	}
 }

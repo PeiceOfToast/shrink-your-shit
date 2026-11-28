@@ -116,14 +116,15 @@ func TestContractGoldens(t *testing.T) {
 		e.do(http.MethodDelete, "/api/v2/libraries/2", "", write(withSession(cookie)), false), dir)
 
 	// Shares (S3-7): Add, the list, Test's two answers, Try again and Remove. The fake mounter is
-	// the API tests' stand-in for the root helper, so this golden run needs no privilege.
+	// the API tests' stand-in for the root helper, so this golden run needs no privilege. It makes
+	// each share's point under its own base, which the golden writes as $DIR.
 	shareBody := mustJSON(t, map[string]any{
 		"address": "//nas/media", "username": "viewer", "password": "share-password",
 	})
 	writeGolden(t, "share-post", "Share", http.MethodPost, "/api/v2/shares",
-		e.do(http.MethodPost, "/api/v2/shares", shareBody, write(withSession(cookie)), false))
+		e.do(http.MethodPost, "/api/v2/shares", shareBody, write(withSession(cookie)), false), e.mounter.base)
 	writeGolden(t, "shares", "Shares", http.MethodGet, "/api/v2/shares",
-		e.do(http.MethodGet, "/api/v2/shares", "", withSession(cookie), false))
+		e.do(http.MethodGet, "/api/v2/shares", "", withSession(cookie), false), e.mounter.base)
 	writeGolden(t, "share-test", "ShareTest", http.MethodPost, "/api/v2/shares/test",
 		e.do(http.MethodPost, "/api/v2/shares/test", shareBody, write(withSession(cookie)), false))
 	e.mounter.failOn("//offline/media", &share.MountError{
@@ -136,7 +137,7 @@ func TestContractGoldens(t *testing.T) {
 		e.do(http.MethodPost, "/api/v2/shares/test", offlineBody, write(withSession(cookie)), false))
 	e.mounter.heal()
 	writeGolden(t, "share-reconnect", "Share", http.MethodPost, "/api/v2/shares/1/reconnect",
-		e.do(http.MethodPost, "/api/v2/shares/1/reconnect", "", write(withSession(cookie)), false))
+		e.do(http.MethodPost, "/api/v2/shares/1/reconnect", "", write(withSession(cookie)), false), e.mounter.base)
 	writeGolden(t, "share-delete", "none", http.MethodDelete, "/api/v2/shares/1",
 		e.do(http.MethodDelete, "/api/v2/shares/1", "", write(withSession(cookie)), false))
 

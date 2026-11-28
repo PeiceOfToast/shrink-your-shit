@@ -8,7 +8,7 @@
         "hasPassword": true,
         "id": "1",
         "name": "media",
-        "point": "/var/lib/syp/shares/1",
+        "point": "$DIR/1",
         "since": "2026-11-27T04:00:00Z",
         "type": "smb",
         "username": "viewer"

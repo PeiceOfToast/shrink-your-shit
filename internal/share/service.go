@@ -26,9 +26,16 @@ const (
 	ReasonNoSuchShare    = "no_such_share"
 	ReasonMountFailed    = "mount_failed"
 	ReasonTimeout        = "timeout"
-	testMountTimeout     = 10 * time.Second
-	testUnmountTimeout   = 5 * time.Second
+	// ReasonNoHelper is this computer's own state, not the share's: there is no root helper, so the
+	// app cannot mount anything. It is its own code so the page never blames the server.
+	ReasonNoHelper     = "no_helper"
+	testMountTimeout   = 10 * time.Second
+	testUnmountTimeout = 5 * time.Second
 )
+
+// NoHelperReason is the sentence both the host mode and the Unavailable mounter use, so the page
+// and a failed mount say the same thing.
+const NoHelperReason = "This computer has no share helper, so syp can't mount shares here. Mount the share on this computer and add its folder instead."
 
 // MountError is a failed mount or unmount with a code and the sentence the page shows.
 type MountError struct {
@@ -59,13 +66,12 @@ type Mounter interface {
 	Unmount(ctx context.Context, spec Spec) error
 }
 
-// Unavailable is the mounter this build runs with until the helper client lands: a share can be
-// recorded, and it honestly says it is not connected.
+// Unavailable is the mounter a computer without the root helper runs with. It mounts nothing and
+// says why with its own code, so a share saved here is honestly not connected.
 type Unavailable struct{}
 
 func (Unavailable) Mount(context.Context, Spec) (string, error) {
-	return "", &MountError{Reason: ReasonUnreachable,
-		Message: "This build can't mount shares yet. Add the folder on this computer instead."}
+	return "", &MountError{Reason: ReasonNoHelper, Message: NoHelperReason}
 }
 
 func (Unavailable) Unmount(context.Context, Spec) error { return nil }
@@ -187,6 +193,24 @@ func (s *Service) Reconnect(ctx context.Context, id int64) (Share, error) {
 	}
 	if err := s.attempt(ctx, &sh); err != nil {
 		return Share{}, err
+	}
+	return sh, nil
+}
+
+// EnsureMounted mounts the saved share so a library can be added on its folder, and answers the
+// share with its point. The helper leaves a share it already mounted alone and mounts one that was
+// unmounted behind its back, so this is also how a library add heals a share that dropped.
+// ErrDown means the share stayed down; the share carries the sentence why.
+func (s *Service) EnsureMounted(ctx context.Context, id int64) (Share, error) {
+	sh, err := s.store.Get(ctx, id)
+	if err != nil {
+		return Share{}, err
+	}
+	if err := s.attempt(ctx, &sh); err != nil {
+		return Share{}, err
+	}
+	if !sh.Connected {
+		return sh, ErrDown
 	}
 	return sh, nil
 }
