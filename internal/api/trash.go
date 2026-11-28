@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/PeiceOfToast/shrink-your-shit/internal/events"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/safety"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/store"
 )
@@ -82,9 +83,24 @@ func (s *Server) restoreTrash(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "trash_not_found", "That file isn't in the trash.", "", 0)
 		return
 	}
-	err = safety.Restore(r.Context(), safety.NewJournal(rs.DB), id)
+	j := safety.NewJournal(rs.DB)
+	row, _, err := j.Entry(r.Context(), id)
+	if errors.Is(err, safety.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "trash_not_found", "That file isn't in the trash.", "", 0)
+		return
+	}
+	if err != nil {
+		internalError(w)
+		return
+	}
+	err = safety.Restore(r.Context(), j, id)
 	switch {
 	case err == nil:
+		// The job's History shows the restore (page 03).
+		if rs.Events != nil {
+			_ = rs.Events.Emit(events.Event{JobID: row.JobID, Level: events.LevelInfo, Kind: events.KindRestored,
+				Source: "safety", Code: "replace.restored", Message: safety.RestoredSentence})
+		}
 		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 		return
 	case errors.Is(err, safety.ErrNotFound):

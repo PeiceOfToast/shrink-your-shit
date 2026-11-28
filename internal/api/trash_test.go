@@ -22,6 +22,12 @@ func tomorrowPlusEight() time.Time { return time.Now().Add(8 * 24 * time.Hour) }
 // the job wrote. The converted file takes the original's name, or movie.mp4 when mp4 is set. It returns the row id.
 func replacedFixture(t *testing.T, e *env, mp4 bool) (orig, final string, id int64) {
 	t.Helper()
+	return replacedFixtureFor(t, e, mp4, 1)
+}
+
+// replacedFixtureFor is replacedFixture for a job the test owns, so its History can be read.
+func replacedFixtureFor(t *testing.T, e *env, mp4 bool, jobID int64) (orig, final string, id int64) {
+	t.Helper()
 	lib := t.TempDir()
 	orig = filepath.Join(lib, "movie.mkv")
 	final = orig
@@ -36,7 +42,7 @@ func replacedFixture(t *testing.T, e *env, mp4 bool) (orig, final string, id int
 		t.Fatal(err)
 	}
 	if _, err := safety.Swap(context.Background(), safety.NewJournal(e.db), safety.SwapPlan{
-		JobID: 1, Original: orig, Staged: staged, Final: final, KeepDays: 7,
+		JobID: jobID, Original: orig, Staged: staged, Final: final, KeepDays: 7,
 	}); err != nil {
 		t.Fatalf("swap: %v", err)
 	}
@@ -177,4 +183,32 @@ func TestAttentionListsAReplaceThatNeedsALook(t *testing.T) {
 	if len(items) != 1 || !strings.Contains(items[0].What, filepath.Base(orig)) {
 		t.Fatalf("attention = %+v, want one row naming %s", items, filepath.Base(orig))
 	}
+}
+
+// TestRestoreShowsInTheJobsHistory: the restored original's job History reads "Original restored" (page 03).
+func TestRestoreShowsInTheJobsHistory(t *testing.T) {
+	f := newJobsFixture(t)
+	e := f.e
+	_, _, id := replacedFixtureFor(t, e, false, f.done)
+	rec := e.do(http.MethodPost, fmt.Sprintf("/api/v2/trash/%d/restore", id), "",
+		write(map[string]string{"Cookie": f.cookie.String()}), false)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("restore status %d, body %s", rec.Code, rec.Body)
+	}
+	e.closeBus() // the job record is written by the bus's sink; flush it before the History read
+	rec = e.do(http.MethodGet, fmt.Sprintf("/api/v2/jobs/%d/history", f.done), "",
+		map[string]string{"Cookie": f.cookie.String()}, false)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("history status %d, body %s", rec.Code, rec.Body)
+	}
+	var lines []struct {
+		Text string `json:"text"`
+	}
+	decodeInto(t, rec, &lines)
+	for _, l := range lines {
+		if l.Text == safety.RestoredSentence {
+			return
+		}
+	}
+	t.Fatalf("history has no %q line: %+v", safety.RestoredSentence, lines)
 }

@@ -42,6 +42,7 @@ var historyKinds = map[events.Kind]bool{
 	events.KindCancelled: true, events.KindRunStart: true, events.KindRunEnd: true,
 	events.KindWarning: true, events.KindError: true,
 	events.KindDone: true, events.KindSkipped: true, events.KindFailed: true,
+	events.KindRestored: true,
 }
 
 // jobEvents reads every event of a job, oldest first, one page at a time.
@@ -136,6 +137,8 @@ func (s *Server) jobHistory(w http.ResponseWriter, r *http.Request) {
 // finished job's line shows as a note, and a failed one as an error.
 func logKind(k events.Kind) string {
 	switch k {
+	case events.KindRestored:
+		return string(events.KindNote)
 	case events.KindDone, events.KindSkipped:
 		return string(events.KindNote)
 	case events.KindFailed:
