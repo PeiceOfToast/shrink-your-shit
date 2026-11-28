@@ -14,6 +14,7 @@ import (
 	"github.com/PeiceOfToast/shrink-your-shit/internal/flow"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/jobs"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/library"
+	"github.com/PeiceOfToast/shrink-your-shit/internal/safety"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/store"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/worker"
 )
@@ -444,5 +445,96 @@ func TestAnInstallAtSchemaTwelveUpgradesToThirteen(t *testing.T) {
 	}
 	if slots != 4 {
 		t.Errorf("the built-in worker's files at once = %d, want the page 11 value 4", slots)
+	}
+}
+
+// TestAnInstallAtSchemaThirteenUpgradesToFourteen: an install at schema 13 (the workers, after #896) upgrades to 14. The
+// replace journal gets its kind column, and the rows an older install already holds take the default kind. Recovery
+// still runs on them, and no row is left in "moving".
+func TestAnInstallAtSchemaThirteenUpgradesToFourteen(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	db, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Migrate(); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	// Take the schema back to 13: the workers exist, the journal has no kind column yet. Two rows are from before the
+	// kind column: one a crash left "moving", one already "done".
+	if err := db.Tx(ctx, func(tx *sql.Tx) error {
+		for _, s := range []string{
+			`ALTER TABLE replace_journal DROP COLUMN kind`,
+			`PRAGMA user_version = 13`,
+			`INSERT INTO replace_journal (job_id, original, trash, staged, final, state,
+				orig_file_id, orig_size, orig_mtime, orig_ctime, orig_hash,
+				new_file_id, new_size, new_mtime, new_hash, created_at, updated_at)
+				VALUES (1, '/lib/a.mkv', '/lib/.syp-trash/a', '/lib/a.staged.mkv', '/lib/a.mkv', 'moving',
+				'1:1', 100, 1, 1, 'h1', '2:2', 50, 1, 'h2', 1, 1)`,
+			`INSERT INTO replace_journal (job_id, original, trash, staged, final, state,
+				orig_file_id, orig_size, orig_mtime, orig_ctime, orig_hash,
+				new_file_id, new_size, new_mtime, new_hash, created_at, updated_at)
+				VALUES (2, '/lib/b.mkv', '/lib/.syp-trash/b', '/lib/b.staged.mkv', '/lib/b.mkv', 'done',
+				'3:3', 100, 1, 1, 'h3', '4:4', 50, 1, 'h4', 1, 1)`,
+		} {
+			if _, err := tx.Exec(s); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		db.Close()
+		t.Fatalf("make the database a schema 13 install: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err = store.Open(dir)
+	if err != nil {
+		t.Fatalf("open the schema 13 install: %v", err)
+	}
+	defer db.Close()
+	if err := db.Migrate(); err != nil {
+		t.Fatalf("upgrade the schema 13 install: %v", err)
+	}
+
+	var version int
+	if err := db.Read().QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version != 14 {
+		t.Errorf("schema version after the upgrade = %d, want 14", version)
+	}
+	rows, err := db.Read().Query(`SELECT job_id, kind FROM replace_journal ORDER BY job_id`)
+	if err != nil {
+		t.Fatalf("read the journal kinds after the upgrade: %v", err)
+	}
+	defer rows.Close()
+	kinds := map[int]string{}
+	for rows.Next() {
+		var job int
+		var kind string
+		if err := rows.Scan(&job, &kind); err != nil {
+			t.Fatal(err)
+		}
+		kinds[job] = kind
+	}
+	if kinds[1] != "replace" || kinds[2] != "replace" || len(kinds) != 2 {
+		t.Errorf("journal kinds after the upgrade = %v, want both rows \"replace\"", kinds)
+	}
+
+	if _, err := safety.Recover(ctx, safety.NewJournal(db)); err != nil {
+		t.Fatalf("recovery on the upgraded journal: %v", err)
+	}
+	var moving int
+	if err := db.Read().QueryRow(`SELECT count(*) FROM replace_journal WHERE state = 'moving'`).Scan(&moving); err != nil {
+		t.Fatal(err)
+	}
+	if moving != 0 {
+		t.Errorf("rows left in moving after recovery = %d, want 0", moving)
 	}
 }
