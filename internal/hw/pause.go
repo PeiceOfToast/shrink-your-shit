@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/PeiceOfToast/shrink-your-shit/internal/encode"
@@ -110,6 +111,31 @@ func (p *Pauses) Paused(ctx context.Context, worker string, fam encode.Family) (
 	}
 	t := time.UnixMilli(until.Int64).UTC()
 	return t, p.now().UTC().Before(t), nil
+}
+
+// Reader is the picker's paused hook for one worker (hw.Pick's Need.Paused): every file asks the store, so a pause
+// that starts or ends while the queue runs applies from the next file. A read that fails counts as not paused — a
+// store problem must not stop every card being used — and is said once in the log (source hw) so a pause that
+// silently stopped applying is visible. The same error inside a minute is not said again; a different one is.
+func (p *Pauses) Reader(worker string) func(fam encode.Family) (until time.Time, paused bool) {
+	var mu sync.Mutex
+	lastErr, lastAt := "", time.Time{}
+	return func(fam encode.Family) (time.Time, bool) {
+		until, paused, err := p.Paused(context.Background(), worker, fam)
+		if err == nil {
+			return until, paused
+		}
+		mu.Lock()
+		if p.bus != nil && (err.Error() != lastErr || !p.now().Before(lastAt.Add(time.Minute))) {
+			lastErr, lastAt = err.Error(), p.now()
+			_ = p.bus.Emit(events.Event{
+				Kind: events.KindWarning, Level: events.LevelWarn, Source: "hw", Code: "encoder.pauses_unreadable",
+				Message: "the encoder pauses could not be read (" + err.Error() + "); cards are used as if not paused",
+			})
+		}
+		mu.Unlock()
+		return time.Time{}, false
+	}
 }
 
 // read is the current count and pause of one worker's family; a family never seen reads as zero.

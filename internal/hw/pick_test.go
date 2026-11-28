@@ -4,11 +4,13 @@ package hw
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/PeiceOfToast/shrink-your-shit/internal/encode"
+	"github.com/PeiceOfToast/shrink-your-shit/internal/events"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/store"
 )
 
@@ -267,10 +269,7 @@ func TestPickOffersAPausedCardAgainWhenThePauseEnds(t *testing.T) {
 	nv := device(encode.FamilyNVENC, "hevc", nil)
 	inv := Inventory{Verdicts: []Verdict{available(qsv), available(nv)}}
 	need := func() Need {
-		return Need{Codec: encode.CodecHEVC, FullOK: true, Paused: func(f encode.Family) (time.Time, bool) {
-			until, paused, err := p.Paused(ctx, "local", f)
-			return until, paused && err == nil
-		}}
+		return Need{Codec: encode.CodecHEVC, FullOK: true, Paused: p.Reader("local")}
 	}
 	if got := Pick(inv, []DeviceRecord{qsv, nv}, need()); len(got.Rungs) == 0 || got.Rungs[0].Family != encode.FamilyNVENC {
 		t.Fatalf("during the pause = %+v; want the NVIDIA card", got)
@@ -278,5 +277,49 @@ func TestPickOffersAPausedCardAgainWhenThePauseEnds(t *testing.T) {
 	now = now.Add(PauseFor + time.Minute)
 	if got := Pick(inv, []DeviceRecord{qsv, nv}, need()); len(got.Rungs) == 0 || got.Rungs[0].Family != encode.FamilyQSV || len(got.Skipped) != 0 {
 		t.Fatalf("after the pause = %+v; want the Intel card again", got)
+	}
+}
+
+// A pause store that cannot be read counts as "not paused" — a bookkeeping problem must not keep every card out of
+// work — and pause.go says so in the log, once for the same error rather than once per file. The clock is hw's own.
+func TestPickUsesTheCardWhenThePauseCannotBeRead(t *testing.T) {
+	db, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := db.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 11, 27, 12, 0, 0, 0, time.UTC)
+	sink := &eventSink{}
+	p := NewPauses(db, func() time.Time { return now }, sink)
+	ctx := context.Background()
+	if err := db.Tx(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "DROP TABLE encoder_state")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	qsv := device(encode.FamilyQSV, "hevc", nil)
+	inv := Inventory{Verdicts: []Verdict{available(qsv)}}
+	need := Need{Codec: encode.CodecHEVC, FullOK: true, Paused: p.Reader("local")}
+	for i := 0; i < 3; i++ {
+		if got := Pick(inv, []DeviceRecord{qsv}, need); len(got.Rungs) == 0 {
+			t.Fatalf("file %d: a broken pause store refused the card: %+v", i+1, got)
+		}
+	}
+	if len(sink.seen) != 1 {
+		t.Fatalf("warnings = %d, want one for the same error across files", len(sink.seen))
+	}
+	if e := sink.seen[0]; e.Source != "hw" || e.Level != events.LevelWarn || !strings.Contains(e.Message, "could not be read") {
+		t.Errorf("warning = %+v, want source hw, a warning, and the unreadable pause named", e)
+	}
+	// A minute later the same error is worth saying again: the pause may have been broken for a while.
+	now = now.Add(2 * time.Minute)
+	Pick(inv, []DeviceRecord{qsv}, need)
+	if len(sink.seen) != 2 {
+		t.Errorf("warnings = %d after a minute, want the same error said again", len(sink.seen))
 	}
 }

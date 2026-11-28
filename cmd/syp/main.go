@@ -165,7 +165,7 @@ func run(dataDir, listen string) error {
 			bus,
 		).WithDevices().WithPauses(pauses)
 		cards.Start(ctx)
-		pick = cardPicker(cards, pauses)
+		pick = cardPicker(cards, pauses.Reader(workers.LocalID))
 	}
 	// The worker's own settings (page 10): the files it runs at once are its setting at start, its
 	// graphics slots are read per job, and its hours decide whether a slot may take a new job. The
@@ -385,13 +385,9 @@ func engineEnv(pick func(flow.Want) (flow.Attempt, error)) flow.Env {
 // cardPicker answers a job from the detector's last finished pass: the rungs the card's own tests
 // allow (L-HW-9). Before the first pass ends it answers "not yet", so the job converts on the
 // processor and its log says why. A family pause.go has paused after repeated failures is passed
-// over like a card that cannot take the job; a pause store that cannot be read counts as "not
-// paused", since a bookkeeping problem must not hold a job up.
-func cardPicker(cards *hw.Detector, pauses *hw.Pauses) func(flow.Want) (flow.Attempt, error) {
-	paused := func(fam encode.Family) (time.Time, bool) {
-		until, on, err := pauses.Paused(context.Background(), workers.LocalID, fam)
-		return until, on && err == nil
-	}
+// over like a card that cannot take the job; paused is pause.go's Reader, which counts an
+// unreadable pause as "not paused" and says so once in the log.
+func cardPicker(cards *hw.Detector, paused func(encode.Family) (time.Time, bool)) func(flow.Want) (flow.Attempt, error) {
 	return func(want flow.Want) (flow.Attempt, error) {
 		ans, ok := cards.Current()
 		if !ok {
