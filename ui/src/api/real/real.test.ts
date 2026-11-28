@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { request } from "../http.ts";
 import { ApiError } from "../errors.ts";
 import { convertAgain, getJobNeighbours, getJobs, runJobsAction } from "./jobs.ts";
-import { getLibraries, createLibrary, patchLibrary } from "./libraries.ts";
+import { getLibraries, createLibrary, patchLibrary, deleteLibrary } from "./libraries.ts";
 import { getSettings, patchSettings } from "./settings.ts";
 import { getTrash, restoreTrash } from "./trash.ts";
 import { getAttention, getOverview } from "./overview.ts";
@@ -217,8 +217,24 @@ test("trash: GET the list, POST a restore by id, a refusal keeps its code", asyn
   await assert.rejects(restoreTrash("7"), (e: unknown) => e instanceof ApiError && e.code === "original_gone");
 });
 
-test("saving a library says it is not connected yet, and sends nothing", async () => {
-  const calls = stub(200, "{}");
-  await assert.rejects(patchLibrary("1", { name: "Films" }), { code: "not_yet", message: "Saving a library isn't connected yet." });
-  assert.equal(calls.length, 0);
+test("saving a library sends PATCH with the changes and returns the library", async () => {
+  const calls = stub(200, JSON.stringify({ id: "2", name: "Films", watch: "daily" }));
+  const out = await patchLibrary("2", { name: "Films", watch: "daily" });
+  assert.equal(calls[0].url, "/api/v2/libraries/2");
+  assert.equal(calls[0].init.method, "PATCH");
+  assert.deepEqual(JSON.parse(String(calls[0].init.body)), { name: "Films", watch: "daily" });
+  assert.equal(out.name, "Films");
+});
+
+test("a folder the server refuses shows its sentence on the path field", async () => {
+  stub(400, JSON.stringify({ error: { code: "invalid_request", message: "Another library already watches this folder. Choose a different folder.", field: "path" } }));
+  await assert.rejects(patchLibrary("2", { path: "/media/movies" }), (e: unknown) =>
+    e instanceof ApiError && e.code === "invalid_request" && e.field === "path" && e.message === "Another library already watches this folder. Choose a different folder.");
+});
+
+test("removing a library sends DELETE and returns ok", async () => {
+  const calls = stub(200, '{"ok":true}');
+  assert.deepEqual(await deleteLibrary("2"), { ok: true });
+  assert.equal(calls[0].url, "/api/v2/libraries/2");
+  assert.equal(calls[0].init.method, "DELETE");
 });
