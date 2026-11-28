@@ -28,6 +28,7 @@ import (
 	"github.com/PeiceOfToast/shrink-your-shit/internal/library"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/media"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/safety"
+	"github.com/PeiceOfToast/shrink-your-shit/internal/settings"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/store"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/system"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/ui"
@@ -140,8 +141,13 @@ func run(dataDir, listen string) error {
 		_ = bus.Emit(events.Event{Level: events.LevelWarn, Kind: events.KindWarning,
 			Source: "safety", Code: "sidecar.recovered", Message: said})
 	}
+	// parallelJobs is the default a new worker starts with (page 11); it is read once, at start, and clamped to 1-8.
+	slots := settings.Get(ctx, db, "processing.parallelJobs", 1)
+	if slots < 1 || slots > 8 {
+		slots = 1
+	}
 	wk := worker.New(worker.Config{
-		Slots: 1, WorkerID: "local", DataDir: dataDir, Bus: bus,
+		Slots: slots, WorkerID: "local", DataDir: dataDir, Bus: bus,
 		Source: worker.Builtin{Queue: q, DB: db, Flows: flows},
 		Run:    flow.Run, Env: workerEnv(flows, bus, db),
 	})
@@ -157,14 +163,15 @@ func run(dataDir, listen string) error {
 	catalog := library.NewCatalog(db)
 	reportLibraryOverlaps(ctx, catalog, bus)
 	srv.Ready(api.Deps{
-		Access:    access,
-		Events:    bus,
-		DB:        db,
-		Workflows: flows,
-		Catalog:   catalog,
-		Jobs:      q,
-		Scanner:   newScanner(catalog, flows, q, bus, wk.Wake),
-		Wake:      wk.Wake,
+		Access:     access,
+		Events:     bus,
+		DB:         db,
+		AppVersion: version,
+		Workflows:  flows,
+		Catalog:    catalog,
+		Jobs:       q,
+		Scanner:    newScanner(catalog, flows, q, bus, wk.Wake),
+		Wake:       wk.Wake,
 		// Cancel of a running job (S3-6a): the api marks the row cancelled, then this ends the run's
 		// context, which kills ffmpeg and lets the flow remove its staging.
 		StopJob:  func(id int64) { wk.CancelJob(id) },
@@ -324,7 +331,11 @@ func workerEnv(flows *flow.Store, bus *events.Bus, db *store.DB) flow.Env {
 	env.Replacer = flow.RealReplacer{Journal: safety.NewJournal(db)}
 	env.LoadRevision = func(ctx context.Context, id int64, rev int) (flow.Flow, error) {
 		r, err := flows.Revision(ctx, id, rev)
-		return r.Flow, err
+		if err != nil {
+			return r.Flow, err
+		}
+		// "My languages" is looked up now, when the run starts (page 07): a change applies to the next run.
+		return flow.ResolveMyLanguages(r.Flow, settings.Languages(ctx, db)), nil
 	}
 	env.Bus = bus
 	env.Sidecars = jobs.SidecarJournal{DB: db}

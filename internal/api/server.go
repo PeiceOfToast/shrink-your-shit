@@ -37,6 +37,8 @@ type Deps struct {
 	Access *system.Access
 	Events *events.Bus
 	DB     *store.DB
+	// AppVersion is the running build, shown read-only on the settings page.
+	AppVersion string
 	// Workflows and Catalog write setup's one transaction; Jobs and Scanner are what the library
 	// routes read and start. They are interfaces so a test can fail one step or record a scan.
 	Workflows Workflows
@@ -153,6 +155,8 @@ func New(version string) *Server {
 	s.mux.HandleFunc("GET /api/v2/summary", s.getSummary)
 	s.mux.HandleFunc("GET /api/v2/attention", s.getAttention)
 	s.mux.HandleFunc("GET /api/v2/trash", s.getTrash)
+	s.mux.HandleFunc("GET /api/v2/settings", s.getSettings)
+	s.mux.HandleFunc("PATCH /api/v2/settings", s.patchSettings)
 	s.mux.HandleFunc("POST /api/v2/trash/{id}/restore", s.restoreTrash)
 	s.mux.HandleFunc("/", s.static)
 	return s

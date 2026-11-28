@@ -18,9 +18,10 @@ import (
 // then Advanced's codec, bitrate, sample rate, downmix, loudness, commentary and default track,
 // then the subtitles. Every field's tags are the page's form.
 type AudioSettings struct {
-	Format    string   `set:"format" label:"Format" choices:"aac=AAC,opus=Opus,copy=Same as the source" default:"copy"`
-	Channels  string   `set:"channels" label:"Channels" choices:"stereo=Stereo,source=Same as the source,mono=Mono,5.1=5.1" default:"source" help:"A most, never an upmix: a stereo file stays stereo wherever 5.1 is asked for."`
-	Languages []string `set:"languages" label:"Keep these languages" widget:"languages" help:"Other tracks are removed; if none match, the main track stays. Original language keeps the film's own language, whatever it is."`
+	Format       string   `set:"format" label:"Format" choices:"aac=AAC,opus=Opus,copy=Same as the source" default:"copy"`
+	Channels     string   `set:"channels" label:"Channels" choices:"stereo=Stereo,source=Same as the source,mono=Mono,5.1=5.1" default:"source" help:"A most, never an upmix: a stereo file stays stereo wherever 5.1 is asked for."`
+	AllLanguages bool     `set:"allLanguages" label:"Keep every language" default:"true" help:"Off keeps only the languages below, or your own languages when none are picked."`
+	Languages    []string `set:"languages" label:"Keep these languages" widget:"languages" showIf:"allLanguages=false" help:"Other tracks are removed; if none match, the main track stays. Original language keeps the film's own language, whatever it is."`
 
 	Codec        *string `set:"codec" label:"Codec" group:"advanced" choices:"aac=AAC,opus=Opus,ac3=AC-3,eac3=E-AC-3,flac=FLAC,copy=Copy the original" unset:"As picked above" widget:"select"`
 	BitrateKbps  *int    `set:"bitrateKbps" label:"Bitrate" group:"advanced" unit:"kb/s" min:"8" max:"1536"`

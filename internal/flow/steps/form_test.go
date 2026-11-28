@@ -179,6 +179,7 @@ func TestPageSevenFields(t *testing.T) {
 		// 2 Audio, the simple rows.
 		{"audio.tracks", "format", "segmented", "basic", ""},
 		{"audio.tracks", "channels", "segmented", "basic", ""},
+		{"audio.tracks", "allLanguages", "checkbox", "basic", ""},
 		{"audio.tracks", "languages", "languages", "basic", ""},
 		// 2 Audio, Advanced.
 		{"audio.tracks", "codec", "select", "advanced", ""},

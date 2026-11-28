@@ -20,6 +20,7 @@ var layers = map[string]int{
 	"internal/media/fake": 0,
 	"internal/events":     0,
 	"internal/store":      0,
+	"internal/settings":   0,
 	"internal/fsx":        0,
 	"internal/pathmap":    0,
 	"internal/encode":     1,
@@ -41,6 +42,7 @@ var layers = map[string]int{
 // exceptions are the same-layer imports the plan allows, as "from -> to".
 var exceptions = map[string]bool{
 	"internal/events -> internal/store":     true,
+	"internal/settings -> internal/store":   true,
 	"internal/events -> internal/fsx":       true,
 	"internal/store -> internal/fsx":        true,
 	"internal/library -> internal/jobs":     true,
