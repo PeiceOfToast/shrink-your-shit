@@ -251,6 +251,9 @@ func TestRestoreNeverOverwritesANameTakenMeanwhile(t *testing.T) {
 	if stateOf(t, f, id) != StateDone {
 		t.Errorf("state = %s, want done after a refused restore", stateOf(t, f, id))
 	}
+	if _, err := os.Stat(filepath.Join(f.lib, TrashDir, holdingDir)); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("a refused restore left its holding folder behind: %v", err)
+	}
 }
 
 // A crash before the converted file is removed leaves the swap done; recovery keeps the converted file.
@@ -418,5 +421,46 @@ func TestRecoverTouchesOnlyItsOwnHoldingCopy(t *testing.T) {
 	}
 	if got := readFile(t, f.final); got != newBytes {
 		t.Errorf("the converted file is %q after recovery, want its own bytes", got)
+	}
+}
+
+// G2: a foreign file at the holding path survives recovery, and the row goes to attention. Red-first: a holdingOf that
+// skips the identity check removes it.
+func TestForeignFileAtTheHoldingPathSurvivesRecovery(t *testing.T) {
+	f, id := doneSwap(t)
+	crashAt(t, 3) // the original is back; the converted copy is still in the holding folder
+	restoreUntilCrash(f, id)
+	holding := holdingPath(filepath.Join(f.lib, TrashDir), id, f.final)
+	foreign := []byte("not the converted file, put there by someone else")
+	if err := os.WriteFile(holding, foreign, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Recover(context.Background(), f.j); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(holding)
+	if err != nil || string(got) != string(foreign) {
+		t.Errorf("the foreign file at the holding path was changed or removed: %q, %v", got, err)
+	}
+	if stateOf(t, f, id) != StateAttention {
+		t.Errorf("state = %s, want attention", stateOf(t, f, id))
+	}
+}
+
+// G1: a sweep that purges the row after Restore has read it and before Restore claims it makes the restore refuse
+// with ErrOriginalGone, and nothing moves.
+func TestSweepPurgeBetweenEntryAndClaimRefusesTheRestore(t *testing.T) {
+	f, id := doneSwap(t)
+	hookBeforeRestoreClaim = func(got int64) {
+		if got == id {
+			_ = f.j.SetState(context.Background(), id, StatePurged)
+		}
+	}
+	defer func() { hookBeforeRestoreClaim = func(int64) {} }()
+	if err := Restore(context.Background(), f.j, id); !errors.Is(err, ErrOriginalGone) {
+		t.Fatalf("restore = %v, want ErrOriginalGone", err)
+	}
+	if got := readFile(t, f.final); got != newBytes {
+		t.Errorf("the converted file moved after a refused restore: %q", got)
 	}
 }

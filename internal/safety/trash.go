@@ -266,6 +266,10 @@ func removeHoldingFolder(holding string) {
 // holdingDir is the folder under the trash that holds a restore's converted file.
 const holdingDir = ".holding"
 
+// hookBeforeRestoreClaim is a test hook: it runs after a restore has read its row and before it claims it, the window in
+// which a sweep can purge the copy (review G1).
+var hookBeforeRestoreClaim = func(id int64) {}
+
 // hookRestoreStep is a test hook: it runs after each step of a restore, so a test can stop there.
 var hookRestoreStep = func(step int) {}
 
@@ -284,6 +288,7 @@ func Restore(ctx context.Context, j *Journal, id int64) error {
 	if r.State != StateDone || !matches(r.Trash, r.Orig) {
 		return ErrOriginalGone
 	}
+	hookBeforeRestoreClaim(id)
 	if !matches(r.Final, r.New) {
 		return ErrConvertedChanged
 	}
@@ -315,6 +320,7 @@ func Restore(ctx context.Context, j *Journal, id int64) error {
 		return fmt.Errorf("make the restore folder: %w", err)
 	}
 	if err := fsx.RenameNoReplace(r.Final, holding); err != nil {
+		removeHoldingFolder(holding)
 		_ = j.SetState(ctx, id, StateDone)
 		return fmt.Errorf("move the converted file aside: %w", err)
 	}
@@ -328,6 +334,8 @@ func Restore(ctx context.Context, j *Journal, id int64) error {
 			_ = j.SetState(ctx, id, StateAttention)
 			return fmt.Errorf("the original could not be put back and the converted file is in the trash folder (%s): %w", holding, err)
 		}
+		// The converted file is back at its name, so the folder it was held in is empty and goes (review item 3).
+		removeHoldingFolder(holding)
 		_ = j.SetState(ctx, id, StateDone)
 		if taken {
 			return ErrNameTaken
@@ -365,9 +373,17 @@ func settleRestore(r Row) (string, bool) {
 	if !ok {
 		return "", false
 	}
+	// A file at the holding path that is not the converted file is never moved or removed (review G2).
+	if !matches(holding, r.New) {
+		return StateAttention, true
+	}
 	switch {
 	case matches(r.Original, r.Orig):
-		// The original is back at its name, so the restore reached its last step: the converted copy goes.
+		// The original is back at its name, so the restore reached its last step: the converted copy goes. The copy's
+		// identity is checked again just before the removal (review G2): a file that is not ours stays.
+		if !matches(holding, r.New) {
+			return StateAttention, true
+		}
 		if err := os.Remove(holding); err != nil {
 			return StateAttention, true
 		}
@@ -385,13 +401,15 @@ func settleRestore(r Row) (string, bool) {
 	}
 }
 
-// holdingOf is the row's own holding copy, when one is there with the converted file's identity.
+// holdingOf is the row's own holding path when a file is there. A file there that is not the converted file is not
+// ours to touch: the row goes to attention, and holdingOf reports the path so the caller can refuse with the file
+// still in place (review G2). ok is false when there is nothing to settle at that path.
 func holdingOf(r Row) (string, bool) {
 	if matches(r.Final, r.New) {
 		return "", false
 	}
 	holding := holdingPath(filepath.Dir(r.Trash), r.ID, r.Final)
-	if !matches(holding, r.New) {
+	if !exists(holding) {
 		return "", false
 	}
 	return holding, true
