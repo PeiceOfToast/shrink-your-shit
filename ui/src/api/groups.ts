@@ -7,7 +7,7 @@ export const REAL = {
   events: true,
   summary: true,
   workflows: true,
-  overview: false,
+  overview: true,
   settings: true,
   trash: true,
 } as const;

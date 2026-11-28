@@ -1,0 +1,283 @@
+{
+  "body": {
+    "avgShrink": {
+      "pct": 0,
+      "secPerGB": 0
+    },
+    "converted": {
+      "perDay": 0,
+      "total": 0
+    },
+    "failed24h": {
+      "count": 0,
+      "pct": 0
+    },
+    "freed": {
+      "inTrashBytes": 0,
+      "nextReleaseAt": null,
+      "nextReleaseBytes": null,
+      "todayBytes": 0,
+      "totalBytes": 0
+    },
+    "last24h": {
+      "done": 0,
+      "failed": 0,
+      "skipped": 0
+    },
+    "libraries": [],
+    "running": [],
+    "series": {
+      "days": [
+        {
+          "day": "2026-10-29",
+          "done": null,
+          "failed": null,
+          "freedBytes": null,
+          "skipped": null,
+          "trashBytes": null
+        },
+        {
+          "day": "2026-10-30",
+          "done": null,
+          "failed": null,
+          "freedBytes": null,
+          "skipped": null,
+          "trashBytes": null
+        },
+        {
+          "day": "2026-10-31",
+          "done": null,
+          "failed": null,
+          "freedBytes": null,
+          "skipped": null,
+          "trashBytes": null
+        },
+        {
+          "day": "2026-11-01",
+          "done": null,
+          "failed": null,
+          "freedBytes": null,
+          "skipped": null,
+          "trashBytes": null
+        },
+        {
+          "day": "2026-11-02",
+          "done": null,
+          "failed": null,
+          "freedBytes": null,
+          "skipped": null,
+          "trashBytes": null
+        },
+        {
+          "day": "2026-11-03",
+          "done": null,
+          "failed": null,
+          "freedBytes": null,
+          "skipped": null,
+          "trashBytes": null
+        },
+        {
+          "day": "2026-11-04",
+          "done": null,
+          "failed": null,
+          "freedBytes": null,
+          "skipped": null,
+          "trashBytes": null
+        },
+        {
+          "day": "2026-11-05",
+          "done": null,
+          "failed": null,
+          "freedBytes": null,
+          "skipped": null,
+          "trashBytes": null
+        },
+        {
+          "day": "2026-11-06",
+          "done": null,
+          "failed": null,
+          "freedBytes": null,
+          "skipped": null,
+          "trashBytes": null
+        },
+        {
+          "day": "2026-11-07",
+          "done": null,
+          "failed": null,
+          "freedBytes": null,
+          "skipped": null,
+          "trashBytes": null
+        },
+        {
+          "day": "2026-11-08",
+          "done": null,
+          "failed": null,
+          "freedBytes": null,
+          "skipped": null,
+          "trashBytes": null
+        },
+        {
+          "day": "2026-11-09",
+          "done": null,
+          "failed": null,
+          "freedBytes": null,
+          "skipped": null,
+          "trashBytes": null
+        },
+        {
+          "day": "2026-11-10",
+          "done": null,
+          "failed": null,
+          "freedBytes": null,
+          "skipped": null,
+          "trashBytes": null
+        },
+        {
+          "day": "2026-11-11",
+          "done": null,
+          "failed": null,
+          "freedBytes": null,
+          "skipped": null,
+          "trashBytes": null
+        },
+        {
+          "day": "2026-11-12",
+          "done": null,
+          "failed": null,
+          "freedBytes": null,
+          "skipped": null,
+          "trashBytes": null
+        },
+        {
+          "day": "2026-11-13",
+          "done": null,
+          "failed": null,
+          "freedBytes": null,
+          "skipped": null,
+          "trashBytes": null
+        },
+        {
+          "day": "2026-11-14",
+          "done": null,
+          "failed": null,
+          "freedBytes": null,
+          "skipped": null,
+          "trashBytes": null
+        },
+        {
+          "day": "2026-11-15",
+          "done": null,
+          "failed": null,
+          "freedBytes": null,
+          "skipped": null,
+          "trashBytes": null
+        },
+        {
+          "day": "2026-11-16",
+          "done": null,
+          "failed": null,
+          "freedBytes": null,
+          "skipped": null,
+          "trashBytes": null
+        },
+        {
+          "day": "2026-11-17",
+          "done": null,
+          "failed": null,
+          "freedBytes": null,
+          "skipped": null,
+          "trashBytes": null
+        },
+        {
+          "day": "2026-11-18",
+          "done": null,
+          "failed": null,
+          "freedBytes": null,
+          "skipped": null,
+          "trashBytes": null
+        },
+        {
+          "day": "2026-11-19",
+          "done": null,
+          "failed": null,
+          "freedBytes": null,
+          "skipped": null,
+          "trashBytes": null
+        },
+        {
+          "day": "2026-11-20",
+          "done": null,
+          "failed": null,
+          "freedBytes": null,
+          "skipped": null,
+          "trashBytes": null
+        },
+        {
+          "day": "2026-11-21",
+          "done": null,
+          "failed": null,
+          "freedBytes": null,
+          "skipped": null,
+          "trashBytes": null
+        },
+        {
+          "day": "2026-11-22",
+          "done": null,
+          "failed": null,
+          "freedBytes": null,
+          "skipped": null,
+          "trashBytes": null
+        },
+        {
+          "day": "2026-11-23",
+          "done": null,
+          "failed": null,
+          "freedBytes": null,
+          "skipped": null,
+          "trashBytes": null
+        },
+        {
+          "day": "2026-11-24",
+          "done": null,
+          "failed": null,
+          "freedBytes": null,
+          "skipped": null,
+          "trashBytes": null
+        },
+        {
+          "day": "2026-11-25",
+          "done": null,
+          "failed": null,
+          "freedBytes": null,
+          "skipped": null,
+          "trashBytes": null
+        },
+        {
+          "day": "2026-11-26",
+          "done": null,
+          "failed": null,
+          "freedBytes": null,
+          "skipped": null,
+          "trashBytes": null
+        },
+        {
+          "day": "2026-11-27",
+          "done": null,
+          "failed": null,
+          "freedBytes": null,
+          "skipped": null,
+          "trashBytes": null
+        }
+      ]
+    },
+    "waiting": {
+      "count": 0,
+      "nextScanAt": null
+    },
+    "workersOn": true
+  },
+  "method": "GET",
+  "path": "/api/v2/overview",
+  "status": 200,
+  "type": "Overview"
+}

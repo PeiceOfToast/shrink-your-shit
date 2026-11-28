@@ -69,12 +69,20 @@ type Config struct {
 	Bus           Emitter
 	Tick          time.Duration
 	ShutdownGrace time.Duration
+	// MayClaim is the worker's hours (page 10): whether it may take a new job now. nil means any time.
+	// A slot outside the hours waits for its next wake or its next look; a job already running always
+	// finishes.
+	MayClaim func() bool
 }
 
-// Worker runs jobs from a Source. Stage 1 runs one slot; Slots above 1 is accepted, but a Wake reaches one idle slot.
+// Worker runs jobs from a Source. Each of Slots slots claims and runs its own job, so the files at once run in
+// parallel; a Wake reaches every idle slot.
 type Worker struct {
-	cfg  Config
-	wake chan struct{}
+	cfg Config
+	// wake has one token channel per slot: Wake offers a token to each, and a slot that is busy keeps its token
+	// for its next idle moment. One channel for all slots would let a single slot drain the queue while the
+	// others parked.
+	wake []chan struct{}
 
 	// mu guards stops: the cancel of each job this worker is running now. The api reaches it through
 	// CancelJob when a person cancels a running job (S3-6a).
@@ -96,7 +104,12 @@ func New(cfg Config) *Worker {
 	if cfg.WorkerID == "" {
 		cfg.WorkerID = "local"
 	}
-	return &Worker{cfg: cfg, wake: make(chan struct{}, 1), stops: make(map[int64]context.CancelFunc)}
+	w := &Worker{cfg: cfg, stops: make(map[int64]context.CancelFunc)}
+	w.wake = make([]chan struct{}, cfg.Slots)
+	for i := range w.wake {
+		w.wake[i] = make(chan struct{}, 1)
+	}
+	return w
 }
 
 // CancelJob stops the job if this worker is running it: its run context ends, which kills ffmpeg and lets the
@@ -113,12 +126,14 @@ func (w *Worker) CancelJob(id int64) bool {
 	return true
 }
 
-// Wake tells an idle slot that work may be waiting. Call it after a job is enqueued. It never blocks, and a wake
-// that arrives while a slot is busy is kept for the next idle moment.
+// Wake tells every idle slot that work may be waiting. Call it after a job is enqueued. It never blocks, and a wake
+// that arrives while a slot is busy is kept for that slot's next idle moment.
 func (w *Worker) Wake() {
-	select {
-	case w.wake <- struct{}{}:
-	default:
+	for _, c := range w.wake {
+		select {
+		case c <- struct{}{}:
+		default:
+		}
 	}
 }
 
@@ -128,7 +143,7 @@ func (w *Worker) Run(ctx context.Context) {
 	done := make(chan struct{}, w.cfg.Slots)
 	for i := 0; i < w.cfg.Slots; i++ {
 		go func() {
-			w.slot(ctx)
+			w.slot(ctx, i)
 			done <- struct{}{}
 		}()
 	}
@@ -137,32 +152,38 @@ func (w *Worker) Run(ctx context.Context) {
 	}
 }
 
-func (w *Worker) slot(ctx context.Context) {
+func (w *Worker) slot(ctx context.Context, i int) {
 	for ctx.Err() == nil {
+		if w.cfg.MayClaim != nil && !w.cfg.MayClaim() {
+			// Outside its hours the worker takes nothing new; a wake (the hours were saved, a job was
+			// queued) or the tick brings the slot back for another look.
+			w.idle(ctx, i)
+			continue
+		}
 		work, err := w.cfg.Source.Claim(ctx, w.cfg.WorkerID)
 		if err != nil {
 			if ctx.Err() != nil {
 				return
 			}
 			w.record(events.KindError, events.LevelError, 0, 0, "claim.failed", err.Error())
-			w.idle(ctx)
+			w.idle(ctx, i)
 			continue
 		}
 		if work == nil {
-			w.idle(ctx)
+			w.idle(ctx, i)
 			continue
 		}
 		w.execute(ctx, *work)
 	}
 }
 
-// idle waits for a wake, the fallback tick, or shutdown. It never spins.
-func (w *Worker) idle(ctx context.Context) {
+// idle waits for this slot's wake, the fallback tick, or shutdown. It never spins.
+func (w *Worker) idle(ctx context.Context, i int) {
 	t := time.NewTimer(w.cfg.Tick)
 	defer t.Stop()
 	select {
 	case <-ctx.Done():
-	case <-w.wake:
+	case <-w.wake[i]:
 	case <-t.C:
 	}
 }

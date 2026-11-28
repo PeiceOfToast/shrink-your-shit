@@ -367,7 +367,8 @@ export interface Worker {
   slots: number; // files at once
   gpuSlots: number;
   gpu: { name: string; family: GpuFamily } | null;
-  now: { jobId: string; file: string; step: JobStepRef } | null;
+  // The latest step the running job reached; null before the job's first step starts.
+  now: { jobId: string; file: string; step: JobStepRef | null } | null;
   doneToday: number;
   // True while the all-workers switch is off. The worker's own state is kept, so it returns when the switch goes back on.
   pausedGlobally: boolean;
