@@ -445,14 +445,17 @@ const STARTER_ANSWERS: Answers = {
   nameSuffix: "shrunk",
 } as Answers;
 
-function starterFlow(name: string, description: string): Flow {
+// The starter's own description (starters.go), kept with the workflow; the library row's text is not the flow's.
+const STARTER_DESCRIPTION = "Smaller HEVC files next to the originals.";
+
+function starterFlow(name: string): Flow {
   return {
     name,
-    description,
+    description: STARTER_DESCRIPTION,
     steps: [
       { id: "video", type: "video.convert", version: 1, settings: { format: "hevc", ifGpuFails: "cpu", keepDolbyVision: false, preset: "normal", quality: 3, size: null, useGpu: false } },
       { id: "audio", type: "audio.tracks", version: 1, settings: { allLanguages: true, channels: "source", format: "copy", subtitles: "keep_all" } },
-      { id: "save", type: "file.save", version: 1, settings: { container: "mkv", folder: null, nameSuffix: "shrunk", where: "next_to" } },
+      { id: "save", type: "file.save", version: 1, settings: { container: "mkv", folder: "", nameSuffix: "shrunk", where: "next_to" } },
     ],
   };
 }
@@ -463,11 +466,11 @@ function docFor(id: string): Doc {
   const row = peekWorkflowRow(id);
   if (!row) throw new ApiError("workflow_not_found", "That workflow doesn't exist.");
   const doc: Doc = {
-    flow: starterFlow(row.name, row.description),
+    flow: starterFlow(row.name),
     answers: { ...STARTER_ANSWERS },
     rev: 1,
     fitsGuided: row.fitsGuided,
-    published: row.state === "published" ? starterFlow(row.name, row.description) : undefined,
+    published: row.state === "published" ? starterFlow(row.name) : undefined,
   };
   DOCS.set(id, doc);
   return doc;

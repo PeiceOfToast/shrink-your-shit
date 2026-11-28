@@ -31,6 +31,8 @@ test("the sample workflow is the server's starter: its lines, and its flow keys 
   ]);
   assert.equal(flow.steps[0].settings.useGpu, false);
   assert.equal(flow.steps[2].settings.nameSuffix, "shrunk");
+  assert.equal(flow.steps[2].settings.folder, "", "the folder is a string, as the server's is");
+  assert.equal(flow.description, "Smaller HEVC files next to the originals.", "the starter's own description, not the library row's");
 });
 
 test("a flow with no published revision gives three empty lines (a draft the library does not run)", () => {
