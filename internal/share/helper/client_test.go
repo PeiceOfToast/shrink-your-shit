@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -21,6 +22,9 @@ import (
 // hangs here, which is exactly what the installed helper would do.
 func answerOnce(t *testing.T, answer Response) (string, <-chan Request) {
 	t.Helper()
+	if runtime.GOOS != "linux" {
+		t.Skip("the helper and its socket are Linux-only")
+	}
 	path := filepath.Join(t.TempDir(), "mount.sock")
 	ln, err := net.Listen("unix", path)
 	if err != nil {
@@ -159,6 +163,9 @@ func TestClientWithoutTheHelperSaysSo(t *testing.T) {
 // TestClientBoundsAHelperThatNeverAnswers: a helper that accepts and then says nothing answers the
 // caller's deadline, so the page is not held.
 func TestClientBoundsAHelperThatNeverAnswers(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the helper and its socket are Linux-only")
+	}
 	path := filepath.Join(t.TempDir(), "wedged.sock")
 	ln, err := net.Listen("unix", path)
 	if err != nil {

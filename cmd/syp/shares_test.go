@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/PeiceOfToast/shrink-your-shit/internal/share"
@@ -15,6 +16,9 @@ import (
 // TestShareMounterUsesTheHelperSocket: the installed helper's socket is what makes this a helper
 // computer, and the mounter is the client that talks to it.
 func TestShareMounterUsesTheHelperSocket(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the helper and its socket are Linux-only")
+	}
 	path := filepath.Join(t.TempDir(), "mount.sock")
 	ln, err := net.Listen("unix", path)
 	if err != nil {
