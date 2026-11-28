@@ -156,6 +156,11 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 	uid, err := uidOf(uc)
 	if err != nil || !allowed(uid) {
 		_ = writeResponse(conn, refused("This request is not allowed."))
+		// The request is never decoded, but it is read off (capped, under the deadline) so the close is
+		// a clean end: closing with it unread lets a client's write fail with a broken pipe before it
+		// reads this answer.
+		_ = conn.SetReadDeadline(time.Now().Add(requestTimeout))
+		_, _ = io.Copy(io.Discard, io.LimitReader(conn, maxRequest+1))
 		return
 	}
 	_ = conn.SetReadDeadline(time.Now().Add(requestTimeout))
