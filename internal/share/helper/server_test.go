@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -495,6 +496,32 @@ func TestPeerRefused(t *testing.T) {
 	}
 	if len(h.run.recorded()) != 0 {
 		t.Error("a refused peer ran a command")
+	}
+}
+
+// TestRefusedPeerDoesNotHoldTheHelper: a refused caller that keeps its connection open must not delay
+// the next, allowed caller (the refusal's drain runs off the accept loop).
+func TestRefusedPeerDoesNotHoldTheHelper(t *testing.T) {
+	var calls atomic.Int32
+	h := newHarness(t, func(s *Server) {
+		s.PeerOK = func(uint32) bool { return calls.Add(1) > 1 }
+	})
+	held, err := net.Dial("unix", h.sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Close()
+	var first Response
+	if err := json.NewDecoder(held).Decode(&first); err != nil || first.Reason != ReasonRefused {
+		t.Fatalf("held caller = %+v, %v; want a refusal", first, err)
+	}
+	start := time.Now()
+	resp := h.askRequest(Request{Action: ActionProbe, ID: 1})
+	if resp.Reason == ReasonRefused {
+		t.Fatalf("the allowed caller was refused: %+v", resp)
+	}
+	if took := time.Since(start); took > time.Second {
+		t.Errorf("the allowed caller waited %v behind a refused one", took)
 	}
 }
 
