@@ -4,7 +4,7 @@ import { useApi } from "../api/useApi.ts";
 import { clock, clockPrecise } from "../format/time.ts";
 import { Link, navigate, useLocation } from "../router.tsx";
 import { Icon } from "../ui/Icon.tsx";
-import { LEVEL_LABEL, addLiveLine, copyText, levelBadges, saveText, showLines, type LogLevelName } from "./logParts.ts";
+import { LEVEL_LABEL, addLiveLine, copyText, levelBadges, olderCursorAfter, pagingCursor, saveText, showLines, showLoadOlder, type LogLevelName } from "./logParts.ts";
 
 // The System log (page 12): every app-wide event, newest last. Filters live in the URL, so a link can open a filtered log.
 const LEVELS = [
@@ -155,7 +155,8 @@ export function SystemLog() {
   const sources = useApi(() => api.getLogSources(), []);
 
   const [older, setOlder] = useState<LogEvent[]>([]);
-  const [hasMore, setHasMore] = useState(true);
+  // The cursor for the next older page: undefined until an older page is loaded (then the first page's nextBefore is used).
+  const [olderCursor, setOlderCursor] = useState<number | null | undefined>(undefined);
   const [live, setLive] = useState<LogEvent[]>([]);
   const [follow, setFollow] = useState(true);
   const [paused, setPaused] = useState(false);
@@ -168,7 +169,7 @@ export function SystemLog() {
   useEffect(() => {
     setOlder([]);
     setLive([]);
-    setHasMore(true);
+    setOlderCursor(undefined);
   }, [paramKey]);
 
   // Typing in the search box: the URL follows after a short pause.
@@ -221,12 +222,12 @@ export function SystemLog() {
   };
 
   const loadOlder = async () => {
-    const oldest = items[0]?.seq;
-    if (oldest == null) return;
+    const before = pagingCursor(olderCursor, log.data?.nextBefore);
+    if (before == null) return;
     try {
-      const p = await api.getLog({ ...paramsFor(), before: oldest, limit: api.LOG_PAGE_SIZE });
+      const p = await api.getLog({ ...paramsFor(), before, limit: api.LOG_PAGE_SIZE });
       setOlder((o) => [...p.items, ...o]);
-      if (p.items.length < api.LOG_PAGE_SIZE) setHasMore(false);
+      setOlderCursor(olderCursorAfter(p));
     } catch (e) {
       setMsg(e instanceof Error ? e.message : "Couldn't load older lines. Try again.");
     }
@@ -359,7 +360,7 @@ export function SystemLog() {
 
       {log.data && items.length > 0 && (
         <div className="log syslog syslog-list" ref={listRef} onScroll={onScroll} aria-label="System log lines" role="log">
-          {hasMore && base.length >= api.LOG_PAGE_SIZE && (
+          {showLoadOlder(pagingCursor(olderCursor, log.data?.nextBefore) != null, items.length) && (
             <button type="button" className="btn ghost sm" onClick={loadOlder}>
               Load older lines
             </button>

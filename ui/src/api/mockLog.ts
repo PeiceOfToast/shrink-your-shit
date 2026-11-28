@@ -132,7 +132,9 @@ export function getLog(params: LogParams = {}): Promise<LogPage> {
       if (keep(e, params, true) && e.level !== "debug") counts[e.level]++;
     }
     const hit = all().filter((e) => keep(e, params, false) && (params.before == null || e.seq < params.before));
-    return { items: hit.slice(-(params.limit ?? LOG_PAGE_SIZE)), counts };
+    const page = hit.slice(-(params.limit ?? LOG_PAGE_SIZE));
+    // As the server does: the cursor is the oldest raw line of a full page, so the next older page starts before it.
+    return page.length === (params.limit ?? LOG_PAGE_SIZE) ? { items: page, counts, nextBefore: page[0].seq } : { items: page, counts };
   });
 }
 

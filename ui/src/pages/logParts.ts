@@ -1,5 +1,5 @@
 // Shared by the Job log (page 03) and the System log (page 12): the level words, copying and saving text.
-import type { JobStep, LogCounts, LogEvent, LogLine, LogStep } from "../api/types.ts";
+import type { JobStep, LogCounts, LogEvent, LogLine, LogPage, LogStep } from "../api/types.ts";
 
 export type LogLevelName = "info" | "warn" | "error" | "detail";
 
@@ -84,5 +84,21 @@ export function showLines(loaded: LogEvent[], live: LogEvent[]): LogEvent[] {
 // already includes the lines the page has seen, so adding the live ones counts them twice.
 export function levelBadges(server: LogCounts, _live: LogEvent[]): LogCounts {
   return server;
+}
+
+// The cursor after an older page: the server's nextBefore. It is set only when the raw page was full, so a page that folds
+// short still has its cursor. The page must not page by its first row's seq: a folded row's seq is its newest line.
+export function olderCursorAfter(page: LogPage): number | null {
+  return page.nextBefore ?? null;
+}
+
+// The cursor the next older page starts before: the last older page's, or the first page's when no older page is loaded yet.
+export function pagingCursor(olderCursor: number | null | undefined, firstPageNextBefore: number | undefined): number | null {
+  return olderCursor !== undefined ? olderCursor : (firstPageNextBefore ?? null);
+}
+
+// The Load older button: there may be older lines (the last load was not empty), and the list has lines to hang it on.
+export function showLoadOlder(hasMore: boolean, shownCount: number): boolean {
+  return hasMore && shownCount > 0;
 }
 
