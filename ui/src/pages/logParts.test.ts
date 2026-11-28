@@ -270,11 +270,12 @@ test("Load older pages by the paging cursor, not the first row's seq (a fold's s
   assert.doesNotMatch(src, /items\[0\]\?\.seq;\s*if \(oldest/);
 });
 
-test("Follow scrolls to the bottom only for a new line at the end, and only while following and not paused", () => {
-  assert.equal(followsBottom(10, 11, true, false), true, "a new newest line while following");
-  assert.equal(followsBottom(10, 10, true, false), false, "older lines prepended: the newest is unchanged");
-  assert.equal(followsBottom(10, 11, true, true), false, "paused: the person scrolled up");
-  assert.equal(followsBottom(10, 11, false, false), false, "not following");
+test("Follow scrolls to the bottom for a new line at the end, or when following is turned on; not for prepends, pauses or off", () => {
+  assert.equal(followsBottom(10, 11, true, false, true), true, "a new newest line while following");
+  assert.equal(followsBottom(10, 10, true, false, true), false, "older lines prepended: the newest is unchanged");
+  assert.equal(followsBottom(10, 11, true, true, true), false, "paused: the person scrolled up");
+  assert.equal(followsBottom(10, 11, false, false, false), false, "not following");
+  assert.equal(followsBottom(10, 10, true, false, false), true, "Follow turned on with the same newest line: go to the newest");
 });
 
 test("Load older keeps the distance from the bottom", () => {
@@ -284,7 +285,7 @@ test("Load older keeps the distance from the bottom", () => {
 
 test("the page scrolls through followsBottom and keeps the distance from the bottom through keptScrollTop", () => {
   const src = readFileSync(new URL("./SystemLog.tsx", import.meta.url), "utf8");
-  assert.match(src, /followsBottom\(seenNewest\.current, newestSeq, follow, paused\)/);
+  assert.match(src, /followsBottom\(seen\.current\.newest, newestSeq, follow, paused, seen\.current\.on\)/);
   assert.match(src, /keptScrollTop\(el\.scrollHeight, keepFromBottom\.current\)/);
   assert.doesNotMatch(src, /\[items\.length, follow, paused\]/);
 });

@@ -213,10 +213,10 @@ export function SystemLog() {
   // Follow scrolls to the newest line when a new line arrives at the bottom. Older lines prepended by Load older are not new
   // lines at the bottom, so they do not move the view.
   const newestSeq = items[items.length - 1]?.seq;
-  const seenNewest = useRef<number | undefined>(undefined);
+  const seen = useRef<{ newest: number | undefined; on: boolean }>({ newest: undefined, on: false });
   useEffect(() => {
-    const go = followsBottom(seenNewest.current, newestSeq, follow, paused);
-    seenNewest.current = newestSeq;
+    const go = followsBottom(seen.current.newest, newestSeq, follow, paused, seen.current.on);
+    seen.current = { newest: newestSeq, on: follow && !paused };
     const el = listRef.current;
     if (el && go) el.scrollTop = el.scrollHeight;
   }, [newestSeq, follow, paused]);
