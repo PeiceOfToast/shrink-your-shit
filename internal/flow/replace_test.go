@@ -4,9 +4,12 @@ package flow_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/PeiceOfToast/shrink-your-shit/internal/flow"
@@ -15,16 +18,21 @@ import (
 	"github.com/PeiceOfToast/shrink-your-shit/internal/safety"
 )
 
-// fakeReplacer records the swap a run asks for and answers with a set error.
+// fakeReplacer records the swap a run asks for and answers with a set error. during, when set, runs inside the swap
+// (a file that takes a name meanwhile).
 type fakeReplacer struct {
 	got    safety.SwapPlan
 	called bool
 	err    error
+	during func()
 }
 
 func (f *fakeReplacer) Swap(ctx context.Context, p safety.SwapPlan) (safety.SwapResult, error) {
 	f.called = true
 	f.got = p
+	if f.during != nil {
+		f.during()
+	}
 	return safety.SwapResult{}, f.err
 }
 
@@ -192,5 +200,348 @@ func TestRunReplaceRecordUnsettledKeepsTheSubtitles(t *testing.T) {
 	}
 	if len(journal.finished) != 1 || journal.finished[0] != 42 {
 		t.Errorf("finished = %v, want the job finished", journal.finished)
+	}
+}
+
+// TestRunReplaceTrashesAnEarlierSubtitleOfOurs: a subtitle file of ours that the replace would write over is moved to
+// the trash, the new subtitles take its name, and its record is dropped (the .srt rule of S2-10b).
+func TestRunReplaceTrashesAnEarlierSubtitleOfOurs(t *testing.T) {
+	root, src, info, rev := srtRun(t)
+	rev = setReplace(t, rev)
+	earlier := filepath.Join(root, "clip.eng.srt")
+	if err := os.WriteFile(earlier, []byte("EDITED-BY-HAND"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte("EARLIER"))
+	journal := &fakeJournal{recs: []safety.Sidecar{{JobID: 7, Path: earlier, Bytes: 7, Hash: hex.EncodeToString(sum[:])}}}
+	m := &srtWriting{Media: &fake.Media{Probes: map[string]media.Info{src: info}}}
+	sf := &fakeSafety{verify: safety.Verdict{OK: true}}
+	env := newEnv(m, sf, &recorder{}, rev, nil)
+	env.Replacer = &fakeReplacer{}
+	env.Sidecars = journal
+	res := flow.Run(context.Background(), runInput(t, root, src), env)
+	if res.Outcome != flow.OutcomeSmaller {
+		t.Fatalf("result = %+v, want smaller", res)
+	}
+	if b, err := os.ReadFile(filepath.Join(root, ".syp-trash", "clip.eng.7.srt")); err != nil || string(b) != "EDITED-BY-HAND" {
+		t.Errorf("the earlier subtitle in the trash = %q (%v), want it kept there", b, err)
+	}
+	if b, err := os.ReadFile(earlier); err != nil || string(b) == "EDITED-BY-HAND" {
+		t.Errorf("clip.eng.srt = %q (%v), want the new subtitles at its name", b, err)
+	}
+	found := false
+	for _, p := range journal.dropped {
+		if p == earlier {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("dropped = %v, want the earlier record dropped", journal.dropped)
+	}
+}
+
+// TestRunReplaceRefusesAForeignSubtitle: a subtitle file with no record of ours is never moved or replaced; the run
+// refuses with save.srt_exists, as before.
+func TestRunReplaceRefusesAForeignSubtitle(t *testing.T) {
+	root, src, info, rev := srtRun(t)
+	rev = setReplace(t, rev)
+	foreign := filepath.Join(root, "clip.eng.srt")
+	if err := os.WriteFile(foreign, []byte("SOMEONE ELSE"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := &srtWriting{Media: &fake.Media{Probes: map[string]media.Info{src: info}}}
+	sf := &fakeSafety{verify: safety.Verdict{OK: true}}
+	env := newEnv(m, sf, &recorder{}, rev, nil)
+	env.Replacer = &fakeReplacer{}
+	// A record of ours for a different file (clip.eng.2.srt) does not make clip.eng.srt ours (review #869).
+	journal := &fakeJournal{recs: []safety.Sidecar{{JobID: 9, Path: filepath.Join(root, "clip.eng.2.srt"), Bytes: 1}}}
+	env.Sidecars = journal
+	res := flow.Run(context.Background(), runInput(t, root, src), env)
+	if res.Outcome != flow.OutcomeFatal || res.Reason != "save.srt_exists" {
+		t.Fatalf("result = %+v, want the taken-name refusal", res)
+	}
+	if b, _ := os.ReadFile(foreign); string(b) != "SOMEONE ELSE" {
+		t.Errorf("the foreign subtitle = %q, want it untouched", b)
+	}
+	// Refused before anything is recorded: a foreign name must not enter the records at all (review #869).
+	if len(journal.added) != 0 {
+		t.Errorf("added = %+v, want nothing recorded for a foreign name", journal.added)
+	}
+}
+
+// TestRunRefusedSwapPutsTheEarlierSubtitleBack: a replace trashes an earlier subtitle of ours, then the swap refuses.
+// The subtitle goes back to its name with its record, the trash no longer holds it, and the message is a plain sentence
+// (the review's "put it back on a refused swap").
+func TestRunRefusedSwapPutsTheEarlierSubtitleBack(t *testing.T) {
+	root, src, info, rev := srtRun(t)
+	rev = setReplace(t, rev)
+	earlier := filepath.Join(root, "clip.eng.srt")
+	if err := os.WriteFile(earlier, []byte("EDITED-BY-HAND"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte("EARLIER"))
+	rec := safety.Sidecar{JobID: 7, Path: earlier, Bytes: 7, Hash: hex.EncodeToString(sum[:])}
+	journal := &fakeJournal{recs: []safety.Sidecar{rec}}
+	m := &srtWriting{Media: &fake.Media{Probes: map[string]media.Info{src: info}}}
+	sf := &fakeSafety{verify: safety.Verdict{OK: true}}
+	env := newEnv(m, sf, &recorder{}, rev, nil)
+	env.Replacer = &fakeReplacer{err: safety.ErrSwapFailed}
+	env.Sidecars = journal
+	res := flow.Run(context.Background(), runInput(t, root, src), env)
+	if res.Outcome != flow.OutcomeFatal || res.Reason != "replace.failed" {
+		t.Fatalf("result = %+v, want fatal replace.failed", res)
+	}
+	if strings.Contains(res.Message, "safety:") || !strings.Contains(res.Message, "put back") {
+		t.Errorf("message = %q, want the plain sentence", res.Message)
+	}
+	if b, err := os.ReadFile(earlier); err != nil || string(b) != "EDITED-BY-HAND" {
+		t.Errorf("clip.eng.srt = %q (%v), want the earlier subtitle back at its name", b, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".syp-trash", "clip.eng.7.srt")); !os.IsNotExist(err) {
+		t.Errorf("the earlier subtitle is still in the trash: %v", err)
+	}
+	restored := false
+	for _, r := range journal.added {
+		if r.Path == earlier && r.JobID == 7 {
+			restored = true
+		}
+	}
+	if !restored {
+		t.Errorf("added = %+v, want the earlier record back", journal.added)
+	}
+}
+
+// stopJournal is a journal whose Sidecars call number "at" stops the run: the stop lands between the earlier subtitle's
+// move to the trash and the placing of the new subtitles.
+type stopJournal struct {
+	*fakeJournal
+	calls  int
+	at     int
+	cancel func()
+}
+
+func (s *stopJournal) Sidecars() ([]safety.Sidecar, error) {
+	s.calls++
+	if s.calls == s.at {
+		s.cancel()
+	}
+	return s.fakeJournal.Sidecars()
+}
+
+// movingReplacer places the new file, then reports a stop: the swap happened and the run was stopped after it.
+type movingReplacer struct{ cancel func() }
+
+func (m movingReplacer) Swap(ctx context.Context, p safety.SwapPlan) (safety.SwapResult, error) {
+	if err := os.Rename(p.Staged, p.Final); err != nil {
+		return safety.SwapResult{}, err
+	}
+	m.cancel()
+	return safety.SwapResult{}, context.Canceled
+}
+
+// earlierSubtitleRun is a replace over an earlier subtitle of ours that was edited by hand since we wrote it.
+func earlierSubtitleRun(t *testing.T) (root, src string, info media.Info, rev flow.Flow, earlier string, rec safety.Sidecar) {
+	t.Helper()
+	root, src, info, rev = srtRun(t)
+	rev = setReplace(t, rev)
+	earlier = filepath.Join(root, "clip.eng.srt")
+	if err := os.WriteFile(earlier, []byte("EDITED-BY-HAND"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte("EARLIER"))
+	rec = safety.Sidecar{JobID: 7, Path: earlier, Bytes: 7, Hash: hex.EncodeToString(sum[:])}
+	return root, src, info, rev, earlier, rec
+}
+
+// TestRunStopBeforePlacementRestoresTheEarlierSubtitle (review #869): a stop after the earlier subtitle moved to the
+// trash and before anything is placed puts it back with its record.
+func TestRunStopBeforePlacementRestoresTheEarlierSubtitle(t *testing.T) {
+	root, src, info, rev, earlier, rec := earlierSubtitleRun(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	journal := &stopJournal{fakeJournal: &fakeJournal{recs: []safety.Sidecar{rec}}, at: 2, cancel: cancel}
+	m := &srtWriting{Media: &fake.Media{Probes: map[string]media.Info{src: info}}}
+	sf := &fakeSafety{verify: safety.Verdict{OK: true}}
+	env := newEnv(m, sf, &recorder{}, rev, nil)
+	env.Replacer = &fakeReplacer{}
+	env.Sidecars = journal
+	res := flow.Run(ctx, runInput(t, root, src), env)
+	if res.Outcome != flow.OutcomeCancelled {
+		t.Fatalf("result = %+v, want cancelled", res)
+	}
+	if b, err := os.ReadFile(earlier); err != nil || string(b) != "EDITED-BY-HAND" {
+		t.Errorf("clip.eng.srt = %q (%v), want the earlier subtitle back at its name", b, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".syp-trash", "clip.eng.7.srt")); !os.IsNotExist(err) {
+		t.Errorf("the earlier subtitle is still in the trash: %v", err)
+	}
+	restored := false
+	for _, r := range journal.added {
+		if r.Path == earlier && r.JobID == 7 {
+			restored = true
+		}
+	}
+	if !restored {
+		t.Errorf("added = %+v, want the earlier record back", journal.added)
+	}
+}
+
+// TestRunStopAfterPlacementKeepsTheNewSubtitles (review #869): the swap placed the new file, then the run was stopped:
+// the new subtitles stay with it.
+func TestRunStopAfterPlacementKeepsTheNewSubtitles(t *testing.T) {
+	root, src, info, rev, earlier, rec := earlierSubtitleRun(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	journal := &stopJournal{fakeJournal: &fakeJournal{recs: []safety.Sidecar{rec}}, at: 0, cancel: cancel}
+	m := &srtWriting{Media: &fake.Media{Probes: map[string]media.Info{src: info}}}
+	sf := &fakeSafety{verify: safety.Verdict{OK: true}}
+	env := newEnv(m, sf, &recorder{}, rev, nil)
+	env.Replacer = movingReplacer{cancel: cancel}
+	env.Sidecars = journal
+	res := flow.Run(ctx, runInput(t, root, src), env)
+	if res.Outcome != flow.OutcomeCancelled {
+		t.Fatalf("result = %+v, want cancelled", res)
+	}
+	if b, err := os.ReadFile(earlier); err != nil || string(b) == "EDITED-BY-HAND" || len(b) == 0 {
+		t.Errorf("clip.eng.srt = %q (%v), want the new subtitles kept with the new file", b, err)
+	}
+}
+
+// TestRunNoReplacerRestoresTheEarlierSubtitle (review #869, P3): a worker without the replace journal keeps the
+// original and puts the earlier subtitle back.
+func TestRunNoReplacerRestoresTheEarlierSubtitle(t *testing.T) {
+	root, src, info, rev, earlier, rec := earlierSubtitleRun(t)
+	journal := &fakeJournal{recs: []safety.Sidecar{rec}}
+	m := &srtWriting{Media: &fake.Media{Probes: map[string]media.Info{src: info}}}
+	sf := &fakeSafety{verify: safety.Verdict{OK: true}}
+	env := newEnv(m, sf, &recorder{}, rev, nil)
+	env.Sidecars = journal
+	res := flow.Run(context.Background(), runInput(t, root, src), env)
+	if res.Outcome != flow.OutcomeFatal || res.Reason != "replace.unavailable" {
+		t.Fatalf("result = %+v, want fatal replace.unavailable", res)
+	}
+	if b, err := os.ReadFile(earlier); err != nil || string(b) != "EDITED-BY-HAND" {
+		t.Errorf("clip.eng.srt = %q (%v), want the earlier subtitle back at its name", b, err)
+	}
+}
+
+// TestRestoreNeverOverwritesANameTakenMeanwhile (review #869): a file takes the earlier subtitle's name while the swap
+// runs. The restore is a no-replace move: the file there is kept, and the earlier subtitle stays in the trash.
+func TestRestoreNeverOverwritesANameTakenMeanwhile(t *testing.T) {
+	root, src, info, rev, earlier, rec := earlierSubtitleRunForRestore(t)
+	journal := &fakeJournal{recs: []safety.Sidecar{rec}}
+	m := &srtWriting{Media: &fake.Media{Probes: map[string]media.Info{src: info}}}
+	sf := &fakeSafety{verify: safety.Verdict{OK: true}}
+	env := newEnv(m, sf, &recorder{}, rev, nil)
+	env.Replacer = &fakeReplacer{err: safety.ErrSwapFailed, during: func() {
+		// Once the new subtitles are placed, a stranger's file takes the name: it is not ours, so it is kept.
+		if err := os.WriteFile(earlier, []byte("TAKEN"), 0o644); err != nil {
+			t.Fatalf("take the name in the test: %v", err)
+		}
+	}}
+	env.Sidecars = journal
+	res := flow.Run(context.Background(), runInput(t, root, src), env)
+	if res.Outcome != flow.OutcomeFatal {
+		t.Fatalf("result = %+v, want the refused swap", res)
+	}
+	if b, _ := os.ReadFile(earlier); string(b) != "TAKEN" {
+		t.Errorf("clip.eng.srt = %q, want the file that took the name kept, not overwritten", b)
+	}
+	if b, _ := os.ReadFile(filepath.Join(root, ".syp-trash", "clip.eng.7.srt")); string(b) != "EDITED-BY-HAND" {
+		t.Errorf("the earlier subtitle in the trash = %q, want it kept there", b)
+	}
+}
+
+// earlierSubtitleRunForRestore is a replace over an earlier subtitle of ours that was edited by hand since we wrote it.
+func earlierSubtitleRunForRestore(t *testing.T) (root, src string, info media.Info, rev flow.Flow, earlier string, rec safety.Sidecar) {
+	t.Helper()
+	root, src, info, rev, earlier, rec = earlierSubtitleRun(t)
+	return root, src, info, rev, earlier, rec
+}
+
+// TestEveryRefusedSwapPutsTheEarlierSubtitleBack (review #869): each refusal of the swap that leaves the new file
+// unplaced restores the earlier subtitle with its record. A swap that placed the new file keeps the new subtitles.
+func TestEveryRefusedSwapPutsTheEarlierSubtitleBack(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+	}{
+		{"no trash folder", safety.ErrNoTrash},
+		{"read-only library", safety.ErrReadOnlyLibrary},
+		{"original changed", safety.ErrSourceChanged},
+		{"hard-linked original", safety.ErrSharedSource},
+		{"put-back failed", safety.ErrPutBackFailed},
+		{"stranger in the trash", safety.ErrStrangerInTrash},
+		{"new file not placed", safety.ErrSwapFailed},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			root, src, info, rev, earlier, rec := earlierSubtitleRun(t)
+			journal := &fakeJournal{recs: []safety.Sidecar{rec}}
+			m := &srtWriting{Media: &fake.Media{Probes: map[string]media.Info{src: info}}}
+			sf := &fakeSafety{verify: safety.Verdict{OK: true}}
+			env := newEnv(m, sf, &recorder{}, rev, nil)
+			env.Replacer = &fakeReplacer{err: c.err}
+			env.Sidecars = journal
+			res := flow.Run(context.Background(), runInput(t, root, src), env)
+			if res.Outcome == flow.OutcomeSmaller {
+				t.Fatalf("result = %+v, want a refusal", res)
+			}
+			if b, err := os.ReadFile(earlier); err != nil || string(b) != "EDITED-BY-HAND" {
+				t.Errorf("clip.eng.srt = %q (%v), want the earlier subtitle back", b, err)
+			}
+			restored := false
+			for _, r := range journal.added {
+				if r.Path == earlier && r.JobID == 7 {
+					restored = true
+				}
+			}
+			if !restored {
+				t.Errorf("added = %+v, want the earlier record back", journal.added)
+			}
+		})
+	}
+}
+
+// takingJournal writes a stranger's file at path the first time subtitle records are added: the name is taken between
+// the earlier subtitle's move to the trash and the placement of the new subtitles.
+type takingJournal struct {
+	*fakeJournal
+	path  string
+	taken bool
+}
+
+func (j *takingJournal) AddSidecars(list []safety.Sidecar) error {
+	if !j.taken {
+		j.taken = true
+		if err := os.WriteFile(j.path, []byte("TAKEN"), 0o644); err != nil {
+			return err
+		}
+	}
+	return j.fakeJournal.AddSidecars(list)
+}
+
+// TestRunSubtitleNameTakenDuringPlacementSaysWhereTheEarlierOneIs (review #869): the name is taken before the new
+// subtitles are placed, and the earlier subtitle cannot go back. The message must not say nothing changed.
+func TestRunSubtitleNameTakenDuringPlacementSaysWhereTheEarlierOneIs(t *testing.T) {
+	root, src, info, rev, earlier, rec := earlierSubtitleRun(t)
+	journal := &takingJournal{fakeJournal: &fakeJournal{recs: []safety.Sidecar{rec}}, path: earlier}
+	m := &srtWriting{Media: &fake.Media{Probes: map[string]media.Info{src: info}}}
+	sf := &fakeSafety{verify: safety.Verdict{OK: true}}
+	env := newEnv(m, sf, &recorder{}, rev, nil)
+	env.Replacer = &fakeReplacer{}
+	env.Sidecars = journal
+	res := flow.Run(context.Background(), runInput(t, root, src), env)
+	if res.Outcome != flow.OutcomeFatal || res.Reason != "save.srt_exists" {
+		t.Fatalf("result = %+v, want the taken-name refusal", res)
+	}
+	if strings.Contains(res.Message, "Nothing was changed") {
+		t.Errorf("message = %q, says nothing changed though the earlier subtitle is in the trash", res.Message)
+	}
+	if !strings.Contains(res.Message, "trash") {
+		t.Errorf("message = %q, want it to say where the earlier subtitle is", res.Message)
+	}
+	if b, _ := os.ReadFile(earlier); string(b) != "TAKEN" {
+		t.Errorf("clip.eng.srt = %q, want the stranger's file kept", b)
 	}
 }

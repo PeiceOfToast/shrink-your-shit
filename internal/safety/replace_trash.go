@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/PeiceOfToast/shrink-your-shit/internal/fsx"
 )
 
 // TrashDir is the folder a replaced original moves to. It sits in the original's own folder, so the move is a rename
@@ -76,4 +78,28 @@ func checkWritable(dir string) error {
 		return err
 	}
 	return os.Remove(name)
+}
+
+// TrashSidecar moves a subtitle file of ours that a replace is about to write over into the library's trash, under
+// the same name rule as a replaced original (<stem>.<jobid><ext>, then .2). The move is a no-replace rename; a file
+// that is not ours is never passed here (the caller checks the record first).
+func TrashSidecar(libDir string, jobID int64, path string) (string, error) {
+	trashDir, err := ensureTrash(libDir)
+	if err != nil {
+		return "", err
+	}
+	trash, err := trashPath(trashDir, path, jobID)
+	if err != nil {
+		return "", err
+	}
+	if err := fsx.RenameNoReplace(path, trash); err != nil {
+		return "", err
+	}
+	return trash, nil
+}
+
+// RestoreSubtitle moves a subtitle moved to the trash by TrashSidecar back to its name, with a no-replace rename. A
+// name taken meanwhile is an error, and the file stays in the trash.
+func RestoreSubtitle(trash, path string) error {
+	return fsx.RenameNoReplace(trash, path)
 }
