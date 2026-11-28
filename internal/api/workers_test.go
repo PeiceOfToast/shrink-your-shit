@@ -25,12 +25,19 @@ type fakeCards struct {
 	run    string     // TestRun's answer; "" is a pass already going with no id to give
 	after  *hw.Answer // what Current serves once the test has run
 	tested []string   // the workers TestRun was asked about
+	test   hw.TestState
+	has    bool // a run the person asked for exists
 }
 
 func (f *fakeCards) Current() (hw.Answer, bool) { return f.ans, f.ok }
 
+func (f *fakeCards) Test() (hw.TestState, bool) { return f.test, f.has }
+
 func (f *fakeCards) TestRun(workerID string) string {
 	f.tested = append(f.tested, workerID)
+	if f.run != "" {
+		f.test, f.has = hw.TestState{RunID: f.run, Running: true}, true
+	}
 	if f.after != nil {
 		f.ans, f.ok = *f.after, true
 	}
@@ -350,6 +357,50 @@ func TestCapabilitiesTestUpdatesWhatThePageReads(t *testing.T) {
 	}
 }
 
+// The worker item says where its latest encoder test stands (page 10): nothing before one has run, then the run's
+// id, whether it is still going and when it finished. A page polling for its own run id sees a re-test end even
+// when its results are the same as before.
+func TestWorkerTestStandingInTheWorkerItem(t *testing.T) {
+	e := newEnv(t, false)
+	cards := qsvCards()
+	e.cards = cards
+	e.ready()
+	cookie := e.setup()
+
+	var list []workerJSON
+	e.getWorkerJSON(t, cookie, "/api/v2/workers", &list)
+	if len(list) != 1 || list[0].Test != nil {
+		t.Fatalf("before any run = %+v; want no test", list)
+	}
+
+	rec := e.do(http.MethodPost, "/api/v2/workers/local/capabilities/test", "", write(withSession(cookie)), false)
+	var started workerTestJSON
+	decodeInto(t, rec, &started)
+	var detail workerDetailJSON
+	e.getWorkerJSON(t, cookie, "/api/v2/workers/local", &detail)
+	if detail.Test == nil || detail.Test.RunID != started.RunID || !detail.Test.Running || detail.Test.FinishedAt != nil {
+		t.Fatalf("while running = %+v; want run %q running with no finish time", detail.Test, started.RunID)
+	}
+
+	// It ends. A re-test that finds the same thing is a new run, and its end is what the page waits for.
+	cards.run = "2"
+	rec = e.do(http.MethodPost, "/api/v2/workers/local/capabilities/test", "", write(withSession(cookie)), false)
+	decodeInto(t, rec, &started)
+	e.getWorkerJSON(t, cookie, "/api/v2/workers/local", &detail)
+	if detail.Test == nil || detail.Test.RunID != "2" || !detail.Test.Running || detail.Test.FinishedAt != nil {
+		t.Fatalf("while the re-test runs = %+v; want run 2 running", detail.Test)
+	}
+	cards.test.Running = false
+	cards.test.FinishedAt = e.clock.Now()
+	e.getWorkerJSON(t, cookie, "/api/v2/workers/local", &detail)
+	if detail.Test == nil || detail.Test.RunID != "2" || detail.Test.Running {
+		t.Fatalf("after the re-test = %+v; want run 2 finished", detail.Test)
+	}
+	if want := e.clock.Now().UTC().Format(time.RFC3339); detail.Test.FinishedAt == nil || *detail.Test.FinishedAt != want {
+		t.Errorf("finishedAt = %v, want %q", detail.Test.FinishedAt, want)
+	}
+}
+
 // A second click while a run is going is refused with a sentence: the first run's results are still coming.
 func TestCapabilitiesTestWhileRunningIsRefused(t *testing.T) {
 	e := newEnv(t, false)
@@ -398,6 +449,14 @@ func TestCapabilitiesTestRemoteWorkerIsOffline(t *testing.T) {
 	}
 	if len(cards.tested) != 0 {
 		t.Errorf("tested = %v; want nothing for a worker that isn't here", cards.tested)
+	}
+	// Nor does the remote worker's item borrow this computer's run: only this computer's encoders are tested here.
+	var list []workerJSON
+	e.getWorkerJSON(t, cookie, "/api/v2/workers", &list)
+	for _, row := range list {
+		if row.ID == "studio" && row.Test != nil {
+			t.Errorf("remote worker's test = %+v; want none", row.Test)
+		}
 	}
 }
 

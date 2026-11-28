@@ -15,7 +15,8 @@
       "pausedGlobally": false,
       "since": null,
       "slots": 1,
-      "state": "idle"
+      "state": "idle",
+      "test": null
     }
   ],
   "method": "GET",

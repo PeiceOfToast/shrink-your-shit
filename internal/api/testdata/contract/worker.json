@@ -30,7 +30,8 @@
     "primaryEncoder": null,
     "since": null,
     "slots": 1,
-    "state": "idle"
+    "state": "idle",
+    "test": null
   },
   "method": "GET",
   "path": "/api/v2/workers/local",

@@ -372,6 +372,9 @@ export interface Worker {
   doneToday: number;
   // True while the all-workers switch is off. The worker's own state is kept, so it returns when the switch goes back on.
   pausedGlobally: boolean;
+  // The latest encoder test this page asked for (POST .../capabilities/test): null before the first one. Poll until
+  // runId is the one POST answered and running is false; finishedAt is then an RFC 3339 time.
+  test: { runId: string; running: boolean; finishedAt: string | null } | null;
 }
 
 export interface WorkerLibrary {

@@ -281,6 +281,43 @@ func waitProbes(t *testing.T, s *eventSink, n int) []events.Event {
 	}
 }
 
+// A run the person asked for says where it stands (page 10): running with its id from the moment it starts, then
+// finished with the time. A re-test that finds the same thing as before is still a new, finished run, so a page
+// polling for its own run id sees it end.
+func TestTestRunReportsRunningThenFinished(t *testing.T) {
+	defer func(d time.Duration) { TestTimeout = d }(TestTimeout)
+	TestTimeout = 100 * time.Millisecond // every test hangs, so a run's tests end only at their timeout
+	dir := t.TempDir()
+	m := &fake.Media{Runs: []fake.RunScript{{Hang: true}}}
+	d := NewDetector(m, dir, []Candidate{{Encoder: "h264_qsv", Family: encode.FamilyQSV, Codec: "h264"}}, nil)
+	if st, ok := d.Test(); ok {
+		t.Fatalf("Test before any run = %+v, %v; want nothing yet", st, ok)
+	}
+	first := d.TestRun("local")
+	if st, ok := d.Test(); !ok || st.RunID != first || !st.Running || !st.FinishedAt.IsZero() {
+		t.Fatalf("Test while the first run goes = %+v, %v; want run %q running with no finish time", st, ok, first)
+	}
+	finished := waitTest(t, d)
+	if finished.RunID != first || finished.Running || finished.FinishedAt.IsZero() {
+		t.Fatalf("Test after the first run = %+v; want run %q finished with a time", finished, first)
+	}
+	second := d.TestRun("local")
+	if second == "" || second == first {
+		t.Fatalf("the second run's id = %q; want a new id, not %q", second, first)
+	}
+	if st, _ := d.Test(); st.RunID != second || !st.Running || !st.FinishedAt.IsZero() {
+		t.Fatalf("Test while the re-test goes = %+v; want run %q running", st, second)
+	}
+	again := waitTest(t, d)
+	if again.RunID != second || again.Running || again.FinishedAt.IsZero() || again.FinishedAt.Before(finished.FinishedAt) {
+		t.Fatalf("Test after the re-test = %+v; want the new run %q finished, no earlier than the first", again, second)
+	}
+	// The re-test found the same thing as the first run, and that is still what the page reads.
+	if inv := waitInventory(t, d); len(inv.Verdicts) != 1 || inv.Verdicts[0].Available {
+		t.Errorf("the re-test's answer = %+v; want the same one failed encoder", inv)
+	}
+}
+
 // Test the encoders re-runs the same pass for the worker the person asked about (page 10): it answers with a run id
 // at once, reports each encoder as one probe event of that run, scoped to the worker, and leaves the new answer as
 // what the Workers page reads.
@@ -483,6 +520,21 @@ func TestMultiWordTagMustStartWithLavc(t *testing.T) {
 	}
 	if !namedBy("Lavc61.3.100 hevc_qsv", "hevc_qsv") {
 		t.Error("the real Lavc form was refused")
+	}
+}
+
+// waitTest waits for the latest run the person asked for to finish and returns its state.
+func waitTest(t *testing.T, d *Detector) TestState {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		if st, ok := d.Test(); ok && !st.Running {
+			return st
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the run did not finish")
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 

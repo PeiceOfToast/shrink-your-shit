@@ -33,7 +33,8 @@
     "primaryEncoder": "hevc_qsv",
     "since": null,
     "slots": 2,
-    "state": "idle"
+    "state": "idle",
+    "test": null
   },
   "method": "PATCH",
   "path": "/api/v2/workers/local",

@@ -57,6 +57,14 @@ type Answer struct {
 	Devices   []DeviceRecord
 }
 
+// TestState is where the latest run the person asked for stands (page 10's Test the encoders). The startup pass has
+// no run id, so it is not one of these.
+type TestState struct {
+	RunID      string
+	Running    bool
+	FinishedAt time.Time // zero until the run has finished
+}
+
 // Detector runs detection in the background (L-HW-3). Start returns at once; Current serves the last finished pass
 // until a new pass ends, and a failing pass replaces it like any other.
 type Detector struct {
@@ -74,6 +82,8 @@ type Detector struct {
 	running bool
 	runs    int
 	runID   string // the id of the pass running now, when a person asked for it
+	test    TestState
+	hasTest bool // a run the person asked for has existed
 }
 
 // NewDetector makes a detector over the candidates. bus may be nil, in which case nothing is reported.
@@ -128,6 +138,7 @@ func (d *Detector) TestRun(workerID string) string {
 	id := d.runID
 	ctx := d.base
 	d.running = true
+	d.test, d.hasTest = TestState{RunID: id, Running: true}, true
 	d.mu.Unlock()
 	go d.pass(ctx, id, workerID)
 	return id
@@ -165,11 +176,13 @@ func (d *Detector) pass(ctx context.Context, runID, workerID string) {
 		// A cancelled pass is incomplete: the last finished pass stays.
 		d.mu.Lock()
 		d.running, d.runID = false, ""
+		d.finishTestLocked(runID)
 		d.mu.Unlock()
 		return
 	}
 	d.mu.Lock()
 	d.cur, d.has, d.running, d.runID = Answer{Inventory: inv, Devices: devices}, true, false, ""
+	d.finishTestLocked(runID)
 	d.mu.Unlock()
 	d.report(inv)
 }
@@ -198,6 +211,22 @@ func (d *Detector) recordSuccess(ctx context.Context, v Verdict, workerID string
 			Code: "encoder.state", WorkerID: workerID,
 			Message: "The encoder test's result could not be saved: " + err.Error()})
 	}
+}
+
+// finishTestLocked marks the run the person asked for as finished. The caller holds d.mu.
+func (d *Detector) finishTestLocked(runID string) {
+	if runID == "" || d.test.RunID != runID {
+		return
+	}
+	d.test.Running, d.test.FinishedAt = false, time.Now().UTC()
+}
+
+// Test returns where the latest run the person asked for stands. ok is false before the first such run; the startup
+// pass is not one, since it has no id to wait for.
+func (d *Detector) Test() (TestState, bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.test, d.hasTest
 }
 
 // Current returns the last finished pass. ok is false until one has finished.

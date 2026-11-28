@@ -83,6 +83,8 @@ type CardAnswer interface {
 	// TestRun starts a pass for the worker and returns its id at once; its results are probe events. "" means a pass
 	// was already going that has no id to hand out (the startup pass).
 	TestRun(workerID string) string
+	// Test is where the latest run the person asked for stands; ok is false before the first one.
+	Test() (hw.TestState, bool)
 }
 
 // Workflows is flow.Store as the api uses it.

@@ -23,18 +23,27 @@ import (
 // workerJSON is one row of the Workers table, as types.ts shapes Worker. The live parts (state, now,
 // doneToday) come from the queue; the settings from the workers store.
 type workerJSON struct {
-	ID             string     `json:"id"`
-	Name           string     `json:"name"`
-	Address        string     `json:"address"`
-	Local          bool       `json:"local"`
-	State          string     `json:"state"`
-	Since          *string    `json:"since"`
-	Slots          int        `json:"slots"`
-	GPUSlots       int        `json:"gpuSlots"`
-	GPU            *workerGPU `json:"gpu"`
-	Now            *workerNow `json:"now"`
-	DoneToday      int        `json:"doneToday"`
-	PausedGlobally bool       `json:"pausedGlobally"`
+	ID             string               `json:"id"`
+	Name           string               `json:"name"`
+	Address        string               `json:"address"`
+	Local          bool                 `json:"local"`
+	State          string               `json:"state"`
+	Since          *string              `json:"since"`
+	Slots          int                  `json:"slots"`
+	GPUSlots       int                  `json:"gpuSlots"`
+	GPU            *workerGPU           `json:"gpu"`
+	Now            *workerNow           `json:"now"`
+	DoneToday      int                  `json:"doneToday"`
+	PausedGlobally bool                 `json:"pausedGlobally"`
+	Test           *workerTestStateJSON `json:"test"`
+}
+
+// workerTestStateJSON is where the latest encoder test the person asked for stands (page 10): its id, whether it is
+// still going, and when it finished. nil before any run.
+type workerTestStateJSON struct {
+	RunID      string  `json:"runId"`
+	Running    bool    `json:"running"`
+	FinishedAt *string `json:"finishedAt"`
 }
 
 // workerGPU is the card's friendly name and the family its HEVC encoder belongs to (page 10's
@@ -172,6 +181,7 @@ func (s *Server) workerRow(ctx context.Context, rs *Deps, wk workers.Worker) (wo
 	}
 	gpu, _ := s.workerCard(rs, wk)
 	row.GPU = gpu
+	row.Test = workerTest(rs, wk)
 	running, err := rs.Jobs.RunningFor(ctx, wk.ID)
 	if err != nil {
 		return workerJSON{}, err
@@ -190,6 +200,24 @@ func (s *Server) workerRow(ctx context.Context, rs *Deps, wk workers.Worker) (wo
 	}
 	row.DoneToday = done
 	return row, nil
+}
+
+// workerTest is where this computer's latest encoder test stands, or nil before the first run. A remote worker's
+// encoders are not tested here, so its item never carries one.
+func workerTest(rs *Deps, wk workers.Worker) *workerTestStateJSON {
+	if !wk.Local || rs.Cards == nil {
+		return nil
+	}
+	st, ok := rs.Cards.Test()
+	if !ok {
+		return nil
+	}
+	out := &workerTestStateJSON{RunID: st.RunID, Running: st.Running}
+	if !st.FinishedAt.IsZero() {
+		at := st.FinishedAt.UTC().Format(time.RFC3339)
+		out.FinishedAt = &at
+	}
+	return out
 }
 
 // workerDetail is the Worker page's answer: the list row and the settings it can change.
