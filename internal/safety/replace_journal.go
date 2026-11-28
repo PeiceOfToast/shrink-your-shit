@@ -92,10 +92,17 @@ func (j *Journal) Begin(ctx context.Context, r Row) (int64, error) {
 }
 
 // SetState moves a row to a state.
+// trashed_at is the first time the swap settled with the original in the trash (kept across a purge revert). left_at is
+// when the copy left the trash (purged, or restored), and a return to done clears it (migration 15).
 func (j *Journal) SetState(ctx context.Context, id int64, state string) error {
+	now := j.now().Unix()
 	return j.db.Tx(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, `UPDATE replace_journal SET state = ?, updated_at = ? WHERE id = ?`,
-			state, j.now().Unix(), id)
+		_, err := tx.ExecContext(ctx, `UPDATE replace_journal SET state = ?, updated_at = ?,
+				trashed_at = CASE WHEN ? = 'done' THEN COALESCE(trashed_at, ?) ELSE trashed_at END,
+				left_at = CASE WHEN ? IN ('purged', 'rolled_back') THEN COALESCE(left_at, ?)
+				               WHEN ? = 'done' THEN NULL ELSE left_at END
+			WHERE id = ?`,
+			state, now, state, now, state, now, state, id)
 		return err
 	})
 }
