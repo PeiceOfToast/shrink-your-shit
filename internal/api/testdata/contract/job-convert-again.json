@@ -1,0 +1,68 @@
+{
+  "body": {
+    "attempt": 1,
+    "failure": null,
+    "finishedAt": null,
+    "history": [
+      {
+        "level": "info",
+        "text": "queued",
+        "time": "2026-11-27T04:00:00.000Z"
+      },
+      {
+        "level": "info",
+        "text": "picked",
+        "time": "2026-11-27T04:00:00.000Z"
+      },
+      {
+        "level": "info",
+        "text": "smaller",
+        "time": "2026-11-27T04:00:00.000Z"
+      }
+    ],
+    "job": {
+      "file": "three.mkv",
+      "finishedAt": null,
+      "id": "3",
+      "library": "Clips",
+      "progress": null,
+      "queuedAt": "2026-11-27T04:00:00.000Z",
+      "result": {
+        "failedStep": null,
+        "outcome": null,
+        "reason": null,
+        "sizeAfter": null,
+        "sizeBefore": 0,
+        "warnings": 0
+      },
+      "startedAt": "2026-11-27T04:00:00.000Z",
+      "state": "waiting",
+      "step": null,
+      "tookMs": null,
+      "worker": "local",
+      "workflow": "Shrink"
+    },
+    "logs": [],
+    "media": [],
+    "original": {
+      "action": "not_yet",
+      "until": null
+    },
+    "outputPath": null,
+    "path": "/videos/three.mkv",
+    "sizeAfterBytes": null,
+    "sizeBeforeBytes": 0,
+    "skipReason": null,
+    "startedAt": "2026-11-27T04:00:00.000Z",
+    "steps": [],
+    "timeLeftMs": null,
+    "tookMs": null,
+    "worker": "local",
+    "workflow": "Shrink",
+    "writtenAt": null
+  },
+  "method": "POST",
+  "path": "/api/v2/jobs/3/convert-again",
+  "status": 200,
+  "type": "JobDetail"
+}
