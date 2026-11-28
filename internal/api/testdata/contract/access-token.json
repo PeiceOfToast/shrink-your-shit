@@ -1,0 +1,9 @@
+{
+  "body": {
+    "token": "$DIR"
+  },
+  "method": "GET",
+  "path": "/api/v2/access/token",
+  "status": 200,
+  "type": "AccessToken"
+}
