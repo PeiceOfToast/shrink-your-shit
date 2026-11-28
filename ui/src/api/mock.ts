@@ -3,6 +3,7 @@ import { ATTENTION, OVERVIEW, SUMMARY } from "./fixtures/index.ts";
 import { JOBS } from "./fixtures/jobs.ts";
 import { jobDetail } from "./fixtures/jobDetail.ts";
 import { ApiError } from "./errors.ts";
+import { actionOutcome } from "./actionReply.ts";
 import { getForcedState, noLibrariesYet, respond } from "./mockState.ts";
 import { currentLibraries, reconnectShare } from "./mockLibraries.ts";
 import { workerName, workersSwitch } from "./mockWorkers.ts";
@@ -181,7 +182,7 @@ export function runAction(method: string, path: string, body?: unknown): Promise
     if (!b || b.action !== "retry" || !Array.isArray(b.ids) || b.ids.length === 0) {
       return Promise.reject(new ApiError("bad_request", "Pick the jobs to retry."));
     }
-    return respond(() => ({}));
+    return runJobsAction("retry", b.ids as string[]).then(actionOutcome);
   }
   return Promise.reject(new ApiError("unknown_action", "That action isn't available here."));
 }

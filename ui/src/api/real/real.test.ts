@@ -258,3 +258,9 @@ test("an action path outside /api/v2 is refused, and nothing is sent", async () 
   await assert.rejects(runAction("POST", "/jobs/actions", {}), (e: unknown) => e instanceof ApiError && e.code === "invalid_request");
   assert.equal(calls.length, 0);
 });
+
+test("a Needs attention action where every item is refused shows the refusal, not done", async () => {
+  stub(200, JSON.stringify({ done: [], refused: [{ id: "j1", code: "job_busy", message: "Still running." }] }));
+  await assert.rejects(runAction("POST", "/api/v2/jobs/actions", { action: "retry", ids: ["j1"] }), (e: unknown) =>
+    e instanceof ApiError && e.code === "job_busy" && e.message === "Still running.");
+});
