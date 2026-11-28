@@ -254,3 +254,36 @@ func TestTryReadsOnlyFilesInsideALibrary(t *testing.T) {
 		t.Fatalf("a library file = %d %s; want 200", rec.Code, rec.Body)
 	}
 }
+
+// Item 4: a Try resolves "my languages" the way a run does, so the guide's Try shows what the run will keep. Red-first:
+// without the lookup in the try route the audio step keeps no languages.
+func TestTryResolvesMyLanguagesLikeARun(t *testing.T) {
+	e, call := tryEnv(t, nil)
+	cookie := e.setup()
+	file := tryLibrary(t, e)
+	h := withSession(cookie)
+	rec := e.do(http.MethodPatch, "/api/v2/settings", `{"general":{"languages":["fra","ita"]}}`, write(h), false)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("patch = %d %s", rec.Code, rec.Body)
+	}
+	answers := flow.DefaultAnswers()
+	answers["allLanguages"] = false
+	rec = e.do(http.MethodPost, "/api/v2/workflows/try",
+		mustJSON(t, map[string]any{"answers": answers, "file": file}), write(h), false)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("try = %d %s; want 200", rec.Code, rec.Body)
+	}
+	var audio struct {
+		Languages []string `json:"languages"`
+	}
+	for _, st := range call.flow.Steps {
+		if st.Type == "audio.tracks" {
+			if err := json.Unmarshal(st.Settings, &audio); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if len(audio.Languages) != 2 || audio.Languages[0] != "fra" || audio.Languages[1] != "ita" {
+		t.Errorf("the try's audio languages = %v, want the settings' [fra ita]", audio.Languages)
+	}
+}

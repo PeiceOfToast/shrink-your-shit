@@ -5,6 +5,7 @@ package safety
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -13,21 +14,9 @@ import (
 	"time"
 
 	"github.com/PeiceOfToast/shrink-your-shit/internal/fsx"
+	"github.com/PeiceOfToast/shrink-your-shit/internal/settings"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/store"
 )
-
-// Migration 12 is the app settings table. Migration 11 is taken by the failure code (#789).
-func init() {
-	store.Register(store.Migration{Version: 12, Name: "app-settings", Up: createSettings})
-}
-
-func createSettings(tx *sql.Tx) error {
-	_, err := tx.Exec(`CREATE TABLE app_settings (
-		key TEXT PRIMARY KEY,
-		value TEXT NOT NULL
-	)`)
-	return err
-}
 
 // KeepOriginalsKey is the settings key for processing.keepOriginalsDays (page 11).
 const KeepOriginalsKey = "processing.keepOriginalsDays"
@@ -52,33 +41,18 @@ var (
 	ErrNameTaken = errors.New("safety: something is already at the original's name")
 )
 
-// KeepDays reads processing.keepOriginalsDays from the store, DefaultKeepDays when it was never set.
+// KeepDays reads processing.keepOriginalsDays from the settings store, DefaultKeepDays when it was never set.
 func (j *Journal) KeepDays(ctx context.Context) (int, error) {
-	var v string
-	err := j.db.Read().QueryRowContext(ctx, `SELECT value FROM app_settings WHERE key = ?`, KeepOriginalsKey).Scan(&v)
-	if errors.Is(err, sql.ErrNoRows) {
-		return DefaultKeepDays, nil
-	}
-	if err != nil {
-		return 0, fmt.Errorf("read keepOriginalsDays: %w", err)
-	}
-	var n int
-	if _, err := fmt.Sscanf(v, "%d", &n); err != nil || n < 0 || n > MaxKeepDays {
-		return DefaultKeepDays, nil
-	}
-	return n, nil
+	return settings.Get(ctx, j.db, KeepOriginalsKey, DefaultKeepDays), nil
 }
 
-// SetKeepDays stores processing.keepOriginalsDays. Values outside 0..365 are refused.
+// SetKeepDays stores processing.keepOriginalsDays through the settings store. Values outside 0..365 are refused.
 func (j *Journal) SetKeepDays(ctx context.Context, days int) error {
-	if days < 0 || days > MaxKeepDays {
-		return fmt.Errorf("safety: keep originals must be 0 to %d days", MaxKeepDays)
+	body := map[string]json.RawMessage{
+		"processing": json.RawMessage(fmt.Sprintf(`{"keepOriginalsDays":%d}`, days)),
 	}
-	return j.db.Tx(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, `INSERT INTO app_settings (key, value) VALUES (?, ?)
-			ON CONFLICT(key) DO UPDATE SET value = excluded.value`, KeepOriginalsKey, fmt.Sprint(days))
-		return err
-	})
+	_, _, err := settings.Patch(ctx, j.db, settings.Options{}, body)
+	return err
 }
 
 // DB is the store the journal writes to, for callers that read beside it.

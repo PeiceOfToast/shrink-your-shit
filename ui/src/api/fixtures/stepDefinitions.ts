@@ -617,6 +617,17 @@ export const STEP_DEFINITIONS: StepDefinition[] = [
       "schema": {
         "additionalProperties": false,
         "properties": {
+          "allLanguages": {
+            "default": true,
+            "description": "Off keeps only the languages below, or your own languages when none are picked.",
+            "title": "Keep every language",
+            "type": "boolean",
+            "x-ui": {
+              "group": "basic",
+              "order": 3,
+              "widget": "checkbox"
+            }
+          },
           "bitrateKbps": {
             "default": null,
             "maximum": 1536,
@@ -628,7 +639,7 @@ export const STEP_DEFINITIONS: StepDefinition[] = [
             ],
             "x-ui": {
               "group": "advanced",
-              "order": 5,
+              "order": 6,
               "unit": "kb/s",
               "widget": "number"
             }
@@ -655,7 +666,7 @@ export const STEP_DEFINITIONS: StepDefinition[] = [
                 }
               ],
               "group": "advanced",
-              "order": 6,
+              "order": 7,
               "showIf": {
                 "field": "bitrateKbps",
                 "notEquals": null
@@ -757,7 +768,7 @@ export const STEP_DEFINITIONS: StepDefinition[] = [
                 }
               ],
               "group": "advanced",
-              "order": 4,
+              "order": 5,
               "widget": "select"
             }
           },
@@ -783,7 +794,7 @@ export const STEP_DEFINITIONS: StepDefinition[] = [
                 }
               ],
               "group": "advanced",
-              "order": 10,
+              "order": 11,
               "widget": "segmented"
             }
           },
@@ -796,7 +807,7 @@ export const STEP_DEFINITIONS: StepDefinition[] = [
             ],
             "x-ui": {
               "group": "advanced",
-              "order": 11,
+              "order": 12,
               "widget": "select"
             }
           },
@@ -831,7 +842,7 @@ export const STEP_DEFINITIONS: StepDefinition[] = [
                 }
               ],
               "group": "advanced",
-              "order": 8,
+              "order": 9,
               "widget": "select"
             }
           },
@@ -873,7 +884,7 @@ export const STEP_DEFINITIONS: StepDefinition[] = [
             "type": "boolean",
             "x-ui": {
               "group": "advanced",
-              "order": 12,
+              "order": 13,
               "widget": "checkbox"
             }
           },
@@ -887,7 +898,11 @@ export const STEP_DEFINITIONS: StepDefinition[] = [
             "type": "array",
             "x-ui": {
               "group": "basic",
-              "order": 3,
+              "order": 4,
+              "showIf": {
+                "equals": false,
+                "field": "allLanguages"
+              },
               "widget": "languages"
             }
           },
@@ -897,7 +912,7 @@ export const STEP_DEFINITIONS: StepDefinition[] = [
             "type": "boolean",
             "x-ui": {
               "group": "advanced",
-              "order": 9,
+              "order": 10,
               "widget": "checkbox"
             }
           },
@@ -912,7 +927,7 @@ export const STEP_DEFINITIONS: StepDefinition[] = [
             ],
             "x-ui": {
               "group": "advanced",
-              "order": 7,
+              "order": 8,
               "unit": "Hz",
               "widget": "number"
             }
@@ -927,7 +942,7 @@ export const STEP_DEFINITIONS: StepDefinition[] = [
             "type": "array",
             "x-ui": {
               "group": "subtitles",
-              "order": 14,
+              "order": 15,
               "showIf": {
                 "equals": "my_languages",
                 "field": "subtitles"
@@ -970,7 +985,7 @@ export const STEP_DEFINITIONS: StepDefinition[] = [
                 }
               ],
               "group": "subtitles",
-              "order": 13,
+              "order": 14,
               "widget": "segmented"
             }
           }

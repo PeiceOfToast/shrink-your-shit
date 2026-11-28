@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"github.com/PeiceOfToast/shrink-your-shit/internal/settings"
 	"path/filepath"
 	"strconv"
 	"time"
@@ -25,7 +26,12 @@ type Builtin struct {
 
 // Claim takes the next job, or returns nil when none is ready.
 func (b Builtin) Claim(ctx context.Context, workerID string) (*Work, error) {
-	j, err := b.Queue.Claim(ctx, workerID, jobs.ClaimOptions{})
+	// The claim order is the queueOrder setting (page 11); an unset or unknown value is newest.
+	var opts jobs.ClaimOptions
+	if b.DB != nil {
+		opts.Order = jobs.Order(settings.Get(ctx, b.DB, "processing.queueOrder", "newest"))
+	}
+	j, err := b.Queue.Claim(ctx, workerID, opts)
 	if err != nil || j == nil {
 		return nil, err
 	}

@@ -21,6 +21,7 @@
         {
           "id": "audio",
           "settings": {
+            "allLanguages": true,
             "channels": "stereo",
             "format": "aac",
             "subtitles": "keep_all"

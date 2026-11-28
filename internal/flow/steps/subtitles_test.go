@@ -138,6 +138,7 @@ func TestSubtitlesTextOnly(t *testing.T) {
 	)
 	set := audioDefaults()
 	set.Subtitles = "text_only"
+	set.AllLanguages = true // no language list here: every language, as the step's default
 	d, p := planSubs(t, set, info)
 	if got := dropIndexes(p); !sameInts(got, []int{4, 6}) {
 		t.Errorf("drops = %v, want the two picture subtitles only", got)

@@ -98,7 +98,7 @@ export const DRAWN: Record<"video.convert" | "audio.tracks" | "file.save", StepF
     },
   },
   "audio.tracks": {
-    fields: ["format", "channels", "languages", "codec", "bitrateKbps", "downmix", "loudnorm", "commentary", "keepOriginal", "subtitles", "subtitleLanguages", "bitratePer", "sampleRate", "defaultTrack"],
+    fields: ["format", "channels", "allLanguages", "languages", "codec", "bitrateKbps", "downmix", "loudnorm", "commentary", "keepOriginal", "subtitles", "subtitleLanguages", "bitratePer", "sampleRate", "defaultTrack"],
     choices: {
       format: [
         { value: "aac", label: "AAC" },
@@ -143,6 +143,7 @@ export const DRAWN: Record<"video.convert" | "audio.tracks" | "file.save", StepF
     defaults: {
       format: "copy",
       channels: "source",
+      allLanguages: true,
       languages: [],
       codec: null,
       bitrateKbps: null,

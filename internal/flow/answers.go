@@ -97,10 +97,6 @@ func NormalizeAnswers(answers, defaults Answers) Answers {
 	if allLanguages {
 		out["languages"] = []string{}
 		out["languagesEverywhere"] = false
-	} else if len(languages) == 0 {
-		if base, _ := answerStrings(MergeAnswers(nil, defaults), "languages"); len(base) > 0 {
-			out["languages"] = append([]string{}, base...)
-		}
 	}
 	if suffix, ok := merged["nameSuffix"].(string); ok && suffix != "" {
 		out["nameSuffix"] = suffix
@@ -192,9 +188,6 @@ func FromAnswers(answers, defaults Answers) (Flow, []Problem) {
 	// empty means my languages (page 07: the Audio step reads an empty list as the person's own).
 	// The guide's own fallback is the defaults' list, the same canonical form NormalizeAnswers keeps.
 	audioLanguages := languages
-	if !allLanguages && len(audioLanguages) == 0 {
-		audioLanguages, _ = answerStrings(MergeAnswers(nil, defaults), "languages")
-	}
 	if allLanguages {
 		audioLanguages = []string{}
 		// "Keep every language" and "use my languages everywhere" cannot both hold: with no
@@ -202,7 +195,11 @@ func FromAnswers(answers, defaults Answers) (Flow, []Problem) {
 		languagesEverywhere = false
 	}
 	if languagesEverywhere {
-		audioLanguages = append(append([]string{}, audioLanguages...), "orig")
+		// With no list of its own, "everywhere" is my languages (an empty list, looked up at the run); with a list,
+		// the list plus the original language.
+		if len(audioLanguages) > 0 {
+			audioLanguages = append(append([]string{}, audioLanguages...), "orig")
+		}
 		if subtitles == "my_languages" {
 			subtitleLanguages = append([]string{}, audioLanguages...)
 		}
@@ -222,11 +219,14 @@ func FromAnswers(answers, defaults Answers) (Flow, []Problem) {
 	}
 	audioSettings := map[string]any{
 		"format": audioSet.Format, "channels": audioSet.Channels, "subtitles": subtitles,
+		// Every language is explicit: an empty list with this off means "my languages" (page 07), looked up at run.
+		"allLanguages": allLanguages,
 	}
 	// An empty list is left out, so the setting keeps its unset form: that is what "every language"
 	// and "the audio's languages" mean to the engine, and it is the shape a starter or a person
 	// clearing the picker already has.
-	if len(audioLanguages) > 0 {
+	// Off with no list is written as an explicit empty list: it means "my languages" at the run.
+	if len(audioLanguages) > 0 || !allLanguages {
 		audioSettings["languages"] = audioLanguages
 	}
 	if len(subtitleLanguages) > 0 {
@@ -342,11 +342,16 @@ func ToAnswers(f Flow) (Answers, bool) {
 		return nil, false
 	}
 	allLanguages, languagesEverywhere := false, false
-	switch {
-	case len(audioLanguages) == 0:
+	// A flow saved before the flag had no flag: an empty list then meant every language, and still does.
+	if flag, ok := settingBool(au, "allLanguages"); ok {
+		allLanguages = flag
+	} else if len(audioLanguages) == 0 {
 		allLanguages = true
+	}
+	switch {
+	case allLanguages:
 		audioLanguages = []string{}
-	case audioLanguages[len(audioLanguages)-1] == "orig":
+	case len(audioLanguages) > 0 && audioLanguages[len(audioLanguages)-1] == "orig":
 		languagesEverywhere = true
 		audioLanguages = audioLanguages[:len(audioLanguages)-1]
 	}
@@ -463,10 +468,15 @@ func Sentences(f Flow) []string {
 	}
 	video += "."
 	audio := fmt.Sprintf("Audio: %s, %s", codecLabel, channelsName(channels))
-	if names := languageNames(languages); names != "" {
+	allLanguages, _ := settingBool(au, "allLanguages")
+	switch names := languageNames(languages); {
+	case names != "":
 		audio += ", in " + names
-	} else {
+	case allLanguages:
 		audio += ", every language"
+	default:
+		// Off with no list: the person's own languages, looked up when the run starts.
+		audio += ", your languages"
 	}
 	audio += "."
 

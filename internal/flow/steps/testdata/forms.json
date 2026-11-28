@@ -19,6 +19,17 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "allLanguages": {
+          "type": "boolean",
+          "title": "Keep every language",
+          "description": "Off keeps only the languages below, or your own languages when none are picked.",
+          "default": true,
+          "x-ui": {
+            "widget": "checkbox",
+            "group": "basic",
+            "order": 3
+          }
+        },
         "bitrateKbps": {
           "type": [
             "null",
@@ -31,7 +42,7 @@
           "x-ui": {
             "widget": "number",
             "group": "advanced",
-            "order": 5,
+            "order": 6,
             "unit": "kb/s"
           }
         },
@@ -46,7 +57,7 @@
           "x-ui": {
             "widget": "segmented",
             "group": "advanced",
-            "order": 6,
+            "order": 7,
             "showIf": {
               "field": "bitrateKbps",
               "notEquals": null
@@ -123,7 +134,7 @@
           "x-ui": {
             "widget": "select",
             "group": "advanced",
-            "order": 4,
+            "order": 5,
             "choices": [
               {
                 "value": null,
@@ -174,7 +185,7 @@
           "x-ui": {
             "widget": "segmented",
             "group": "advanced",
-            "order": 10,
+            "order": 11,
             "choices": [
               {
                 "value": "keep",
@@ -199,7 +210,7 @@
           "x-ui": {
             "widget": "select",
             "group": "advanced",
-            "order": 11
+            "order": 12
           }
         },
         "downmix": {
@@ -217,7 +228,7 @@
           "x-ui": {
             "widget": "select",
             "group": "advanced",
-            "order": 8,
+            "order": 9,
             "choices": [
               {
                 "value": "speech",
@@ -276,7 +287,7 @@
           "x-ui": {
             "widget": "checkbox",
             "group": "advanced",
-            "order": 12
+            "order": 13
           }
         },
         "languages": {
@@ -290,7 +301,11 @@
           "x-ui": {
             "widget": "languages",
             "group": "basic",
-            "order": 3
+            "order": 4,
+            "showIf": {
+              "field": "allLanguages",
+              "equals": false
+            }
           }
         },
         "loudnorm": {
@@ -300,7 +315,7 @@
           "x-ui": {
             "widget": "checkbox",
             "group": "advanced",
-            "order": 9
+            "order": 10
           }
         },
         "sampleRate": {
@@ -315,7 +330,7 @@
           "x-ui": {
             "widget": "number",
             "group": "advanced",
-            "order": 7,
+            "order": 8,
             "unit": "Hz"
           }
         },
@@ -330,7 +345,7 @@
           "x-ui": {
             "widget": "languages",
             "group": "subtitles",
-            "order": 14,
+            "order": 15,
             "showIf": {
               "field": "subtitles",
               "equals": "my_languages"
@@ -351,7 +366,7 @@
           "x-ui": {
             "widget": "segmented",
             "group": "subtitles",
-            "order": 13,
+            "order": 14,
             "choices": [
               {
                 "value": "keep_all",

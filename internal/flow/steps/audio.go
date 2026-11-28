@@ -14,13 +14,23 @@ import (
 	"github.com/PeiceOfToast/shrink-your-shit/internal/media"
 )
 
+// wantedList is the language list the filter uses: none when "keep every language" is on, whatever the list says
+// (review item 6), else the list itself.
+func (set AudioSettings) wantedList() []string {
+	if set.AllLanguages {
+		return nil
+	}
+	return set.Languages
+}
+
 // AudioSettings is page 07's Audio card: the format, the channels and the languages to keep,
 // then Advanced's codec, bitrate, sample rate, downmix, loudness, commentary and default track,
 // then the subtitles. Every field's tags are the page's form.
 type AudioSettings struct {
-	Format    string   `set:"format" label:"Format" choices:"aac=AAC,opus=Opus,copy=Same as the source" default:"copy"`
-	Channels  string   `set:"channels" label:"Channels" choices:"stereo=Stereo,source=Same as the source,mono=Mono,5.1=5.1" default:"source" help:"A most, never an upmix: a stereo file stays stereo wherever 5.1 is asked for."`
-	Languages []string `set:"languages" label:"Keep these languages" widget:"languages" help:"Other tracks are removed; if none match, the main track stays. Original language keeps the film's own language, whatever it is."`
+	Format       string   `set:"format" label:"Format" choices:"aac=AAC,opus=Opus,copy=Same as the source" default:"copy"`
+	Channels     string   `set:"channels" label:"Channels" choices:"stereo=Stereo,source=Same as the source,mono=Mono,5.1=5.1" default:"source" help:"A most, never an upmix: a stereo file stays stereo wherever 5.1 is asked for."`
+	AllLanguages bool     `set:"allLanguages" label:"Keep every language" default:"true" defaultFrom:"languages" help:"Off keeps only the languages below, or your own languages when none are picked."`
+	Languages    []string `set:"languages" label:"Keep these languages" widget:"languages" showIf:"allLanguages=false" help:"Other tracks are removed; if none match, the main track stays. Original language keeps the film's own language, whatever it is."`
 
 	Codec        *string `set:"codec" label:"Codec" group:"advanced" choices:"aac=AAC,opus=Opus,ac3=AC-3,eac3=E-AC-3,flac=FLAC,copy=Copy the original" unset:"As picked above" widget:"select"`
 	BitrateKbps  *int    `set:"bitrateKbps" label:"Bitrate" group:"advanced" unit:"kb/s" min:"8" max:"1536"`
@@ -90,8 +100,10 @@ const (
 	origNotFoundNote = "The original language was not found, so it matches no track."
 	// noMatchMainNote and noMatchAllNote are K2: what stays when no track is in the person's
 	// languages, by whether the choice wanted one track or every surround track.
-	noMatchMainNote     = "None of the audio is in your languages, so the main track is kept."
-	noMatchAllNote      = "None of the audio is in your languages, so all audio tracks are kept."
+	noMatchMainNote = "None of the audio is in your languages, so the main track is kept."
+	noMatchAllNote  = "None of the audio is in your languages, so all audio tracks are kept."
+	// noMineEmptyNote is said when "my languages" has none set, so every track is kept.
+	noMineEmptyNote     = "Your languages are not set, so every audio track is kept."
 	defaultNotFoundNote = "The default track's language is not among the kept tracks, so each file keeps its own default flag."
 	smallKeptNote       = "Small stereo track kept as it is: converting would not make it smaller."
 	surroundKeptNote    = "Surround track kept as it is: converting would not make it smaller."
@@ -356,7 +368,7 @@ func isSDH(s media.SubtitleTrack) bool {
 func subtitleLanguages(set AudioSettings, tracks []media.AudioTrack) (codes map[string]bool, active bool, note string) {
 	list := set.SubtitleLanguages
 	if len(list) == 0 {
-		list = set.Languages
+		list = set.wantedList()
 	}
 	if len(list) == 0 {
 		return nil, false, ""
@@ -455,6 +467,10 @@ func targetBitrate(set AudioSettings, codec string, channels int) int {
 // to (K5).
 func chooseTracks(set AudioSettings, tracks []media.AudioTrack) ([]media.AudioTrack, []string) {
 	var notes []string
+	if !set.AllLanguages && len(set.Languages) == 0 {
+		// "My languages" with none set keeps every language (decisions.md, 11-28), and the run says so.
+		notes = append(notes, noMineEmptyNote)
+	}
 	work := append([]media.AudioTrack{}, tracks...)
 	if set.Commentary == "drop" {
 		var rest []media.AudioTrack
@@ -470,7 +486,7 @@ func chooseTracks(set AudioSettings, tracks []media.AudioTrack) ([]media.AudioTr
 		}
 	}
 
-	codes, active, origNote := wantedLanguages(set.Languages, work)
+	codes, active, origNote := wantedLanguages(set.wantedList(), work)
 	if origNote != "" {
 		notes = append(notes, origNote)
 	}
@@ -721,8 +737,8 @@ func audioCopyConflicts(set AudioSettings) []flow.Problem {
 // languages to keep and the subtitles choice.
 func audioSummary(set AudioSettings) string {
 	langs := "my languages"
-	if len(set.Languages) > 0 {
-		langs = languageNames(set.Languages)
+	if len(set.wantedList()) > 0 {
+		langs = languageNames(set.wantedList())
 	}
 	subLangs := langs
 	if len(set.SubtitleLanguages) > 0 {
