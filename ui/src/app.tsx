@@ -16,7 +16,7 @@ import { Workflows } from "./pages/Workflows.tsx";
 import { NewWorkflow } from "./pages/NewWorkflow.tsx";
 import { Guided } from "./pages/Guided.tsx";
 import { FlowEditor } from "./pages/FlowEditor.tsx";
-import { api } from "./api/index.ts";
+import { api, sampleOnly } from "./api/index.ts";
 import { useApi } from "./api/useApi.ts";
 import { navigate, resolve, useLocation } from "./router.tsx";
 
@@ -113,14 +113,16 @@ export function App() {
     case "library":
       page = <Libraries selected={route.id} />;
       break;
+    // Workers and the system log have no server routes yet. Their sample rows would read as real, so the real build
+    // shows "Not built yet" instead (?api=mock still shows the mock screens).
     case "workers":
-      page = <Workers />;
+      page = sampleOnly() ? <Placeholder title="Workers" note="Not built yet. This screen isn't connected to the server yet; it comes in a later batch." /> : <Workers />;
       break;
     case "worker":
-      page = <WorkerPage id={route.id} />;
+      page = sampleOnly() ? <Placeholder title="Workers" note="Not built yet. This screen isn't connected to the server yet; it comes in a later batch." /> : <WorkerPage id={route.id} />;
       break;
     case "systemLog":
-      page = <SystemLog />;
+      page = sampleOnly() ? <Placeholder title="System log" note="Not built yet. This screen isn't connected to the server yet; it comes in a later batch." back={{ to: "/settings", label: "Back to Settings" }} /> : <SystemLog />;
       break;
     case "settings":
       page = <SettingsPage section={route.section} />;

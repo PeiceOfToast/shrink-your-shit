@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { api, ApiError } from "../api/index.ts";
 import { FolderBrowser } from "./FolderBrowser.tsx";
+import { SampleBanner } from "../ui/SampleBanner.tsx";
 
 // Where the videos are (page 09). On this server: a folder, typed or browsed. Or a network share: its address is
 // tested, and the test saves the share so a library can use it. Add library and first run both show this field.
@@ -96,6 +97,7 @@ export function LibrarySource({
         </div>
       ) : (
         <div className="field">
+          <SampleBanner text="network shares aren't connected yet, so the test answer is made up. Use a folder on this server for now." />
           <input
             className="inp mono"
             value={value.address}

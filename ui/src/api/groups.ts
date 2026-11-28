@@ -19,6 +19,17 @@ function override(): "real" | "mock" | null {
   return v === "real" || v === "mock" ? v : null;
 }
 
+// The ?api override as the page loaded: the api object is built once from it, so the banners read the same value.
+const atLoad = override();
+
+// True where a page's data is the mock's made-up sample in this build: its group is off (or it has none yet) and the
+// tab isn't on ?api=mock, where everything is sample on purpose.
+export function sampleOnly(group?: Group): boolean {
+  if (atLoad === "mock") return false;
+  if (!group) return true;
+  return atLoad ? atLoad !== "real" : !REAL[group];
+}
+
 export function isReal(group: Group): boolean {
   const o = override();
   if (o) return o === "real";

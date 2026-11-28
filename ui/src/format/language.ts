@@ -48,7 +48,7 @@ export function sameLanguage(a: string, b: string): boolean {
 // language and ignores the list; false with an empty list keeps the person's own languages (Settings, My languages);
 // false with codes keeps those codes. A missing allLanguages is read as true, the default.
 export function keptAudioLanguages(allLanguages: unknown, list: string[]): { summary: string; hint?: string } {
-  if (allLanguages !== false) return { summary: "all", hint: "None picked keeps every language." };
+  if (allLanguages !== false) return { summary: "every language", hint: "None picked keeps every language." };
   if (list.length === 0) return { summary: "my languages", hint: "None picked keeps my languages (Settings, General)." };
   return { summary: list.map(languageName).join(" and ") };
 }

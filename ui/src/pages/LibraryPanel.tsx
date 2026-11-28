@@ -5,6 +5,7 @@ import { api, formatCount, formatGB, type LibraryDetail, type LibraryPatch, type
 import { useApi } from "../api/useApi.ts";
 import { libraryStatus } from "../ui/libraryStatus.ts";
 import { useKeys } from "../ui/useKeys.ts";
+import { SampleBanner } from "../ui/SampleBanner.tsx";
 import { FolderBrowser } from "./FolderBrowser.tsx";
 
 // Library panel (drafts/add-library/a-side-panel.html#lib). Opens on a row click and after Add. Save sends only the
@@ -150,6 +151,7 @@ export function LibraryPanel({ id, onChange }: { id: string; onChange?: () => vo
         </div>
 
         <div className="ovb">
+          <SampleBanner text="changes here aren't saved yet. Editing, removing and the workflow preview aren't connected." />
           {err && <p className="err" role="alert">{err}</p>}
           {lib.error && !L && (
             <p className="bad">
