@@ -68,6 +68,7 @@ export function addLiveLine(lines: LogEvent[], e: LogEvent): LogEvent[] {
 }
 
 // What the page shows: the loaded lines, with the live lines folded in (a fold of a loaded line replaces it).
+// A reload already has the live lines it was taken after, so a live line whose seq the page has is not added again.
 export function showLines(loaded: LogEvent[], live: LogEvent[]): LogEvent[] {
-  return live.reduce(addLiveLine, loaded);
+  return live.reduce((acc, e) => (acc.some((l) => l.seq === e.seq) ? acc : addLiveLine(acc, e)), loaded);
 }

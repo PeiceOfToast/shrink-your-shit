@@ -154,3 +154,28 @@ test("a fold of a line from the initial load replaces that line on the page, not
   assert.deepEqual(shown.map((l) => l.seq), [2, 4]);
   assert.equal(shown[1].repeat?.count, 2);
 });
+
+test("a reload that already has the live lines does not add them again (Follow on, refresh)", () => {
+  const a = liveEv(1, "2026-11-28T07:00:00Z", "one");
+  const b = liveEv(2, "2026-11-28T07:00:01Z", "two");
+  const c = liveEv(3, "2026-11-28T07:00:02Z", "three");
+  const reloaded = [a, b, c];
+  assert.deepEqual(showLines(reloaded, [b, c]), reloaded);
+});
+
+test("a later fold over a row that is already folded replaces that row, not a second copy", () => {
+  // The server answers a folded line as one row (seq 4, count 2); the page holds only that row.
+  const folded = liveEv(4, "2026-11-28T07:00:09Z", "sign-in refused", { count: 2, firstAt: "2026-11-28T07:00:00Z", lastAt: "2026-11-28T07:00:09Z" });
+  const again = liveEv(5, "2026-11-28T07:00:12Z", "sign-in refused", { count: 3, firstAt: "2026-11-28T07:00:00Z", lastAt: "2026-11-28T07:00:12Z" });
+  const shown = showLines([folded], [again]);
+  assert.equal(shown.length, 1);
+  assert.equal(shown[0].seq, 5);
+  assert.equal(shown[0].repeat?.count, 3);
+});
+
+test("the system log page builds its lines with showLines (a source check)", async () => {
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync(new URL("./SystemLog.tsx", import.meta.url), "utf8");
+  assert.match(src, /showLines\(\[\.\.\.older, \.\.\.base\], live\)/);
+});
+
