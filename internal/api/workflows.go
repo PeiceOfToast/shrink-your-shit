@@ -258,7 +258,12 @@ func (s *Server) getWorkflow(w http.ResponseWriter, r *http.Request) {
 	sentences := steps.Sentences{}
 	if wf, err := rs.Workflows.Get(r.Context(), id); err == nil && wf.CurrentRev > 0 {
 		if rev, err := rs.Workflows.Revision(r.Context(), id, wf.CurrentRev); err == nil {
-			if words, err := steps.WorkflowSentences(rev.Flow, s.keepDaysNow(rs)); err == nil {
+			// A failed read is -1: the replace line is then empty, not a guessed number of days.
+			days, read := s.keepDaysRead(rs)
+			if !read {
+				days = -1
+			}
+			if words, err := steps.WorkflowSentences(rev.Flow, days); err == nil {
 				sentences = words
 			}
 		}
@@ -416,7 +421,7 @@ func (s *Server) previewWorkflow(w http.ResponseWriter, r *http.Request) {
 		writeAnswerProblem(w, problems[0])
 		return
 	}
-	rep := flow.Validate(f, flow.ValidateContext{Env: flow.Env{}})
+	rep := flow.Validate(f, flow.ValidateContext{Env: s.checkEnv()})
 	writeJSON(w, http.StatusOK, struct {
 		Sentences []string        `json:"sentences"`
 		Flow      flow.Flow       `json:"flow"`
@@ -477,7 +482,7 @@ func (s *Server) tryWorkflow(w http.ResponseWriter, r *http.Request) {
 	}
 	// "My languages" is looked up as a run looks it up, so the try shows what the run will keep (review item 4).
 	f = flow.ResolveMyLanguages(f, s.myLanguages(r))
-	if rep := flow.Validate(f, flow.ValidateContext{Env: flow.Env{}}); len(rep.Problems) > 0 {
+	if rep := flow.Validate(f, flow.ValidateContext{Env: s.checkEnv()}); len(rep.Problems) > 0 {
 		writeError(w, http.StatusConflict, "has_problems", "Fix this first: "+rep.Problems[0].Message, "", 0)
 		return
 	}
@@ -590,7 +595,7 @@ func (s *Server) publishWorkflow(w http.ResponseWriter, r *http.Request) {
 	if !decodeOptional(w, r, &body) {
 		return
 	}
-	rev, err := rs.Workflows.Publish(r.Context(), id, body.Flow, flow.ValidateContext{Env: flow.Env{}})
+	rev, err := rs.Workflows.Publish(r.Context(), id, body.Flow, flow.ValidateContext{Env: s.validateEnv(rs)})
 	var blocked *flow.PublishBlockedError
 	switch {
 	case errors.As(err, &blocked):

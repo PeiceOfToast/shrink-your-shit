@@ -113,3 +113,57 @@ func TestKeepDaysNeverZeroWhenTheReadFails(t *testing.T) {
 		t.Errorf("keepDaysNow after a failed read = %d, want 7", got)
 	}
 }
+
+// A read that fails is reported as unread, so the summary's replace line can be left empty.
+func TestKeepDaysReadReportsAFailure(t *testing.T) {
+	db, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	s := &Server{}
+	if _, ok := s.keepDaysRead(&Deps{DB: db}); ok {
+		t.Error("a read with no settings table reported as read")
+	}
+}
+
+// The replace line reads processing.keepOriginalsDays each time the workflow is read: the first setting and then a second
+// one each name their own days, so a fixed number could not pass both.
+func TestReplaceLineReadsTheSettingEachTime(t *testing.T) {
+	e := newEnv(t, true)
+	cookie := e.setup()
+	ctx := context.Background()
+	f := starterWithFormat(t, "hevc")
+	for i, ref := range f.Steps {
+		if ref.Type != "file.save" {
+			continue
+		}
+		var settings map[string]any
+		if err := json.Unmarshal(ref.Settings, &settings); err != nil {
+			t.Fatal(err)
+		}
+		settings["where"] = "replace"
+		raw, err := json.Marshal(settings)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.Steps[i].Settings = raw
+	}
+	id, _, err := e.flows.Create(ctx, f, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.flows.Publish(ctx, id, nil, flow.ValidateContext{Env: flow.Env{}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, days := range []int{10, 20} {
+		rec := e.do(http.MethodPatch, "/api/v2/settings", `{"processing":{"keepOriginalsDays":`+strconv.Itoa(days)+`}}`, write(withSession(cookie)), false)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("set keep = %d: %s", rec.Code, rec.Body)
+		}
+		want := "The original goes to the trash for " + strconv.Itoa(days) + " days."
+		if got := getSummary(t, e, cookie, id).Summary.Original; got != want {
+			t.Errorf("original with %d days = %q, want %q", days, got, want)
+		}
+	}
+}

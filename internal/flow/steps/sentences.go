@@ -22,7 +22,7 @@ type Sentences struct {
 }
 
 // WorkflowSentences reads the flow's steps and writes the three lines. keepDays is processing.keepOriginalsDays, read
-// by the caller at request time. A step the flow does not register is an error.
+// by the caller at request time; a negative value means it did not read. A step the flow does not register is an error.
 func WorkflowSentences(f flow.Flow, keepDays int) (Sentences, error) {
 	var video *VideoSettings
 	var audio *AudioSettings
@@ -87,7 +87,9 @@ func leavesAloneSentence(video *VideoSettings) string {
 		return "Leaves no files alone."
 	}
 	var parts []string
-	parts = append(parts, fmt.Sprintf("Leaves alone files already in %s, with nothing else to change.",
+	// The claim is the video's only: the audio and the rest of the flow are planned on their own, so a file can still be
+	// converted for them.
+	parts = append(parts, fmt.Sprintf("Leaves the video alone when it is already in %s.",
 		codecName(encode.Codec(video.Format))))
 	if video.HDR != nil && *video.HDR == "skip" {
 		parts = append(parts, "Leaves HDR files alone.")
@@ -95,13 +97,17 @@ func leavesAloneSentence(video *VideoSettings) string {
 	return strings.Join(parts, " ")
 }
 
-// originalSentence follows the Save mode, and the trash days are the setting the run reads, not a constant.
+// originalSentence follows the Save mode, and the trash days are the setting the run reads, not a constant. A keepDays
+// below zero means the setting did not read: the replace line is then left empty, never given a number.
 func originalSentence(save *SaveSettings, keepDays int) string {
 	if save == nil {
 		return ""
 	}
 	switch save.Where {
 	case "replace":
+		if keepDays < 0 {
+			return ""
+		}
 		return fmt.Sprintf("The original goes to the trash for %s.", dayCount(keepDays))
 	case "folder":
 		// The folder mode is not built yet; the step's own note says so, and the line repeats it.

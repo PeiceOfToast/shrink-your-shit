@@ -50,6 +50,9 @@ type Attempt struct {
 // services the engine needs. A step reads only Encoders and CardFamily from it; the rest belongs
 // to the engine.
 type Env struct {
+	// KeepDays is processing.keepOriginalsDays, read when a flow is checked, so the save step's words name the days
+	// the run keeps a replaced original. nil uses the setting's default (7).
+	KeepDays func() int
 	// Encoders names the encoders this worker lists; a choice no worker can run is greyed.
 	Encoders []string
 	// CardFamily is the graphics card family this worker has, "" for none.

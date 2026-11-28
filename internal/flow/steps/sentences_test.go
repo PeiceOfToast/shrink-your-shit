@@ -68,14 +68,15 @@ func sentencesOf(t *testing.T, f flow.Flow, keepDays int) (converts, leavesAlone
 // The starter converts to HEVC at the default quality on the graphics card, and leaves HEVC alone.
 func TestStarterSentences(t *testing.T) {
 	c, l, o := sentencesOf(t, starter(t), 7)
-	if !strings.Contains(c, "Converts video to HEVC at the Balanced setting") {
+	// The words come from the steps' declarations (see labels_test.go), not literals here.
+	if !strings.Contains(c, "Converts video to HEVC at the "+strings.Split(tagOf(steps.VideoSettings{}, "Quality", "sliderLabels"), ",")[2]+" setting") {
 		t.Errorf("converts = %q", c)
 	}
 	// The starter definition has the card on, so its line names the card and the processor fallback.
 	if !strings.Contains(c, "on the graphics card, or the processor if the card can't do the file") {
 		t.Errorf("converts = %q, want the card with the processor fallback (the starter's setting)", c)
 	}
-	if !strings.Contains(l, "Leaves alone files already in HEVC") {
+	if !strings.Contains(l, "Leaves the video alone when it is already in HEVC.") {
 		t.Errorf("leavesAlone = %q", l)
 	}
 	if o != "The original stays next to the new file." {
@@ -167,4 +168,27 @@ func planWork(t *testing.T, rev flow.Revision, info media.Info) bool {
 		t.Fatal(err)
 	}
 	return d.Work()
+}
+
+// A failed read of keepOriginalsDays leaves the replace line empty, never a number; the other two modes do not use it.
+func TestReplaceLineEmptyWhenTheReadFailed(t *testing.T) {
+	_, _, o := sentencesOf(t, withSave(t, "replace"), -1)
+	if o != "" {
+		t.Errorf("replace with an unread setting = %q, want empty", o)
+	}
+	_, _, next := sentencesOf(t, withSave(t, "next_to"), -1)
+	if next != "The original stays next to the new file." {
+		t.Errorf("next_to with an unread setting = %q", next)
+	}
+}
+
+// The leave-alone line claims only the video: it does not say the rest of the file is unchanged.
+func TestLeaveAloneLineClaimsOnlyTheVideo(t *testing.T) {
+	_, leave, _ := sentencesOf(t, starter(t), 7)
+	if strings.Contains(leave, "nothing else") {
+		t.Errorf("leavesAlone = %q over-claims the rest of the file", leave)
+	}
+	if !strings.Contains(leave, "Leaves the video alone when it is already in HEVC.") {
+		t.Errorf("leavesAlone = %q, want the video claim", leave)
+	}
 }
