@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "typecheck": "tsc --noEmit",
-    "test": "node --test --experimental-strip-types src/api/format.test.ts src/api/groups.test.ts src/api/mockFlow.test.ts src/api/guideDefaults.test.ts src/api/sampleCallSites.test.ts src/api/http.test.ts src/api/mockWorkers.test.ts src/format/time.test.ts src/format/job.test.ts src/format/workflow.test.ts src/format/language.test.ts src/format/quality.test.ts src/format/fileType.test.ts src/api/mockJobs.test.ts src/format/accent.test.ts src/api/mockSettings.test.ts src/api/mockTrash.test.ts src/api/contract.test.ts src/api/real/real.test.ts src/api/events.test.ts src/api/live.test.ts src/pages/logParts.test.ts src/pages/flowFields.test.ts src/format/nameExample.test.ts",
+    "test": "node --test --experimental-strip-types src/api/format.test.ts src/api/groups.test.ts src/api/mockFlow.test.ts src/api/guideDefaults.test.ts src/api/sampleCallSites.test.ts src/api/http.test.ts src/api/mockWorkers.test.ts src/format/time.test.ts src/format/job.test.ts src/format/workflow.test.ts src/format/language.test.ts src/format/quality.test.ts src/format/fileType.test.ts src/api/mockJobs.test.ts src/format/accent.test.ts src/api/mockSettings.test.ts src/api/mockTrash.test.ts src/api/contract.test.ts src/api/real/real.test.ts src/api/events.test.ts src/api/live.test.ts src/pages/logParts.test.ts src/pages/flowFields.test.ts src/pages/workerPages.test.ts src/format/nameExample.test.ts",
     "build": "node scripts/clean-dist.mjs && tsc --noEmit && vite build",
     "preview": "vite preview",
     "contract": "node scripts/contract.mjs",
