@@ -162,6 +162,7 @@ func New(version string) *Server {
 	s.mux.HandleFunc("GET /api/v2/summary", s.getSummary)
 	s.mux.HandleFunc("GET /api/v2/attention", s.getAttention)
 	s.mux.HandleFunc("GET /api/v2/trash", s.getTrash)
+	s.mux.HandleFunc("GET /api/v2/overview", s.getOverview)
 	s.mux.HandleFunc("GET /api/v2/settings", s.getSettings)
 	s.mux.HandleFunc("PATCH /api/v2/settings", s.patchSettings)
 	s.mux.HandleFunc("POST /api/v2/trash/{id}/restore", s.restoreTrash)

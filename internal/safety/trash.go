@@ -66,11 +66,15 @@ type TrashEntry struct {
 	Trash    string
 	Final    string
 	When     time.Time
+	// OrigBytes is the original's size; NewBytes the converted file's. The saving is the difference (S3-8a).
+	OrigBytes int64
+	NewBytes  int64
 }
 
 // trashEntryFrom turns a done row into a trash entry.
 func trashEntryFrom(r Row, when int64) TrashEntry {
-	return TrashEntry{ID: r.ID, JobID: r.JobID, Original: r.Original, Trash: r.Trash, Final: r.Final, When: time.Unix(when, 0)}
+	return TrashEntry{ID: r.ID, JobID: r.JobID, Original: r.Original, Trash: r.Trash, Final: r.Final, When: time.Unix(when, 0),
+		OrigBytes: r.Orig.Size, NewBytes: r.New.Size}
 }
 
 // doneRows lists the rows whose swap settled with the original still in the trash, newest first.
