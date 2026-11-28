@@ -5,6 +5,7 @@ import { keptAudioLanguages, languageName, pickAudioLanguages } from "../format/
 import { useApi } from "../api/useApi.ts";
 import { ChoiceField, QUALITY_NAMES, Row, toErr, useBitrateLadder, useCardFamilies, type Err } from "./flowParts.tsx";
 import { useTryFile } from "./useTryFile.ts";
+import { publishFlowOnce } from "./flowPublish.ts";
 import { qualityMeaning } from "../format/quality.ts";
 import { fileTypeHint } from "../format/fileType.ts";
 
@@ -159,8 +160,11 @@ function GuidedForm({ id, initial }: { id: string; initial: Loaded }) {
     setBusy("use");
     setErr(null);
     try {
-      const useId = isNew ? await api.createDraft({ name: initial.name, answers }).then((c) => c.id) : draftId;
-      await api.publishFlow(useId, preview.flow);
+      // A new workflow's draft is made once: a refused publish keeps it, so the retry publishes the same draft.
+      const useId = await publishFlowOnce(api, { isNew, draftId, flow: preview.flow, makeDraft: () => api.createDraft({ name: initial.name, answers }) }, (id, created) => {
+        setDraftId(id);
+        setRev(created);
+      });
       navigate(`/workflows/${useId}`);
     } catch (e) {
       setErr(toErr(e));

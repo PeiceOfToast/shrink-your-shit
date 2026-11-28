@@ -172,7 +172,7 @@ function Editor({ id, initial }: { id: string; initial: Loaded }) {
     setErr(null);
     try {
       // A new workflow's draft is made once: a refused publish keeps it, so the retry publishes the same draft.
-      await publishFlowOnce(api, { isNew, draftId, flow }, (id, created) => {
+      await publishFlowOnce(api, { isNew, draftId, flow, makeDraft: () => api.createDraft({ name: flow.name, description: flow.description, flow }) }, (id, created) => {
         setDraftId(id);
         setRev(created);
       });
