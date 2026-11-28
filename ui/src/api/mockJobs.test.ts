@@ -72,3 +72,14 @@ test("a stopped job is left out of every list, as the server does; Retry clears 
   assert.equal(after.result.outcome, null);
   assert.equal(after.result.reason, null);
 });
+
+test("Move to top puts a waiting job first among the waiting ones and refuses any other job as the server does", async () => {
+  const waiting = JOBS.filter((j) => j.state === "waiting");
+  const last = waiting[waiting.length - 1];
+  assert.ok(waiting.length > 1 && last.id !== waiting[0].id, "the fixtures have several waiting jobs");
+  const done = JOBS.find((j) => j.state === "done")!;
+  const out = await runJobsAction("top", [last.id, done.id]);
+  assert.deepEqual(out.done, [last.id]);
+  assert.deepEqual(out.refused, [{ id: done.id, code: "not_movable", message: "Only a waiting job can be moved to the top." }]);
+  assert.equal(JOBS.find((j) => j.state === "waiting")!.id, last.id);
+});

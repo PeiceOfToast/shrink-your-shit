@@ -121,20 +121,36 @@ export function getJobs(params: JobsParams = {}): Promise<JobsPage> {
   });
 }
 
-// POST /api/v2/jobs/actions: {done, refused[{id, code, message}]}. The mock refuses nothing.
+// POST /api/v2/jobs/actions: {done, refused[{id, code, message}]}. Like the server, Move to top refuses a job that
+// isn't waiting (not_movable); nothing else is refused. Cancel, retry and top change the job the way the server does.
 export function runJobsAction(action: "retry" | "cancel" | "top", ids: string[]): Promise<JobsActionDone> {
-  // The mock refuses nothing, so every id is done. Cancel and retry move the job the way the server does.
   return respond(() => {
+    const done: string[] = [];
+    const refused: JobsActionDone["refused"] = [];
     for (const id of ids) {
       const i = JOBS.findIndex((j) => j.id === id);
-      if (i < 0) continue;
+      if (i < 0) {
+        done.push(id); // the mock has no not-found refusal
+        continue;
+      }
+      if (action === "top") {
+        if (JOBS[i].state !== "waiting") {
+          refused.push({ id, code: "not_movable", message: "Only a waiting job can be moved to the top." });
+          continue;
+        }
+        // First in the claim order: ahead of every other waiting job.
+        const [job] = JOBS.splice(i, 1);
+        const first = JOBS.findIndex((j) => j.state === "waiting");
+        JOBS.splice(first < 0 ? JOBS.length : first, 0, job);
+      }
       if (action === "cancel") JOBS[i] = { ...JOBS[i], state: "cancelled", step: null, progress: null };
       if (action === "retry") {
         const job = JOBS[i];
         JOBS[i] = { ...job, state: "waiting", step: null, progress: null, startedAt: null, finishedAt: null, tookMs: null, result: { ...job.result, sizeAfter: null, outcome: null, failedStep: null, reason: null } };
       }
+      done.push(id);
     }
-    return { done: [...ids], refused: [] };
+    return { done, refused };
   });
 }
 
