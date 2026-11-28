@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { JobStep, LogEvent, LogKind, LogLevel } from "../api/types.ts";
-import { addLiveLine, levelBadges, logsFromEvents, showLines } from "./logParts.ts";
+import { addLiveLine, levelBadges, logsFromEvents, olderPageEnds, showLines } from "./logParts.ts";
 import { readFileSync } from "node:fs";
 
 const steps: JobStep[] = [
@@ -204,5 +204,14 @@ test("the level badges are the server's counts: live lines are not added on top"
   const folded = { ...liveEv(10, "2026-11-28T07:00:19Z", "sign-in refused", { count: 3, firstAt: "2026-11-28T07:00:09Z", lastAt: "2026-11-28T07:00:19Z" }), level: "warn" } as LogEvent;
   assert.deepEqual(levelBadges(server, [warn, folded]), server);
   assert.deepEqual(levelBadges(server, []), server);
+});
+
+test("Load older: a short folded page keeps the button; only an empty page ends it", () => {
+  const PAGE = 20;
+  const fold = { ...liveEv(30, "2026-11-28T07:00:30Z", "sign-in refused", { count: 40, firstAt: "2026-11-28T06:59:00Z", lastAt: "2026-11-28T07:00:30Z" }) } as LogEvent;
+  const short = [fold];
+  assert.ok(short.length < PAGE, "a folded page can be shorter than the page size");
+  assert.equal(olderPageEnds(short), false);
+  assert.equal(olderPageEnds([]), true);
 });
 

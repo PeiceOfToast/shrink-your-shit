@@ -4,7 +4,7 @@ import { useApi } from "../api/useApi.ts";
 import { clock, clockPrecise } from "../format/time.ts";
 import { Link, navigate, useLocation } from "../router.tsx";
 import { Icon } from "../ui/Icon.tsx";
-import { LEVEL_LABEL, addLiveLine, copyText, levelBadges, saveText, showLines, type LogLevelName } from "./logParts.ts";
+import { LEVEL_LABEL, addLiveLine, copyText, levelBadges, olderPageEnds, saveText, showLines, type LogLevelName } from "./logParts.ts";
 
 // The System log (page 12): every app-wide event, newest last. Filters live in the URL, so a link can open a filtered log.
 const LEVELS = [
@@ -227,7 +227,7 @@ export function SystemLog() {
       const p = await api.getLog({ ...paramsFor(), before: oldest, limit: api.LOG_PAGE_SIZE });
       setOlder((o) => [...p.items, ...o]);
       // The server's limit counts raw lines and a page folds, so a short page is not the end: an empty page is.
-      if (p.items.length === 0) setHasMore(false);
+      if (olderPageEnds(p.items)) setHasMore(false);
     } catch (e) {
       setMsg(e instanceof Error ? e.message : "Couldn't load older lines. Try again.");
     }

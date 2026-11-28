@@ -86,3 +86,9 @@ export function levelBadges(server: LogCounts, _live: LogEvent[]): LogCounts {
   return server;
 }
 
+// An older page ends the list only when it is empty: the server's limit counts raw lines, and a page of repeats folds to
+// fewer rows, so a short page does not mean there is nothing older. The log route has no more/next hint.
+export function olderPageEnds(page: LogEvent[]): boolean {
+  return page.length === 0;
+}
+
