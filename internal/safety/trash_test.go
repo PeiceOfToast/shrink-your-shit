@@ -464,3 +464,81 @@ func TestSweepPurgeBetweenEntryAndClaimRefusesTheRestore(t *testing.T) {
 		t.Errorf("the converted file moved after a refused restore: %q", got)
 	}
 }
+
+// M3: a sweep that crashed after claiming a row (done to purged) left the trash file. Recovery returns the row to done,
+// so the copy is not lost. Red-first: without the startup pass the row stays purged and the file is never swept.
+func TestRecoverReturnsAPurgedRowWhoseFileStayed(t *testing.T) {
+	f, id := doneSwap(t)
+	if err := f.j.SetState(context.Background(), id, StatePurged); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Recover(context.Background(), f.j); err != nil {
+		t.Fatal(err)
+	}
+	if stateOf(t, f, id) != StateDone {
+		t.Errorf("state = %s after recovery, want done: the trash file is still the original", stateOf(t, f, id))
+	}
+}
+
+// M3, the other side: a purged row whose file is gone stays purged.
+func TestRecoverLeavesAPurgedRowWhoseFileIsGone(t *testing.T) {
+	f, id := doneSwap(t)
+	r, _, _ := f.j.Entry(context.Background(), id)
+	if err := os.Remove(r.Trash); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.j.SetState(context.Background(), id, StatePurged); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Recover(context.Background(), f.j); err != nil {
+		t.Fatal(err)
+	}
+	if stateOf(t, f, id) != StatePurged {
+		t.Errorf("state = %s, want purged", stateOf(t, f, id))
+	}
+}
+
+// M2: a restore that crashed after removing the converted copy, before its record was written, is reported as finished
+// (its job's History gets the line). Red-first: without the kind check the rolled-back record is not in Restored.
+func TestRecoverReportsAFinishedRestoreWhoseRecordWasNotWritten(t *testing.T) {
+	f, id := doneSwap(t)
+	crashAt(t, 4)
+	restoreUntilCrash(f, id)
+	rep, err := Recover(context.Background(), f.j)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Restored) != 1 || rep.Restored[0] != 7 {
+		t.Errorf("restored = %v, want [7]: the original is back and the restore finished", rep.Restored)
+	}
+	if got := readFile(t, f.original); got != origBytes {
+		t.Errorf("the original is %q, want its own bytes", got)
+	}
+	if stateOf(t, f, id) != StateRolledBack {
+		t.Errorf("state = %s, want rolled_back", stateOf(t, f, id))
+	}
+}
+
+// M3, a different file: the trash path holds another file (another identity), not the original. Recovery leaves the
+// row purged and the file as it is.
+func TestRecoverLeavesAPurgedRowWhoseTrashPathHoldsAnotherFile(t *testing.T) {
+	f, id := doneSwap(t)
+	r, _, _ := f.j.Entry(context.Background(), id)
+	other := []byte("ANOTHER-FILE-NOT-THE-ORIGINAL")
+	if err := os.WriteFile(r.Trash, other, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.j.SetState(context.Background(), id, StatePurged); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Recover(context.Background(), f.j); err != nil {
+		t.Fatal(err)
+	}
+	if stateOf(t, f, id) != StatePurged {
+		t.Errorf("state = %s, want purged: the trash path holds another file", stateOf(t, f, id))
+	}
+	got, err := os.ReadFile(r.Trash)
+	if err != nil || string(got) != string(other) {
+		t.Errorf("the other file at the trash path was touched: %q, %v", got, err)
+	}
+}

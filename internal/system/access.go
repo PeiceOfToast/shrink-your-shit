@@ -561,6 +561,36 @@ func digest(secret string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// Seal encrypts a secret under the data folder's key file, the same way the access token is
+// sealed. Shares use it for the password they keep (stage 3 item 7), so there is one key and one
+// mechanism; a caller never sees the key.
+func (a *Access) Seal(plain []byte) ([]byte, error) {
+	key, err := a.sealingKey()
+	if err != nil {
+		return nil, err
+	}
+	return seal(key, plain)
+}
+
+// Unseal opens a value Seal made. A value sealed under another key, or cut short, is an error.
+func (a *Access) Unseal(sealed []byte) ([]byte, error) {
+	key, err := a.sealingKey()
+	if err != nil {
+		return nil, err
+	}
+	return openSealed(key, sealed)
+}
+
+// sealingKey is the key file's contents, made on first use (setup makes it sooner).
+func (a *Access) sealingKey() ([]byte, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if err := a.ensureKeyLocked(); err != nil {
+		return nil, err
+	}
+	return a.key, nil
+}
+
 // seal encrypts with AES-256-GCM: a random nonce, then the ciphertext.
 func seal(key, plain []byte) ([]byte, error) {
 	block, err := aes.NewCipher(key)
@@ -576,4 +606,22 @@ func seal(key, plain []byte) ([]byte, error) {
 		return nil, err
 	}
 	return gcm.Seal(nonce, nonce, plain, nil), nil
+}
+
+// openSealed reverses seal. It is the one opener: the token, the sessions' checks and a share's
+// password all come through here or through Unseal above.
+func openSealed(key, sealed []byte) ([]byte, error) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	ns := gcm.NonceSize()
+	if len(sealed) < ns {
+		return nil, errors.New("sealed value is too short")
+	}
+	return gcm.Open(nil, sealed[:ns], sealed[ns:], nil)
 }

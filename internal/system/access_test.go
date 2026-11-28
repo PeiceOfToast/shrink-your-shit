@@ -4,8 +4,6 @@ package system
 
 import (
 	"context"
-	"crypto/aes"
-	"crypto/cipher"
 	"errors"
 	"os"
 	"path/filepath"
@@ -188,22 +186,51 @@ func TestTokenStoredEncrypted(t *testing.T) {
 	}
 }
 
+// unseal is the test's window into a sealed blob. It uses the one opener rather than a second
+// GCM implementation, so the test cannot agree with itself while both are wrong.
 func unseal(t *testing.T, key, sealed []byte) string {
 	t.Helper()
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ns := gcm.NonceSize()
-	plain, err := gcm.Open(nil, sealed[:ns], sealed[ns:], nil)
+	plain, err := openSealed(key, sealed)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return string(plain)
+}
+
+// A share's password goes through the same seal the access token does. This pins the pair: the
+// value opens under the key file, does not open under another key, and a short blob is refused
+// rather than panicking on the nonce slice.
+func TestSealAndUnsealForASharePassword(t *testing.T) {
+	a, _, dir, _ := newAccess(t)
+	secret := []byte("share.password")
+	sealed, err := a.Seal(secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(sealed), string(secret)) {
+		t.Fatal("the sealed share password is readable in clear")
+	}
+	got, err := a.Unseal(sealed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(secret) {
+		t.Fatalf("Unseal = %q, want the password", got)
+	}
+	key, err := os.ReadFile(filepath.Join(dir, keyFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if open, err := openSealed(key, sealed); err != nil || string(open) != string(secret) {
+		t.Fatalf("the key file opens the share password: %q, %v", open, err)
+	}
+	other := make([]byte, 32)
+	if _, err := openSealed(other, sealed); err == nil {
+		t.Fatal("another key opened the share password")
+	}
+	if _, err := a.Unseal([]byte{1, 2, 3}); err == nil {
+		t.Fatal("a short blob opened")
+	}
 }
 
 func TestRotateEndsOtherSessions(t *testing.T) {

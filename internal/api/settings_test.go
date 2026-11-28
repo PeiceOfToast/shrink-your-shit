@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/PeiceOfToast/shrink-your-shit/internal/events"
+	"github.com/PeiceOfToast/shrink-your-shit/internal/media"
 )
 
 // TestSettingsGetReturnsTheDocument: GET /settings answers the page's groups with the defaults.
@@ -116,5 +117,31 @@ func TestSettingsPatchBodyIsCapped(t *testing.T) {
 	rec := e.do(http.MethodPatch, "/api/v2/settings", big, write(h), false)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status %d for a 70 KiB body, want 400; body %s", rec.Code, rec.Body)
+	}
+}
+
+// TestSettingsPatchLowPriorityAppliesAtOnce: turning low priority off on page 11 applies to tools started from
+// now on, not from the next restart (dev-review on #896). Running tools keep the priority they started with.
+func TestSettingsPatchLowPriorityAppliesAtOnce(t *testing.T) {
+	before := media.LowPriority()
+	t.Cleanup(func() { media.SetLowPriority(before) })
+	media.SetLowPriority(true)
+
+	e := newEnv(t, true)
+	cookie := e.setup()
+	h := map[string]string{"Cookie": cookie.String()}
+	rec := e.do(http.MethodPatch, "/api/v2/settings", `{"processing":{"lowPriority":false}}`, write(h), false)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d, body %s", rec.Code, rec.Body)
+	}
+	if media.LowPriority() {
+		t.Error("low priority is still on after the settings page turned it off")
+	}
+	rec = e.do(http.MethodPatch, "/api/v2/settings", `{"processing":{"lowPriority":true}}`, write(h), false)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d, body %s", rec.Code, rec.Body)
+	}
+	if !media.LowPriority() {
+		t.Error("low priority is still off after the settings page turned it on")
 	}
 }

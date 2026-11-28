@@ -1,0 +1,7 @@
+{
+  "body": null,
+  "method": "DELETE",
+  "path": "/api/v2/shares/1",
+  "status": 204,
+  "type": "none"
+}

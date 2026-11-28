@@ -14,6 +14,7 @@ import (
 	"github.com/PeiceOfToast/shrink-your-shit/internal/flow"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/jobs"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/library"
+	"github.com/PeiceOfToast/shrink-your-shit/internal/safety"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/store"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/worker"
 )
@@ -117,7 +118,7 @@ func TestAnInstallAtSchemaSixUpgradesThroughSeven(t *testing.T) {
 		t.Fatalf("queue the old job: %v", err)
 	}
 
-	// Take the schema back to 6: remove what migrations 7, 8, 9, 10 and 11 add, and say the database is
+	// Take the schema back to 6: remove what migrations 7 through 16 add, and say the database is
 	// at 6. All the data above stays, as it would on a real stage 1 install.
 	if err := db.Tx(ctx, func(tx *sql.Tx) error {
 		for _, s := range []string{
@@ -128,6 +129,10 @@ func TestAnInstallAtSchemaSixUpgradesThroughSeven(t *testing.T) {
 			`ALTER TABLE jobs DROP COLUMN subtitle_files`,
 			`ALTER TABLE jobs DROP COLUMN failure_code`,
 			`DROP TABLE IF EXISTS app_settings`,
+			`DROP TABLE IF EXISTS workers`,
+			`DROP TABLE IF EXISTS shares`,
+			`ALTER TABLE libraries DROP COLUMN share_paused`,
+			`ALTER TABLE libraries DROP COLUMN share_down_at`,
 			`PRAGMA user_version = 6`,
 		} {
 			if _, err := tx.Exec(s); err != nil {
@@ -157,10 +162,10 @@ func TestAnInstallAtSchemaSixUpgradesThroughSeven(t *testing.T) {
 	if err := db.Read().QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	// The newest migration is 12 (the app settings, S2-10c); 11 is the failure code (S3-6a), 10 the replace journal,
-	// 9 the subtitles change (#854).
-	if version != 12 {
-		t.Errorf("schema version after the upgrade = %d, want 12", version)
+	// The newest migration is 16 (shares, S3-7); 15 and 14 are the journal's, 13 the workers (S3-4), 12 the app settings
+	// (S2-10c), 11 the failure code (S3-6a), 10 the replace journal, 9 the subtitles change (#854).
+	if version != 16 {
+		t.Errorf("schema version after the upgrade = %d, want 16", version)
 	}
 	if err := db.Read().QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'encoder_state'`).
 		Scan(&encoderState); err != nil {
@@ -276,10 +281,10 @@ func TestTheStartupSweepClearsOlderTriesOnly(t *testing.T) {
 	})
 }
 
-// TestAnInstallAtSchemaNineUpgradesToEleven: an install at schema 9 (the subtitles change) upgrades through the
-// program's own open-and-migrate path to 11, with the replace journal and the failure code made and the data kept
-// (review #865 add-on, then S3-6a).
-func TestAnInstallAtSchemaNineUpgradesToEleven(t *testing.T) {
+// TestAnInstallAtSchemaNineUpgradesToThirteen: an install at schema 9 (the subtitles change) upgrades through the
+// program's own open-and-migrate path to 13, with the replace journal, the failure code, the app settings and the
+// workers' settings made and the data kept (review #865 add-on, then S3-6a, S2-10c, S3-4).
+func TestAnInstallAtSchemaNineUpgradesToThirteen(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 
@@ -303,12 +308,16 @@ func TestAnInstallAtSchemaNineUpgradesToEleven(t *testing.T) {
 		t.Fatalf("add the library: %v", err)
 	}
 
-	// Take the schema back to 9: remove what migrations 10 and 11 add and say the database is at 9.
+	// Take the schema back to 9: remove what migrations 10 through 16 add and say the database is at 9.
 	if err := db.Tx(ctx, func(tx *sql.Tx) error {
 		for _, s := range []string{
 			`DROP TABLE IF EXISTS replace_journal`,
 			`ALTER TABLE jobs DROP COLUMN failure_code`,
 			`DROP TABLE IF EXISTS app_settings`,
+			`DROP TABLE IF EXISTS workers`,
+			`DROP TABLE IF EXISTS shares`,
+			`ALTER TABLE libraries DROP COLUMN share_paused`,
+			`ALTER TABLE libraries DROP COLUMN share_down_at`,
 			`PRAGMA user_version = 9`,
 		} {
 			if _, err := tx.Exec(s); err != nil {
@@ -337,8 +346,8 @@ func TestAnInstallAtSchemaNineUpgradesToEleven(t *testing.T) {
 	if err := db.Read().QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 12 {
-		t.Errorf("schema version after the upgrade = %d, want 12", version)
+	if version != 16 {
+		t.Errorf("schema version after the upgrade = %d, want 16", version)
 	}
 	if err := db.Read().QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'replace_journal'`).
 		Scan(&journal); err != nil {
@@ -358,5 +367,190 @@ func TestAnInstallAtSchemaNineUpgradesToEleven(t *testing.T) {
 	libs, err := library.NewCatalog(db).ListLibraries(ctx)
 	if err != nil || len(libs) != 1 {
 		t.Errorf("libraries after the upgrade = %d (%v), want the one kept", len(libs), err)
+	}
+}
+
+// TestAnInstallAtSchemaTwelveUpgradesToThirteen: an install at schema 12 (the app settings) upgrades through the
+// program's own open-and-migrate path to 13, which makes the workers table and its built-in row (S3-4).
+func TestAnInstallAtSchemaTwelveUpgradesToThirteen(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	db, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Migrate(); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	// A person who had already set page 11's files at once: the built-in worker row is created with
+	// it (the setting is the default for a new worker).
+	if err := db.Tx(ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec(`INSERT INTO app_settings(key, value) VALUES ('processing.parallelJobs', '4')
+			ON CONFLICT(key) DO UPDATE SET value = excluded.value`)
+		return err
+	}); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	// Take the schema back to 12: the number before the workers' settings.
+	if err := db.Tx(ctx, func(tx *sql.Tx) error {
+		for _, s := range []string{
+			`DROP TABLE IF EXISTS workers`,
+			`ALTER TABLE replace_journal DROP COLUMN kind`,
+			`ALTER TABLE replace_journal DROP COLUMN trashed_at`,
+			`ALTER TABLE replace_journal DROP COLUMN left_at`,
+			`DROP TABLE IF EXISTS shares`,
+			`ALTER TABLE libraries DROP COLUMN share_paused`,
+			`ALTER TABLE libraries DROP COLUMN share_down_at`,
+			`PRAGMA user_version = 12`,
+		} {
+			if _, err := tx.Exec(s); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		db.Close()
+		t.Fatalf("make the database a schema 12 install: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err = store.Open(dir)
+	if err != nil {
+		t.Fatalf("open the schema 12 install: %v", err)
+	}
+	defer db.Close()
+	if err := db.Migrate(); err != nil {
+		t.Fatalf("upgrade the schema 12 install: %v", err)
+	}
+
+	var version int
+	if err := db.Read().QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version != 16 {
+		t.Errorf("schema version after the upgrade = %d, want 16", version)
+	}
+	var workersTable int
+	if err := db.Read().QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'workers'`).
+		Scan(&workersTable); err != nil {
+		t.Fatal(err)
+	}
+	if workersTable != 1 {
+		t.Error("migration 13 did not run: workers is missing")
+	}
+	var builtin int
+	if err := db.Read().QueryRow(`SELECT count(*) FROM workers WHERE id = 'local'`).Scan(&builtin); err != nil {
+		t.Fatal(err)
+	}
+	if builtin != 1 {
+		t.Errorf("the built-in worker rows = %d, want 1", builtin)
+	}
+	var slots int
+	if err := db.Read().QueryRow(`SELECT slots FROM workers WHERE id = 'local'`).Scan(&slots); err != nil {
+		t.Fatal(err)
+	}
+	if slots != 4 {
+		t.Errorf("the built-in worker's files at once = %d, want the page 11 value 4", slots)
+	}
+}
+
+// TestAnInstallAtSchemaThirteenUpgradesThroughFourteen: an install at schema 13 (the workers, after #896) upgrades through 14. The
+// replace journal gets its kind column, and the rows an older install already holds take the default kind. Recovery
+// still runs on them, and no row is left in "moving".
+func TestAnInstallAtSchemaThirteenUpgradesThroughFourteen(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	db, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Migrate(); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	// Take the schema back to 13: the workers exist, the journal has no kind column yet. Two rows are from before the
+	// kind column: one a crash left "moving", one already "done".
+	if err := db.Tx(ctx, func(tx *sql.Tx) error {
+		for _, s := range []string{
+			`ALTER TABLE replace_journal DROP COLUMN kind`,
+			`ALTER TABLE replace_journal DROP COLUMN trashed_at`,
+			`ALTER TABLE replace_journal DROP COLUMN left_at`,
+			`DROP TABLE IF EXISTS shares`,
+			`ALTER TABLE libraries DROP COLUMN share_paused`,
+			`ALTER TABLE libraries DROP COLUMN share_down_at`,
+			`PRAGMA user_version = 13`,
+			`INSERT INTO replace_journal (job_id, original, trash, staged, final, state,
+				orig_file_id, orig_size, orig_mtime, orig_ctime, orig_hash,
+				new_file_id, new_size, new_mtime, new_hash, created_at, updated_at)
+				VALUES (1, '/lib/a.mkv', '/lib/.syp-trash/a', '/lib/a.staged.mkv', '/lib/a.mkv', 'moving',
+				'1:1', 100, 1, 1, 'h1', '2:2', 50, 1, 'h2', 1, 1)`,
+			`INSERT INTO replace_journal (job_id, original, trash, staged, final, state,
+				orig_file_id, orig_size, orig_mtime, orig_ctime, orig_hash,
+				new_file_id, new_size, new_mtime, new_hash, created_at, updated_at)
+				VALUES (2, '/lib/b.mkv', '/lib/.syp-trash/b', '/lib/b.staged.mkv', '/lib/b.mkv', 'done',
+				'3:3', 100, 1, 1, 'h3', '4:4', 50, 1, 'h4', 1, 1)`,
+		} {
+			if _, err := tx.Exec(s); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		db.Close()
+		t.Fatalf("make the database a schema 13 install: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err = store.Open(dir)
+	if err != nil {
+		t.Fatalf("open the schema 13 install: %v", err)
+	}
+	defer db.Close()
+	if err := db.Migrate(); err != nil {
+		t.Fatalf("upgrade the schema 13 install: %v", err)
+	}
+
+	var version int
+	if err := db.Read().QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version != 16 {
+		t.Errorf("schema version after the upgrade = %d, want 16", version)
+	}
+	rows, err := db.Read().Query(`SELECT job_id, kind FROM replace_journal ORDER BY job_id`)
+	if err != nil {
+		t.Fatalf("read the journal kinds after the upgrade: %v", err)
+	}
+	defer rows.Close()
+	kinds := map[int]string{}
+	for rows.Next() {
+		var job int
+		var kind string
+		if err := rows.Scan(&job, &kind); err != nil {
+			t.Fatal(err)
+		}
+		kinds[job] = kind
+	}
+	if kinds[1] != "replace" || kinds[2] != "replace" || len(kinds) != 2 {
+		t.Errorf("journal kinds after the upgrade = %v, want both rows \"replace\"", kinds)
+	}
+
+	if _, err := safety.Recover(ctx, safety.NewJournal(db)); err != nil {
+		t.Fatalf("recovery on the upgraded journal: %v", err)
+	}
+	var moving int
+	if err := db.Read().QueryRow(`SELECT count(*) FROM replace_journal WHERE state = 'moving'`).Scan(&moving); err != nil {
+		t.Fatal(err)
+	}
+	if moving != 0 {
+		t.Errorf("rows left in moving after recovery = %d, want 0", moving)
 	}
 }
