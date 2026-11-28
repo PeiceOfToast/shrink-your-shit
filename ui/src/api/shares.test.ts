@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { HOME_VIDEOS_SHARE } from "./fixtures/libraries.ts";
 import { reconnectShare } from "./mockLibraries.ts";
+import { runAction } from "./mock.ts";
 import { ApiError } from "./errors.ts";
 
 test("the mock reconnects a share by its share id and answers the Share", async () => {
@@ -21,3 +22,9 @@ test("the library panel reconnects with the library's share id, then reloads", (
   assert.match(src, /await api\.reconnectShare\(L\.shareId\);/);
   assert.doesNotMatch(src, /api\.reconnectShare\(id\)/);
 });
+
+test("the mock's share route (runAction) reconnects by the share id, and refuses a library id", async () => {
+  await assert.doesNotReject(runAction("POST", `/api/v2/shares/${HOME_VIDEOS_SHARE}/reconnect`));
+  await assert.rejects(runAction("POST", "/api/v2/shares/home-videos/reconnect"), (e: unknown) => e instanceof ApiError && e.code === "share_not_found");
+});
+
