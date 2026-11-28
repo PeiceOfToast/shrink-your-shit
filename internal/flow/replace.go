@@ -83,11 +83,11 @@ func (e *engine) replaceOriginal(ctx context.Context, staged safety.Staged, fina
 		return cancelled()
 	case errors.Is(err, safety.ErrNoTrash), errors.Is(err, safety.ErrReadOnlyLibrary):
 		return Result{Outcome: OutcomeMayPass, Reason: "replace.not_possible", Message: err.Error(),
-			SizeBefore: e.in.Size, NextAction: "retry"}
+			SizeBefore: e.in.Size, NextAction: "Make the library folder writable so a trash folder can be made there, or save the new file next to the original instead."}
 	case errors.Is(err, safety.ErrSourceChanged):
 		return Result{Outcome: OutcomeMayPass, Reason: "replace.source_changed",
 			Message:    "The original changed while it was being replaced, so it was kept.",
-			SizeBefore: e.in.Size, NextAction: "retry"}
+			SizeBefore: e.in.Size, NextAction: "Try it again once nothing else is changing the file."}
 	case errors.Is(err, safety.ErrSharedSource):
 		return Result{Outcome: OutcomeSkip, Reason: "replace.shared",
 			Message: "The original is hard-linked, so it is shared and was not replaced.", SizeBefore: e.in.Size}

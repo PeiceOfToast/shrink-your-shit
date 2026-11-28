@@ -92,9 +92,9 @@ func TestRunReplaceRefusalsKeepTheOriginal(t *testing.T) {
 		why  string
 		next string // the next-action sentence the page shows, or retry where a retry is the step
 	}{
-		{"no trash folder", safety.ErrNoTrash, flow.OutcomeMayPass, "replace.not_possible", "retry"},
-		{"read-only library", safety.ErrReadOnlyLibrary, flow.OutcomeMayPass, "replace.not_possible", "retry"},
-		{"original changed", safety.ErrSourceChanged, flow.OutcomeMayPass, "replace.source_changed", "retry"},
+		{"no trash folder", safety.ErrNoTrash, flow.OutcomeMayPass, "replace.not_possible", "Make the library folder writable so a trash folder can be made there, or save the new file next to the original instead."},
+		{"read-only library", safety.ErrReadOnlyLibrary, flow.OutcomeMayPass, "replace.not_possible", "Make the library folder writable so a trash folder can be made there, or save the new file next to the original instead."},
+		{"original changed", safety.ErrSourceChanged, flow.OutcomeMayPass, "replace.source_changed", "Try it again once nothing else is changing the file."},
 		{"hard-linked original", safety.ErrSharedSource, flow.OutcomeSkip, "replace.shared", ""},
 		{"put-back failed", safety.ErrPutBackFailed, flow.OutcomeFatal, "replace.put_back_failed",
 			"Check the library's trash folder and put the original back by hand."},
