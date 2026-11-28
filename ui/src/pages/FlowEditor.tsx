@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { navigate, useLocation } from "../router.tsx";
+import { navigate, replaceUrl, useLocation } from "../router.tsx";
 import { api, type Flow, type FlowCheck, type FlowStep, type StepDefinition, type StepId } from "../api/index.ts";
 import { useApi } from "../api/useApi.ts";
 import { QUALITY_NAMES, Row, Seg, toErr, useBitrateLadder, useCardFamilies, type Err } from "./flowParts.tsx";
@@ -102,6 +102,8 @@ function Editor({ id, initial }: { id: string; initial: Loaded }) {
   const [tryFile, setTryFile] = useState("");
   const tryRun = useTryFile();
   const [draftId, setDraftId] = useState(id);
+  // The draft this page made, if it made one: a refused publish keeps the address bar on it.
+  const madeRef = useRef<string | null>(null);
   const [tryOpen, setTryOpen] = useState(false);
   const seq = useRef(0);
   const isNew = draftId === NEW;
@@ -170,15 +172,19 @@ function Editor({ id, initial }: { id: string; initial: Loaded }) {
   const publish = async () => {
     setBusy(true);
     setErr(null);
+    madeRef.current = null;
     try {
       // A new workflow's draft is made once: a refused publish keeps it, so the retry publishes the same draft.
       await publishFlowOnce(api, { isNew, draftId, flow, makeDraft: () => api.createDraft({ name: flow.name, description: flow.description, flow }) }, (id, created) => {
+        madeRef.current = id;
         setDraftId(id);
         setRev(created);
       });
       navigate("/workflows");
     } catch (e) {
       setErr(toErr(e));
+      // A refused publish of a draft made here: the address bar moves to that draft, so a reload opens it.
+      if (madeRef.current) replaceUrl(`/workflows/${madeRef.current}`);
     } finally {
       setBusy(false);
     }

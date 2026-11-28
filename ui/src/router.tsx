@@ -15,6 +15,8 @@ export function navigate(to: string): void {
   go(to);
 }
 
+export { replaceUrl } from "./urlBar.ts";
+
 function subscribe(cb: () => void): () => void {
   window.addEventListener("popstate", cb);
   return () => window.removeEventListener("popstate", cb);

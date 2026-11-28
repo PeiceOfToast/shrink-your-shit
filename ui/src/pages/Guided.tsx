@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { navigate, useLocation } from "../router.tsx";
+import { navigate, replaceUrl, useLocation } from "../router.tsx";
 import { api, type Answers, type FlowDisabled, type GuideChoice, type GuideDoc, type GuideField, type GuidePart, type GuidePreview } from "../api/index.ts";
 import { keptAudioLanguages, languageName, pickAudioLanguages } from "../format/language.ts";
 import { useApi } from "../api/useApi.ts";
@@ -87,6 +87,8 @@ function GuidedForm({ id, initial }: { id: string; initial: Loaded }) {
   const [tryFile, setTryFile] = useState("");
   const tryRun = useTryFile();
   const [draftId, setDraftId] = useState(id);
+  // The draft this page made, if it made one: a refused publish keeps the address bar on it.
+  const madeRef = useRef<string | null>(null);
   const [rev, setRev] = useState(initial.rev);
   const seq = useRef(0);
 
@@ -152,22 +154,29 @@ function GuidedForm({ id, initial }: { id: string; initial: Loaded }) {
   };
 
   const onSaveAndUse = async () => {
-    if (!preview) return;
-    if (preview.problems.length > 0) {
-      setErr({ message: preview.problems[0].message });
-      return;
-    }
     setBusy("use");
     setErr(null);
+    madeRef.current = null;
     try {
+      // The preview refreshes 300 ms after a change, so it can still be for an earlier choice. The publish takes a fresh
+      // preview of the answers on screen, so Save right after a choice publishes what the page shows.
+      const fresh = await api.guidePreview(answers);
+      setPreview(fresh);
+      if (fresh.problems.length > 0) {
+        setErr({ message: fresh.problems[0].message });
+        return;
+      }
       // A new workflow's draft is made once: a refused publish keeps it, so the retry publishes the same draft.
-      const useId = await publishFlowOnce(api, { isNew, draftId, flow: preview.flow, makeDraft: () => api.createDraft({ name: initial.name, answers }) }, (id, created) => {
+      const useId = await publishFlowOnce(api, { isNew, draftId, flow: fresh.flow, makeDraft: () => api.createDraft({ name: initial.name, answers }) }, (id, created) => {
+        madeRef.current = id;
         setDraftId(id);
         setRev(created);
       });
       navigate(`/workflows/${useId}`);
     } catch (e) {
       setErr(toErr(e));
+      // A refused publish of a draft made here: the address bar moves to that draft, so a reload opens it.
+      if (madeRef.current) replaceUrl(`/workflows/${madeRef.current}/guided`);
     } finally {
       setBusy("");
     }
