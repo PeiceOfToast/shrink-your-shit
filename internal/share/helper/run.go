@@ -85,33 +85,17 @@ func Run(ctx context.Context, opts Options) error {
 	if err != nil {
 		return fmt.Errorf("the syp user's gid: %w", err)
 	}
-	root, err := makeRoot(opts.Shares)
+	root, err := prepareDir(opts.Shares, 0o750, 0, gid, "/")
 	if err != nil {
-		return err
+		return fmt.Errorf("the shares folder: %w", err)
 	}
-	if err := os.Chown(root, 0, gid); err != nil {
-		return fmt.Errorf("the shares folder's owner: %w", err)
-	}
-	// Only root may write the shares folder, so the syp user can't put a link where a mount point will
-	// be. MkdirAll leaves an existing folder's mode alone.
-	if err := os.Chmod(root, 0o750); err != nil {
-		return fmt.Errorf("the shares folder's mode: %w", err)
-	}
-	// The chmod covers the folder; its parents must be root's alone too, or the syp user could swap
-	// the whole folder for a link (the reason it is not under the app's own /var/lib/syp).
-	if err := checkOwnedPath(root, 0); err != nil {
-		return fmt.Errorf("the shares folder can be swapped by another user: %w", err)
-	}
-	recordDir, err := makeDir(opts.Record, 0o700)
+	recordDir, err := prepareDir(opts.Record, 0o700, 0, 0, "/")
 	if err != nil {
 		return fmt.Errorf("the mount record's folder: %w", err)
 	}
-	runDir, err := makeDir(opts.RunDir, 0o750)
+	runDir, err := prepareDir(opts.RunDir, 0o750, 0, gid, "/")
 	if err != nil {
 		return fmt.Errorf("the run folder: %w", err)
-	}
-	if err := os.Chown(runDir, 0, gid); err != nil {
-		return fmt.Errorf("the run folder's owner: %w", err)
 	}
 	for _, bin := range []string{opts.MountBin, opts.UmountBin} {
 		if fi, err := os.Stat(bin); err != nil || fi.IsDir() {
@@ -167,14 +151,36 @@ func listen(path string, gid int) (net.Listener, error) {
 	return ln, nil
 }
 
-// makeRoot opens the shares folder: it must exist as a real folder, and it is stored as the path
-// its symlinks resolve to, so every derived point is under the one real folder.
-func makeRoot(path string) (string, error) {
-	real, err := makeDir(path, 0o750)
-	if err != nil {
-		return "", fmt.Errorf("the shares folder: %w", err)
+// prepareDir makes one of the helper's folders safe before it acts on it. The folders above it are
+// checked first, up to top ("/" outside tests): they must be uid's (root in production) and
+// writable by it alone, so nobody else can make, rename or swap the folder while the helper creates
+// it, changes its owner and mode, and later mounts under it. A folder already there must pass the
+// same check (one the syp user made could hold anything). It answers the resolved path, owned by
+// uid:gid with mode.
+func prepareDir(path string, mode os.FileMode, uid, gid int, top string) (string, error) {
+	if !filepath.IsAbs(path) {
+		return "", fmt.Errorf("%s is not an absolute path", path)
 	}
-	return real, nil
+	if err := checkOwnedPath(filepath.Dir(path), uint32(uid), top); err != nil {
+		return "", err
+	}
+	if _, err := os.Lstat(path); err == nil {
+		if err := checkOwnedPath(path, uint32(uid), path); err != nil {
+			return "", err
+		}
+	}
+	dir, err := makeDir(path, mode)
+	if err != nil {
+		return "", err
+	}
+	if err := os.Chown(dir, uid, gid); err != nil {
+		return "", fmt.Errorf("its owner: %w", err)
+	}
+	// MkdirAll leaves an existing folder's mode alone.
+	if err := os.Chmod(dir, mode); err != nil {
+		return "", fmt.Errorf("its mode: %w", err)
+	}
+	return dir, nil
 }
 
 // makeDir ensures a real (not symlinked) folder exists and answers its resolved path.

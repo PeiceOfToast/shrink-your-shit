@@ -11,12 +11,13 @@ import (
 	"syscall"
 )
 
-// checkOwnedPath refuses a folder that anyone but owner (or root) could swap: the folder and every
-// folder above it must be owned by root or owner and writable by its owner alone. A sticky folder
-// (like /tmp) is allowed, because there only an entry's owner can rename it. The helper mounts by
-// path, so a writable parent would let the caller replace the shares folder with a link between a
-// check and a mount, and the helper would make folders, chown and mount wherever it pointed.
-func checkOwnedPath(path string, owner uint32) error {
+// checkOwnedPath refuses a path that anyone but owner (or root) could swap: path and every folder
+// above it, up to and including top, must be owned by root or owner and writable by its owner alone.
+// Sticky folders get no exception: an entry the syp user made there is still the syp user's to swap.
+// The helper acts by path, so a writable parent would let the caller replace a folder with a link
+// between a check and a mkdir, chown or mount.
+func checkOwnedPath(path string, owner uint32, top string) error {
+	top = filepath.Clean(top)
 	for p := filepath.Clean(path); ; p = filepath.Dir(p) {
 		fi, err := os.Lstat(p)
 		if err != nil {
@@ -30,10 +31,10 @@ func checkOwnedPath(path string, owner uint32) error {
 			return fmt.Errorf("%s is owned by uid %d, not root", p, st.Uid)
 		}
 		// A symbolic link is always 0777 on Linux, so this refuses links too.
-		if fi.Mode().Perm()&0o022 != 0 && fi.Mode()&os.ModeSticky == 0 {
+		if fi.Mode().Perm()&0o022 != 0 {
 			return fmt.Errorf("%s can be written by others than its owner", p)
 		}
-		if p == filepath.Dir(p) {
+		if p == top || p == filepath.Dir(p) {
 			return nil
 		}
 	}

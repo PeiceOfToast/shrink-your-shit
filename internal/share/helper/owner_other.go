@@ -7,6 +7,6 @@ package helper
 import "errors"
 
 // checkOwnedPath has no owner information to check away from Linux, so it refuses.
-func checkOwnedPath(path string, owner uint32) error {
+func checkOwnedPath(path string, owner uint32, top string) error {
 	return errors.New("the helper runs on Linux only")
 }
