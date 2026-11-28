@@ -434,6 +434,7 @@ function freshNow(): boolean {
 
 export function getDoctor(retest = false): Promise<Doctor> {
   return respond(() => {
+    if (getForcedState() === "starting") throw new ApiError("starting", "Starting up…");
     if (retest) doctor = { ...doctor, ranAt: "2026-11-26T23:32:00Z" };
     const checks = freshNow() ? doctor.checks.filter((c) => c.status !== "bad") : doctor.checks;
     return clone({ ...doctor, checks });

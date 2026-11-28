@@ -313,3 +313,8 @@ test("a fix the server refuses shows the server's message, and nothing else is r
     e instanceof ApiError && e.code === "worker_busy" && e.message === "A worker is starting. Try again in a moment.");
   assert.equal(calls.length, 1);
 });
+
+test("the checks answer 503 starting until the first run; that reads as the starting code", async () => {
+  stub(503, JSON.stringify({ error: { code: "starting", message: "Starting up…" } }));
+  await assert.rejects(getDoctor(), (e: unknown) => e instanceof ApiError && e.code === "starting" && e.message === "Starting up…");
+});
