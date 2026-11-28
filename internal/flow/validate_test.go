@@ -32,7 +32,7 @@ func TestValidateStarterHasNoProblems(t *testing.T) {
 		t.Errorf("problems = %+v, want none for the starter", rep.Problems)
 	}
 	want := map[string]string{
-		"video": "HEVC · quality 3 · graphics card off",
+		"video": "HEVC · quality 3 · graphics card automatic",
 		"audio": "Same as the source · same channels as the source · every language · subtitles: keep all",
 		"save":  "MKV · next to the original",
 	}
