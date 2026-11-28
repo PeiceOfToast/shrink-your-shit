@@ -45,7 +45,7 @@
     },
     "rev": 0,
     "summary": {
-      "converts": "Converts video to HEVC at the Balanced setting, on the processor. Keeps the audio as it is.",
+      "converts": "Converts video to HEVC at the Balanced setting, on the graphics card, or the processor if the card can't do the file. Keeps the audio as it is.",
       "leavesAlone": "Leaves alone files already in HEVC, with nothing else to change.",
       "original": "The original stays next to the new file."
     }

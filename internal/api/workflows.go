@@ -15,7 +15,6 @@ import (
 
 	"github.com/PeiceOfToast/shrink-your-shit/internal/flow"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/flow/steps"
-	"github.com/PeiceOfToast/shrink-your-shit/internal/settings"
 )
 
 // The workflows group (pages 04 and 07): the list, create, the draft the editor loads and saves,
@@ -254,15 +253,15 @@ func (s *Server) getWorkflow(w http.ResponseWriter, r *http.Request) {
 		internalError(w)
 		return
 	}
-	// The three lines (page 09) read the flow's settings, and the trash days read processing.keepOriginalsDays now. A
-	// draft that does not read (its settings are not valid yet) gets empty lines; the panel shows no lines for it.
-	var keepDays int
-	if doc, err := settings.Load(r.Context(), rs.DB, s.settingsOptions(rs)); err == nil {
-		keepDays = doc.Processing.KeepOriginalsDays
-	}
-	sentences, err := steps.WorkflowSentences(info.Flow, keepDays)
-	if err != nil {
-		sentences = steps.Sentences{}
+	// The three lines (page 09) describe what the library runs: the published revision, not the draft. No published
+	// revision, or one whose settings do not read, gives empty lines. The trash days are read now.
+	sentences := steps.Sentences{}
+	if wf, err := rs.Workflows.Get(r.Context(), id); err == nil && wf.CurrentRev > 0 {
+		if rev, err := rs.Workflows.Revision(r.Context(), id, wf.CurrentRev); err == nil {
+			if words, err := steps.WorkflowSentences(rev.Flow, s.keepDaysNow(rs)); err == nil {
+				sentences = words
+			}
+		}
 	}
 	writeJSON(w, http.StatusOK, struct {
 		Flow       flow.Flow       `json:"flow"`

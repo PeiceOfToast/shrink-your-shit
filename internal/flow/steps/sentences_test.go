@@ -71,9 +71,9 @@ func TestStarterSentences(t *testing.T) {
 	if !strings.Contains(c, "Converts video to HEVC at the Balanced setting") {
 		t.Errorf("converts = %q", c)
 	}
-	// The starter's card is off, so its line says the processor.
-	if !strings.Contains(c, "on the processor") {
-		t.Errorf("converts = %q, want the processor (the starter's card is off)", c)
+	// The starter definition has the card on, so its line names the card and the processor fallback.
+	if !strings.Contains(c, "on the graphics card, or the processor if the card can't do the file") {
+		t.Errorf("converts = %q, want the card with the processor fallback (the starter's setting)", c)
 	}
 	if !strings.Contains(l, "Leaves alone files already in HEVC") {
 		t.Errorf("leavesAlone = %q", l)
