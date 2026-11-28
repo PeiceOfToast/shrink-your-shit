@@ -305,6 +305,13 @@ func (c *Catalog) ListLibraries(ctx context.Context) ([]Library, error) {
 
 // UpdateLibrary changes the set fields of a library and moves next_scan_at when the schedule did.
 func (c *Catalog) UpdateLibrary(ctx context.Context, id int64, in Patch) (Library, error) {
+	return c.UpdateLibraryWith(ctx, id, in, nil)
+}
+
+// UpdateLibraryWith is UpdateLibrary with onPathChange run inside its transaction when the folder
+// changes, before the old folder's rows are dropped: the library's waiting jobs are queued against
+// files that are about to go, so their cancellation must commit with the change.
+func (c *Catalog) UpdateLibraryWith(ctx context.Context, id int64, in Patch, onPathChange func(tx *sql.Tx) error) (Library, error) {
 	lib, err := c.GetLibrary(ctx, id)
 	if err != nil {
 		return Library{}, err
@@ -359,6 +366,13 @@ func (c *Catalog) UpdateLibrary(ctx context.Context, id int64, in Patch) (Librar
 			return err
 		}
 		if pathMoved {
+			// The library's waiting jobs name files of the old folder; they are cancelled with it,
+			// before the rows go (review-890 path change).
+			if onPathChange != nil {
+				if err := onPathChange(tx); err != nil {
+					return err
+				}
+			}
 			// The rows describe files under the old folder, not the new one: leaving them would have
 			// the next scan mark every one gone and a workflow set in the same Save queue files that
 			// are not there. The next scan counts the new folder (review-890 item 3).

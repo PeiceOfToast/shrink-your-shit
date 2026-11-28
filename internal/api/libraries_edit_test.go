@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -333,6 +334,57 @@ func TestPatchLibraryPathChangeQueuesNothingFromTheOldFolder(t *testing.T) {
 	}
 	if len(list) != 0 {
 		t.Fatalf("jobs = %d; the old folder's files are not the new folder's", len(list))
+	}
+}
+
+// TestPatchLibraryPathChangeCancelsWaitingJobs: a path change takes the old folder's rows with it,
+// so the library's waiting jobs are cancelled in the same transaction, with a History line that says
+// why. A running job still finishes (review-890 at 82d8316b).
+func TestPatchLibraryPathChangeCancelsWaitingJobs(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t, true)
+	cookie := e.setup()
+	old := t.TempDir()
+	lib := mustAddLibraryWithWorkflow(t, e, 1, 1, old)
+	ids := mustEnqueueWaiting(t, e, lib, "a.mkv", "b.mkv")
+	// The oldest waits first, so a.mkv's job is the running one.
+	claimed, err := e.queue.Claim(ctx, "worker-1", jobs.ClaimOptions{Order: jobs.OrderOldest})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claimed == nil || claimed.ID != ids[0] {
+		t.Fatalf("claimed %+v, want job %d", claimed, ids[0])
+	}
+	cancelled, stop := e.bus.Subscribe(events.Filter{Kind: events.KindCancelled})
+	defer stop()
+
+	next := t.TempDir()
+	rec := patchLib(t, e, cookie, "1", map[string]any{"path": next})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("path change: %d %s", rec.Code, rec.Body)
+	}
+
+	if got, _ := e.queue.Get(ctx, ids[1]); got.State != jobs.Cancelled {
+		t.Fatalf("waiting job after a path change = %s, want cancelled", got.State)
+	}
+	if got, _ := e.queue.Get(ctx, ids[0]); got.State != jobs.Running {
+		t.Fatalf("running job after a path change = %s, want running", got.State)
+	}
+	select {
+	case ev := <-cancelled:
+		if ev.JobID != ids[1] || !strings.Contains(ev.Message, "folder changed") {
+			t.Fatalf("cancelled event = %+v; want job %d with the folder-changed line", ev, ids[1])
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the cancelled job has no History line")
+	}
+
+	// The running job is still the worker's, and it finishes.
+	if err := e.queue.Finish(ctx, claimed.ID, claimed.Attempt, jobs.Result{Verdict: jobs.VerdictFail, Reason: "the folder moved under it"}); err != nil {
+		t.Fatalf("finish the running job: %v", err)
+	}
+	if got, _ := e.queue.Get(ctx, claimed.ID); got.State != jobs.Failed {
+		t.Fatalf("finished job state = %s, want failed", got.State)
 	}
 }
 

@@ -489,51 +489,69 @@ func (q *Queue) Cancel(ctx context.Context, id int64) (CancelResult, error) {
 	return res, q.emit(events.KindCancelled, events.LevelInfo, id, res.Attempt, libraryID, "cancelled", "cancelled")
 }
 
-// CancelWaitingFor cancels every waiting or retry_wait job of one library, in one transaction, and leaves a
-// running one alone: page 09's Remove cancels what has not started, while what is already converting finishes.
-// It answers how many jobs it cancelled. Each one gets the same History line a Cancel writes.
-func (q *Queue) CancelWaitingFor(ctx context.Context, libraryID int64) (int, error) {
+// CancelledWaiting is a job CancelledWaitingIn took out of the queue, kept for its History line.
+type CancelledWaiting struct {
+	ID      int64
+	Attempt int
+}
+
+// CancelWaitingIn cancels every waiting or retry_wait job of one library inside tx and answers what it cancelled,
+// leaving a running one alone: page 09's Remove and a folder change both cancel what has not started, while what is
+// already converting finishes. The caller owns the transaction and writes the History lines once it commits
+// (CancelledWaitingHistory), so a change to the library and its cancellations commit together.
+func (q *Queue) CancelWaitingIn(tx *sql.Tx, libraryID int64) ([]CancelledWaiting, error) {
 	now := q.now()
-	var ids []int64
-	var attempts []int
+	rows, err := tx.Query(
+		`SELECT id, attempt FROM jobs WHERE library_id = ? AND state IN (?, ?) ORDER BY id`,
+		libraryID, string(Waiting), string(RetryWait))
+	if err != nil {
+		return nil, err
+	}
+	var cancelled []CancelledWaiting
+	for rows.Next() {
+		var c CancelledWaiting
+		if err := rows.Scan(&c.ID, &c.Attempt); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		cancelled = append(cancelled, c)
+	}
+	// The updates below need the transaction's connection back, and every row is read by now.
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for _, c := range cancelled {
+		if err := move(tx, c.ID, verbCancel, Cancelled, change{set: ", finished_at = ?, worker_id = NULL", args: []any{ms(now)}}); err != nil {
+			return nil, err
+		}
+	}
+	return cancelled, nil
+}
+
+// CancelledWaitingHistory writes each cancelled job's History line, in the caller's words for why.
+func (q *Queue) CancelledWaitingHistory(cancelled []CancelledWaiting, libraryID int64, reason string) error {
+	for _, c := range cancelled {
+		if err := q.emit(events.KindCancelled, events.LevelInfo, c.ID, c.Attempt, libraryID, reason, reason); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// CancelWaitingFor cancels every waiting or retry_wait job of one library, in one transaction, and answers how many
+// it cancelled. Each one gets the same History line a Cancel writes. The library is gone or going.
+func (q *Queue) CancelWaitingFor(ctx context.Context, libraryID int64) (int, error) {
+	var cancelled []CancelledWaiting
 	err := q.db.Tx(ctx, func(tx *sql.Tx) error {
-		rows, err := tx.Query(
-			`SELECT id, attempt FROM jobs WHERE library_id = ? AND state IN (?, ?) ORDER BY id`,
-			libraryID, string(Waiting), string(RetryWait))
-		if err != nil {
-			return err
-		}
-		for rows.Next() {
-			var id int64
-			var attempt int
-			if err := rows.Scan(&id, &attempt); err != nil {
-				rows.Close()
-				return err
-			}
-			ids = append(ids, id)
-			attempts = append(attempts, attempt)
-		}
-		// The updates below need the transaction's connection back, and every row is read by now.
-		rows.Close()
-		if err := rows.Err(); err != nil {
-			return err
-		}
-		for _, id := range ids {
-			if err := move(tx, id, verbCancel, Cancelled, change{set: ", finished_at = ?, worker_id = NULL", args: []any{ms(now)}}); err != nil {
-				return err
-			}
-		}
-		return nil
+		var err error
+		cancelled, err = q.CancelWaitingIn(tx, libraryID)
+		return err
 	})
 	if err != nil {
 		return 0, err
 	}
-	for i, id := range ids {
-		if err := q.emit(events.KindCancelled, events.LevelInfo, id, attempts[i], libraryID, "library removed", "library removed"); err != nil {
-			return len(ids), err
-		}
-	}
-	return len(ids), nil
+	return len(cancelled), q.CancelledWaitingHistory(cancelled, libraryID, "library removed")
 }
 
 // Retry puts a failed or cancelled job back to waiting on the same row. Its tries start again at zero, and the

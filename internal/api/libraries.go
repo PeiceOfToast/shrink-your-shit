@@ -4,6 +4,7 @@ package api
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"math"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/PeiceOfToast/shrink-your-shit/internal/events"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/flow"
+	"github.com/PeiceOfToast/shrink-your-shit/internal/jobs"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/library"
 )
 
@@ -229,7 +231,17 @@ func (s *Server) patchLibrary(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	upd, err := rs.Catalog.UpdateLibrary(r.Context(), id, patch)
+	// A path change takes the library's waiting jobs with it, in the same transaction as the rows
+	// they name (review-890 path change); a running one finishes.
+	var cancelledWaiting []jobs.CancelledWaiting
+	upd, err := rs.Catalog.UpdateLibraryWith(r.Context(), id, patch, func(tx *sql.Tx) error {
+		if rs.Jobs == nil {
+			return nil
+		}
+		var cerr error
+		cancelledWaiting, cerr = rs.Jobs.CancelWaitingIn(tx, id)
+		return cerr
+	})
 	if err != nil {
 		switch {
 		case errors.Is(err, library.ErrNotFound):
@@ -242,6 +254,13 @@ func (s *Server) patchLibrary(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		return
+	}
+
+	if len(cancelledWaiting) > 0 {
+		if err := rs.Jobs.CancelledWaitingHistory(cancelledWaiting, id, pathChangedCancellation); err != nil {
+			internalError(w)
+			return
+		}
 	}
 
 	// A needs_workflow library that is given its workflow starts queueing the files it already
@@ -275,6 +294,10 @@ func (s *Server) patchLibrary(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, row)
 }
+
+// pathChangedCancellation is the History line a path change's cancelled jobs get: their file is
+// under a folder the library no longer watches, so nothing will run them.
+const pathChangedCancellation = "The library's folder changed, so this file is no longer in it."
 
 // deleteLibrary is DELETE /libraries/{id}: Remove with its confirm. Waiting jobs for the library are
 // cancelled and a running one finishes; files on disk, converted or original, are not touched. The
