@@ -32,7 +32,9 @@ export interface RequestOpts {
   signal?: AbortSignal;
 }
 
-export async function request<T>(method: Method, path: string, body?: unknown, opts: RequestOpts = {}): Promise<T> {
+// One fetch to the API: the same-origin request with the X-SYP header, and the body read as text. A failed call to the
+// server (no answer) is "unreachable"; anything the server answered is returned for the caller to read.
+async function send(method: Method, path: string, body: unknown, opts: RequestOpts): Promise<{ res: Response; text: string }> {
   let res: Response;
   try {
     res = await fetch("/api/v2" + path, {
@@ -48,20 +50,40 @@ export async function request<T>(method: Method, path: string, body?: unknown, o
     throw new ApiError("unreachable", "Can't reach the server.");
   }
   setConnection(true);
-  const text = await res.text();
+  return { res, text: await res.text() };
+}
+
+// An error answer: the server's {error:{code, message, field}} becomes an ApiError whose message is shown as it is.
+function refuse(res: Response, text: string): never {
+  let data: unknown = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    throw new ApiError("unreachable", "The server sent something unexpected.");
+  }
+  const err = (data as { error?: { code?: string; message?: string; field?: string } } | null)?.error;
+  if (!err?.code || !err.message) throw new ApiError("unreachable", "The server sent something unexpected.");
+  onRouteCode(res.status, err.code);
+  throw new ApiError(err.code, err.message, err.field);
+}
+
+export async function request<T>(method: Method, path: string, body?: unknown, opts: RequestOpts = {}): Promise<T> {
+  const { res, text } = await send(method, path, body, opts);
+  if (!res.ok) refuse(res, text);
   let data: unknown = null;
   try {
     data = text ? JSON.parse(text) : null;
   } catch {
     if (!res.ok) throw new ApiError("unreachable", "The server sent something unexpected.");
   }
-  if (!res.ok) {
-    const err = (data as { error?: { code?: string; message?: string; field?: string } } | null)?.error;
-    if (!err?.code || !err.message) throw new ApiError("unreachable", "The server sent something unexpected.");
-    onRouteCode(res.status, err.code);
-    throw new ApiError(err.code, err.message, err.field);
-  }
   return data as T;
+}
+
+// A plain-text answer (the log download): the text as it is.
+export async function requestText(path: string): Promise<string> {
+  const { res, text } = await send("GET", path, undefined, {});
+  if (!res.ok) refuse(res, text);
+  return text;
 }
 
 // A query string from the defined values: undefined, null and "" are left out.

@@ -5,6 +5,8 @@ import { request } from "../http.ts";
 import { ApiError } from "../errors.ts";
 import { convertAgain, getJobNeighbours, getJobs, runJobsAction } from "./jobs.ts";
 import { getLibraries, createLibrary, patchLibrary, deleteLibrary } from "./libraries.ts";
+import { getLog, getLogSources, getLogDownload, markLogSeen } from "./log.ts";
+import { readFileSync } from "node:fs";
 import { getSettings, patchSettings } from "./settings.ts";
 import { getTrash, restoreTrash } from "./trash.ts";
 import { getAttention, getOverview } from "./overview.ts";
@@ -237,4 +239,42 @@ test("removing a library sends DELETE and returns ok", async () => {
   assert.deepEqual(await deleteLibrary("2"), { ok: true });
   assert.equal(calls[0].url, "/api/v2/libraries/2");
   assert.equal(calls[0].init.method, "DELETE");
+});
+
+// The System log: the request's parameters and paths, and the replies (the goldens' bodies, read from the contract testdata).
+const golden = (name: string) => JSON.parse(readFileSync(new URL(`../../../../internal/api/testdata/contract/${name}`, import.meta.url), "utf8")).body;
+
+test("the log page sends its filters as the server reads them: level, source by display name, before, limit", async () => {
+  const calls = stub(200, JSON.stringify(golden("log.json")));
+  const page = await getLog({ level: "warn", source: "Web", before: 12, limit: 20 });
+  assert.equal(calls[0].url, "/api/v2/log?level=warn&source=Web&before=12&limit=20");
+  assert.equal(calls[0].init.method, "GET");
+  assert.deepEqual(page, golden("log.json"));
+});
+
+test("the log page with no filters asks for the bare path", async () => {
+  const calls = stub(200, JSON.stringify(golden("log.json")));
+  await getLog();
+  assert.equal(calls[0].url, "/api/v2/log");
+});
+
+test("the log's sources are the names the server lists", async () => {
+  const calls = stub(200, JSON.stringify(golden("log-sources.json")));
+  assert.deepEqual(await getLogSources(), golden("log-sources.json"));
+  assert.equal(calls[0].url, "/api/v2/log/sources");
+});
+
+test("the log download is the plain text the server sends, with the same filters", async () => {
+  const calls = stub(200, "2026-11-28 06:00 scan started\n", "text/plain");
+  assert.equal(await getLogDownload({ level: "error" }), "2026-11-28 06:00 scan started\n");
+  assert.equal(calls[0].url, "/api/v2/log/download?level=error");
+});
+
+test("marking the log seen posts the seq and answers the seen seq, as the golden does", async () => {
+  const calls = stub(200, JSON.stringify(golden("log-seen.json")));
+  const out = await markLogSeen(3);
+  assert.equal(calls[0].url, "/api/v2/log/seen");
+  assert.equal(calls[0].init.method, "POST");
+  assert.deepEqual(JSON.parse(String(calls[0].init.body)), { seq: 3 });
+  assert.deepEqual(out, golden("log-seen.json"));
 });
