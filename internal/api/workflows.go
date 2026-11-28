@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/PeiceOfToast/shrink-your-shit/internal/flow"
+	"github.com/PeiceOfToast/shrink-your-shit/internal/flow/steps"
+	"github.com/PeiceOfToast/shrink-your-shit/internal/settings"
 )
 
 // The workflows group (pages 04 and 07): the list, create, the draft the editor loads and saves,
@@ -252,11 +254,22 @@ func (s *Server) getWorkflow(w http.ResponseWriter, r *http.Request) {
 		internalError(w)
 		return
 	}
+	// The three lines (page 09) read the flow's settings, and the trash days read processing.keepOriginalsDays now. A
+	// draft that does not read (its settings are not valid yet) gets empty lines; the panel shows no lines for it.
+	var keepDays int
+	if doc, err := settings.Load(r.Context(), rs.DB, s.settingsOptions(rs)); err == nil {
+		keepDays = doc.Processing.KeepOriginalsDays
+	}
+	sentences, err := steps.WorkflowSentences(info.Flow, keepDays)
+	if err != nil {
+		sentences = steps.Sentences{}
+	}
 	writeJSON(w, http.StatusOK, struct {
-		Flow       flow.Flow `json:"flow"`
-		Rev        int       `json:"rev"`
-		FitsGuided bool      `json:"fitsGuided"`
-	}{Flow: info.Flow, Rev: info.Rev, FitsGuided: info.Answers != nil})
+		Flow       flow.Flow       `json:"flow"`
+		Rev        int             `json:"rev"`
+		FitsGuided bool            `json:"fitsGuided"`
+		Summary    steps.Sentences `json:"summary"`
+	}{Flow: info.Flow, Rev: info.Rev, FitsGuided: info.Answers != nil, Summary: sentences})
 }
 
 // answersGiven is true when the body carries an answers object (not absent, not null).

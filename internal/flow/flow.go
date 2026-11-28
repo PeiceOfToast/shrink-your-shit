@@ -188,3 +188,9 @@ func planError(step string, err error) *PlanError {
 	}
 	return &PlanError{Step: step, Code: "step.failed", Message: err.Error()}
 }
+
+// DecodeStep reads one step of a flow: the step and its typed settings. The steps' sentences (page 09) read a flow
+// through it, so they see the settings the run sees.
+func DecodeStep(ref StepRef) (Step, Settings, error) {
+	return decodeStep(ref)
+}
