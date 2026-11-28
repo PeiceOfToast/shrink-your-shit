@@ -31,6 +31,19 @@ KEEP="${KEEP:-0}"
 FALLBACK="${FALLBACK:-0}"
 KEY="${SYP_SSH_KEY:-$HOME/.ssh/openrig_proxmox_test}"
 SLICES="${SYP_SLICES:-/home/mb/.openrig/workspace/missions/shrink-your-shit/slices/15-rebuild}"
+# The commit the artifacts were built from, written into the log so a proof can be checked against a
+# build of that commit. SYP_PROOF_COMMIT overrides the checkout's HEAD for a run outside the repository.
+PROOF_COMMIT="${SYP_PROOF_COMMIT:-$(git -C "$(dirname "$0")/../.." rev-parse HEAD 2>/dev/null || echo unknown)}"
+# The binary's own build stamp (`go version -m`). The bytes are the proof, so a binary built from another
+# tree than the one named in the log is a mistake worth stopping for.
+BIN_COMMIT=""
+if [ -f "$ART/syp-linux-amd64" ] && command -v go >/dev/null 2>&1; then
+  BIN_COMMIT="$(go version -m "$ART/syp-linux-amd64" 2>/dev/null | awk '/vcs\.revision=/ { sub(/.*vcs\.revision=/, ""); print; exit }')"
+fi
+if [ -n "$BIN_COMMIT" ] && [ "$BIN_COMMIT" != "$PROOF_COMMIT" ]; then
+  echo "gpu-job: $ART/syp-linux-amd64 was built from $BIN_COMMIT, not $PROOF_COMMIT (set SYP_PROOF_COMMIT to the build's commit)" >&2
+  exit 2
+fi
 
 if [ -z "$VMID" ] || [ -z "$TEMPLATE" ] || [ -z "$GPU" ] || [ -z "$ENCODER" ]; then
   echo "usage: $0 <vmid> <debian13|ubuntu24> <intel|nvidia|amd> <hevc_qsv|hevc_nvenc|hevc_vaapi>" >&2
@@ -232,6 +245,7 @@ PY
 step "The proof"
 say "$NODE, $VOLID, ip $IP"
 say "passed through: $GPU; encoder: $ENCODER; fallback: $FALLBACK"
+say "commit: $PROOF_COMMIT (binary vcs.revision ${BIN_COMMIT:-unknown})"
 say "artifacts: $ART (syp-linux-amd64 sha256 $(sha256sum "$ART/syp-linux-amd64" | cut -d' ' -f1))"
 
 step "Container $VMID"
