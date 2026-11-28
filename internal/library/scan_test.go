@@ -825,3 +825,67 @@ func TestQueueFilesKeepsTheDecideSkipReason(t *testing.T) {
 		t.Fatalf("row state %s reason %q, want skipped with already_small", row.State, row.SkipReason)
 	}
 }
+
+// TestQueueFilesLeavesAStillChangingFileForTheNextScan: a file the last scan saw mid-copy is not
+// queued by QueueFiles, which settles nothing; the next scan settles it and queues it then (Finding 1
+// of review-890).
+func TestQueueFilesLeavesAStillChangingFileForTheNextScan(t *testing.T) {
+	ctx := context.Background()
+	st := newScanTest(t)
+	st.write("clip.mp4", "0123456789")
+	st.onSleep = func() {
+		// Still being copied between the scan's two looks.
+		st.write("clip.mp4", "0123456789abcdefghij")
+	}
+	if res := st.run(); res.StillChanging != 1 || res.Queued != 0 {
+		t.Fatalf("first scan = %+v, want one still changing and none queued", res)
+	}
+	st.onSleep = nil
+
+	st.decide = func(File, media.Info) (bool, string) { return true, "" }
+	n, err := st.scanner.QueueFiles(ctx, st.lib)
+	if err != nil {
+		t.Fatalf("queue files: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("queued %d files, want 0 while the file is still changing", n)
+	}
+	wantQueued(t, st.queue.names())
+	if row := st.row("clip.mp4"); row.State != StillChanging {
+		t.Fatalf("row state = %s, want still_changing", row.State)
+	}
+
+	// The copy has finished; the next scan settles it and queues it.
+	if res := st.run(); res.Queued != 1 {
+		t.Fatalf("next scan = %+v, want the settled file queued", res)
+	}
+	wantQueued(t, st.queue.names(), "clip.mp4")
+}
+
+// TestQueueFilesSkipsARowWhoseFileMovedSinceTheCount: a file that grew after the last count is not
+// queued from the old row; the next scan settles it (Finding 1 of review-890).
+func TestQueueFilesSkipsARowWhoseFileMovedSinceTheCount(t *testing.T) {
+	ctx := context.Background()
+	st := newScanTest(t)
+	st.decide = func(File, media.Info) (bool, string) { return false, "needs_workflow" }
+	st.write("clip.mp4", "0123")
+	st.run()
+	// It grew after the count (the size alone differs, whatever the mtime did).
+	st.write("clip.mp4", "0123456789")
+
+	st.decide = func(File, media.Info) (bool, string) { return true, "" }
+	n, err := st.scanner.QueueFiles(ctx, st.lib)
+	if err != nil {
+		t.Fatalf("queue files: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("queued %d files, want 0 for a row the file has outgrown", n)
+	}
+	wantQueued(t, st.queue.names())
+
+	// The next scan takes the new facts and queues it.
+	if res := st.run(); res.Queued != 1 {
+		t.Fatalf("next scan = %+v, want the changed file queued", res)
+	}
+	wantQueued(t, st.queue.names(), "clip.mp4")
+}

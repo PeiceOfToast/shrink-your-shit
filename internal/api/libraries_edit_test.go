@@ -253,9 +253,15 @@ func TestPatchLibrarySettingTheWorkflowQueuesTheCountedFiles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(clips, "clip.mkv"), []byte("12345"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// The row as a scan would have saved it: the file's own size and mtime, so QueueFiles sees it
+	// unchanged since the count.
+	info, err := os.Stat(filepath.Join(clips, "clip.mkv"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	libID, _ := strconv.ParseInt(added.ID, 10, 64)
 	if _, err := e.catalog.SaveFile(ctx, library.File{
-		LibraryID: libID, RelPath: "clip.mkv", Size: 5, MTime: e.clock.Now(),
+		LibraryID: libID, RelPath: "clip.mkv", Size: info.Size(), MTime: info.ModTime(),
 	}, library.Skipped, "needs_workflow", nil); err != nil {
 		t.Fatal(err)
 	}
@@ -288,6 +294,45 @@ func TestPatchLibrarySettingTheWorkflowQueuesTheCountedFiles(t *testing.T) {
 	}
 	if list[0].LibraryID != libID || list[0].WorkflowID != 1 || list[0].State != jobs.Waiting {
 		t.Fatalf("job = %+v; want library %d queued on workflow 1", list[0], libID)
+	}
+}
+
+// TestPatchLibraryPathChangeQueuesNothingFromTheOldFolder: the stored rows describe the old folder,
+// so a path change drops them; a workflow set in the same Save queues nothing until the next scan
+// has counted the new folder (review-890 item 3).
+func TestPatchLibraryPathChangeQueuesNothingFromTheOldFolder(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t, true)
+	cookie := e.setup()
+	old := t.TempDir()
+	added := mustAddLibrary(t, e, cookie, "Clips", old, "")
+	libID, _ := strconv.ParseInt(added.ID, 10, 64)
+	if _, err := e.catalog.SaveFile(ctx, library.File{
+		LibraryID: libID, RelPath: "old.mkv", Size: 5, MTime: e.clock.Now(),
+	}, library.Skipped, "needs_workflow", nil); err != nil {
+		t.Fatal(err)
+	}
+	e.scans.queue = func(ctx context.Context, lib library.Library) (int, error) {
+		return newTestQueueingScanner(e).QueueFiles(ctx, lib)
+	}
+
+	next := t.TempDir()
+	rec := patchLib(t, e, cookie, added.ID, map[string]any{"path": next, "workflowId": "1"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("path and workflow together: %d %s", rec.Code, rec.Body)
+	}
+	if row := decodeLibrary(t, rec); row.Path != next || row.Workflow == nil {
+		t.Fatalf("row = %+v; want the new path with the workflow set", row)
+	}
+	if rows, err := e.catalog.Files(ctx, libID); err != nil || len(rows) != 0 {
+		t.Fatalf("files rows = %d (%v); a path change clears the old folder's rows", len(rows), err)
+	}
+	list, err := e.queue.List(ctx, jobs.ListFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 0 {
+		t.Fatalf("jobs = %d; the old folder's files are not the new folder's", len(list))
 	}
 }
 

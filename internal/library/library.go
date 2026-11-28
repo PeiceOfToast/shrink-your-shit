@@ -316,6 +316,7 @@ func (c *Catalog) UpdateLibrary(ctx context.Context, id int64, in Patch) (Librar
 			lib.Name = filepath.Base(lib.Path)
 		}
 	}
+	pathMoved := false
 	if in.Path != nil {
 		path, err := c.checkPath(*in.Path)
 		if err != nil {
@@ -324,6 +325,7 @@ func (c *Catalog) UpdateLibrary(ctx context.Context, id int64, in Patch) (Librar
 		if err := c.refuseWatched(ctx, path, id); err != nil {
 			return Library{}, err
 		}
+		pathMoved = path != lib.Path
 		lib.Path = path
 	}
 	if in.ClearWorkflow {
@@ -351,10 +353,20 @@ func (c *Catalog) UpdateLibrary(ctx context.Context, id int64, in Patch) (Librar
 		lib.NextScanAt = c.arm(lib, c.clock().UTC().Truncate(time.Millisecond))
 	}
 	err = c.db.Tx(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx,
+		if _, err := tx.ExecContext(ctx,
 			`UPDATE libraries SET name = ?, path = ?, workflow_id = ?, watch = ?, paused = ?, next_scan_at = ? WHERE id = ?`,
-			lib.Name, lib.Path, lib.WorkflowID, string(lib.Watch), boolInt(lib.Paused), timePtr(lib.NextScanAt), id)
-		return err
+			lib.Name, lib.Path, lib.WorkflowID, string(lib.Watch), boolInt(lib.Paused), timePtr(lib.NextScanAt), id); err != nil {
+			return err
+		}
+		if pathMoved {
+			// The rows describe files under the old folder, not the new one: leaving them would have
+			// the next scan mark every one gone and a workflow set in the same Save queue files that
+			// are not there. The next scan counts the new folder (review-890 item 3).
+			if _, err := tx.ExecContext(ctx, `DELETE FROM files WHERE library_id = ?`, id); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		return Library{}, fmt.Errorf("save the library %d: %w", id, err)

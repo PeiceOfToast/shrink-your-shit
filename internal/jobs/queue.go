@@ -388,10 +388,13 @@ func attemptOutcome(r Result) string {
 }
 
 // Requeue puts a running job back to waiting. It is not a try (L-Q-5). Startup recovery and a worker that lost its
-// lease both use it.
+// lease both use it. A job whose library was removed while it ran is cancelled instead of waited again: no claim
+// can take it, since a job is claimed only through a library that exists (page 09 Remove, review-890 Finding 2).
 func (q *Queue) Requeue(ctx context.Context, id int64, why string) error {
 	var libraryID int64
 	var attempt int
+	removed := false
+	now := q.now()
 	err := q.db.Tx(ctx, func(tx *sql.Tx) error {
 		if err := tx.QueryRow(`SELECT attempt, library_id FROM jobs WHERE id = ?`, id).Scan(&attempt, &libraryID); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
@@ -399,19 +402,49 @@ func (q *Queue) Requeue(ctx context.Context, id int64, why string) error {
 			}
 			return err
 		}
+		gone, err := libraryGone(tx, libraryID)
+		if err != nil {
+			return err
+		}
+		if gone {
+			removed = true
+			if err := move(tx, id, verbCancel, Cancelled, change{set: ", finished_at = ?, worker_id = NULL", args: []any{ms(now)}}); err != nil {
+				return err
+			}
+			// The attempt the job was running is over.
+			_, err := tx.Exec(`
+				UPDATE job_attempts SET finished_at = ?, outcome = 'cancelled'
+				WHERE job_id = ? AND attempt = ? AND finished_at IS NULL`,
+				ms(now), id, attempt)
+			return err
+		}
 		if err := move(tx, id, verbRequeue, Waiting, change{set: ", worker_id = NULL, started_at = NULL"}); err != nil {
 			return err
 		}
-		_, err := tx.Exec(`
+		_, err = tx.Exec(`
 			UPDATE job_attempts SET finished_at = ?, outcome = 'requeued', failure = ?
 			WHERE job_id = ? AND attempt = ? AND finished_at IS NULL`,
-			ms(q.now()), nz(why), id, attempt)
+			ms(now), nz(why), id, attempt)
 		return err
 	})
 	if err != nil {
 		return err
 	}
+	if removed {
+		// The same History line Remove's cancellations write.
+		return q.emit(events.KindCancelled, events.LevelInfo, id, attempt, libraryID, "library removed", "library removed")
+	}
 	return q.emit(events.KindRequeued, events.LevelInfo, id, attempt, libraryID, why, why)
+}
+
+// libraryGone reports whether a job's library row is no longer there.
+func libraryGone(tx *sql.Tx, id int64) (bool, error) {
+	var one int64
+	err := tx.QueryRow(`SELECT 1 FROM libraries WHERE id = ?`, id).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return true, nil
+	}
+	return false, err
 }
 
 // CancelResult tells the caller what to stop. WorkerID and Attempt are set when the job was running; the worker
@@ -527,8 +560,16 @@ func (q *Queue) Retry(ctx context.Context, id int64) error {
 		if message, refused := RetryRefused(failureCode); refused {
 			return &ErrNotRetryable{Message: message}
 		}
+		gone, err := libraryGone(tx, libraryID)
+		if err != nil {
+			return err
+		}
+		if gone {
+			// A job of a removed library would wait forever: nothing claims it (review-890 Finding 2).
+			return &ErrNotRetryable{Message: "This job's library was removed, so it can't run again."}
+		}
 		var other int64
-		err := tx.QueryRow(
+		err = tx.QueryRow(
 			`SELECT id FROM jobs WHERE file_id = ? AND id <> ? AND state IN (`+marks(len(openStates))+`) LIMIT 1`,
 			append([]any{fileID, id}, stateArgs(openStates)...)...,
 		).Scan(&other)

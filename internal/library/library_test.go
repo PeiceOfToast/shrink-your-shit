@@ -220,6 +220,40 @@ func TestUpdateLibraryRefusesABadPath(t *testing.T) {
 	}
 }
 
+// TestUpdateLibraryPathChangeDropsTheOldFiles: a library's files rows describe the folder it watched.
+// When that folder changes, they no longer mean anything: they are cleared, and the next scan counts
+// the new folder. A workflow set in the same save therefore queues nothing that is not there
+// (review-890 item 3).
+func TestUpdateLibraryPathChangeDropsTheOldFiles(t *testing.T) {
+	ctx := context.Background()
+	c, _ := newTestCatalog(t)
+	lib, err := c.AddLibrary(ctx, NewLibrary{Path: newFolder(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.SaveFile(ctx, File{LibraryID: lib.ID, RelPath: "a.mp4"}, Skipped, "needs_workflow", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// A name change is not a path change: the rows still describe the same folder.
+	name := "Renamed"
+	if _, err := c.UpdateLibrary(ctx, lib.ID, Patch{Name: &name}); err != nil {
+		t.Fatal(err)
+	}
+	if rows, err := c.Files(ctx, lib.ID); err != nil || len(rows) != 1 {
+		t.Fatalf("after a name change: %d rows (%v), want the one", len(rows), err)
+	}
+
+	next := newFolder(t)
+	workflow := int64(7)
+	if _, err := c.UpdateLibrary(ctx, lib.ID, Patch{Path: &next, WorkflowID: &workflow}); err != nil {
+		t.Fatal(err)
+	}
+	if rows, err := c.Files(ctx, lib.ID); err != nil || len(rows) != 0 {
+		t.Fatalf("after a path change: %d rows (%v), want none", len(rows), err)
+	}
+}
+
 func TestDeleteLibraryRemovesItsFiles(t *testing.T) {
 	c, _ := newTestCatalog(t)
 	lib, err := c.AddLibrary(context.Background(), NewLibrary{Path: newFolder(t)})

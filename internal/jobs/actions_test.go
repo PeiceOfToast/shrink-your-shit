@@ -5,6 +5,7 @@ package jobs
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -284,5 +285,63 @@ func TestCancelWaitingForCancelsOnlyWaiting(t *testing.T) {
 	}
 	if len(all) != 2 {
 		t.Fatalf("listed %d jobs, want the running one and the other library's", len(all))
+	}
+}
+
+// TestRequeueOfARemovedLibraryCancelsTheJob: Remove leaves a running job to finish, but if that job is
+// requeued (lost lease, or a restart) its library is gone and no claim can take it. It ends cancelled,
+// with Remove's History line, never waiting (review-890 Finding 2).
+func TestRequeueOfARemovedLibraryCancelsTheJob(t *testing.T) {
+	ctx := context.Background()
+	env := newEnv(t)
+	env.addLibrary(t, 1, false)
+	id := env.enqueue(t, 1, 1)
+	mustClaim(t, env, id)
+	// Delete as DELETE /libraries/{id} does: waiting jobs first (none here), then the row.
+	if _, err := env.q.CancelWaitingFor(ctx, 1); err != nil {
+		t.Fatal(err)
+	}
+	env.exec(t, `DELETE FROM libraries WHERE id = ?`, 1)
+
+	cancelled, stop := env.bus.Subscribe(events.Filter{Kind: events.KindCancelled})
+	defer stop()
+	if err := env.q.Requeue(ctx, id, "the worker lost its lease"); err != nil {
+		t.Fatalf("requeue: %v", err)
+	}
+	if got := env.stateOf(t, id); got != Cancelled {
+		t.Fatalf("state after requeue = %s, want cancelled", got)
+	}
+	expectEvent(t, cancelled, events.KindCancelled, id)
+	if job, err := env.q.Claim(ctx, "worker-1", ClaimOptions{}); err != nil || job != nil {
+		t.Fatalf("claim after the requeue = %+v, %v; want nothing", job, err)
+	}
+}
+
+// TestRetryRefusedForARemovedLibrary: a failed or cancelled job whose library was removed cannot run
+// again, and says so plainly (review-890 Finding 2).
+func TestRetryRefusedForARemovedLibrary(t *testing.T) {
+	ctx := context.Background()
+	env := newEnv(t)
+	env.addLibrary(t, 1, false)
+	failed := env.enqueue(t, 1, 1)
+	job := mustClaim(t, env, failed)
+	if err := env.q.Finish(ctx, failed, job.Attempt, Result{Verdict: VerdictFail, Reason: "bad"}); err != nil {
+		t.Fatal(err)
+	}
+	cancelledID := env.enqueue(t, 2, 1)
+	if _, err := env.q.Cancel(ctx, cancelledID); err != nil {
+		t.Fatal(err)
+	}
+	env.exec(t, `DELETE FROM libraries WHERE id = ?`, 1)
+
+	for _, id := range []int64{failed, cancelledID} {
+		err := env.q.Retry(ctx, id)
+		var refused *ErrNotRetryable
+		if !errors.As(err, &refused) || !strings.Contains(refused.Message, "removed") {
+			t.Fatalf("retry %d = %v, want a plain refusal saying the library was removed", id, err)
+		}
+		if got := env.stateOf(t, id); got == Waiting {
+			t.Fatalf("retry %d left the job waiting", id)
+		}
 	}
 }

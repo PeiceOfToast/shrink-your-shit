@@ -5,5 +5,5 @@
   "method": "DELETE",
   "path": "/api/v2/libraries/2",
   "status": 200,
-  "type": "ScanAllDone"
+  "type": "LibraryRemoved"
 }

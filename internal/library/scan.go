@@ -481,10 +481,12 @@ func (s *Scanner) decide(ctx context.Context, lib Library, files []scanFile, res
 
 // QueueFiles runs Decide over the library's counted files and enqueues the ones that should convert,
 // with no rescan (page 09: giving a needs_workflow library its first workflow starts queueing at
-// once). Each file is probed from disk again rather than read from its stored summary: the summary
-// is not the whole probe the workflow's Plan reads. Nothing is walked or settled, no scan events are
-// sent, and the scan's schedule is left alone. It answers how many files it queued, counting one
-// that already has an open job as queued, as a scan does.
+// once). A file the last scan saw mid-copy is left for the next scan: this path settles nothing, so
+// it must not queue a file that may still be growing. A row whose file has moved since the count is
+// left the same way — the next scan settles it. Each file is probed from disk again rather than read
+// from its stored summary: the summary is not the whole probe the workflow's Plan reads. Nothing is
+// walked or settled, no scan events are sent, and the scan's schedule is left alone. It answers how
+// many files it queued, counting one that already has an open job as queued, as a scan does.
 func (s *Scanner) QueueFiles(ctx context.Context, lib Library) (int, error) {
 	if s.Catalog == nil || s.Prober == nil || s.Decide == nil || s.Enqueue == nil {
 		return 0, errors.New("queue files: the scanner needs a catalog, a prober, a Decide and an Enqueue")
@@ -496,12 +498,21 @@ func (s *Scanner) QueueFiles(ctx context.Context, lib Library) (int, error) {
 	root := filepath.Clean(lib.Path)
 	files := make([]scanFile, 0, len(rows))
 	for _, row := range rows {
-		if row.State == Gone {
+		if row.State == Gone || row.State == StillChanging {
+			continue
+		}
+		abs := filepath.Join(root, filepath.FromSlash(row.RelPath))
+		info, err := os.Stat(abs)
+		if err != nil {
+			// Gone or unreadable now: the next scan records what happened to its row.
+			continue
+		}
+		if info.Size() != row.Size || !info.ModTime().Equal(row.MTime) {
+			// It moved since the count, and this path does not settle: the next scan does.
 			continue
 		}
 		files = append(files, scanFile{
-			rel: row.RelPath, abs: filepath.Join(root, filepath.FromSlash(row.RelPath)),
-			size: row.Size, mtime: row.MTime, fileID: row.FileID,
+			rel: row.RelPath, abs: abs, size: row.Size, mtime: row.MTime, fileID: row.FileID,
 		})
 	}
 	res := ScanResult{SkippedBy: map[string]int{}}

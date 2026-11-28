@@ -111,7 +111,7 @@ func TestContractGoldens(t *testing.T) {
 	// the goldens after this one still show library 1 as it was.
 	writeGolden(t, "library-patch", "LibraryDetail", http.MethodPatch, "/api/v2/libraries/2",
 		e.do(http.MethodPatch, "/api/v2/libraries/2", mustJSON(t, map[string]any{"name": "More clips"}), write(withSession(cookie)), false), dir)
-	writeGolden(t, "library-delete", "ScanAllDone", http.MethodDelete, "/api/v2/libraries/2",
+	writeGolden(t, "library-delete", "LibraryRemoved", http.MethodDelete, "/api/v2/libraries/2",
 		e.do(http.MethodDelete, "/api/v2/libraries/2", "", write(withSession(cookie)), false), dir)
 
 	// The steps' cards (S2-1): page 07's form, from the registry.
