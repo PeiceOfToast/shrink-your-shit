@@ -38,12 +38,14 @@ type Want struct {
 }
 
 // Attempt is a picker's answer: the rungs to try in order (L-HW-5), the line the job log shows for
-// the card it chose, and, when it chose none, why in plain words (L-HW-9). A picker may name the
-// processor rung itself; the engine adds it otherwise, unless the step's ifGpuFails stops first.
+// the card it chose, and, when it chose none, why in plain words (L-HW-9). Skipped says why a card
+// was passed over when another one took the job; the job log shows each sentence. A picker may name
+// the processor rung itself; the engine adds it otherwise, unless the step's ifGpuFails stops first.
 type Attempt struct {
-	Rungs  []encode.Rung
-	Line   string
-	Reason string
+	Rungs   []encode.Rung
+	Line    string
+	Reason  string
+	Skipped []string
 }
 
 // Env is the world a flow is planned and run against: what this worker can encode, and the

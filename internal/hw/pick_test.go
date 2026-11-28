@@ -3,10 +3,13 @@
 package hw
 
 import (
+	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/PeiceOfToast/shrink-your-shit/internal/encode"
+	"github.com/PeiceOfToast/shrink-your-shit/internal/store"
 )
 
 // device is a card that passed every probe step for one codec, with the steps a test says failed
@@ -213,5 +216,67 @@ func TestPickNoCardFound(t *testing.T) {
 	got := Pick(Inventory{}, nil, Need{Codec: encode.CodecHEVC})
 	if len(got.Rungs) != 0 || got.Reason != "no graphics card was found" {
 		t.Fatalf("attempt = %+v", got)
+	}
+}
+
+// A card family paused after repeated failures (pause.go, #904's follow-up) is passed over, and the next card takes
+// the job; Skipped says which encoder was left out and until when, so the job log can say it in words.
+func TestPickPassesOverAPausedFamily(t *testing.T) {
+	qsv := device(encode.FamilyQSV, "hevc", nil)
+	nv := device(encode.FamilyNVENC, "hevc", nil)
+	until := time.Date(2026, 11, 27, 14, 5, 0, 0, time.Local)
+	inv := Inventory{Verdicts: []Verdict{available(qsv), available(nv)}}
+	got := Pick(inv, []DeviceRecord{qsv, nv}, Need{Codec: encode.CodecHEVC, FullOK: true,
+		Paused: func(f encode.Family) (time.Time, bool) { return until, f == encode.FamilyQSV }})
+	if len(got.Rungs) == 0 || got.Rungs[0].Family != encode.FamilyNVENC {
+		t.Fatalf("Pick with a paused QSV = %+v; want the NVIDIA card", got)
+	}
+	want := "hevc_qsv is paused until 14:05 after repeated failures"
+	if len(got.Skipped) != 1 || got.Skipped[0] != want {
+		t.Errorf("Skipped = %q; want [%q]", got.Skipped, want)
+	}
+	// With nothing paused the first card is offered again, and nothing is reported as skipped.
+	free := Pick(inv, []DeviceRecord{qsv, nv}, Need{Codec: encode.CodecHEVC, FullOK: true,
+		Paused: func(encode.Family) (time.Time, bool) { return time.Time{}, false }})
+	if len(free.Rungs) == 0 || free.Rungs[0].Family != encode.FamilyQSV || len(free.Skipped) != 0 {
+		t.Errorf("Pick with nothing paused = %+v; want the Intel card and no skips", free)
+	}
+}
+
+// The pause is read through pause.go and it is a time, not a switch: once its hour is over the card is offered
+// again. The clock is hw's own, so the test never waits on time.Now.
+func TestPickOffersAPausedCardAgainWhenThePauseEnds(t *testing.T) {
+	dir := t.TempDir()
+	db, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := db.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 11, 27, 12, 0, 0, 0, time.UTC)
+	p := NewPauses(db, func() time.Time { return now }, nil)
+	ctx := context.Background()
+	for i := 0; i < FailLimit; i++ {
+		if _, err := p.Record(ctx, "local", encode.FamilyQSV, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	qsv := device(encode.FamilyQSV, "hevc", nil)
+	nv := device(encode.FamilyNVENC, "hevc", nil)
+	inv := Inventory{Verdicts: []Verdict{available(qsv), available(nv)}}
+	need := func() Need {
+		return Need{Codec: encode.CodecHEVC, FullOK: true, Paused: func(f encode.Family) (time.Time, bool) {
+			until, paused, err := p.Paused(ctx, "local", f)
+			return until, paused && err == nil
+		}}
+	}
+	if got := Pick(inv, []DeviceRecord{qsv, nv}, need()); len(got.Rungs) == 0 || got.Rungs[0].Family != encode.FamilyNVENC {
+		t.Fatalf("during the pause = %+v; want the NVIDIA card", got)
+	}
+	now = now.Add(PauseFor + time.Minute)
+	if got := Pick(inv, []DeviceRecord{qsv, nv}, need()); len(got.Rungs) == 0 || got.Rungs[0].Family != encode.FamilyQSV || len(got.Skipped) != 0 {
+		t.Fatalf("after the pause = %+v; want the Intel card again", got)
 	}
 }

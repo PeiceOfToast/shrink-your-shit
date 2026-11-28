@@ -3,6 +3,8 @@
 package hw
 
 import (
+	"time"
+
 	"github.com/PeiceOfToast/shrink-your-shit/internal/encode"
 )
 
@@ -22,14 +24,19 @@ type Need struct {
 	// Bitrate is true when the plan carries a set bitrate. The card families' bitrate flags are not
 	// part of this stage (L-HW-10 is quality-only), so no card can take such a job.
 	Bitrate bool
+	// Paused reports when a card family is paused after repeated failures (pause.go), and until when.
+	// A paused family is passed over like a card that cannot take the job, and the next card is tried.
+	Paused func(family encode.Family) (until time.Time, paused bool)
 }
 
 // Attempt is the rungs to try for one job, in order (L-HW-5), with the line the job log shows for the
-// first (L-HW-7, L-HW-9). When no card can do the job, Rungs is empty and Reason says why.
+// first (L-HW-7, L-HW-9). When no card can do the job, Rungs is empty and Reason says why. Skipped says
+// why a card was passed over when another one took the job: a family paused after repeated failures.
 type Attempt struct {
-	Rungs  []encode.Rung
-	Line   string
-	Reason string
+	Rungs   []encode.Rung
+	Line    string
+	Reason  string
+	Skipped []string
 }
 
 // ProductName is the friendly name L-HW-7 gives a card family in the job log.
@@ -61,12 +68,22 @@ func Pick(inv Inventory, devices []DeviceRecord, need Need) Attempt {
 		// processor honours the number the person chose.
 		return Attempt{Reason: "a set bitrate isn't built for the graphics card yet"}
 	}
-	var failed []string
+	var failed, skipped []string
 	for _, d := range devices {
 		if d.Codec != string(need.Codec) {
 			continue
 		}
 		name := ProductName(d.Family) + " (" + d.Encoder + ")"
+		if need.Paused != nil {
+			if until, paused := need.Paused(d.Family); paused {
+				// A paused family is no more usable than a card that failed its test: the next one is tried, and
+				// the sentence names the encoder and the hour so the job log says why it was passed over.
+				why := d.Encoder + " is paused until " + until.Local().Format("15:04") + " after repeated failures"
+				failed = append(failed, why)
+				skipped = append(skipped, why)
+				continue
+			}
+		}
 		if need.TenBit && !d.Encode10 {
 			failed = append(failed, name+" did not pass the 10-bit test")
 			continue
@@ -95,7 +112,7 @@ func Pick(inv Inventory, devices []DeviceRecord, need Need) Attempt {
 		} else {
 			line += "; the processor decodes the picture."
 		}
-		return Attempt{Rungs: rungs, Line: line}
+		return Attempt{Rungs: rungs, Line: line, Skipped: skipped}
 	}
 	if len(failed) > 0 {
 		return Attempt{Reason: joinReasons(failed)}

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/PeiceOfToast/shrink-your-shit/internal/api"
+	encode "github.com/PeiceOfToast/shrink-your-shit/internal/encode"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/events"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/flow"
 	_ "github.com/PeiceOfToast/shrink-your-shit/internal/flow/steps"
@@ -147,6 +148,7 @@ func run(dataDir, listen string) error {
 	// says so in its log.
 	scratch := filepath.Join(dataDir, "tmp")
 	var cards *hw.Detector
+	var pauses *hw.Pauses
 	var pick func(flow.Want) (flow.Attempt, error)
 	if err := os.MkdirAll(scratch, 0o700); err != nil {
 		_ = bus.Emit(events.Event{Level: events.LevelWarn, Kind: events.KindWarning,
@@ -155,14 +157,15 @@ func run(dataDir, listen string) error {
 	} else {
 		// A test the person asks for (page 10) records each encoder that works with the pause rules, so an encoder
 		// that now works starts counting failures again from zero.
+		pauses = hw.NewPauses(db, nil, bus)
 		cards = hw.NewDetector(
 			media.MediaFuncs{ProbeFunc: media.Probe, RunFunc: media.Run, CaptureFunc: media.Capture},
 			scratch,
 			hw.Candidates(hw.ReadRenderNodes("/sys/class/drm", "/dev/dri")),
 			bus,
-		).WithDevices().WithPauses(hw.NewPauses(db, nil, bus))
+		).WithDevices().WithPauses(pauses)
 		cards.Start(ctx)
-		pick = cardPicker(cards)
+		pick = cardPicker(cards, pauses)
 	}
 	// The worker's own settings (page 10): the files it runs at once are its setting at start, its
 	// graphics slots are read per job, and its hours decide whether a slot may take a new job. The
@@ -381,14 +384,20 @@ func engineEnv(pick func(flow.Want) (flow.Attempt, error)) flow.Env {
 
 // cardPicker answers a job from the detector's last finished pass: the rungs the card's own tests
 // allow (L-HW-9). Before the first pass ends it answers "not yet", so the job converts on the
-// processor and its log says why.
-func cardPicker(cards *hw.Detector) func(flow.Want) (flow.Attempt, error) {
+// processor and its log says why. A family pause.go has paused after repeated failures is passed
+// over like a card that cannot take the job; a pause store that cannot be read counts as "not
+// paused", since a bookkeeping problem must not hold a job up.
+func cardPicker(cards *hw.Detector, pauses *hw.Pauses) func(flow.Want) (flow.Attempt, error) {
+	paused := func(fam encode.Family) (time.Time, bool) {
+		until, on, err := pauses.Paused(context.Background(), workers.LocalID, fam)
+		return until, on && err == nil
+	}
 	return func(want flow.Want) (flow.Attempt, error) {
 		ans, ok := cards.Current()
 		if !ok {
 			return flow.Attempt{Reason: "the graphics card has not been tested yet"}, nil
 		}
-		return flow.PickFromAnswer(ans, want), nil
+		return flow.PickFromAnswer(ans, want, paused), nil
 	}
 }
 

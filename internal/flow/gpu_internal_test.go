@@ -180,15 +180,15 @@ func TestPickFromAnswerBridgesThePlansNeeds(t *testing.T) {
 		Candidate: hw.Candidate{Encoder: "hevc_qsv", Family: encode.FamilyQSV, Codec: "hevc"},
 		Decode:    true, Scale: true, Encode10: true, HDRSurvives: true,
 	}}}
-	got := PickFromAnswer(ans, Want{Codec: encode.CodecHEVC, FullOK: true})
+	got := PickFromAnswer(ans, Want{Codec: encode.CodecHEVC, FullOK: true}, nil)
 	if len(got.Rungs) != 2 || got.Rungs[0].Decode != encode.DecodeHardware || got.Rungs[1].Decode != encode.DecodeSoftware {
 		t.Errorf("PickFromAnswer = %+v, want the full pipeline then the hybrid", got)
 	}
-	refused := PickFromAnswer(ans, Want{Codec: encode.CodecHEVC, TenBit: false, FullOK: false})
+	refused := PickFromAnswer(ans, Want{Codec: encode.CodecHEVC, TenBit: false, FullOK: false}, nil)
 	if len(refused.Rungs) != 1 || refused.Rungs[0].Decode != encode.DecodeSoftware {
 		t.Errorf("PickFromAnswer(no full) = %+v, want the hybrid rung only", refused)
 	}
-	none := PickFromAnswer(hw.Answer{}, Want{Codec: encode.CodecHEVC})
+	none := PickFromAnswer(hw.Answer{}, Want{Codec: encode.CodecHEVC}, nil)
 	if len(none.Rungs) != 0 || none.Reason == "" {
 		t.Errorf("PickFromAnswer(no card) = %+v, want no rungs and a reason", none)
 	}

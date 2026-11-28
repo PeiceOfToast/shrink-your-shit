@@ -82,6 +82,13 @@ func (e *engine) convert(ctx context.Context, plan encode.Plan, info media.Info,
 			}
 		}
 	}
+	if picked && len(card.Rungs) > 0 {
+		// A card that can take the file does not hide why another was passed over: a family paused after repeated
+		// failures is one, and the log says so in pause.go's words, so the person can re-test the encoder.
+		for _, why := range card.Skipped {
+			e.note(why)
+		}
+	}
 
 	// L-HW-8: the card's places are one count for the whole process. A job the card's rungs will encode takes
 	// one before the first encode and gives it back when the card is done with it: on every return from here,

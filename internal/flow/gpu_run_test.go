@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/PeiceOfToast/shrink-your-shit/internal/encode"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/events"
@@ -55,7 +56,7 @@ func qsvPicker() func(flow.Want) (flow.Attempt, error) {
 		Candidate: hw.Candidate{Encoder: "hevc_qsv", Family: encode.FamilyQSV, Codec: "hevc"},
 		Decode:    true, Scale: true,
 	}}}
-	return func(w flow.Want) (flow.Attempt, error) { return flow.PickFromAnswer(ans, w), nil }
+	return func(w flow.Want) (flow.Attempt, error) { return flow.PickFromAnswer(ans, w, nil), nil }
 }
 
 // failRun is an encode that ended with these key lines. `has no usable` etc. are left to the
@@ -538,4 +539,55 @@ func (m *writingMedia) Run(ctx context.Context, argv []string, onProgress func(m
 		return media.Result{}, err
 	}
 	return m.Media.Run(ctx, argv, onProgress)
+}
+
+// A card family paused after repeated failures is passed over like a card that cannot take the file: the processor
+// converts it, and the job log says which encoder and until when, in pause.go's words.
+func TestTheProcessorConvertsWhenTheCardIsPaused(t *testing.T) {
+	ans := hw.Answer{Devices: []hw.DeviceRecord{{
+		Candidate: hw.Candidate{Encoder: "hevc_qsv", Family: encode.FamilyQSV, Codec: "hevc"},
+		Decode:    true, Scale: true,
+	}}}
+	until := time.Date(2026, 11, 27, 14, 5, 0, 0, time.Local)
+	pick := func(w flow.Want) (flow.Attempt, error) {
+		return flow.PickFromAnswer(ans, w, func(encode.Family) (time.Time, bool) { return until, true }), nil
+	}
+	res, m, _, bus := ladderRun(t, "", pick, []fake.RunScript{{}})
+	if res.Outcome != flow.OutcomeSmaller {
+		t.Fatalf("outcome = %q (%s: %s), want smaller", res.Outcome, res.Reason, res.Message)
+	}
+	if n := len(m.Argvs()); n != 1 || !strings.Contains(strings.Join(m.Argvs()[0], " "), "libx265") {
+		t.Fatalf("ran %v, want one encode on the processor", m.Argvs())
+	}
+	want := "Converting on the processor: hevc_qsv is paused until 14:05 after repeated failures."
+	if got := said(bus, events.KindWarning); len(got) != 1 || got[0] != want {
+		t.Errorf("warnings = %q, want %q", got, want)
+	}
+}
+
+// A card that can take the file does not hide why another was passed over: the paused family is named in the job log
+// (a note, since the job still converts on the card).
+func TestThePausedCardIsNamedWhenAnotherCardTakesTheFile(t *testing.T) {
+	ans := hw.Answer{Devices: []hw.DeviceRecord{
+		{Candidate: hw.Candidate{Encoder: "hevc_qsv", Family: encode.FamilyQSV, Codec: "hevc"}, Decode: true, Scale: true},
+		{Candidate: hw.Candidate{Encoder: "hevc_nvenc", Family: encode.FamilyNVENC, Codec: "hevc"}, Decode: true, Scale: true},
+	}}
+	until := time.Date(2026, 11, 27, 14, 5, 0, 0, time.Local)
+	pick := func(w flow.Want) (flow.Attempt, error) {
+		return flow.PickFromAnswer(ans, w, func(f encode.Family) (time.Time, bool) { return until, f == encode.FamilyQSV }), nil
+	}
+	res, m, _, bus := ladderRun(t, "", pick, []fake.RunScript{{}})
+	if res.Outcome != flow.OutcomeSmaller {
+		t.Fatalf("outcome = %q (%s: %s), want smaller", res.Outcome, res.Reason, res.Message)
+	}
+	if n := len(m.Argvs()); n != 1 || !strings.Contains(strings.Join(m.Argvs()[0], " "), "hevc_nvenc") {
+		t.Fatalf("ran %v, want one encode on the NVIDIA card", m.Argvs())
+	}
+	want := "hevc_qsv is paused until 14:05 after repeated failures"
+	for _, n := range said(bus, events.KindNote) {
+		if n == want {
+			return
+		}
+	}
+	t.Errorf("notes = %q, want %q among them", said(bus, events.KindNote), want)
 }
