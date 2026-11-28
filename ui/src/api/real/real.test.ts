@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { request } from "../http.ts";
 import { ApiError } from "../errors.ts";
 import { convertAgain, getJobNeighbours, getJobs, runJobsAction } from "./jobs.ts";
-import { getLibraries, createLibrary, patchLibrary, deleteLibrary } from "./libraries.ts";
+import { getLibraries, createLibrary, patchLibrary, deleteLibrary, reconnectShare } from "./libraries.ts";
 import { getSettings, patchSettings } from "./settings.ts";
 import { getTrash, restoreTrash } from "./trash.ts";
 import { getAttention, getOverview } from "./overview.ts";
@@ -237,4 +237,10 @@ test("removing a library sends DELETE and returns ok", async () => {
   assert.deepEqual(await deleteLibrary("2"), { ok: true });
   assert.equal(calls[0].url, "/api/v2/libraries/2");
   assert.equal(calls[0].init.method, "DELETE");
+});
+
+test("reconnecting a share says it is not connected yet, and sends nothing", async () => {
+  const calls = stub(200, "{}");
+  await assert.rejects(reconnectShare("1"), { code: "not_yet", message: "Reconnecting a share isn't connected yet." });
+  assert.equal(calls.length, 0);
 });
