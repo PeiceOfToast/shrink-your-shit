@@ -17,20 +17,32 @@ import (
 	"github.com/PeiceOfToast/shrink-your-shit/internal/workers"
 )
 
-// fakeCards is the hardware detector's last pass, set before ready().
+// fakeCards is the hardware detector's last pass, set before ready(). TestRun answers run, and after (when set) is
+// what a finished run leaves behind, so a test can show the page reading the new result.
 type fakeCards struct {
-	ans hw.Answer
-	ok  bool
+	ans    hw.Answer
+	ok     bool
+	run    string     // TestRun's answer; "" is a pass already going with no id to give
+	after  *hw.Answer // what Current serves once the test has run
+	tested []string   // the workers TestRun was asked about
 }
 
-func (f fakeCards) Current() (hw.Answer, bool) { return f.ans, f.ok }
+func (f *fakeCards) Current() (hw.Answer, bool) { return f.ans, f.ok }
+
+func (f *fakeCards) TestRun(workerID string) string {
+	f.tested = append(f.tested, workerID)
+	if f.after != nil {
+		f.ans, f.ok = *f.after, true
+	}
+	return f.run
+}
 
 // qsvCards is one working HEVC encoder and one whose test failed, on an Intel card.
-func qsvCards() CardAnswer {
+func qsvCards() *fakeCards {
 	device := "/dev/dri/renderD128"
 	hevc := hw.Candidate{Encoder: "hevc_qsv", Family: encode.FamilyQSV, Codec: "hevc", Device: device}
 	h264 := hw.Candidate{Encoder: "h264_qsv", Family: encode.FamilyQSV, Codec: "h264", Device: device}
-	return fakeCards{ok: true, ans: hw.Answer{
+	return &fakeCards{ok: true, run: "1", ans: hw.Answer{
 		Inventory: hw.Inventory{Verdicts: []hw.Verdict{
 			{Candidate: hevc, Available: true},
 			{Candidate: h264, Available: false, Reason: "the encoder stopped"},
@@ -288,5 +300,114 @@ func TestWorkerShowsTheRunningJobAndTodaysWork(t *testing.T) {
 	f.e.getWorkerJSON(t, f.cookie, "/api/v2/workers", &list)
 	if list[0].State != "idle" || list[0].Now != nil || list[0].DoneToday != 2 {
 		t.Errorf("after finishing = %+v; want idle and two done today", list[0])
+	}
+}
+
+// The Test button (page 10) starts a pass and answers its run id; the results arrive as probe events.
+func TestCapabilitiesTestStartsARun(t *testing.T) {
+	e := newEnv(t, false)
+	cards := qsvCards()
+	cards.run = "7"
+	e.cards = cards
+	e.ready()
+	cookie := e.setup()
+
+	rec := e.do(http.MethodPost, "/api/v2/workers/local/capabilities/test", "", write(withSession(cookie)), false)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("test = %d %s; want 200", rec.Code, rec.Body)
+	}
+	var got workerTestJSON
+	decodeInto(t, rec, &got)
+	if got.RunID != "7" {
+		t.Errorf("runId = %q, want 7", got.RunID)
+	}
+	if len(cards.tested) != 1 || cards.tested[0] != workers.LocalID {
+		t.Errorf("tested = %v; want one run for the local worker", cards.tested)
+	}
+}
+
+// After the run, the page reads the run's result: the encoder that now works is offered again.
+func TestCapabilitiesTestUpdatesWhatThePageReads(t *testing.T) {
+	e := newEnv(t, false)
+	cards := qsvCards()
+	hevc := hw.Candidate{Encoder: "hevc_qsv", Family: encode.FamilyQSV, Codec: "hevc", Device: "/dev/dri/renderD128"}
+	h264 := hw.Candidate{Encoder: "h264_qsv", Family: encode.FamilyQSV, Codec: "h264", Device: "/dev/dri/renderD128"}
+	cards.after = &hw.Answer{Inventory: hw.Inventory{Verdicts: []hw.Verdict{
+		{Candidate: hevc, Available: true},
+		{Candidate: h264, Available: true},
+	}}}
+	e.cards = cards
+	e.ready()
+	cookie := e.setup()
+
+	if rec := e.do(http.MethodPost, "/api/v2/workers/local/capabilities/test", "", write(withSession(cookie)), false); rec.Code != http.StatusOK {
+		t.Fatalf("test = %d %s; want 200", rec.Code, rec.Body)
+	}
+	var detail workerDetailJSON
+	e.getWorkerJSON(t, cookie, "/api/v2/workers/local", &detail)
+	if len(detail.Encoders) != 2 || !detail.Encoders[1].TestOk {
+		t.Errorf("encoders after the run = %+v; want h264_qsv working as the run found it", detail.Encoders)
+	}
+}
+
+// A second click while a run is going is refused with a sentence: the first run's results are still coming.
+func TestCapabilitiesTestWhileRunningIsRefused(t *testing.T) {
+	e := newEnv(t, false)
+	cards := qsvCards()
+	cards.run = "" // a pass is going, and it has no run id to hand out
+	e.cards = cards
+	e.ready()
+	cookie := e.setup()
+
+	rec := e.do(http.MethodPost, "/api/v2/workers/local/capabilities/test", "", write(withSession(cookie)), false)
+	if code, _, _ := errorBody(t, rec); rec.Code != http.StatusConflict || code != "worker_busy" {
+		t.Errorf("second click = %d %q; want 409 worker_busy", rec.Code, code)
+	}
+}
+
+// An unknown worker is page 10's 404, and nothing is tested.
+func TestCapabilitiesTestUnknownWorker(t *testing.T) {
+	e := newEnv(t, false)
+	cards := qsvCards()
+	e.cards = cards
+	e.ready()
+	cookie := e.setup()
+
+	rec := e.do(http.MethodPost, "/api/v2/workers/nope/capabilities/test", "", write(withSession(cookie)), false)
+	if code, _, _ := errorBody(t, rec); rec.Code != http.StatusNotFound || code != "worker_not_found" {
+		t.Errorf("unknown worker = %d %q; want 404 worker_not_found", rec.Code, code)
+	}
+	if len(cards.tested) != 0 {
+		t.Errorf("tested = %v; want nothing for an unknown worker", cards.tested)
+	}
+}
+
+// A remote worker's encoders cannot be tested from this computer (they come in stage 4), so it is refused.
+func TestCapabilitiesTestRemoteWorkerIsOffline(t *testing.T) {
+	e := newEnv(t, false)
+	cards := qsvCards()
+	e.cards = cards
+	e.ready()
+	cookie := e.setup()
+	e.exec(t, `INSERT INTO workers(id, name, address, local, slots, gpu_slots)
+		VALUES('studio', 'Studio', '10.0.0.5', 0, 1, 0)`)
+
+	rec := e.do(http.MethodPost, "/api/v2/workers/studio/capabilities/test", "", write(withSession(cookie)), false)
+	if code, _, _ := errorBody(t, rec); rec.Code != http.StatusConflict || code != "worker_offline" {
+		t.Errorf("remote worker = %d %q; want 409 worker_offline", rec.Code, code)
+	}
+	if len(cards.tested) != 0 {
+		t.Errorf("tested = %v; want nothing for a worker that isn't here", cards.tested)
+	}
+}
+
+// A machine whose detector could not be built has nothing to run the tests, and says so rather than failing.
+func TestCapabilitiesTestWithoutADetector(t *testing.T) {
+	e := newEnv(t, true)
+	cookie := e.setup()
+
+	rec := e.do(http.MethodPost, "/api/v2/workers/local/capabilities/test", "", write(withSession(cookie)), false)
+	if code, _, _ := errorBody(t, rec); rec.Code != http.StatusConflict || code != "encoder_test_unavailable" {
+		t.Errorf("no detector = %d %q; want 409 encoder_test_unavailable", rec.Code, code)
 	}
 }

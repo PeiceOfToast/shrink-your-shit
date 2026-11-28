@@ -196,4 +196,7 @@ func TestContractGoldens(t *testing.T) {
 		w.do(http.MethodPatch, "/api/v2/workers/local",
 			`{"slots":2,"gpuSlots":0,"hours":{"from":"22:00","to":"06:00"},"primaryEncoder":"hevc_qsv"}`,
 			write(withSession(wcookie)), false))
+	// Test the encoders (page 10): the run's id. Its results arrive as probe events on /api/v2/events.
+	writeGolden(t, "worker-capabilities-test", "WorkerTest", http.MethodPost, "/api/v2/workers/local/capabilities/test",
+		w.do(http.MethodPost, "/api/v2/workers/local/capabilities/test", "", write(withSession(wcookie)), false))
 }

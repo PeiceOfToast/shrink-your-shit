@@ -7,10 +7,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/PeiceOfToast/shrink-your-shit/internal/encode"
+	"github.com/PeiceOfToast/shrink-your-shit/internal/events"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/media"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/media/fake"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/store"
@@ -234,6 +236,178 @@ func TestPauseAfterThreeFailuresResetsOnSuccessAndSurvivesRestart(t *testing.T) 
 	p3 := NewPauses(db2, func() time.Time { return later }, nil)
 	if _, paused, _ := p3.Paused(ctx, "local", encode.FamilyQSV); paused {
 		t.Error("the pause still holds after its hour")
+	}
+}
+
+// eventSink collects what a detector emits.
+type eventSink struct {
+	mu   sync.Mutex
+	seen []events.Event
+}
+
+func (s *eventSink) Emit(e events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.seen = append(s.seen, e)
+	return nil
+}
+
+// probes is the probe events collected so far.
+func (s *eventSink) probes() []events.Event {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []events.Event
+	for _, e := range s.seen {
+		if e.Kind == events.KindProbe {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// waitProbes waits until the sink has n probe events, and returns them.
+func waitProbes(t *testing.T, s *eventSink, n int) []events.Event {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		got := s.probes()
+		if len(got) >= n {
+			return got
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("probe events = %d, want %d", len(got), n)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// Test the encoders re-runs the same pass for the worker the person asked about (page 10): it answers with a run id
+// at once, reports each encoder as one probe event of that run, scoped to the worker, and leaves the new answer as
+// what the Workers page reads.
+func TestTestRunReportsEachEncoderAsAProbe(t *testing.T) {
+	dir := t.TempDir()
+	cands := []Candidate{
+		{Encoder: "h264_qsv", Family: encode.FamilyQSV, Codec: "h264"},
+		{Encoder: "av1_qsv", Family: encode.FamilyQSV, Codec: "av1"},
+	}
+	m := &fake.Media{
+		Runs: []fake.RunScript{{}, {Err: errString("Error creating a MFX session: -9")}},
+		Probes: map[string]media.Info{
+			outFor(dir, cands[0]): {Video: []media.VideoTrack{{Codec: "h264", Encoder: "Lavc61 h264_qsv"}}},
+		},
+	}
+	sink := &eventSink{}
+	d := NewDetector(m, dir, cands, sink)
+	id := d.TestRun("local")
+	if id == "" {
+		t.Fatal("TestRun returned no run id")
+	}
+	got := waitProbes(t, sink, 2)
+	want := []struct {
+		encoder string
+		ok      bool
+	}{{"h264_qsv", true}, {"av1_qsv", false}}
+	for i, w := range want {
+		e := got[i]
+		if e.Source != "hw" || e.WorkerID != "local" || e.Level != events.LevelInfo {
+			t.Errorf("probe %d = %+v; want source hw, worker local, level info", i, e)
+		}
+		if e.Data["runId"] != id || e.Data["encoder"] != w.encoder || e.Data["available"] != w.ok {
+			t.Errorf("probe %d data = %v; want runId %q, encoder %q, available %v", i, e.Data, id, w.encoder, w.ok)
+		}
+	}
+	if !strings.Contains(got[0].Message, "passed its test") || !strings.Contains(got[1].Message, "no QSV runtime") {
+		t.Errorf("messages = %q, %q; want each encoder's result in words", got[0].Message, got[1].Message)
+	}
+	// The finished pass is the answer from now on: the worker's capabilities follow it.
+	waitInventory(t, d)
+	ans, ok := d.Current()
+	if !ok || len(ans.Inventory.Verdicts) != 2 || !ans.Inventory.Verdicts[0].Available || ans.Inventory.Verdicts[1].Available {
+		t.Fatalf("Current after the run = %+v (ok %v); want the run's two results", ans, ok)
+	}
+	if next := d.TestRun("local"); next == "" || next == id {
+		t.Errorf("the second run's id = %q; want a new id, not %q", next, id)
+	}
+}
+
+// One run at a time per worker: a second ask while a run is going is that run, so two clicks do not test twice.
+func TestTestRunWhileRunningIsTheSameRun(t *testing.T) {
+	defer func(d time.Duration) { TestTimeout = d }(TestTimeout)
+	TestTimeout = 100 * time.Millisecond
+	dir := t.TempDir()
+	m := &fake.Media{Runs: []fake.RunScript{{Hang: true}}}
+	d := NewDetector(m, dir, []Candidate{{Encoder: "h264_qsv", Family: encode.FamilyQSV, Codec: "h264"}}, nil)
+	first := d.TestRun("local")
+	second := d.TestRun("local")
+	if first == "" || second != first {
+		t.Fatalf("run ids = %q then %q; want the one run while it is going", first, second)
+	}
+	// Let the hung test time out, so no goroutine outlives the test.
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		d.mu.Lock()
+		running := d.running
+		d.mu.Unlock()
+		if !running {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the run did not end after its test timed out")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// A run's successes are the pause rules' own success: the failure count starts again. A failed test is not a job
+// attempt, so it does not count toward a pause either (internal/hw/pause.go: FailLimit failures in a row).
+func TestTestRunFeedsThePauseRules(t *testing.T) {
+	dir := t.TempDir()
+	db, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := db.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 11, 27, 12, 0, 0, 0, time.UTC)
+	p := NewPauses(db, func() time.Time { return now }, nil)
+	ctx := context.Background()
+
+	// One failure, then a passing test: the count starts again, so the next failure is only the second in a row.
+	if _, err := p.Record(ctx, "local", encode.FamilyQSV, false); err != nil {
+		t.Fatal(err)
+	}
+	m := &fake.Media{
+		Runs: []fake.RunScript{{}},
+		Probes: map[string]media.Info{
+			outFor(dir, Candidate{Encoder: "h264_qsv"}): {Video: []media.VideoTrack{{Codec: "h264", Encoder: "Lavc61 h264_qsv"}}},
+		},
+	}
+	cands := []Candidate{{Encoder: "h264_qsv", Family: encode.FamilyQSV, Codec: "h264"}}
+	d := NewDetector(m, dir, cands, nil).WithPauses(p)
+	if d.TestRun("local") == "" {
+		t.Fatal("TestRun returned no run id")
+	}
+	waitInventory(t, d)
+	if started, err := p.Record(ctx, "local", encode.FamilyQSV, false); err != nil || started {
+		t.Fatalf("after the passing test, the next failure: started %v, err %v; want the count reset", started, err)
+	}
+
+	// One failure on another family, then a failing test: the test is no attempt, so the next failure is the second
+	// in a row and still no pause.
+	if _, err := p.Record(ctx, "local", encode.FamilyNVENC, false); err != nil {
+		t.Fatal(err)
+	}
+	bad := &fake.Media{Runs: []fake.RunScript{{Err: errString("no NVENC")}}}
+	dc := []Candidate{{Encoder: "hevc_nvenc", Family: encode.FamilyNVENC, Codec: "hevc"}}
+	d2 := NewDetector(bad, dir, dc, nil).WithPauses(p)
+	if d2.TestRun("local") == "" {
+		t.Fatal("TestRun returned no run id")
+	}
+	waitInventory(t, d2)
+	if started, err := p.Record(ctx, "local", encode.FamilyNVENC, false); err != nil || started {
+		t.Fatalf("after the failing test, the next failure: started %v, err %v; want the test not counted", started, err)
 	}
 }
 

@@ -76,10 +76,13 @@ func (d *Deps) now() time.Time {
 	return time.Now()
 }
 
-// CardAnswer is the hardware detector as the Workers page reads it: the last finished pass.
-// *hw.Detector has this shape.
+// CardAnswer is the hardware detector as the Workers page reads it: the last finished pass, and the pass a person
+// asks for with Test the encoders. *hw.Detector has this shape.
 type CardAnswer interface {
 	Current() (hw.Answer, bool)
+	// TestRun starts a pass for the worker and returns its id at once; its results are probe events. "" means a pass
+	// was already going that has no id to hand out (the startup pass).
+	TestRun(workerID string) string
 }
 
 // Workflows is flow.Store as the api uses it.
@@ -149,6 +152,8 @@ func New(version string) *Server {
 	s.mux.HandleFunc("GET /api/v2/workers", s.listWorkers)
 	s.mux.HandleFunc("GET /api/v2/workers/{id}", s.getWorker)
 	s.mux.HandleFunc("PATCH /api/v2/workers/{id}", s.patchWorker)
+	// Test the encoders (page 10): a fresh pass over this computer's encoders, reported as probe events.
+	s.mux.HandleFunc("POST /api/v2/workers/{id}/capabilities/test", s.testWorkerCapabilities)
 	s.mux.HandleFunc("GET /api/v2/events", s.stream)
 	// Access (R1-9a): the first-run page's calls, the languages and the guide.
 	s.mux.HandleFunc("GET /api/v2/languages", s.getLanguages)

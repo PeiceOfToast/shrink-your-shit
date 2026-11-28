@@ -400,6 +400,12 @@ export interface WorkerDetail extends Worker {
   newLibraries: { libraryId: string; name: string }[];
 }
 
+// POST /api/v2/workers/{id}/capabilities/test: the run's id. Its results arrive as `probe` events on
+// /api/v2/events, scoped to the worker, and are kept in the System log.
+export interface WorkerTest {
+  runId: string;
+}
+
 export interface Pairing {
   id: string;
   code: string;

@@ -75,6 +75,12 @@ type workerDetailJSON struct {
 	NewLibraries   []struct{}          `json:"newLibraries"`
 }
 
+// workerTestJSON is POST /workers/{id}/capabilities/test's answer (page 10): the run's id. What the run finds
+// arrives as probe events on /api/v2/events.
+type workerTestJSON struct {
+	RunID string `json:"runId"`
+}
+
 // workerStore is the workers' settings: the one the program wired, or a store over the open database.
 func (s *Server) workerStore(rs *Deps) *workers.Store {
 	if rs.Workers != nil {
@@ -129,6 +135,33 @@ func (s *Server) findWorker(w http.ResponseWriter, r *http.Request, rs *Deps) (w
 		return workers.Worker{}, false
 	}
 	return wk, true
+}
+
+// testWorkerCapabilities re-runs the encoder pass for this computer's worker (page 10's Test the encoders). The
+// pass runs in the background and the page watches the probe events; one run at a time, so a click while one is
+// going gets that run's id rather than a second pass. Only this computer's encoders can be tested here.
+func (s *Server) testWorkerCapabilities(w http.ResponseWriter, r *http.Request) {
+	rs := s.ready.Load()
+	wk, ok := s.findWorker(w, r, rs)
+	if !ok {
+		return
+	}
+	if !wk.Local {
+		writeError(w, http.StatusConflict, "worker_offline",
+			"This worker isn't connected to this computer, so its encoders can't be tested from here.", "", 0)
+		return
+	}
+	if rs.Cards == nil {
+		writeError(w, http.StatusConflict, "encoder_test_unavailable", "This computer can't test its encoders.", "", 0)
+		return
+	}
+	id := rs.Cards.TestRun(wk.ID)
+	if id == "" {
+		writeError(w, http.StatusConflict, "worker_busy",
+			"The encoders are already being tested. The result is in the System log when it ends.", "", 0)
+		return
+	}
+	writeJSON(w, http.StatusOK, workerTestJSON{RunID: id})
 }
 
 // workerRow is one list row: the settings, and the live state from the queue.

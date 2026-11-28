@@ -153,12 +153,14 @@ func run(dataDir, listen string) error {
 			Source: "hw", Code: "hw.no_temp",
 			Message: "The graphics card cannot be tested, so every job runs on the processor: " + err.Error()})
 	} else {
+		// A test the person asks for (page 10) records each encoder that works with the pause rules, so an encoder
+		// that now works starts counting failures again from zero.
 		cards = hw.NewDetector(
 			media.MediaFuncs{ProbeFunc: media.Probe, RunFunc: media.Run, CaptureFunc: media.Capture},
 			scratch,
 			hw.Candidates(hw.ReadRenderNodes("/sys/class/drm", "/dev/dri")),
 			bus,
-		).WithDevices()
+		).WithDevices().WithPauses(hw.NewPauses(db, nil, bus))
 		cards.Start(ctx)
 		pick = cardPicker(cards)
 	}
