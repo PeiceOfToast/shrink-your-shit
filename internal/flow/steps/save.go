@@ -47,6 +47,8 @@ func (SaveStep) Def() flow.Definition {
 		Events: []flow.EventDef{
 			{Code: "save.next_to", Level: events.LevelInfo, Text: "Saving next to the original",
 				Fields: []string{"container", "output"}, Keep: events.KeepLog},
+			{Code: "save.replace", Level: events.LevelInfo, Text: "Replacing the original",
+				Fields: []string{"container", "output"}, Keep: events.KeepLog},
 			{Code: "save.nothing", Level: events.LevelInfo, Text: "Nothing to save",
 				Keep: events.KeepLog},
 			{Code: "save.would_land_on_source", Level: events.LevelError,
@@ -65,8 +67,13 @@ func (SaveStep) Plan(s flow.Settings, in flow.PlanInput, p *encode.Plan) (flow.D
 	if err != nil {
 		return flow.Decision{}, err
 	}
+	// Replacing takes the original's own name with the new file type: no suffix, and the same-name refusal does not
+	// apply to it, because the original is swapped out (S2-10b).
+	replacing := set.Where == "replace"
 	output := outputPath(in.Info.Path, set.NameSuffix, container)
-	if sameFile(output, in.Info.Path) {
+	if replacing {
+		output = outputPath(in.Info.Path, "", container)
+	} else if sameFile(output, in.Info.Path) {
 		return flow.Decision{}, &flow.PlanError{
 			Code:    "save.would_land_on_source",
 			Message: "The new file would take the original's name; add a suffix.",
@@ -80,6 +87,13 @@ func (SaveStep) Plan(s flow.Settings, in flow.PlanInput, p *encode.Plan) (flow.D
 	if p.Video.Codec == "" || p.Video.Codec == encode.CodecCopy {
 		return flow.Decision{Work: false, Label: "Nothing to save", Reason: "save.nothing",
 			Detail: flow.F{"output": output}}, nil
+	}
+	if replacing {
+		return flow.Decision{
+			Work: true, Label: "Replacing the original as " + strings.ToUpper(string(container)),
+			Reason: "save.replace",
+			Detail: flow.F{"container": string(container), "output": output},
+		}, nil
 	}
 	return flow.Decision{
 		Work: true, Label: "Saving next to the original as " + strings.ToUpper(string(container)),

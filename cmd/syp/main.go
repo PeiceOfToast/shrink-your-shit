@@ -101,6 +101,16 @@ func run(dataDir, listen string) error {
 		return err
 	}
 	flows := flow.Open(db)
+	// A replace that a crash left unsettled is settled from the files' identity before any job runs (L-SAFE-9).
+	journal := safety.NewJournal(db)
+	if rep, err := safety.Recover(ctx, journal); err != nil {
+		_ = bus.Emit(events.Event{Level: events.LevelWarn, Kind: events.KindWarning,
+			Source: "safety", Code: "replace.recover_failed", Message: err.Error()})
+	} else if rep.Attention > 0 {
+		_ = bus.Emit(events.Event{Level: events.LevelWarn, Kind: events.KindWarning,
+			Source: "safety", Code: "replace.attention",
+			Message: fmt.Sprintf("%d replaced original(s) need a look: the original is in the library's %s folder, and nothing was removed.", rep.Attention, safety.TrashDir)})
+	}
 	// Anything left in the app's temp folder came from a process that stopped without tidying
 	// up: a try's sample and staging both live there. Only entries older than this start are
 	// removed, so a try already running in another process is left alone.
@@ -268,6 +278,7 @@ func engineEnv() flow.Env {
 
 func workerEnv(flows *flow.Store, bus *events.Bus, db *store.DB) flow.Env {
 	env := engineEnv()
+	env.Replacer = flow.RealReplacer{Journal: safety.NewJournal(db)}
 	env.LoadRevision = func(ctx context.Context, id int64, rev int) (flow.Flow, error) {
 		r, err := flows.Revision(ctx, id, rev)
 		return r.Flow, err

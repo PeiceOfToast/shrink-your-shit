@@ -117,6 +117,8 @@ type engine struct {
 	in      RunInput
 	env     Env
 	started time.Time
+	// replace is true when the flow's save step replaces the original (S2-10b).
+	replace bool
 }
 
 func (e *engine) run(ctx context.Context) (res Result) {
@@ -180,14 +182,19 @@ func (e *engine) run(ctx context.Context) (res Result) {
 		return fatal("encode.plan_failed", err.Error(), e.encodeOwner(decisions), "")
 	}
 	if len(extracts) > 0 && !e.in.Try {
-		name, err := safety.FreeName(plan.Output)
-		if err != nil {
-			// Nothing has been written yet: the original is untouched and no new file exists.
-			return fatal("save.name_failed",
-				"The original was left as it is and no new file was made, because no free name for it could be found. ("+err.Error()+")",
-				"save", "")
+		// A replace takes the original's stem with the new extension. The swap moves the original out first, and
+		// refuses a final name another file already holds (replace.failed, the original back), so the name is not
+		// renamed here (review #865).
+		if !e.replace {
+			name, err := safety.FreeName(plan.Output)
+			if err != nil {
+				// Nothing has been written yet: the original is untouched and no new file exists.
+				return fatal("save.name_failed",
+					"The original was left as it is and no new file was made, because no free name for it could be found. ("+err.Error()+")",
+					"save", "")
+			}
+			plan.Output = name
 		}
-		plan.Output = name
 		// A subtitle file name taken already stops the run now, before anything is written: the
 		// person moves or renames that file and retries (L-AUD-25).
 		for _, x := range extracts {
@@ -314,6 +321,9 @@ func (e *engine) run(ctx context.Context) (res Result) {
 	sidecars, res := e.placeSidecars(plan, extracts, staged)
 	if res.Outcome != "" {
 		return res
+	}
+	if e.replace {
+		return e.replaceOriginal(ctx, staged, plan.Output, after, &placed, sidecars)
 	}
 	final, err := e.env.Safety.Place(ctx, staged, plan.Output)
 	if err != nil {
@@ -467,6 +477,7 @@ func (e *engine) plan(ctx context.Context, rev Revision, info media.Info) (Decis
 	if problems := shapeProblems(rev.Flow); len(problems) > 0 {
 		return d, plan, fatal("invalid_flow", strings.Join(problems, " "), "", "")
 	}
+	e.replace = saveReplaces(rev.Flow)
 	for i, ref := range rev.Flow.Steps {
 		if res := ctxStop(ctx); res.Outcome != "" {
 			return d, plan, res

@@ -996,6 +996,16 @@ export const STEP_DEFINITIONS: StepDefinition[] = [
         "text": "Saving next to the original"
       },
       {
+        "code": "save.replace",
+        "fields": [
+          "container",
+          "output"
+        ],
+        "keep": "log",
+        "level": "info",
+        "text": "Replacing the original"
+      },
+      {
         "code": "save.nothing",
         "keep": "log",
         "level": "info",
