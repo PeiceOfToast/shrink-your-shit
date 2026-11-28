@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { navigate, useLocation } from "../router.tsx";
 import { api, type Answers, type FlowDisabled, type GuideChoice, type GuideDoc, type GuideField, type GuidePart, type GuidePreview } from "../api/index.ts";
-import { languageName } from "../format/language.ts";
+import { keptAudioLanguages, languageName, pickAudioLanguages } from "../format/language.ts";
 import { useApi } from "../api/useApi.ts";
 import { ChoiceField, QUALITY_NAMES, Row, toErr, useBitrateLadder, useCardFamilies, type Err } from "./flowParts.tsx";
 import { useTryFile } from "./useTryFile.ts";
@@ -28,6 +28,7 @@ function partValue(part: GuidePart, answers: Answers): string {
       if (f.type === "choice") return choiceLabel(f, answers[f.key]);
       if (f.type === "number") return String(answers[f.key] ?? "");
       if (f.type === "yesno") return answers[f.key] ? "yes" : "no";
+      if (f.key === "languages") return keptAudioLanguages(answers.allLanguages, (answers.languages as string[] | undefined) ?? []).summary;
       if (f.type === "languages") return (answers[f.key] as string[] | undefined)?.map(languageName).join(" and ") || "all";
       return String(answers[f.key] ?? "");
     })
@@ -110,7 +111,9 @@ function GuidedForm({ id, initial }: { id: string; initial: Loaded }) {
     return () => clearTimeout(t);
   }, [answers]);
 
-  const setAnswer = (key: string, value: unknown) => setAnswers((a) => ({ ...a, [key]: value }));
+  // The audio languages also set allLanguages, which the server reads first (page 07).
+  const setAnswer = (key: string, value: unknown) =>
+    setAnswers((a) => (key === "languages" ? { ...a, ...pickAudioLanguages(value as string[]) } : { ...a, [key]: value }));
 
   const toggleChip = (chip: GuideDoc["chips"][number]) => {
     if (chip.always || !chip.available) return;
@@ -415,7 +418,7 @@ function FieldRow({ field, value, answers, languages, disabled, onChange }: { fi
     // A field the app cannot act on yet is greyed with its reason, the same as a greyed choice.
     const greyed = field.available === false;
     return (
-      <Row label={field.label} full hint={greyed ? field.why : list.length === 0 ? "None picked keeps every language." : undefined}>
+      <Row label={field.label} full hint={greyed ? field.why : field.key === "languages" ? keptAudioLanguages(answers.allLanguages, list).hint : list.length === 0 ? "None picked keeps every language." : undefined}>
         <div className="wf-togs" role="group" aria-label={field.label} aria-disabled={greyed || undefined}>
           {languages.map((code) => (
             <button key={code} type="button" aria-pressed={list.includes(code)} title={greyed ? field.why : undefined} disabled={greyed} onClick={() => toggle(code)}>

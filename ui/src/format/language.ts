@@ -43,3 +43,18 @@ export function languageName(input: string): string {
 export function sameLanguage(a: string, b: string): boolean {
   return normalizeLanguage(a) === normalizeLanguage(b);
 }
+
+// The audio languages a guided answer keeps (page 07: allLanguages on the audio step). allLanguages true keeps every
+// language and ignores the list; false with an empty list keeps the person's own languages (Settings, My languages);
+// false with codes keeps those codes. A missing allLanguages is read as true, the default.
+export function keptAudioLanguages(allLanguages: unknown, list: string[]): { summary: string; hint?: string } {
+  if (allLanguages !== false) return { summary: "all", hint: "None picked keeps every language." };
+  if (list.length === 0) return { summary: "my languages", hint: "None picked keeps my languages (Settings, General)." };
+  return { summary: list.map(languageName).join(" and ") };
+}
+
+// Picking audio languages by hand: a pick turns allLanguages off so the server reads the list; clearing every pick
+// goes back to keeping every language.
+export function pickAudioLanguages(list: string[]): { languages: string[]; allLanguages: boolean } {
+  return { languages: list, allLanguages: list.length === 0 };
+}
