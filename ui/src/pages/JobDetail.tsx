@@ -149,7 +149,7 @@ export function JobDetail({ id, initialTab }: { id: string; initialTab: "summary
       setBusy(false);
     }
   };
-  const jobAct = (action: "retry" | "cancel", done: string) =>
+  const jobAct = (action: "retry" | "cancel" | "top", done: string) =>
     act(async () => jobActionText(await api.runJobsAction(action, [id]), done), done);
 
   const downloadLog = () => {
@@ -205,6 +205,9 @@ export function JobDetail({ id, initialTab }: { id: string; initialTab: "summary
             <div className={`jd-more${more ? " open" : ""}`}>
             {(state === "done" || state === "skipped") && (
               <button type="button" className="btn sm" disabled={busy} onClick={() => setConfirm("again")}>Run again</button>
+            )}
+            {state === "waiting" && (
+              <button type="button" className="btn sm" disabled={busy} onClick={() => jobAct("top", "Moved to the top of the queue.")}>Move to top</button>
             )}
             {(state === "running" || state === "waiting") && (
               <button type="button" className="btn sm" disabled={busy} onClick={() => setConfirm("cancel")}>Cancel</button>
