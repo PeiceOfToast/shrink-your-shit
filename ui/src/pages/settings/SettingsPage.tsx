@@ -38,7 +38,7 @@ function Body({ section }: { section: SettingsSection }) {
     case "health": return <><SampleBanner text="these checks are made up. The health check isn't connected yet." /><Health /></>;
     // Token and password changes have no server route yet; a made-up token would read as real.
     case "access":
-      return sampleOnly() ? (
+      return sampleOnly("access") ? (
         <>
           <h2 className="set-title">Access</h2>
           <p className="muted">Not built yet. Changing the password and the access token come in a later batch.</p>
