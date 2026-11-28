@@ -90,14 +90,18 @@ func TestRunReplaceRefusalsKeepTheOriginal(t *testing.T) {
 		err  error
 		want flow.Outcome
 		why  string
+		next string // the next-action sentence the page shows, or retry where a retry is the step
 	}{
-		{"no trash folder", safety.ErrNoTrash, flow.OutcomeMayPass, "replace.not_possible"},
-		{"read-only library", safety.ErrReadOnlyLibrary, flow.OutcomeMayPass, "replace.not_possible"},
-		{"original changed", safety.ErrSourceChanged, flow.OutcomeMayPass, "replace.source_changed"},
-		{"hard-linked original", safety.ErrSharedSource, flow.OutcomeSkip, "replace.shared"},
-		{"put-back failed", safety.ErrPutBackFailed, flow.OutcomeFatal, "replace.put_back_failed"},
-		{"stranger in the trash", safety.ErrStrangerInTrash, flow.OutcomeFatal, "replace.stranger_in_trash"},
-		{"swap done, record not settled", safety.ErrRecordNotSettled, flow.OutcomeFatal, "replace.record_unsettled"},
+		{"no trash folder", safety.ErrNoTrash, flow.OutcomeMayPass, "replace.not_possible", "retry"},
+		{"read-only library", safety.ErrReadOnlyLibrary, flow.OutcomeMayPass, "replace.not_possible", "retry"},
+		{"original changed", safety.ErrSourceChanged, flow.OutcomeMayPass, "replace.source_changed", "retry"},
+		{"hard-linked original", safety.ErrSharedSource, flow.OutcomeSkip, "replace.shared", ""},
+		{"put-back failed", safety.ErrPutBackFailed, flow.OutcomeFatal, "replace.put_back_failed",
+			"Check the library's trash folder and put the original back by hand."},
+		{"stranger in the trash", safety.ErrStrangerInTrash, flow.OutcomeFatal, "replace.stranger_in_trash",
+			"Check the library's trash folder."},
+		{"swap done, record not settled", safety.ErrRecordNotSettled, flow.OutcomeFatal, "replace.record_unsettled",
+			"The next start settles the record; check the file names."},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -110,10 +114,9 @@ func TestRunReplaceRefusalsKeepTheOriginal(t *testing.T) {
 			if res.Outcome != c.want || res.Reason != c.why {
 				t.Fatalf("result = %+v, want %s %s", res, c.want, c.why)
 			}
-			// The page shows NextAction as the action and a retry is accepted only for a code it knows: a human
-			// sentence there gives no action (review #865 add-on).
-			if c.want != flow.OutcomeSkip && res.NextAction != "retry" {
-				t.Errorf("next action = %q, want the code retry", res.NextAction)
+			// The page shows NextAction as the action: each failure carries the sentence it needs (the lead's correction).
+			if c.want != flow.OutcomeSkip && res.NextAction != c.next {
+				t.Errorf("next action = %q, want %q", res.NextAction, c.next)
 			}
 			if _, err := os.Stat(src); err != nil {
 				t.Errorf("the original is gone: %v", err)
