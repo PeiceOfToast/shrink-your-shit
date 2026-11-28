@@ -224,3 +224,85 @@ func TestRestoreCrashAfterTheOriginalIsBackRemovesTheCopy(t *testing.T) {
 		t.Errorf("state = %s, want rolled_back", stateOf(t, f, id))
 	}
 }
+
+// lookAlike puts the original's bytes at the original's name with another time: a file only the full identity tells
+// apart from the original.
+func lookAlike(t *testing.T, path string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(origBytes), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-48 * time.Hour)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestRecoveryLeavesALookAlikeAndSettlesDone: a byte-identical look-alike at the original's old name does not make a
+// finished swap look unfinished. The new file is at its name and the original is in the trash, so the row is done and
+// the stranger is left where it is; content identity for the original would wrongly report attention here.
+func TestRecoveryLeavesALookAlikeAndSettlesDone(t *testing.T) {
+	f := newSwapFixture(t, "")
+	f.final = filepath.Join(f.lib, "movie.mp4") // another extension, so the original's name is free for the look-alike
+	trash := filepath.Join(f.lib, TrashDir, "movie.15.mkv")
+	if err := os.Mkdir(filepath.Dir(trash), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	journalRow(t, f, 15, trash)
+	if err := os.Rename(f.original, trash); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(f.staged, f.final); err != nil {
+		t.Fatal(err)
+	}
+	lookAlike(t, f.original)
+
+	rep, err := Recover(context.Background(), f.j)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Done != 1 || rep.Attention != 0 {
+		t.Errorf("report = %+v, want the finished swap done and the look-alike left alone", rep)
+	}
+	if got := readFile(t, f.original); got != origBytes {
+		t.Errorf("the look-alike = %q, want it left where it is", got)
+	}
+	if got := readFile(t, trash); got != origBytes {
+		t.Errorf("the original in the trash = %q, want it still there", got)
+	}
+	if got := readFile(t, f.final); got != newBytes {
+		t.Errorf("the new file = %q, want it at its name", got)
+	}
+}
+
+// TestRecoveryRemovesNothingBesideALookAlike: a byte-identical look-alike at the original's name, where a restore
+// stopped after the original was supposed to be back, is not the original. Recovery must not remove the converted copy
+// on its strength: the row waits for a person and the copy stays.
+func TestRecoveryRemovesNothingBesideALookAlike(t *testing.T) {
+	f, id := doneSwapAs(t, true)
+	crashAt(t, 3)
+	restoreUntilCrash(f, id)
+	lookAlike(t, f.original)
+	r, _, err := f.j.Entry(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	holding := holdingPath(filepath.Dir(r.Trash), id, r.Final)
+
+	rep, err := Recover(context.Background(), f.j)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Attention != 1 || rep.RolledBack != 0 {
+		t.Errorf("report = %+v, want the row left for a person", rep)
+	}
+	if got := readFile(t, holding); got != newBytes {
+		t.Errorf("the converted copy = %q, want it kept while a look-alike sits at the original's name", got)
+	}
+	if got := readFile(t, f.original); got != origBytes {
+		t.Errorf("the look-alike = %q, want it left where it is", got)
+	}
+	if stateOf(t, f, id) != StateAttention {
+		t.Errorf("state = %s, want attention", stateOf(t, f, id))
+	}
+}
