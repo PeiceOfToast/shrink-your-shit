@@ -251,19 +251,8 @@ type Page struct {
 	Cursor int64
 }
 
-// Query reads stored events matching f, one page at a time, from the read pool. Results are in insertion order,
-// which is seq order within a job. A page shorter than its limit is the last one.
-func (b *Bus) Query(ctx context.Context, f Filter, p Page) ([]Event, Page, error) {
-	if b.db == nil {
-		return nil, Page{}, errors.New("events: no database is open for queries")
-	}
-	switch {
-	case p.Limit <= 0:
-		p.Limit = 100
-	case p.Limit > maxPage:
-		p.Limit = maxPage
-	}
-
+// where builds the WHERE conditions for f. withLevel is false for Counts, which counts every level.
+func (b *Bus) where(f Filter, withLevel bool) ([]string, []any, error) {
 	var where []string
 	var args []any
 	add := func(cond string, a ...any) {
@@ -273,16 +262,30 @@ func (b *Bus) Query(ctx context.Context, f Filter, p Page) ([]Event, Page, error
 	if f.JobID != 0 {
 		add("job_id = ?", f.JobID)
 	}
+	if f.AppOnly {
+		add("job_id = 0")
+	}
 	if f.Kind != "" {
 		add("kind = ?", string(f.Kind))
 	}
 	if f.Attempt != 0 {
 		add("attempt = ?", f.Attempt)
 	}
-	if f.MinLevel != "" {
+	if withLevel && f.Level != "" {
+		add("level = ?", string(f.Level))
+	}
+	if len(f.Sources) > 0 {
+		marks := strings.TrimSuffix(strings.Repeat("?, ", len(f.Sources)), ", ")
+		var vals []any
+		for _, v := range f.Sources {
+			vals = append(vals, v)
+		}
+		add("source IN ("+marks+")", vals...)
+	}
+	if withLevel && f.MinLevel != "" {
 		levels := levelsAtLeast(f.MinLevel)
 		if len(levels) == 0 {
-			return nil, Page{}, fmt.Errorf("events: unknown level %q", f.MinLevel)
+			return nil, nil, fmt.Errorf("events: unknown level %q", f.MinLevel)
 		}
 		marks := strings.TrimSuffix(strings.Repeat("?, ", len(levels)), ", ")
 		var vals []any
@@ -293,6 +296,15 @@ func (b *Bus) Query(ctx context.Context, f Filter, p Page) ([]Event, Page, error
 	}
 	if f.Source != "" {
 		add("source = ?", f.Source)
+	}
+	if f.Library != "" {
+		add("library_id = ?", f.Library)
+	}
+	if f.Worker != "" {
+		add("worker_id = ?", f.Worker)
+	}
+	if f.Text != "" {
+		add(`message LIKE ? ESCAPE '\'`, "%"+likeEscaper.Replace(f.Text)+"%")
 	}
 	if f.StepID != "" {
 		add("step_id = ?", f.StepID)
@@ -306,6 +318,70 @@ func (b *Bus) Query(ctx context.Context, f Filter, p Page) ([]Event, Page, error
 	if f.AfterSeq > 0 {
 		add("seq > ?", f.AfterSeq)
 	}
+	if f.AfterRowID > 0 {
+		add("id > ?", f.AfterRowID)
+	}
+	return where, args, nil
+}
+
+var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+
+// Counts returns how many stored events match f at each level. f's MinLevel is ignored, so the three counts are
+// the same filter at every level.
+func (b *Bus) Counts(ctx context.Context, f Filter) (map[Level]int, error) {
+	if b.db == nil {
+		return nil, errors.New("events: no database is open for queries")
+	}
+	f.MinLevel = ""
+	f.Level = ""
+	where, args, err := b.where(f, false)
+	if err != nil {
+		return nil, err
+	}
+	q := "SELECT level, COUNT(*) FROM events"
+	if len(where) > 0 {
+		q += " WHERE " + strings.Join(where, " AND ")
+	}
+	q += " GROUP BY level"
+	rows, err := b.db.Read().QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("count events: %w", err)
+	}
+	defer rows.Close()
+	out := map[Level]int{}
+	for rows.Next() {
+		var l string
+		var n int
+		if err := rows.Scan(&l, &n); err != nil {
+			return nil, err
+		}
+		out[Level(l)] = n
+	}
+	return out, rows.Err()
+}
+
+// Query reads stored events matching f, one page at a time, from the read pool. Results are in insertion order,
+// which is seq order within a job. A page shorter than its limit is the last one.
+func (b *Bus) Query(ctx context.Context, f Filter, p Page) ([]Event, Page, error) {
+	if b.db == nil {
+		return nil, Page{}, errors.New("events: no database is open for queries")
+	}
+	switch {
+	case p.Limit <= 0:
+		p.Limit = 100
+	case p.Limit > maxPage:
+		p.Limit = maxPage
+	}
+
+	where, args, err := b.where(f, true)
+	if err != nil {
+		return nil, Page{}, err
+	}
+	add := func(cond string, a ...any) {
+		where = append(where, cond)
+		args = append(args, a...)
+	}
+
 	order := "ASC"
 	if p.Newest {
 		order = "DESC"

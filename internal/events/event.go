@@ -169,6 +169,18 @@ type Filter struct {
 	Since    time.Time
 	Until    time.Time
 	AfterSeq int64
+	// The fields below are for Query and Counts only (the System log page). AppOnly keeps the app-wide events, the
+	// ones with no job. AfterRowID keeps rows whose id is greater: app-wide seq restarts with each process, so the row
+	// id is the stable cursor there. Library and Worker match the ids; Text is a substring of the message.
+	AppOnly    bool
+	AfterRowID int64
+	Library    string
+	Worker     string
+	Text       string
+	// Level is an exact level (the page's Warnings tab lists only warnings). Sources, when set, matches any of the
+	// stored source values, so one display name can cover several.
+	Level   Level
+	Sources []string
 }
 
 func (f Filter) match(e Event) bool {
