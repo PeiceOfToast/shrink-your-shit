@@ -22,3 +22,9 @@ test("a working share says Connected with no folder count", () => {
   assert.match(test_, /testRes: "Connected"/);
   assert.doesNotMatch(test_, /folders/);
 });
+
+test("the banner tells the truth: the test is real, and this build can't add shares yet", () => {
+  assert.doesNotMatch(src, /made up/);
+  assert.match(src, /can't be added on this build yet\. The test is real/);
+});
+

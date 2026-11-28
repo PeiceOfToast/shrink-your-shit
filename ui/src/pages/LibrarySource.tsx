@@ -102,7 +102,7 @@ export function LibrarySource({
         </div>
       ) : (
         <div className="field">
-          <SampleBanner text="network shares aren't connected yet, so the test answer is made up. Use a folder on this server for now." />
+          <SampleBanner text="network shares can't be added on this build yet. The test is real and says so, so use a folder on this server for now." />
           <input
             className="inp mono"
             value={value.address}
