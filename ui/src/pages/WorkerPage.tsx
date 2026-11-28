@@ -4,6 +4,7 @@ import { clock } from "../format/time.ts";
 import { api, onSummaryChanged, type Job, type WorkerDetail, type WorkerLibrary } from "../api/index.ts";
 import { useApi } from "../api/useApi.ts";
 import { JobRow } from "./Jobs.tsx";
+import { testFinished, waitUntil } from "./encoderTest.ts";
 import { PauseDialog, RemoveDialog, StatePill, errorText } from "./workerParts.tsx";
 
 // One worker's page (pages/10-workers.md, the worker panel). Changed fields only go to the server on Save.
@@ -135,10 +136,18 @@ export function WorkerPage({ id }: { id: string }) {
       .catch((e: unknown) => setTests((t) => ({ ...t, [libraryId]: { state: "failed", message: errorText(e) } })));
   };
 
+  // The test answers a run id; the page reads the worker until that run has finished (its result is then on the worker).
   const testEncoders = () =>
     run(async () => {
-      const r = await api.testEncoders(id);
-      setMsg(r.line);
+      const { runId } = await api.testEncoders(id);
+      setMsg("Testing the encoders…");
+      const finished = await waitUntil(async () => testFinished(await api.getWorker(id), runId), {
+        tries: 30,
+        delayMs: 1000,
+        sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+      });
+      setMsg(finished ? "Test finished. The encoder list is updated." : "The test is still running. Refresh in a moment to see the result.");
+      worker.reload();
     });
 
   if (!w) {
