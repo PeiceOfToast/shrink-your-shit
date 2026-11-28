@@ -219,3 +219,12 @@ test("the audio summary follows Keep every language", () => {
   assert.match(checkFlow(withAnswers({ allLanguages: true, languages: ["eng"] })).summaries.audio, / · every language · /);
   assert.match(checkFlow(withAnswers({ allLanguages: false, languages: ["eng"] })).summaries.audio, / · English · /);
 });
+
+// Flag first, as the server's audio card: Keep every language wins over a list still picked. A hand-set flow keeps the list.
+test("the audio summary is flag-first: every language wins over a picked list", () => {
+  const flow = answersToFlow(DEFAULT_ANSWERS, META);
+  flow.steps[1].settings = { ...flow.steps[1].settings, allLanguages: true, languages: ["eng"] };
+  const summary = checkFlow(flow).summaries.audio ?? "";
+  assert.match(summary, /every language/);
+  assert.doesNotMatch(summary, /English/);
+});
