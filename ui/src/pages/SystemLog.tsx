@@ -4,7 +4,7 @@ import { useApi } from "../api/useApi.ts";
 import { clock, clockPrecise } from "../format/time.ts";
 import { Link, navigate, useLocation } from "../router.tsx";
 import { Icon } from "../ui/Icon.tsx";
-import { LEVEL_LABEL, copyText, saveText, type LogLevelName } from "./logParts.ts";
+import { LEVEL_LABEL, addLiveLine, copyText, saveText, showLines, type LogLevelName } from "./logParts.ts";
 
 // The System log (page 12): every app-wide event, newest last. Filters live in the URL, so a link can open a filtered log.
 const LEVELS = [
@@ -198,13 +198,13 @@ export function SystemLog() {
     if (!follow) return;
     return api.subscribeAppEvents((e) => {
       const p = paramsFor();
-      if (matches(e, p)) setLive((l) => [...l, e]);
+      if (matches(e, p)) setLive((l) => addLiveLine(l, e));
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [follow, paramKey]);
 
   const base = log.data?.items ?? [];
-  const items = [...older, ...base, ...live];
+  const items = showLines([...older, ...base], live);
   const counts = { ...(log.data?.counts ?? { info: 0, warn: 0, error: 0 }) };
   for (const e of live) if (e.level !== "debug") counts[e.level]++;
 

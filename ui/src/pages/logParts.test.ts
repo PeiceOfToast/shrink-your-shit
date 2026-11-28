@@ -2,7 +2,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { JobStep, LogEvent, LogKind, LogLevel } from "../api/types.ts";
-import { logsFromEvents } from "./logParts.ts";
+import { addLiveLine, logsFromEvents, showLines } from "./logParts.ts";
+import { readFileSync } from "node:fs";
 
 const steps: JobStep[] = [
   { index: 1, name: "Video", outcome: "done", durationMs: 0 },
@@ -119,3 +120,81 @@ test("a run that failed in step 1 of 3 shows step 1 alone, with its lines after 
   assert.deepEqual(out[0].lines.map((l) => l.text), ["queued", "Starting sample.mp4", "Could not read the video", "Check the file and try again"]);
   assert.equal(out[0].decision, "Decision one");
 });
+
+// Follow: a folded repeat replaces the line it folds, so the page shows it once.
+const liveEv = (seq: number, ts: string, message: string, repeat?: { count: number; firstAt: string; lastAt: string }) =>
+  ({ seq, ts, level: "info", kind: "note", source: "Scanner", message, jobId: null, libraryId: null, workerId: null, ...(repeat ? { repeat } : {}) }) as LogEvent;
+
+test("a folded repeat replaces the line it folds (same message, the first time) instead of adding a second", () => {
+  const first = liveEv(3, "2026-11-28T07:00:00Z", "sign-in refused");
+  const folded = liveEv(4, "2026-11-28T07:00:09Z", "sign-in refused", { count: 2, firstAt: "2026-11-28T07:00:00Z", lastAt: "2026-11-28T07:00:09Z" });
+  const out = addLiveLine([first], folded);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].seq, 4);
+  assert.equal(out[0].repeat?.count, 2);
+});
+
+test("a new line, or one with no repeat, is added after the lines shown", () => {
+  const a = liveEv(1, "2026-11-28T07:00:00Z", "one");
+  const b = liveEv(2, "2026-11-28T07:00:01Z", "two");
+  assert.deepEqual(addLiveLine([a], b).map((l) => l.seq), [1, 2]);
+  const other = liveEv(5, "2026-11-28T07:00:05Z", "sign-in refused", { count: 2, firstAt: "2026-11-28T07:00:00Z", lastAt: "2026-11-28T07:00:05Z" });
+  assert.deepEqual(addLiveLine([a], other).map((l) => l.seq), [1, 5], "a repeat of a different line is added");
+});
+
+test("the page adds live lines with the helper, so a fold replaces its line", () => {
+  const page = readFileSync(new URL("./SystemLog.tsx", import.meta.url), "utf8");
+  assert.match(page, /setLive\(\(l\) => addLiveLine\(l, e\)\)/);
+});
+
+test("a fold of a line from the initial load replaces that line on the page, not a second copy", () => {
+  const loaded = [liveEv(2, "2026-11-28T06:59:00Z", "scan started"), liveEv(3, "2026-11-28T07:00:00Z", "sign-in refused")];
+  const fold = liveEv(4, "2026-11-28T07:00:09Z", "sign-in refused", { count: 2, firstAt: "2026-11-28T07:00:00Z", lastAt: "2026-11-28T07:00:09Z" });
+  const shown = showLines(loaded, [fold]);
+  assert.deepEqual(shown.map((l) => l.seq), [2, 4]);
+  assert.equal(shown[1].repeat?.count, 2);
+});
+
+test("a reload that already has the live lines does not add them again (Follow on, refresh)", () => {
+  const a = liveEv(1, "2026-11-28T07:00:00Z", "one");
+  const b = liveEv(2, "2026-11-28T07:00:01Z", "two");
+  const c = liveEv(3, "2026-11-28T07:00:02Z", "three");
+  const reloaded = [a, b, c];
+  assert.deepEqual(showLines(reloaded, [b, c]), reloaded);
+});
+
+test("a later fold over a row that is already folded replaces that row, not a second copy", () => {
+  // The server answers a folded line as one row (seq 4, count 2); the page holds only that row.
+  const folded = liveEv(4, "2026-11-28T07:00:09Z", "sign-in refused", { count: 2, firstAt: "2026-11-28T07:00:00Z", lastAt: "2026-11-28T07:00:09Z" });
+  const again = liveEv(5, "2026-11-28T07:00:12Z", "sign-in refused", { count: 3, firstAt: "2026-11-28T07:00:00Z", lastAt: "2026-11-28T07:00:12Z" });
+  const shown = showLines([folded], [again]);
+  assert.equal(shown.length, 1);
+  assert.equal(shown[0].seq, 5);
+  assert.equal(shown[0].repeat?.count, 3);
+});
+
+test("the system log page builds its lines with showLines (a source check)", async () => {
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync(new URL("./SystemLog.tsx", import.meta.url), "utf8");
+  assert.match(src, /showLines\(\[\.\.\.older, \.\.\.base\], live\)/);
+});
+
+test("an older live fold does not replace a newer fold the page already holds", () => {
+  // A reload holds the fold at seq 6 (count 4); a late live fold of the same run is seq 5 (count 3) and must not win.
+  const newer = liveEv(6, "2026-11-28T07:00:15Z", "sign-in refused", { count: 4, firstAt: "2026-11-28T07:00:00Z", lastAt: "2026-11-28T07:00:15Z" });
+  const older = liveEv(5, "2026-11-28T07:00:12Z", "sign-in refused", { count: 3, firstAt: "2026-11-28T07:00:00Z", lastAt: "2026-11-28T07:00:12Z" });
+  assert.deepEqual(showLines([newer], [older]), [newer]);
+});
+
+test("a run longer than the poll window holds one row across polls (base page 20, Follow polls 50)", () => {
+  // 60 identical refusals, one per second. The base page is the newest 20 (a fold of seq 60, count 20); each poll reads the
+  // newest 50, so its fold's firstAt slides with every poll. The page must still show one row for the run.
+  const at = (k: number) => new Date(Date.UTC(2026, 10, 28, 7, 0, 0) + k * 1000).toISOString();
+  const run = (seq: number, count: number) => liveEv(seq, at(seq), "sign-in refused", { count, firstAt: at(seq - count + 1), lastAt: at(seq) });
+  let shown = [run(60, 20)];
+  for (let n = 61; n <= 64; n++) shown = showLines(shown, [run(n, 50)]);
+  assert.equal(shown.length, 1);
+  assert.equal(shown[0].seq, 64);
+  assert.equal(shown[0].repeat?.count, 50);
+});
+

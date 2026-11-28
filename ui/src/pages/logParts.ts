@@ -54,3 +54,28 @@ export function logsFromEvents(steps: JobStep[], events: LogEvent[]): LogStep[] 
   }
   return out.slice(0, Math.min(block + 1, out.length));
 }
+
+// The live lines the page adds. The server folds a repeated line into the newest row (its seq moves up, and its repeat says
+// how many times and from when). A folded line that matches a line already shown replaces that line, so it shows once.
+// The time a line covers: a fold's run, or the one line's moment. A fold read through a shorter or longer window gets a
+// different firstAt, but it always overlaps the same run, so overlap is what identifies a fold.
+const span = (l: LogEvent) => ({ from: Date.parse(l.repeat?.firstAt ?? l.ts), to: Date.parse(l.repeat?.lastAt ?? l.ts) });
+
+export function addLiveLine(lines: LogEvent[], e: LogEvent): LogEvent[] {
+  if (e.repeat) {
+    const mine = { from: Date.parse(e.repeat.firstAt), to: Date.parse(e.repeat.lastAt) };
+    const at = lines.findIndex((l) => {
+      const theirs = span(l);
+      return l.seq !== e.seq && l.message === e.message && l.source === e.source && theirs.from <= mine.to && mine.from <= theirs.to;
+    });
+    // A late live fold of the same run is older than a fold the page already holds: the newer one stays.
+    if (at >= 0) return lines[at].seq > e.seq ? lines : lines.map((l, i) => (i === at ? e : l));
+  }
+  return [...lines, e];
+}
+
+// What the page shows: the loaded lines, with the live lines folded in (a fold of a loaded line replaces it).
+// A reload already has the live lines it was taken after, so a live line whose seq the page has is not added again.
+export function showLines(loaded: LogEvent[], live: LogEvent[]): LogEvent[] {
+  return live.reduce((acc, e) => (acc.some((l) => l.seq === e.seq) ? acc : addLiveLine(acc, e)), loaded);
+}
