@@ -371,7 +371,7 @@ export function checkFlow(flow: Flow): FlowCheck {
   const videoSummary = v.rateControl
     ? `${FORMAT_LABEL[String(v.format)]} · ${v.rateControl === "vbr" ? "variable" : "constant"} bitrate about ${bitrateFor(v)} Mb/s`
     : `${FORMAT_LABEL[String(v.format)]} · quality ${v.quality} · graphics card ${v.useGpu ? "automatic" : "off"}`;
-  const langs = Array.isArray(au.languages) && au.languages.length ? (au.languages as string[]).map(languageName).join(" and ") : "my languages";
+  const langs = Array.isArray(au.languages) && au.languages.length ? (au.languages as string[]).map(languageName).join(" and ") : au.allLanguages === false ? "my languages" : "every language";
   // The subtitles part follows the Subtitles choice; with no subtitle languages picked, they are the audio's.
   const subLangs = Array.isArray(au.subtitleLanguages) && au.subtitleLanguages.length ? (au.subtitleLanguages as string[]).map(languageName).join(" and ") : langs;
   const subPart = au.subtitles === "srt" ? "SRT files"
