@@ -1,0 +1,13 @@
+{
+  "body": {
+    "error": {
+      "code": "invalid_setting",
+      "field": "processing.keepOriginalsDays",
+      "message": "Originals are kept at least 7 days while a workflow replaces originals."
+    }
+  },
+  "method": "PATCH",
+  "path": "/api/v2/settings",
+  "status": 400,
+  "type": "ApiError"
+}

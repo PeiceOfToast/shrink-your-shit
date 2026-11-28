@@ -582,7 +582,7 @@ func (s *Server) publishWorkflow(w http.ResponseWriter, r *http.Request) {
 	var blocked *flow.PublishBlockedError
 	switch {
 	case errors.As(err, &blocked):
-		writeError(w, http.StatusConflict, "has_problems", "Fix this first: "+blocked.Problem.Message, "", 0)
+		writeError(w, http.StatusConflict, "has_problems", "Fix this first: "+blocked.Problem.Message, blocked.Problem.Field, 0)
 	case errors.Is(err, flow.ErrNothingToPublish):
 		writeError(w, http.StatusBadRequest, "nothing_to_publish", "There is nothing to publish.", "", 0)
 	case errors.Is(err, flow.ErrNotFound):

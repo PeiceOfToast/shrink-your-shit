@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"github.com/PeiceOfToast/shrink-your-shit/internal/events"
+	"github.com/PeiceOfToast/shrink-your-shit/internal/flow"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/safety"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/settings"
 )
@@ -45,6 +46,15 @@ func (s *Server) patchSettings(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &body) {
 		return
 	}
+	// K17: while a workflow replaces originals, the keep cannot go below the floor. Nothing is saved on a refusal.
+	if refused, err := s.keepBelowReplaceFloor(r, rs, body); err != nil {
+		internalError(w)
+		return
+	} else if refused {
+		writeError(w, http.StatusBadRequest, "invalid_setting",
+			"Originals are kept at least 7 days while a workflow replaces originals.", "processing.keepOriginalsDays", 0)
+		return
+	}
 	doc, changes, err := settings.Patch(r.Context(), rs.DB, s.settingsOptions(rs), body)
 	if refusal, ok := settings.AsRefusal(err); ok {
 		writeError(w, http.StatusBadRequest, refusal.Code, refusal.Message, refusal.Field, 0)
@@ -70,4 +80,30 @@ func (s *Server) myLanguages(r *http.Request) []string {
 		return []string{}
 	}
 	return settings.Languages(r.Context(), rs.DB)
+}
+
+// keepBelowReplaceFloor reports whether the body lowers processing.keepOriginalsDays below the floor while a workflow
+// replaces originals (K17, rule 1). A body without the setting, or with a value that is not a number, is left to the
+// settings check.
+func (s *Server) keepBelowReplaceFloor(r *http.Request, rs *Deps, body map[string]json.RawMessage) (bool, error) {
+	raw, ok := body["processing"]
+	if !ok {
+		return false, nil
+	}
+	var group map[string]json.RawMessage
+	if json.Unmarshal(raw, &group) != nil {
+		return false, nil
+	}
+	keepRaw, ok := group["keepOriginalsDays"]
+	if !ok {
+		return false, nil
+	}
+	var keep int
+	if json.Unmarshal(keepRaw, &keep) != nil || keep >= flow.ReplaceKeepFloor {
+		return false, nil
+	}
+	if rs.Workflows == nil {
+		return false, nil
+	}
+	return rs.Workflows.ReplaceInUse(r.Context())
 }
