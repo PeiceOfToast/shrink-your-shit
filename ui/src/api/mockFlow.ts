@@ -6,6 +6,7 @@ import { ApiError } from "./errors.ts";
 import { respond } from "./mockState.ts";
 import { createWorkflowRow, peekWorkflowRow, updateWorkflowRow } from "./mockWorkflows.ts";
 import { languageName } from "../format/language.ts";
+import { keepOriginalsDaysNow } from "./mockSettings.ts";
 
 // The answers a new workflow starts from: the guide's defaults. They match internal/api/testdata/contract/guide.json
 // (body.defaults); guideDefaults.test.ts fails when they differ.
@@ -422,6 +423,8 @@ interface Doc {
   answers: Answers;
   rev: number;
   fitsGuided: boolean;
+  // The revision the library runs: set on publish. The panel's three lines describe it, not the draft.
+  published?: Flow;
 }
 const DOCS = new Map<string, Doc>();
 
@@ -435,6 +438,7 @@ function docFor(id: string): Doc {
     answers: { ...DEFAULT_ANSWERS },
     rev: 1,
     fitsGuided: row.fitsGuided,
+    published: row.state === "published" ? structuredClone(answersToFlow(DEFAULT_ANSWERS, { name: row.name, description: row.description })) : undefined,
   };
   DOCS.set(id, doc);
   return doc;
@@ -494,27 +498,51 @@ export function putAnswers(id: string, answers: Answers, baseRev: number): Promi
 export function getFlow(id: string): Promise<WorkflowDraft> {
   return respond(() => {
     const d = docFor(id);
-    return { flow: d.flow, rev: d.rev, fitsGuided: d.fitsGuided, summary: linesFor(d.flow) };
+    return { flow: d.flow, rev: d.rev, fitsGuided: d.fitsGuided, summary: linesFor(d.published, keepOriginalsDaysNow()) };
   });
 }
 
-// The library panel's three lines, from the flow's own settings only: the format and quality, the file that is
-// already in the target format, and where the original goes. No size or sample rule: the flow has none.
-export function linesFor(flow: Flow): WorkflowLines {
-  const v = flow.steps[0].settings;
-  const sv = flow.steps[2].settings;
-  const format = FORMAT_LABEL[String(v.format)] ?? "HEVC";
-  const q = Number(v.quality);
-  const quality = LADDER.slider.find((s) => s.position === q)?.name ?? `quality ${q}`;
-  const size = v.size ? `, at most ${String(v.size)}p` : "";
-  const original = sv.where === "replace"
-    ? "The old file goes to the trash."
-    : "The original stays where it is.";
-  return {
-    converts: `Converts video to ${format}, at ${quality} quality${size}.`,
-    leavesAlone: `Leaves alone files already in ${format}.`,
-    original,
-  };
+// The library panel's three lines for the published revision, with the same sentences and rules as the server's
+// steps.WorkflowSentences. No published revision gives three empty lines.
+const EMPTY_LINES: WorkflowLines = { converts: "", leavesAlone: "", original: "" };
+const SLIDER = ["Smallest file", "Smaller", "Balanced", "Better quality", "Best quality"];
+const FOLDER_LATER = "Saving to a different folder comes in a later update; for now the new file is saved next to it.";
+
+export function linesFor(flow: Flow | undefined, keepDays: number): WorkflowLines {
+  if (!flow) return EMPTY_LINES;
+  const v = flow.steps.find((s) => s.type === "video.convert")?.settings;
+  const au = flow.steps.find((s) => s.type === "audio.tracks")?.settings;
+  const sv = flow.steps.find((s) => s.type === "file.save")?.settings;
+  if (!v || !sv) return EMPTY_LINES;
+  const fmt = FORMAT_LABEL[String(v.format)] ?? String(v.format);
+  const card = !v.useGpu
+    ? "on the processor"
+    : v.ifGpuFails === "stop"
+      ? "on the graphics card, and it stops if the card can't do the file"
+      : "on the graphics card, or the processor if the card can't do the file";
+  const parts = [`Converts video to ${fmt} at the ${SLIDER[Number(v.quality) - 1] ?? "Balanced"} setting, ${card}.`];
+  if (au) {
+    const codec = String(au.codec || au.format || "copy");
+    if (codec === "copy") {
+      parts.push("Keeps the audio as it is.");
+    } else {
+      const label = CODEC_LABEL[codec] ?? codec;
+      // A layout, a sample rate or loudness evening forces the conversion; then the "except" clause is left out.
+      const forced = au.loudnorm === true || au.sampleRate != null || (!!au.channels && au.channels !== "source");
+      parts.push(forced
+        ? `Converts audio to ${label}.`
+        : `Converts audio to ${label}, except tracks already in ${label} and lossy tracks already at or below the target bitrate.`);
+    }
+  }
+  const leaves = [`Leaves the video alone when it is already in ${fmt}.`];
+  if (v.hdr === "skip") leaves.push("Leaves HDR files alone.");
+  const where = String(sv.where);
+  const original = where === "replace"
+    ? (keepDays < 0 ? "" : `The original goes to the trash for ${keepDays === 1 ? "1 day" : `${keepDays} days`}.`)
+    : where === "folder"
+      ? FOLDER_LATER
+      : "The original stays next to the new file.";
+  return { converts: parts.join(" "), leavesAlone: leaves.join(" "), original };
 }
 
 // Save as a draft from the editor. A draft saved elsewhere since baseRev is refused (dev's changed_since).
@@ -544,6 +572,7 @@ export function publishFlow(id: string, flow: Flow): Promise<{ rev: number; publ
     }
     const d = docFor(id);
     d.flow = flow;
+    d.published = structuredClone(flow);
     d.fitsGuided = false;
     d.rev += 1;
     updateWorkflowRow(id, { state: "published", problemCount: 0, name: flow.name.trim() || peekWorkflowRow(id)!.name, description: flow.description, fitsGuided: false });

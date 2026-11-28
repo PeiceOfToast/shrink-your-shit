@@ -90,6 +90,11 @@ function validate(next: SettingsData) {
 }
 
 // The dev state "Update available" shows a newer release; the default is up to date.
+// processing.keepOriginalsDays as the run reads it now: the workflow panel's "trash for N days" line uses it.
+export function keepOriginalsDaysNow(): number {
+  return settings.processing.keepOriginalsDays;
+}
+
 export function getSettings(): Promise<SettingsData> {
   return respond(() => {
     const s = clone(settings);
