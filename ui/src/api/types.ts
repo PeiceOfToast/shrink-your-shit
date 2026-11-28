@@ -636,6 +636,11 @@ export interface LogPage {
   counts: LogCounts;
 }
 
+// GET /api/v2/access/token and POST /api/v2/access/token/rotate (page 11, Access). The token is a secret: show it, never log it.
+export interface AccessToken {
+  token: string;
+}
+
 export interface LogParams {
   level?: "info" | "warn" | "error";
   source?: string;

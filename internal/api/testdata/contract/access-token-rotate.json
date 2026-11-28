@@ -1,0 +1,9 @@
+{
+  "body": {
+    "token": "$DIR"
+  },
+  "method": "POST",
+  "path": "/api/v2/access/token/rotate",
+  "status": 200,
+  "type": "AccessToken"
+}
