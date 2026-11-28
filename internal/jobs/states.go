@@ -38,6 +38,7 @@ const (
 	verbRequeue verb = "requeue"
 	verbCancel  verb = "cancel"
 	verbRetry   verb = "retry"
+	verbRerun   verb = "rerun"
 )
 
 // edge is one row of the transition table: verb moves a job from any of from to to. Enqueue is an insert, not a
@@ -59,6 +60,7 @@ var transitions = []edge{
 	{verbRequeue, []State{Running}, Waiting},
 	{verbCancel, []State{Waiting, RetryWait, Running}, Cancelled},
 	{verbRetry, []State{Failed, Cancelled}, Waiting},
+	{verbRerun, []State{Done, Skipped}, Waiting},
 }
 
 // openStates are the states the partial unique index holds to one row per file.

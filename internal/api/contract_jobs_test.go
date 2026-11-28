@@ -41,4 +41,9 @@ func TestContractGoldensForJobs(t *testing.T) {
 		f.e.do(http.MethodPost, "/api/v2/jobs/actions",
 			fmt.Sprintf(`{"action":"top","ids":[%d,%d]}`, f.waiting, f.done),
 			write(map[string]string{"Cookie": f.cookie.String()}), false))
+	// Run again (S3-6b): the done job runs again on its own row, and the answer is that job. Written last, since it
+	// changes the job.
+	writeGolden(t, "job-convert-again", "JobDetail", http.MethodPost, fmt.Sprintf("/api/v2/jobs/%d/convert-again", f.done),
+		f.e.do(http.MethodPost, fmt.Sprintf("/api/v2/jobs/%d/convert-again", f.done), "",
+			write(map[string]string{"Cookie": f.cookie.String()}), false))
 }

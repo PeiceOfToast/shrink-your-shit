@@ -108,6 +108,8 @@ func New(version string) *Server {
 	// over the {id} subtree below.
 	s.mux.HandleFunc("POST /api/v2/jobs/actions", s.jobActions)
 	s.mux.HandleFunc("GET /api/v2/jobs/{id}", s.getJob)
+	// Run again (S3-6b): a done or skipped job converts the file at its path again, on the same row.
+	s.mux.HandleFunc("POST /api/v2/jobs/{id}/convert-again", s.convertAgain)
 	s.mux.HandleFunc("GET /api/v2/jobs/{id}/neighbours", s.neighbours)
 	s.mux.HandleFunc("GET /api/v2/jobs/{id}/events", s.jobLog)
 	s.mux.HandleFunc("GET /api/v2/jobs/{id}/history", s.jobHistory)
