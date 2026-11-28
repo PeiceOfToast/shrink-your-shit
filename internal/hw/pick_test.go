@@ -63,19 +63,22 @@ func TestPickFullPipelineOnlyWhenDecodeAndScalePassed(t *testing.T) {
 			for _, tc := range cases {
 				fix := tc.fix
 				d := device(f, "hevc", fix)
-				got := Pick(Inventory{Verdicts: []Verdict{available(d)}}, []DeviceRecord{d},
-					Need{Codec: encode.CodecHEVC, FullOK: true})
-				if len(got.Rungs) == 0 {
-					t.Fatalf("%s: no rung", tc.name)
-				}
-				if isFull := got.Rungs[0].Decode == encode.DecodeHardware; isFull != tc.full {
-					t.Errorf("%s: first rung decode = %q, want full = %v", tc.name, got.Rungs[0].Decode, tc.full)
-				}
-				// Whatever the full pipeline's answer, the hybrid rung still encodes on the card.
-				last := got.Rungs[len(got.Rungs)-1]
-				if last.Decode != encode.DecodeSoftware || last.Family != f {
-					t.Errorf("%s: last rung = %+v, want the card's hybrid rung", tc.name, last)
-				}
+				// Each condition is its own named test, so a refusal that stops being refused is named.
+				t.Run(tc.name, func(t *testing.T) {
+					got := Pick(Inventory{Verdicts: []Verdict{available(d)}}, []DeviceRecord{d},
+						Need{Codec: encode.CodecHEVC, FullOK: true})
+					if len(got.Rungs) == 0 {
+						t.Fatalf("%s: no rung", tc.name)
+					}
+					if isFull := got.Rungs[0].Decode == encode.DecodeHardware; isFull != tc.full {
+						t.Errorf("%s: first rung decode = %q, want full = %v", tc.name, got.Rungs[0].Decode, tc.full)
+					}
+					// Whatever the full pipeline's answer, the hybrid rung still encodes on the card.
+					last := got.Rungs[len(got.Rungs)-1]
+					if last.Decode != encode.DecodeSoftware || last.Family != f {
+						t.Errorf("%s: last rung = %+v, want the card's hybrid rung", tc.name, last)
+					}
+				})
 			}
 		})
 	}
