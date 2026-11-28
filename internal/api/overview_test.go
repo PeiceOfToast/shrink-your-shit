@@ -60,8 +60,14 @@ func TestOverviewEmptyInstall(t *testing.T) {
 	if m["freed"].(map[string]any)["nextReleaseAt"] != nil || m["waiting"].(map[string]any)["nextScanAt"] != nil {
 		t.Errorf("empty install should have null next-release and next-scan: %+v", m)
 	}
-	if len(m["converted"].(map[string]any)["perDay"].([]any)) != 7 || len(m["series"].(map[string]any)["days"].([]any)) != 30 {
-		t.Errorf("empty install: want 7 perDay and 30 series days")
+	if m["converted"].(map[string]any)["perDay"] != float64(0) || len(m["series"].(map[string]any)["days"].([]any)) != 30 {
+		t.Errorf("empty install: want perDay 0 and 30 series days, got %+v", m["converted"])
+	}
+	for _, d := range m["series"].(map[string]any)["days"].([]any) {
+		if d.(map[string]any)["done"] != nil {
+			t.Errorf("an empty day should be null: %+v", d)
+			break
+		}
 	}
 }
 

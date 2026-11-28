@@ -23,8 +23,8 @@ type overviewJSON struct {
 		NextReleaseAt    *string `json:"nextReleaseAt"`
 	} `json:"freed"`
 	Converted struct {
-		Total  int        `json:"total"`
-		PerDay []dayCount `json:"perDay"`
+		Total  int     `json:"total"`
+		PerDay float64 `json:"perDay"` // the average of done jobs per day over the last 7 local days
 	} `json:"converted"`
 	Last24h struct {
 		Done    int `json:"done"`
@@ -51,18 +51,14 @@ type overviewJSON struct {
 	WorkersOn bool         `json:"workersOn"`
 }
 
-type dayCount struct {
-	Day   string `json:"day"`
-	Count int    `json:"count"`
-}
-
+// seriesDay is one day of the charts. A day with no data is null in every figure (types.ts: "null = no data that day").
 type seriesDay struct {
 	Day        string `json:"day"`
-	FreedBytes int64  `json:"freedBytes"`
-	TrashBytes int64  `json:"trashBytes"`
-	Done       int    `json:"done"`
-	Skipped    int    `json:"skipped"`
-	Failed     int    `json:"failed"`
+	FreedBytes *int64 `json:"freedBytes"`
+	TrashBytes *int64 `json:"trashBytes"`
+	Done       *int   `json:"done"`
+	Skipped    *int   `json:"skipped"`
+	Failed     *int   `json:"failed"`
 }
 
 // finishedRow is one finished job, the columns the overview reads.
@@ -104,10 +100,18 @@ func (s *Server) getOverview(w http.ResponseWriter, r *http.Request) {
 	dayDone := map[string]int{}
 	var seriesIdx = map[string]int{}
 	var series []seriesDay
+	var seriesRaw []struct {
+		freed, trash, done, skipped, failed int64
+		any                                 bool
+	}
 	for i := 29; i >= 0; i-- {
 		d := now.AddDate(0, 0, -i).In(time.Local).Format("2006-01-02")
 		seriesIdx[d] = len(series)
 		series = append(series, seriesDay{Day: d})
+		seriesRaw = append(seriesRaw, struct {
+			freed, trash, done, skipped, failed int64
+			any                                 bool
+		}{})
 	}
 	var weekBefore, weekSecs, allBefore, allSaved int64
 	for _, row := range rows {
@@ -126,16 +130,20 @@ func (s *Server) getOverview(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if i, ok := seriesIdx[day]; ok {
+			raw := &seriesRaw[i]
 			switch row.state {
 			case "done":
-				series[i].Done++
+				raw.done++
+				raw.any = true
 				if row.outcome == "smaller" && row.hasSizes {
-					series[i].FreedBytes += row.before - row.after
+					raw.freed += row.before - row.after
 				}
 			case "skipped":
-				series[i].Skipped++
+				raw.skipped++
+				raw.any = true
 			case "failed":
-				series[i].Failed++
+				raw.failed++
+				raw.any = true
 			}
 		}
 		if row.state == "done" && row.finishedMS >= weekAgo {
@@ -143,16 +151,29 @@ func (s *Server) getOverview(w http.ResponseWriter, r *http.Request) {
 			weekSecs += (row.finishedMS - row.startedMS) / 1000
 		}
 	}
-	// The seven days of perDay, oldest first.
+	// perDay is the average of done jobs per day over the last seven local days.
+	var sevenDone int
 	for i := 6; i >= 0; i-- {
-		d := now.AddDate(0, 0, -i).In(time.Local).Format("2006-01-02")
-		out.Converted.PerDay = append(out.Converted.PerDay, dayCount{Day: d, Count: dayDone[d]})
+		sevenDone += dayDone[now.AddDate(0, 0, -i).In(time.Local).Format("2006-01-02")]
 	}
+	out.Converted.PerDay = float64(sevenDone) / 7
 	if weekBefore > 0 {
 		out.AvgShrink.SecPerGB = float64(weekSecs) / (float64(weekBefore) / (1 << 30))
 	}
 	if allBefore > 0 {
 		out.AvgShrink.Pct = 100 * float64(allSaved) / float64(allBefore)
+	}
+	// A day with nothing in it is null in every figure; the Dashboard draws no point for it.
+	for i := range series {
+		raw := seriesRaw[i]
+		if !raw.any && raw.trash == 0 && raw.freed == 0 {
+			continue
+		}
+		// trashBytes has no per-day source yet (the journal keeps no purge day), so it stays null.
+		freed := raw.freed
+		done, skipped, failed := int(raw.done), int(raw.skipped), int(raw.failed)
+		series[i].FreedBytes = &freed
+		series[i].Done, series[i].Skipped, series[i].Failed = &done, &skipped, &failed
 	}
 	out.Series.Days = series
 
