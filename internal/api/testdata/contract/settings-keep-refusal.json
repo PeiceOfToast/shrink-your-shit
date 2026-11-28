@@ -9,5 +9,5 @@
   "method": "PATCH",
   "path": "/api/v2/settings",
   "status": 400,
-  "type": "ApiError"
+  "type": "ErrorReply"
 }

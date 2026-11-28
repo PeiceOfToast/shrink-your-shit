@@ -109,5 +109,5 @@ func TestContractSettingsKeepRefusal(t *testing.T) {
 	h := withSession(cookie)
 	publishedReplace(t, e)
 	rec := e.do(http.MethodPatch, "/api/v2/settings", `{"processing":{"keepOriginalsDays":0}}`, write(h), false)
-	writeGolden(t, "settings-keep-refusal", "ApiError", http.MethodPatch, "/api/v2/settings", rec)
+	writeGolden(t, "settings-keep-refusal", "ErrorReply", http.MethodPatch, "/api/v2/settings", rec)
 }
