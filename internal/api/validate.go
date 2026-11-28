@@ -26,5 +26,5 @@ func (s *Server) validateWorkflow(w http.ResponseWriter, r *http.Request) {
 	}
 	// Stage 3 fills the env from the workers; until then it is empty, so no choice is greyed for a
 	// missing encoder and no card is known (stage 3 item 3 changes only the env).
-	writeJSON(w, http.StatusOK, flow.Validate(body.Flow, flow.ValidateContext{Env: flow.Env{}}))
+	writeJSON(w, http.StatusOK, flow.Validate(body.Flow, flow.ValidateContext{Env: s.checkEnv()}))
 }

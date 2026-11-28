@@ -136,7 +136,7 @@ func (SaveStep) Validate(s flow.Settings, vc flow.ValidateContext) flow.Check {
 		})
 	}
 
-	c.Summary = saveSummary(set)
+	c.Summary = saveSummary(set, keepDaysOf(vc.Env))
 	return c
 }
 
@@ -150,10 +150,19 @@ const folderWhy = flow.FolderWhy
 // summary carries the page's own number.
 const trashDays = 7
 
+// keepDaysOf is the trash days a replaced original is kept: the setting the env reads, or the default when no setting
+// is read.
+func keepDaysOf(env flow.Env) int {
+	if env.KeepDays != nil {
+		return env.KeepDays()
+	}
+	return trashDays
+}
+
 // saveSummary is the closed card's line in page 07's words: the file type, then where the result
 // goes. It starts with the file type, as the page draws it.
-func saveSummary(set SaveSettings) string {
-	return containerLabel(set.Container) + " · " + whereText(set.Where, set.Folder)
+func saveSummary(set SaveSettings, days int) string {
+	return containerLabel(set.Container) + " · " + whereText(set.Where, set.Folder, days)
 }
 
 // containerFor resolves the file-type choice; "keep" is the source's own container.
@@ -228,10 +237,10 @@ func containerLabel(choice string) string {
 	return choice
 }
 
-func whereText(where, folder string) string {
+func whereText(where, folder string, days int) string {
 	switch where {
 	case "replace":
-		return fmt.Sprintf("replace the original · old file in the trash %d days", trashDays)
+		return fmt.Sprintf("replace the original · old file in the trash %s", dayCount(days))
 	case "folder":
 		if folder != "" {
 			return "a different folder: " + folder
