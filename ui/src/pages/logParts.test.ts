@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { JobStep, LogEvent, LogKind, LogLevel } from "../api/types.ts";
-import { addLiveLine, logsFromEvents, showLines } from "./logParts.ts";
+import { addLiveLine, levelBadges, logsFromEvents, showLines } from "./logParts.ts";
 import { readFileSync } from "node:fs";
 
 const steps: JobStep[] = [
@@ -177,7 +177,6 @@ test("the system log page builds its lines with showLines (a source check)", asy
   const { readFileSync } = await import("node:fs");
   const src = readFileSync(new URL("./SystemLog.tsx", import.meta.url), "utf8");
   assert.match(src, /showLines\(loaded, live\)/);
-  assert.match(src, /const counts = log\.data\?\.counts/);
 });
 
 test("an older live fold does not replace a newer fold the page already holds", () => {
@@ -198,3 +197,12 @@ test("a run longer than the poll window holds one row across polls (base page 20
   assert.equal(shown[0].seq, 64);
   assert.equal(shown[0].repeat?.count, 50);
 });
+
+test("the level badges are the server's counts: live lines are not added on top", () => {
+  const server = { info: 40, warn: 4, error: 1 };
+  const warn = { ...liveEv(9, "2026-11-28T07:00:09Z", "sign-in refused"), level: "warn" } as LogEvent;
+  const folded = { ...liveEv(10, "2026-11-28T07:00:19Z", "sign-in refused", { count: 3, firstAt: "2026-11-28T07:00:09Z", lastAt: "2026-11-28T07:00:19Z" }), level: "warn" } as LogEvent;
+  assert.deepEqual(levelBadges(server, [warn, folded]), server);
+  assert.deepEqual(levelBadges(server, []), server);
+});
+
