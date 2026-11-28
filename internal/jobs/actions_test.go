@@ -4,6 +4,7 @@ package jobs
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"strings"
 	"testing"
@@ -245,11 +246,19 @@ func TestCancelWaitingForCancelsOnlyWaiting(t *testing.T) {
 
 	cancelled, stop := env.bus.Subscribe(events.Filter{Kind: events.KindCancelled})
 	defer stop()
-	n, err := env.q.CancelWaitingFor(ctx, 1)
-	if err != nil {
+	// As Delete and a path change do it: inside the caller's transaction, then the History lines.
+	var waitingCancelled []CancelledWaiting
+	if err := env.q.db.Tx(ctx, func(tx *sql.Tx) error {
+		var err error
+		waitingCancelled, err = env.q.CancelWaitingIn(tx, 1)
+		return err
+	}); err != nil {
 		t.Fatal(err)
 	}
-	if n != 2 {
+	if err := env.q.CancelledWaitingHistory(waitingCancelled, 1, "library removed"); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(waitingCancelled); n != 2 {
 		t.Fatalf("cancelled %d jobs, want 2", n)
 	}
 	if got := env.stateOf(t, running); got != Running {
@@ -297,10 +306,7 @@ func TestRequeueOfARemovedLibraryCancelsTheJob(t *testing.T) {
 	env.addLibrary(t, 1, false)
 	id := env.enqueue(t, 1, 1)
 	mustClaim(t, env, id)
-	// Delete as DELETE /libraries/{id} does: waiting jobs first (none here), then the row.
-	if _, err := env.q.CancelWaitingFor(ctx, 1); err != nil {
-		t.Fatal(err)
-	}
+	// Remove takes the row; the waiting jobs (none here) go with it in the same transaction.
 	env.exec(t, `DELETE FROM libraries WHERE id = ?`, 1)
 
 	cancelled, stop := env.bus.Subscribe(events.Filter{Kind: events.KindCancelled})
@@ -315,6 +321,65 @@ func TestRequeueOfARemovedLibraryCancelsTheJob(t *testing.T) {
 	if job, err := env.q.Claim(ctx, "worker-1", ClaimOptions{}); err != nil || job != nil {
 		t.Fatalf("claim after the requeue = %+v, %v; want nothing", job, err)
 	}
+}
+
+// TestFinishRetryWithARemovedLibraryCancels: a may-pass run whose library was removed while it ran
+// must not wait for a try nothing will claim. It ends cancelled with Remove's History line, while
+// the same run on a kept library waits and comes back after the wait (review2-890).
+func TestFinishRetryWithARemovedLibraryCancels(t *testing.T) {
+	ctx := context.Background()
+	retry := Result{
+		Verdict: VerdictRetry, Reason: "the encoder stopped",
+		NextAction: "This file will be tried again in a few minutes.",
+	}
+
+	t.Run("kept", func(t *testing.T) {
+		env := newEnv(t)
+		env.addLibrary(t, 1, false)
+		id := env.enqueue(t, 1, 1)
+		job := mustClaim(t, env, id)
+		if err := env.q.Finish(ctx, id, job.Attempt, retry); err != nil {
+			t.Fatal(err)
+		}
+		if got := env.stateOf(t, id); got != RetryWait {
+			t.Fatalf("state after a may-pass = %s, want retry_wait", got)
+		}
+		// Past the first wait it is the queue's again.
+		env.clk.advance(6 * time.Minute)
+		if next, err := env.q.Claim(ctx, "worker-1", ClaimOptions{}); err != nil || next == nil || next.ID != id {
+			t.Fatalf("claim after the wait = %+v, %v; want job %d", next, err, id)
+		}
+	})
+
+	t.Run("removed", func(t *testing.T) {
+		env := newEnv(t)
+		env.addLibrary(t, 1, false)
+		id := env.enqueue(t, 1, 1)
+		job := mustClaim(t, env, id)
+		cancelled, stop := env.bus.Subscribe(events.Filter{Kind: events.KindCancelled})
+		defer stop()
+		env.exec(t, `DELETE FROM libraries WHERE id = ?`, 1)
+
+		if err := env.q.Finish(ctx, id, job.Attempt, retry); err != nil {
+			t.Fatal(err)
+		}
+		if got := env.stateOf(t, id); got != Cancelled {
+			t.Fatalf("state after a may-pass on a removed library = %s, want cancelled", got)
+		}
+		expectEvent(t, cancelled, events.KindCancelled, id)
+		got, err := env.q.Get(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.NextAction != "" || got.NextTryAt != nil {
+			t.Fatalf("cancelled job still promises a try: next %q at %v", got.NextAction, got.NextTryAt)
+		}
+		// Long after the wait it is still not claimed: nothing can take it.
+		env.clk.advance(31 * time.Minute)
+		if next, err := env.q.Claim(ctx, "worker-1", ClaimOptions{}); err != nil || next != nil {
+			t.Fatalf("claim after the wait = %+v, %v; want nothing", next, err)
+		}
+	})
 }
 
 // TestRetryRefusedForARemovedLibrary: a failed or cancelled job whose library was removed cannot run

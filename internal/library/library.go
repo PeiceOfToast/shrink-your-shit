@@ -390,8 +390,20 @@ func (c *Catalog) UpdateLibraryWith(ctx context.Context, id int64, in Patch, onP
 
 // DeleteLibrary removes the library and its catalog rows. Files on disk are not touched.
 func (c *Catalog) DeleteLibrary(ctx context.Context, id int64) error {
+	return c.DeleteLibraryWith(ctx, id, nil)
+}
+
+// DeleteLibraryWith is DeleteLibrary with before run inside its transaction, just before the row
+// goes: the library's waiting jobs are cancelled there, so the cancellations and the removal commit
+// together.
+func (c *Catalog) DeleteLibraryWith(ctx context.Context, id int64, before func(tx *sql.Tx) error) error {
 	var n int64
 	err := c.db.Tx(ctx, func(tx *sql.Tx) error {
+		if before != nil {
+			if err := before(tx); err != nil {
+				return err
+			}
+		}
 		res, err := tx.ExecContext(ctx, `DELETE FROM libraries WHERE id = ?`, id)
 		if err != nil {
 			return err

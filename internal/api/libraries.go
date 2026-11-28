@@ -314,15 +314,24 @@ func (s *Server) deleteLibrary(w http.ResponseWriter, r *http.Request) {
 		writeLibraryError(w, err)
 		return
 	}
-	if rs.Jobs != nil {
-		if _, err := rs.Jobs.CancelWaitingFor(r.Context(), id); err != nil {
+	// The cancellations and the row go in one transaction, so a failure leaves both as they were.
+	var cancelledWaiting []jobs.CancelledWaiting
+	if err := rs.Catalog.DeleteLibraryWith(r.Context(), id, func(tx *sql.Tx) error {
+		if rs.Jobs == nil {
+			return nil
+		}
+		var cerr error
+		cancelledWaiting, cerr = rs.Jobs.CancelWaitingIn(tx, id)
+		return cerr
+	}); err != nil {
+		writeLibraryError(w, err)
+		return
+	}
+	if len(cancelledWaiting) > 0 {
+		if err := rs.Jobs.CancelledWaitingHistory(cancelledWaiting, id, "library removed"); err != nil {
 			internalError(w)
 			return
 		}
-	}
-	if err := rs.Catalog.DeleteLibrary(r.Context(), id); err != nil {
-		writeLibraryError(w, err)
-		return
 	}
 	s.libraryChangedEvent(rs, id, "Removed "+lib.Name)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})

@@ -355,6 +355,7 @@ func TestPatchLibraryPathChangeCancelsWaitingJobs(t *testing.T) {
 	if claimed == nil || claimed.ID != ids[0] {
 		t.Fatalf("claimed %+v, want job %d", claimed, ids[0])
 	}
+	retrying := mustEnqueueRetryWait(t, e, lib, "c.mkv")
 	cancelled, stop := e.bus.Subscribe(events.Filter{Kind: events.KindCancelled})
 	defer stop()
 
@@ -366,6 +367,9 @@ func TestPatchLibraryPathChangeCancelsWaitingJobs(t *testing.T) {
 
 	if got, _ := e.queue.Get(ctx, ids[1]); got.State != jobs.Cancelled {
 		t.Fatalf("waiting job after a path change = %s, want cancelled", got.State)
+	}
+	if got, _ := e.queue.Get(ctx, retrying); got.State != jobs.Cancelled {
+		t.Fatalf("retry_wait job after a path change = %s, want cancelled", got.State)
 	}
 	if got, _ := e.queue.Get(ctx, ids[0]); got.State != jobs.Running {
 		t.Fatalf("running job after a path change = %s, want running", got.State)
@@ -464,6 +468,25 @@ func mustEnqueueWaiting(t *testing.T, e *env, lib library.Library, rels ...strin
 	return ids
 }
 
+// mustEnqueueRetryWait leaves one job of a library in retry_wait: a may-pass run the wait holds
+// back. It claims with the default order, so the new file must be its library's newest job.
+func mustEnqueueRetryWait(t *testing.T, e *env, lib library.Library, rel string) int64 {
+	t.Helper()
+	ctx := context.Background()
+	id := mustEnqueueWaiting(t, e, lib, rel)[0]
+	job, err := e.queue.Claim(ctx, "worker-1", jobs.ClaimOptions{})
+	if err != nil || job == nil {
+		t.Fatalf("claim %s: %+v, %v", rel, job, err)
+	}
+	if err := e.queue.Finish(ctx, id, job.Attempt, jobs.Result{Verdict: jobs.VerdictRetry, Reason: "the encoder stopped"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := e.queue.Get(ctx, id); got.State != jobs.RetryWait {
+		t.Fatalf("%s is %s, want retry_wait", rel, got.State)
+	}
+	return id
+}
+
 // TestPatchLibraryUnsettingTheWorkflowKeepsWaitingJobs: null goes back to needs_workflow, the files
 // queued before it stay queued, and nothing is re-decided (page 09).
 func TestPatchLibraryUnsettingTheWorkflowKeepsWaitingJobs(t *testing.T) {
@@ -550,6 +573,7 @@ func TestDeleteLibraryCancelsWaitingAndLeavesTheRunning(t *testing.T) {
 	if claimed == nil {
 		t.Fatal("no job to claim")
 	}
+	retrying := mustEnqueueRetryWait(t, e, lib, "c.mkv")
 	changed, stop := e.bus.Subscribe(events.Filter{Kind: events.KindLibraryChanged})
 	defer stop()
 
@@ -578,6 +602,9 @@ func TestDeleteLibraryCancelsWaitingAndLeavesTheRunning(t *testing.T) {
 		if got, _ := e.queue.Get(ctx, id); got.State != jobs.Cancelled {
 			t.Fatalf("waiting job %d after remove = %s, want cancelled", id, got.State)
 		}
+	}
+	if got, _ := e.queue.Get(ctx, retrying); got.State != jobs.Cancelled {
+		t.Fatalf("retry_wait job after remove = %s, want cancelled", got.State)
 	}
 
 	if _, err := os.Stat(keep); err != nil {
