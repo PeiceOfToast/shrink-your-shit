@@ -127,6 +127,7 @@ func TestAnInstallAtSchemaSixUpgradesThroughSeven(t *testing.T) {
 			`DROP TABLE IF EXISTS replace_journal`,
 			`ALTER TABLE jobs DROP COLUMN subtitle_files`,
 			`ALTER TABLE jobs DROP COLUMN failure_code`,
+			`DROP TABLE IF EXISTS app_settings`,
 			`PRAGMA user_version = 6`,
 		} {
 			if _, err := tx.Exec(s); err != nil {
@@ -156,10 +157,10 @@ func TestAnInstallAtSchemaSixUpgradesThroughSeven(t *testing.T) {
 	if err := db.Read().QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	// The newest migration is 11 (the failure code, S3-6a); 10 is the replace journal, 9 the subtitles
-	// change (#854).
-	if version != 11 {
-		t.Errorf("schema version after the upgrade = %d, want 11", version)
+	// The newest migration is 12 (the app settings, S2-10c); 11 is the failure code (S3-6a), 10 the replace journal,
+	// 9 the subtitles change (#854).
+	if version != 12 {
+		t.Errorf("schema version after the upgrade = %d, want 12", version)
 	}
 	if err := db.Read().QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'encoder_state'`).
 		Scan(&encoderState); err != nil {
@@ -307,6 +308,7 @@ func TestAnInstallAtSchemaNineUpgradesToEleven(t *testing.T) {
 		for _, s := range []string{
 			`DROP TABLE IF EXISTS replace_journal`,
 			`ALTER TABLE jobs DROP COLUMN failure_code`,
+			`DROP TABLE IF EXISTS app_settings`,
 			`PRAGMA user_version = 9`,
 		} {
 			if _, err := tx.Exec(s); err != nil {
@@ -335,8 +337,8 @@ func TestAnInstallAtSchemaNineUpgradesToEleven(t *testing.T) {
 	if err := db.Read().QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 11 {
-		t.Errorf("schema version after the upgrade = %d, want 11", version)
+	if version != 12 {
+		t.Errorf("schema version after the upgrade = %d, want 12", version)
 	}
 	if err := db.Read().QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'replace_journal'`).
 		Scan(&journal); err != nil {

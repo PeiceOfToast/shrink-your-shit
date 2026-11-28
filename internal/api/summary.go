@@ -4,10 +4,26 @@ package api
 
 import (
 	"net/http"
+	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/PeiceOfToast/shrink-your-shit/internal/library"
+	"github.com/PeiceOfToast/shrink-your-shit/internal/safety"
 )
+
+// Attention is one row of GET /attention, the shape types.ts names. action and link are null: a replace row has no
+// button yet.
+type Attention struct {
+	ID       string `json:"id"`
+	Level    string `json:"level"`
+	What     string `json:"what"`
+	Means    string `json:"means"`
+	Count    int    `json:"count"`
+	LatestAt string `json:"latestAt"`
+	Action   any    `json:"action"`
+	Link     any    `json:"link"`
+}
 
 // The shell's counts (GET /summary) and the Dashboard's Needs attention list (GET /attention).
 
@@ -85,8 +101,29 @@ func earliestScan(libs []library.Library) *time.Time {
 	return out
 }
 
-// getAttention is the Dashboard's Needs attention list. Stage 1 keeps no attention rows: the
-// problems it will show (a failing share, an offline worker) do not exist yet.
+// getAttention is the Dashboard's Needs attention list. A replace whose swap could not be settled or put back is one
+// row: the original is in the library's trash, and nothing was removed.
 func (s *Server) getAttention(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, []any{})
+	rs := s.ready.Load()
+	if rs == nil {
+		writeError(w, http.StatusServiceUnavailable, "starting", "Starting up…", "", 0)
+		return
+	}
+	rows, err := safety.NewJournal(rs.DB).Attention(r.Context())
+	if err != nil {
+		internalError(w)
+		return
+	}
+	out := make([]Attention, 0, len(rows))
+	for _, a := range rows {
+		out = append(out, Attention{
+			ID:       "replace-" + strconv.FormatInt(a.Row.ID, 10),
+			Level:    "warn",
+			What:     filepath.Base(a.Row.Original) + " could not be finished",
+			Means:    "The original is in the library's " + safety.TrashDir + " folder and nothing was removed. Check the folder before you run this file again.",
+			Count:    1,
+			LatestAt: a.When.UTC().Format(time.RFC3339),
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
 }

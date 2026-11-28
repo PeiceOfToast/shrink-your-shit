@@ -111,6 +111,8 @@ func run(dataDir, listen string) error {
 			Source: "safety", Code: "replace.attention",
 			Message: fmt.Sprintf("%d replaced original(s) need a look: the original is in the library's %s folder, and nothing was removed.", rep.Attention, safety.TrashDir)})
 	}
+	// The trash is emptied once a day: copies past keepOriginalsDays go, and nothing else (S2-10c).
+	go trashSweepLoop(ctx, journal, bus)
 	// Anything left in the app's temp folder came from a process that stopped without tidying
 	// up: a try's sample and staging both live there. Only entries older than this start are
 	// removed, so a try already running in another process is left alone.
@@ -213,6 +215,37 @@ func reportLibraryOverlaps(ctx context.Context, catalog *library.Catalog, bus *e
 	for _, o := range overlaps {
 		_ = bus.Emit(events.Event{Level: events.LevelWarn, Kind: events.KindWarning, Source: "library",
 			Code: "library.overlap", Message: o.Message()})
+	}
+}
+
+// trashSweepLoop runs the trash sweep at start and then every day until the app stops.
+func trashSweepLoop(ctx context.Context, j *safety.Journal, bus *events.Bus) {
+	tick := time.NewTicker(24 * time.Hour)
+	defer tick.Stop()
+	for {
+		sweepTrashOnce(ctx, j, bus)
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+		}
+	}
+}
+
+func sweepTrashOnce(ctx context.Context, j *safety.Journal, bus *events.Bus) {
+	days, err := j.KeepDays(ctx)
+	if err == nil {
+		var rep safety.TrashSweepReport
+		rep, err = safety.SweepTrash(ctx, j, time.Now(), days)
+		if rep.Purged > 0 {
+			_ = bus.Emit(events.Event{Level: events.LevelInfo, Kind: events.KindWarning,
+				Source: "safety", Code: "trash.swept",
+				Message: fmt.Sprintf("%d original(s) left the trash after %d days.", rep.Purged, days)})
+		}
+	}
+	if err != nil && ctx.Err() == nil {
+		_ = bus.Emit(events.Event{Level: events.LevelWarn, Kind: events.KindWarning,
+			Source: "safety", Code: "trash.sweep_failed", Message: err.Error()})
 	}
 }
 
