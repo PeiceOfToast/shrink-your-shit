@@ -92,6 +92,11 @@ func Run(ctx context.Context, opts Options) error {
 	if err := os.Chown(root, 0, gid); err != nil {
 		return fmt.Errorf("the shares folder's owner: %w", err)
 	}
+	// Only root may write the shares folder, so the syp user can't swap a mount point for a link
+	// between the helper's check and the mount. MkdirAll leaves an existing folder's mode alone.
+	if err := os.Chmod(root, 0o750); err != nil {
+		return fmt.Errorf("the shares folder's mode: %w", err)
+	}
 	recordDir, err := makeDir(opts.Record, 0o700)
 	if err != nil {
 		return fmt.Errorf("the mount record's folder: %w", err)

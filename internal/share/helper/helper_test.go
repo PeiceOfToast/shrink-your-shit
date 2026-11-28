@@ -25,9 +25,15 @@ func TestDecodeRequestRefusals(t *testing.T) {
 		`{"action":"probe","id":3} {"action":"probe","id":3}`,
 		`{"action":"probe","id":3} trailing`,
 		``,
+		`{"action":"probe","password":"hunter2"x}`,
+		`{"action":"probe","hunter2":1}`,
+		`{"action":"probe","id":"hunter2"}`,
 	} {
-		if _, err := decodeRequest([]byte(body)); err == nil {
+		_, err := decodeRequest([]byte(body))
+		if err == nil {
 			t.Errorf("%q decoded, want a refusal", body)
+		} else if strings.Contains(err.Error(), "hunter2") || strings.Contains(err.Error(), "'x'") {
+			t.Errorf("%q: the refusal %q quotes the body", body, err)
 		}
 	}
 }

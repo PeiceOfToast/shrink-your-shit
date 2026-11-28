@@ -13,7 +13,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"io/fs"
 	"net"
@@ -186,7 +185,8 @@ func decodeRequest(body []byte) (Request, error) {
 		if errors.Is(err, io.EOF) {
 			return Request{}, errors.New("The request is empty.")
 		}
-		return Request{}, fmt.Errorf("The request can't be read: %v", err)
+		// A fixed phrase: encoding/json quotes the offending byte or field, which can be a password's.
+		return Request{}, errors.New("The request can't be read.")
 	}
 	var extra json.RawMessage
 	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
