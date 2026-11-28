@@ -195,7 +195,8 @@ export function JobDetail({ id, initialTab }: { id: string; initialTab: "summary
           <div className="jd-acts" ref={acts}>
             <button type="button" className="btn ghost sm" aria-label="Previous job" disabled={!nb.data?.prev} onClick={() => go(nb.data?.prev ?? null)}>‹</button>
             <button type="button" className="btn ghost sm" aria-label="Next job" disabled={!nb.data?.next} onClick={() => go(nb.data?.next ?? null)}>›</button>
-            {state === "failed" && (
+            {/* An empty actionLabel means retrying isn't the right move (a replace that needs a look). */}
+            {state === "failed" && d?.failure?.actionLabel !== "" && (
               <button type="button" className="btn sm" disabled={busy} onClick={() => act(() => api.runJobsAction("retry", [id]), "Queued to try again.")}>Retry</button>
             )}
             <div className={`jd-more${more ? " open" : ""}`}>
@@ -324,9 +325,11 @@ function SummaryTab({ d, busy, onRetry }: { d: Detail; busy: boolean; onRetry: (
           <b>Failed at {d.failure.step}</b>
           <span>{d.failure.reason}</span>
           <span className="muted sm">{d.failure.nextAction}</span>
-          <div>
-            <button type="button" className="btn sm" disabled={busy} onClick={onRetry}>{d.failure.actionLabel}</button>
-          </div>
+          {d.failure.actionLabel && (
+            <div>
+              <button type="button" className="btn sm" disabled={busy} onClick={onRetry}>{d.failure.actionLabel}</button>
+            </div>
+          )}
         </div>
       )}
       {d.skipReason && <p className="muted" style={{ margin: 0 }}>Skipped: {d.skipReason}</p>}
