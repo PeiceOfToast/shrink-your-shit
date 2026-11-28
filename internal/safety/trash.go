@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/PeiceOfToast/shrink-your-shit/internal/fsx"
@@ -253,22 +254,34 @@ func Restore(ctx context.Context, j *Journal, id int64) error {
 		return err
 	}
 	hookRestoreStep(1)
-	// Step 2: the converted file goes. It is identified just before the removal, so a file that changed since the
-	// check is not removed; the row goes back to "done" and nothing else moved.
+	// Step 2: the converted file is moved aside into the trash, not deleted, so a refusal from here on can put it back.
+	// It is identified before the move; a file that changed since the check is left where it is.
+	trashDir := filepath.Dir(r.Trash)
+	holding, err := trashPath(trashDir, r.Final, r.JobID)
+	if err != nil {
+		_ = j.SetState(ctx, id, StateDone)
+		return err
+	}
 	if !matches(r.Final, r.New) {
 		_ = j.SetState(ctx, id, StateDone)
 		return ErrConvertedChanged
 	}
-	if err := os.Remove(r.Final); err != nil {
+	if err := fsx.RenameNoReplace(r.Final, holding); err != nil {
 		_ = j.SetState(ctx, id, StateDone)
-		return fmt.Errorf("remove the converted file: %w", err)
+		return fmt.Errorf("move the converted file aside: %w", err)
 	}
 	hookRestoreStep(2)
-	// Step 3: the original returns to its name. A no-replace rename: a name taken meanwhile is "attention", and the
-	// original stays in the trash for a person to put back.
+	// Step 3: the original returns to its name, a no-replace move. A name taken meanwhile puts the converted file back
+	// where it was, so a refused restore changes nothing; if even that fails, the converted file stays in the trash
+	// and the row waits for a person. Nothing is deleted on a refusal.
 	if err := fsx.RenameNoReplace(r.Trash, r.Original); err != nil {
-		_ = j.SetState(ctx, id, StateAttention)
-		if exists(r.Original) {
+		taken := exists(r.Original)
+		if backErr := fsx.RenameNoReplace(holding, r.Final); backErr != nil {
+			_ = j.SetState(ctx, id, StateAttention)
+			return fmt.Errorf("the original could not be put back and the converted file is in the trash folder (%s): %w", holding, err)
+		}
+		_ = j.SetState(ctx, id, StateDone)
+		if taken {
 			return ErrNameTaken
 		}
 		return fmt.Errorf("put the original back: %w", err)
@@ -277,6 +290,11 @@ func Restore(ctx context.Context, j *Journal, id int64) error {
 	if !matches(r.Original, r.Orig) {
 		_ = j.SetState(ctx, id, StateAttention)
 		return ErrOriginalGone
+	}
+	// Step 4: the original is back and verified, so the converted copy is removed. If that removal fails the original
+	// is still restored; the copy stays in the trash and nothing is lost.
+	if matches(holding, r.New) {
+		_ = os.Remove(holding)
 	}
 	if err := j.SetState(ctx, id, StateRolledBack); err != nil {
 		return fmt.Errorf("restored, but the record could not be saved: %w", err)

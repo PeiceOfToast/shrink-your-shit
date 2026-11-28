@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -243,8 +244,12 @@ func TestRestoreNeverOverwritesANameTakenMeanwhile(t *testing.T) {
 	if got := readFile(t, f.original); got != "taken meanwhile" {
 		t.Errorf("the stranger's file was overwritten: %q", got)
 	}
-	if stateOf(t, f, id) != StateAttention {
-		t.Errorf("state = %s, want attention so a person looks", stateOf(t, f, id))
+	// A refused restore changes nothing: the converted file is back where it was, and the row is done again.
+	if got := readFile(t, f.final); got != newBytes {
+		t.Errorf("the converted file is %q after a refused restore, want its own bytes back", got)
+	}
+	if stateOf(t, f, id) != StateDone {
+		t.Errorf("state = %s, want done after a refused restore", stateOf(t, f, id))
 	}
 }
 
@@ -301,4 +306,30 @@ func crashAt(t *testing.T, step int) {
 func restoreUntilCrash(f swapFixture, id int64) {
 	defer func() { _ = recover() }()
 	_ = Restore(context.Background(), f.j, id)
+}
+
+// A refused restore never deletes the converted file. With the converted file at the original's own name, a name
+// taken after it is moved aside leaves the converted bytes in the trash folder, not gone.
+func TestRestoreRefusalKeepsTheConvertedFile(t *testing.T) {
+	f, id := doneSwap(t) // same extension: the converted file is at the original's name
+	hookRestoreStep = func(step int) {
+		if step == 2 {
+			_ = os.WriteFile(f.original, []byte("taken meanwhile"), 0o644)
+		}
+	}
+	defer func() { hookRestoreStep = func(int) {} }()
+	if err := Restore(context.Background(), f.j, id); err == nil {
+		t.Fatal("the restore was not refused")
+	}
+	found := false
+	entries, _ := os.ReadDir(filepath.Join(f.lib, TrashDir))
+	for _, e := range entries {
+		b, _ := os.ReadFile(filepath.Join(f.lib, TrashDir, e.Name()))
+		if string(b) == newBytes {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the converted bytes are in no trash file: a refused restore lost the converted file")
+	}
 }
