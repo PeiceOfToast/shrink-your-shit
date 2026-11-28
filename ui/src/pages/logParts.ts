@@ -113,3 +113,29 @@ export function keptScrollTop(scrollHeight: number, distanceFromBottom: number):
   return scrollHeight - distanceFromBottom;
 }
 
+// The counts the badges show: the live read while there is one, else the last load's, else zeros.
+export function shownCounts(live: LogCounts | null | undefined, load: LogCounts | null | undefined): LogCounts {
+  return live ?? load ?? { info: 0, warn: 0, error: 0 };
+}
+
+// Reads the counts every poll while Follow is on. A read still in flight when it is stopped is dropped: a late answer
+// would otherwise set the counts of a filter the page has left. Returns the stop.
+export function startCountReads(
+  read: () => Promise<LogCounts>,
+  set: (c: LogCounts) => void,
+  every = 4_000,
+  schedule: (fn: () => void, ms: number) => unknown = (fn, ms) => setInterval(fn, ms),
+  clear: (t: unknown) => void = (t) => clearInterval(t as ReturnType<typeof setInterval>),
+): () => void {
+  let stopped = false;
+  const t = schedule(() => {
+    read().then((c) => {
+      if (!stopped) set(c);
+    }, () => {});
+  }, every);
+  return () => {
+    stopped = true;
+    clear(t);
+  };
+}
+
