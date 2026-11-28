@@ -28,7 +28,8 @@ export function useApi<T>(load: () => Promise<T>, deps: unknown[] = []): ApiStat
     load().then(
       (data) => {
         if (!alive) return;
-        setConnection(true);
+        // No connection change here: a load can resolve from sample data without a server call, and http.ts
+        // already records whether the server answered.
         setState({ data, loading: false });
       },
       (e: unknown) => {
