@@ -2,6 +2,7 @@
 import type * as mock from "../mock.ts";
 import { request, type Method, type Out } from "../http.ts";
 import { ApiError } from "../errors.ts";
+import { actionOutcome } from "../actionReply.ts";
 
 export const getOverview: typeof mock.getOverview = () => request<Out<typeof mock.getOverview>>("GET", "/overview");
 
@@ -16,7 +17,5 @@ export const runAction: typeof mock.runAction = async (method, path, body) => {
   if (!path.startsWith(prefix + "/") || !METHODS.includes(method)) {
     throw new ApiError("invalid_request", "That action isn't one this app can send.");
   }
-  const reply = await request<unknown>(method as Method, path.slice(prefix.length), body);
-  const line = (reply as { line?: unknown } | null | undefined)?.line;
-  return typeof line === "string" ? { line } : {};
+  return actionOutcome(await request<unknown>(method as Method, path.slice(prefix.length), body));
 };
