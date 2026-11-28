@@ -17,6 +17,10 @@ import (
 // fallback can be tested. Tests set it and restore it; none run in parallel.
 var openProcess = windows.OpenProcess
 
+// belowNormalPriorityClass is Windows' BELOW_NORMAL_PRIORITY_CLASS, the process creation flag that
+// starts the tool low: stdcall's SysProcAttr has no name for it.
+const belowNormalPriorityClass = 0x00004000
+
 // tree is a started process and the job object that holds it and its children. fallback ends the
 // whole tree without a job object: taskkill walks the children, and cmd.Process.Kill is the last
 // resort because after Start the command always keeps its own process handle.
@@ -32,6 +36,11 @@ type tree struct {
 // rights) falls back to walking the tree with taskkill; Run keeps the same promise there.
 func startTree(cmd *exec.Cmd) (*tree, error) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_NEW_PROCESS_GROUP}
+	if LowPriority() {
+		// Windows' low priority is a process creation flag, so it is set before the tool starts.
+		// syscall.SysProcAttr has no PriorityClass field (Go removed it), so this is the raw flag value.
+		cmd.SysProcAttr.CreationFlags |= belowNormalPriorityClass
+	}
 	job, err := windows.CreateJobObject(nil, nil)
 	if err != nil {
 		job = 0

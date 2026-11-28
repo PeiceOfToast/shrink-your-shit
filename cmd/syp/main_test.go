@@ -117,7 +117,7 @@ func TestAnInstallAtSchemaSixUpgradesThroughSeven(t *testing.T) {
 		t.Fatalf("queue the old job: %v", err)
 	}
 
-	// Take the schema back to 6: remove what migrations 7, 8, 9, 10 and 11 add, and say the database is
+	// Take the schema back to 6: remove what migrations 7 through 13 add, and say the database is
 	// at 6. All the data above stays, as it would on a real stage 1 install.
 	if err := db.Tx(ctx, func(tx *sql.Tx) error {
 		for _, s := range []string{
@@ -128,6 +128,7 @@ func TestAnInstallAtSchemaSixUpgradesThroughSeven(t *testing.T) {
 			`ALTER TABLE jobs DROP COLUMN subtitle_files`,
 			`ALTER TABLE jobs DROP COLUMN failure_code`,
 			`DROP TABLE IF EXISTS app_settings`,
+			`DROP TABLE IF EXISTS workers`,
 			`PRAGMA user_version = 6`,
 		} {
 			if _, err := tx.Exec(s); err != nil {
@@ -157,10 +158,10 @@ func TestAnInstallAtSchemaSixUpgradesThroughSeven(t *testing.T) {
 	if err := db.Read().QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	// The newest migration is 12 (the app settings, S2-10c); 11 is the failure code (S3-6a), 10 the replace journal,
-	// 9 the subtitles change (#854).
-	if version != 12 {
-		t.Errorf("schema version after the upgrade = %d, want 12", version)
+	// The newest migration is 13 (the workers' settings, S3-4); 12 is the app settings (S2-10c), 11 the
+	// failure code (S3-6a), 10 the replace journal, 9 the subtitles change (#854).
+	if version != 13 {
+		t.Errorf("schema version after the upgrade = %d, want 13", version)
 	}
 	if err := db.Read().QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'encoder_state'`).
 		Scan(&encoderState); err != nil {
@@ -276,10 +277,10 @@ func TestTheStartupSweepClearsOlderTriesOnly(t *testing.T) {
 	})
 }
 
-// TestAnInstallAtSchemaNineUpgradesToEleven: an install at schema 9 (the subtitles change) upgrades through the
-// program's own open-and-migrate path to 11, with the replace journal and the failure code made and the data kept
-// (review #865 add-on, then S3-6a).
-func TestAnInstallAtSchemaNineUpgradesToEleven(t *testing.T) {
+// TestAnInstallAtSchemaNineUpgradesToThirteen: an install at schema 9 (the subtitles change) upgrades through the
+// program's own open-and-migrate path to 13, with the replace journal, the failure code, the app settings and the
+// workers' settings made and the data kept (review #865 add-on, then S3-6a, S2-10c, S3-4).
+func TestAnInstallAtSchemaNineUpgradesToThirteen(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 
@@ -303,12 +304,13 @@ func TestAnInstallAtSchemaNineUpgradesToEleven(t *testing.T) {
 		t.Fatalf("add the library: %v", err)
 	}
 
-	// Take the schema back to 9: remove what migrations 10 and 11 add and say the database is at 9.
+	// Take the schema back to 9: remove what migrations 10 through 13 add and say the database is at 9.
 	if err := db.Tx(ctx, func(tx *sql.Tx) error {
 		for _, s := range []string{
 			`DROP TABLE IF EXISTS replace_journal`,
 			`ALTER TABLE jobs DROP COLUMN failure_code`,
 			`DROP TABLE IF EXISTS app_settings`,
+			`DROP TABLE IF EXISTS workers`,
 			`PRAGMA user_version = 9`,
 		} {
 			if _, err := tx.Exec(s); err != nil {
@@ -337,8 +339,8 @@ func TestAnInstallAtSchemaNineUpgradesToEleven(t *testing.T) {
 	if err := db.Read().QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 12 {
-		t.Errorf("schema version after the upgrade = %d, want 12", version)
+	if version != 13 {
+		t.Errorf("schema version after the upgrade = %d, want 13", version)
 	}
 	if err := db.Read().QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'replace_journal'`).
 		Scan(&journal); err != nil {
@@ -358,5 +360,88 @@ func TestAnInstallAtSchemaNineUpgradesToEleven(t *testing.T) {
 	libs, err := library.NewCatalog(db).ListLibraries(ctx)
 	if err != nil || len(libs) != 1 {
 		t.Errorf("libraries after the upgrade = %d (%v), want the one kept", len(libs), err)
+	}
+}
+
+// TestAnInstallAtSchemaTwelveUpgradesToThirteen: an install at schema 12 (the app settings) upgrades through the
+// program's own open-and-migrate path to 13, which makes the workers table and its built-in row (S3-4).
+func TestAnInstallAtSchemaTwelveUpgradesToThirteen(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	db, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Migrate(); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	// A person who had already set page 11's files at once: the built-in worker row is created with
+	// it (the setting is the default for a new worker).
+	if err := db.Tx(ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec(`INSERT INTO app_settings(key, value) VALUES ('processing.parallelJobs', '4')
+			ON CONFLICT(key) DO UPDATE SET value = excluded.value`)
+		return err
+	}); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	// Take the schema back to 12: the number before the workers' settings.
+	if err := db.Tx(ctx, func(tx *sql.Tx) error {
+		for _, s := range []string{
+			`DROP TABLE IF EXISTS workers`,
+			`PRAGMA user_version = 12`,
+		} {
+			if _, err := tx.Exec(s); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		db.Close()
+		t.Fatalf("make the database a schema 12 install: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err = store.Open(dir)
+	if err != nil {
+		t.Fatalf("open the schema 12 install: %v", err)
+	}
+	defer db.Close()
+	if err := db.Migrate(); err != nil {
+		t.Fatalf("upgrade the schema 12 install: %v", err)
+	}
+
+	var version int
+	if err := db.Read().QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version != 13 {
+		t.Errorf("schema version after the upgrade = %d, want 13", version)
+	}
+	var workersTable int
+	if err := db.Read().QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'workers'`).
+		Scan(&workersTable); err != nil {
+		t.Fatal(err)
+	}
+	if workersTable != 1 {
+		t.Error("migration 13 did not run: workers is missing")
+	}
+	var builtin int
+	if err := db.Read().QueryRow(`SELECT count(*) FROM workers WHERE id = 'local'`).Scan(&builtin); err != nil {
+		t.Fatal(err)
+	}
+	if builtin != 1 {
+		t.Errorf("the built-in worker rows = %d, want 1", builtin)
+	}
+	var slots int
+	if err := db.Read().QueryRow(`SELECT slots FROM workers WHERE id = 'local'`).Scan(&slots); err != nil {
+		t.Fatal(err)
+	}
+	if slots != 4 {
+		t.Errorf("the built-in worker's files at once = %d, want the page 11 value 4", slots)
 	}
 }
