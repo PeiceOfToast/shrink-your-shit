@@ -86,8 +86,6 @@ type CardAnswer interface {
 type Workflows interface {
 	CreateFromStarterTx(ctx context.Context, tx *sql.Tx, starterID, name string, answers flow.Answers) (int64, int, error)
 	Get(ctx context.Context, id int64) (flow.Workflow, error)
-	// Revision is one published revision, for the library preview's decision (page 09).
-	Revision(ctx context.Context, id int64, rev int) (flow.Revision, error)
 	// S2-3: the list, create, the editor's draft, publish, revisions and restore, duplicate, delete.
 	List(ctx context.Context) ([]flow.ListItem, error)
 	Create(ctx context.Context, f flow.Flow, madeWith string) (int64, int, error)
