@@ -286,8 +286,8 @@ func checkOption(t Type, opt string) error {
 			}
 		}
 	}
-	// Name only, never the value: an unknown option may carry a secret (review of #921).
-	return fmt.Errorf("the mount option %q is not one this app uses", name)
+	// Echo nothing: an unknown option, bare or name=value, may be a secret (review of #921).
+	return fmt.Errorf("a mount option this app doesn't use was refused")
 }
 
 func addressError(message string) error {

@@ -162,12 +162,14 @@ func TestCheckOptionsCommaRefusalEchoesNothing(t *testing.T) {
 
 // An unknown option's refusal names it but never echoes its value.
 func TestCheckOptionsUnknownRefusalEchoesNoValue(t *testing.T) {
-	err := CheckOptions(SMB, []string{"pass=s3cret"})
-	if err == nil {
-		t.Fatal("an unknown option was accepted")
-	}
-	if strings.Contains(err.Error(), "s3cret") {
-		t.Errorf("the refusal echoes the value: %q", err)
+	for _, opt := range []string{"pass=s3cret", "s3cretword"} {
+		err := CheckOptions(SMB, []string{opt})
+		if err == nil {
+			t.Fatalf("the unknown option %q was accepted", opt)
+		}
+		if strings.Contains(err.Error(), "s3cret") {
+			t.Errorf("the refusal echoes the option: %q", err)
+		}
 	}
 }
 
