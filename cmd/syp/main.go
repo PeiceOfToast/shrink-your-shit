@@ -445,14 +445,7 @@ func newScanner(catalog *library.Catalog, flows *flow.Store, queue *jobs.Queue, 
 			if err != nil {
 				return false, "workflow_missing"
 			}
-			decisions, _, err := flow.PlanFile(rev, info, flow.Env{})
-			if err != nil {
-				return false, "plan_failed"
-			}
-			if !decisions.Work() {
-				return false, "nothing_to_do"
-			}
-			return true, ""
+			return flow.DecideFile(rev, info)
 		},
 		Enqueue: func(ctx context.Context, lib library.Library, f library.File) error {
 			if lib.WorkflowID == nil {
