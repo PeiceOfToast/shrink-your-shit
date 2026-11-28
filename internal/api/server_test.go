@@ -84,12 +84,15 @@ type env struct {
 }
 
 // scanRecorder is the scanner double: it records each scan's library and answers at once, so a
-// handler that starts a scan does not walk anything.
+// handler that starts a scan does not walk anything. QueueFiles records its library too; queue is an
+// optional real scanner for a test that wants the queueing itself.
 type scanRecorder struct {
-	mu    sync.Mutex
-	libs  []library.Library
-	done  chan library.Library
-	wakes chan struct{}
+	mu     sync.Mutex
+	libs   []library.Library
+	queued []library.Library
+	queue  func(context.Context, library.Library) (int, error)
+	done   chan library.Library
+	wakes  chan struct{}
 }
 
 func newScanRecorder() *scanRecorder {
@@ -102,6 +105,25 @@ func (s *scanRecorder) Scan(ctx context.Context, lib library.Library) (library.S
 	s.mu.Unlock()
 	s.done <- lib
 	return library.ScanResult{}, nil
+}
+
+// QueueFiles records the library whose files a Save asked to queue, and answers through queue when a
+// test set one.
+func (s *scanRecorder) QueueFiles(ctx context.Context, lib library.Library) (int, error) {
+	s.mu.Lock()
+	s.queued = append(s.queued, lib)
+	queue := s.queue
+	s.mu.Unlock()
+	if queue != nil {
+		return queue(ctx, lib)
+	}
+	return 0, nil
+}
+
+func (s *scanRecorder) queueRequests() []library.Library {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]library.Library(nil), s.queued...)
 }
 
 // wake is the worker wake: the test only needs to know it happened.

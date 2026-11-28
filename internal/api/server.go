@@ -78,9 +78,11 @@ type Workflows interface {
 	Delete(ctx context.Context, id int64) error
 }
 
-// Scanner is library.Scanner as the api uses it: one scan of one library.
+// Scanner is library.Scanner as the api uses it: one scan of one library, and the queueing a
+// library's counted files get when it is given its first workflow.
 type Scanner interface {
 	Scan(ctx context.Context, lib library.Library) (library.ScanResult, error)
+	QueueFiles(ctx context.Context, lib library.Library) (int, error)
 }
 
 // Server is the api's door: the gate every request passes, and the /api/v2 routes behind it.
@@ -145,6 +147,9 @@ func New(version string) *Server {
 	s.mux.HandleFunc("GET /api/v2/libraries", s.getLibraries)
 	s.mux.HandleFunc("POST /api/v2/libraries", s.postLibrary)
 	s.mux.HandleFunc("GET /api/v2/libraries/{id}", s.getLibrary)
+	// The library panel (page 09): Save is one PATCH of the changed fields, Remove is a DELETE.
+	s.mux.HandleFunc("PATCH /api/v2/libraries/{id}", s.patchLibrary)
+	s.mux.HandleFunc("DELETE /api/v2/libraries/{id}", s.deleteLibrary)
 	s.mux.HandleFunc("POST /api/v2/libraries/{id}/scan", s.scanLibrary)
 	s.mux.HandleFunc("POST /api/v2/libraries/scan", s.scanAllLibraries)
 	// The steps' cards (S2-1): the flow editor's form, from the step registry.

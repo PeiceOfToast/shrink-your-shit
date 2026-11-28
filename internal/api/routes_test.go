@@ -273,6 +273,8 @@ func TestRoutesNeedASession(t *testing.T) {
 		{http.MethodGet, "/api/v2/libraries"},
 		{http.MethodPost, "/api/v2/libraries"},
 		{http.MethodGet, "/api/v2/libraries/1"},
+		{http.MethodPatch, "/api/v2/libraries/1"},
+		{http.MethodDelete, "/api/v2/libraries/1"},
 		{http.MethodPost, "/api/v2/libraries/1/scan"},
 		{http.MethodPost, "/api/v2/libraries/scan"},
 		{http.MethodGet, "/api/v2/summary"},

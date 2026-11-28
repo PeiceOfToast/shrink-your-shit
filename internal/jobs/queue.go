@@ -456,6 +456,53 @@ func (q *Queue) Cancel(ctx context.Context, id int64) (CancelResult, error) {
 	return res, q.emit(events.KindCancelled, events.LevelInfo, id, res.Attempt, libraryID, "cancelled", "cancelled")
 }
 
+// CancelWaitingFor cancels every waiting or retry_wait job of one library, in one transaction, and leaves a
+// running one alone: page 09's Remove cancels what has not started, while what is already converting finishes.
+// It answers how many jobs it cancelled. Each one gets the same History line a Cancel writes.
+func (q *Queue) CancelWaitingFor(ctx context.Context, libraryID int64) (int, error) {
+	now := q.now()
+	var ids []int64
+	var attempts []int
+	err := q.db.Tx(ctx, func(tx *sql.Tx) error {
+		rows, err := tx.Query(
+			`SELECT id, attempt FROM jobs WHERE library_id = ? AND state IN (?, ?) ORDER BY id`,
+			libraryID, string(Waiting), string(RetryWait))
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var id int64
+			var attempt int
+			if err := rows.Scan(&id, &attempt); err != nil {
+				rows.Close()
+				return err
+			}
+			ids = append(ids, id)
+			attempts = append(attempts, attempt)
+		}
+		// The updates below need the transaction's connection back, and every row is read by now.
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		for _, id := range ids {
+			if err := move(tx, id, verbCancel, Cancelled, change{set: ", finished_at = ?, worker_id = NULL", args: []any{ms(now)}}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	for i, id := range ids {
+		if err := q.emit(events.KindCancelled, events.LevelInfo, id, attempts[i], libraryID, "library removed", "library removed"); err != nil {
+			return len(ids), err
+		}
+	}
+	return len(ids), nil
+}
+
 // Retry puts a failed or cancelled job back to waiting on the same row. Its tries start again at zero, and the
 // next claim makes a new attempt row. It is refused while the file has another open job, and for the failures a
 // retry cannot help (see retryRefused).

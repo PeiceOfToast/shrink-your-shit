@@ -53,6 +53,9 @@ const (
 	KindScanStart    Kind = "scan.start"
 	KindScanProgress Kind = "scan.progress"
 	KindScanEnd      Kind = "scan.end"
+	// KindLibraryChanged is a library's settings saved, or the library removed (page 09): the pages
+	// refetch the library list when the stream carries it.
+	KindLibraryChanged Kind = "library.changed"
 	// History kinds (logging.md §6.1): a job's life as the app saw it.
 	KindQueued    Kind = "queued"
 	KindPicked    Kind = "picked"
@@ -73,7 +76,7 @@ var knownKinds = map[Kind]bool{
 	KindDecision: true, KindCommand: true, KindProbe: true, KindProgress: true,
 	KindSize: true, KindVariable: true, KindMove: true, KindWarning: true,
 	KindError: true, KindNote: true,
-	KindScanStart: true, KindScanProgress: true, KindScanEnd: true,
+	KindScanStart: true, KindScanProgress: true, KindScanEnd: true, KindLibraryChanged: true,
 	KindQueued: true, KindPicked: true, KindRetry: true, KindRequeued: true, KindCancelled: true,
 	KindDone: true, KindSkipped: true, KindFailed: true,
 }

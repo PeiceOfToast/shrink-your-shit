@@ -267,6 +267,7 @@ func TestContractKindMapsTheLifecycle(t *testing.T) {
 		events.KindRequeued: "job.state", events.KindCancelled: "job.state",
 		events.KindDone: "job.done", events.KindSkipped: "job.done", events.KindFailed: "job.failed",
 		events.KindScanStart: "scan.start", events.KindScanEnd: "scan.end",
+		events.KindLibraryChanged: "library.changed",
 	}
 	for k, name := range want {
 		if got, ok := contractKind(k); !ok || got != name {

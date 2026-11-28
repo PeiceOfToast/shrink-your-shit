@@ -6,6 +6,9 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
+
+	"github.com/PeiceOfToast/shrink-your-shit/internal/events"
 )
 
 // TestManualRetryClearsThePinnedRevision: a person pressing Retry runs the workflow as published now, so the retry
@@ -217,5 +220,69 @@ func TestRetryClearsTheOldOutputDetails(t *testing.T) {
 	if got.OutputPath != "" || got.SizeBefore != nil || got.SizeAfter != nil || got.Outcome != "" {
 		t.Fatalf("after retry: output %q before %v after %v outcome %q; want all empty",
 			got.OutputPath, got.SizeBefore, got.SizeAfter, got.Outcome)
+	}
+}
+
+// TestCancelWaitingForCancelsOnlyWaiting: removing a library cancels the jobs that have not started, in
+// one go, and leaves the running one to finish (page 09, Remove). Another library's jobs are not touched.
+func TestCancelWaitingForCancelsOnlyWaiting(t *testing.T) {
+	ctx := context.Background()
+	env := newEnv(t)
+	env.addLibrary(t, 1, false)
+	env.addLibrary(t, 2, false)
+	running := env.enqueue(t, 1, 1)
+	waitingA := env.enqueue(t, 2, 1)
+	waitingB := env.enqueue(t, 3, 1)
+	other := env.enqueue(t, 4, 2)
+	// The oldest first, so the running job is library 1's first one.
+	if _, err := env.q.Claim(ctx, "worker-1", ClaimOptions{Order: OrderOldest}); err != nil {
+		t.Fatal(err)
+	}
+	if got := env.stateOf(t, running); got != Running {
+		t.Fatalf("setup: first job is %s, want running", got)
+	}
+
+	cancelled, stop := env.bus.Subscribe(events.Filter{Kind: events.KindCancelled})
+	defer stop()
+	n, err := env.q.CancelWaitingFor(ctx, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Fatalf("cancelled %d jobs, want 2", n)
+	}
+	if got := env.stateOf(t, running); got != Running {
+		t.Fatalf("running job state = %s, want running", got)
+	}
+	for _, id := range []int64{waitingA, waitingB} {
+		if got := env.stateOf(t, id); got != Cancelled {
+			t.Fatalf("waiting job %d state = %s, want cancelled", id, got)
+		}
+	}
+	if got := env.stateOf(t, other); got != Waiting {
+		t.Fatalf("other library's job state = %s, want waiting", got)
+	}
+
+	// Each cancelled job gets the same History line a Cancel writes.
+	seen := map[int64]bool{}
+	for len(seen) < 2 {
+		select {
+		case e := <-cancelled:
+			seen[e.JobID] = true
+		case <-time.After(5 * time.Second):
+			t.Fatalf("only %d cancelled events, want 2", len(seen))
+		}
+	}
+	if !seen[waitingA] || !seen[waitingB] {
+		t.Fatalf("cancelled events for %v, want %d and %d", seen, waitingA, waitingB)
+	}
+
+	// The running job is still the queue's, and the cancelled ones are out of the list.
+	all, err := env.q.List(ctx, ListFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("listed %d jobs, want the running one and the other library's", len(all))
 	}
 }

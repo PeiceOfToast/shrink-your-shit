@@ -219,7 +219,7 @@ func contractKind(k events.Kind) (string, bool) {
 		return "job.done", true
 	case events.KindFailed:
 		return "job.failed", true
-	case events.KindScanStart, events.KindScanProgress, events.KindScanEnd:
+	case events.KindScanStart, events.KindScanProgress, events.KindScanEnd, events.KindLibraryChanged:
 		return string(k), true
 	}
 	return "", false
