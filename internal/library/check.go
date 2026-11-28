@@ -56,9 +56,10 @@ func (c *Catalog) FileInLibrary(ctx context.Context, path string) (bool, error) 
 	return false, nil
 }
 
-// checkWritable proves the app can write in the folder by creating and removing a temp file. A folder
-// it can read but not write is refused up front rather than at the first conversion.
-func checkWritable(path string) error {
+// CheckWritable proves the app can write in the folder by creating and removing a temp file. A folder
+// it can read but not write is refused up front rather than at the first conversion. The health check
+// (internal/system/doctor.go) uses the same probe, so the two never disagree about a folder.
+func CheckWritable(path string) error {
 	f, err := os.CreateTemp(path, ".syp-check-*")
 	if err != nil {
 		return err
@@ -111,7 +112,7 @@ func (c *Catalog) CheckFolder(ctx context.Context, path string) (FolderCheck, er
 			return FolderCheck{}, err
 		}
 	}
-	if err := checkWritable(abs); err != nil {
+	if err := CheckWritable(abs); err != nil {
 		out.Problems = append(out.Problems, FolderProblem{
 			Code:    ProblemUnwritable,
 			Message: "The app can't write in this folder, so converted videos couldn't be saved here. It runs as the user syp: give syp access (for example add syp to this folder's group), or choose a folder outside your home.",

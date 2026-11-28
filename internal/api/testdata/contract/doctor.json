@@ -1,0 +1,47 @@
+{
+  "body": {
+    "checks": [
+      {
+        "detail": "400 GB free on the data disk.",
+        "fix": null,
+        "hint": null,
+        "id": "disk",
+        "label": "Disk space",
+        "status": "ok"
+      },
+      {
+        "detail": "ffmpeg 7.0.2 and ffprobe 7.0.2 are installed.",
+        "fix": null,
+        "hint": null,
+        "id": "tools",
+        "label": "Tools found",
+        "status": "ok"
+      },
+      {
+        "detail": "The graphics card has not been tested yet.",
+        "fix": {
+          "label": "Test the encoders",
+          "method": "POST",
+          "path": "/api/v2/workers/local/capabilities/test"
+        },
+        "hint": "Files convert on the processor until the test ends.",
+        "id": "gpu",
+        "label": "Graphics card",
+        "status": "warn"
+      },
+      {
+        "detail": "The folder $DIR/clips is there and can be written.",
+        "fix": null,
+        "hint": null,
+        "id": "library-1",
+        "label": "Library Clips",
+        "status": "ok"
+      }
+    ],
+    "ranAt": "2026-11-27T04:00:00Z"
+  },
+  "method": "GET",
+  "path": "/api/v2/doctor",
+  "status": 200,
+  "type": "Doctor"
+}

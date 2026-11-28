@@ -1,0 +1,43 @@
+{
+  "body": {
+    "address": "",
+    "doneToday": 0,
+    "encoders": [
+      {
+        "label": "HEVC · Intel Quick Sync",
+        "name": "hevc_qsv",
+        "testOk": true
+      },
+      {
+        "label": "H.264 · Intel Quick Sync",
+        "name": "h264_qsv",
+        "testOk": false
+      }
+    ],
+    "gpu": {
+      "family": "qsv",
+      "name": "Intel Quick Sync (hevc_qsv)"
+    },
+    "gpuSlots": 0,
+    "hours": {
+      "from": "22:00",
+      "to": "06:00"
+    },
+    "id": "local",
+    "libraries": [],
+    "local": true,
+    "name": "This computer",
+    "newLibraries": [],
+    "now": null,
+    "pausedGlobally": false,
+    "primaryEncoder": "hevc_qsv",
+    "since": null,
+    "slots": 2,
+    "state": "idle",
+    "test": null
+  },
+  "method": "PATCH",
+  "path": "/api/v2/workers/local",
+  "status": 200,
+  "type": "WorkerDetail"
+}

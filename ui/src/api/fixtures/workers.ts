@@ -17,6 +17,7 @@ export const WORKERS: WorkerDetail[] = [
     now: { jobId: "j1", file: "Dune.Part.Two.2024.2160p.REMUX.mkv", step: { index: 3, count: 5, name: "Converting video" } },
     doneToday: 9,
     pausedGlobally: false,
+    test: null,
     hours: null,
     primaryEncoder: null,
     encoders: [
@@ -39,6 +40,7 @@ export const WORKERS: WorkerDetail[] = [
     now: { jobId: "j2", file: "The.Bear.S03E04.1080p.WEB-DL.mkv", step: { index: 4, count: 5, name: "Checking the result" } },
     doneToday: 5,
     pausedGlobally: false,
+    test: null,
     hours: null,
     primaryEncoder: "cpu",
     encoders: [],
@@ -61,6 +63,7 @@ export const WORKERS: WorkerDetail[] = [
     now: null,
     doneToday: 0,
     pausedGlobally: false,
+    test: null,
     hours: { from: "09:00", to: "17:00" },
     primaryEncoder: null,
     encoders: [],
