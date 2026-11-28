@@ -326,6 +326,11 @@ func (e *engine) run(ctx context.Context) (res Result) {
 		if res = e.trashOwnSubtitles(plan, extracts); res.Outcome != "" {
 			return res
 		}
+		// A stop after the earlier subtitles moved to the trash and before anything is placed puts them back (review #869).
+		if ctx.Err() != nil {
+			e.restoreTrashed()
+			return cancelled()
+		}
 	}
 	sidecars, res := e.placeSidecars(plan, extracts, staged)
 	if res.Outcome != "" {

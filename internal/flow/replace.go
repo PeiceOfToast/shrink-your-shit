@@ -77,7 +77,13 @@ func (e *engine) replaceOriginal(ctx context.Context, staged safety.Staged, fina
 			Message: "Replaced " + filepath.Base(final) + "; the original is in the trash.",
 		}
 	}
-	if ctx.Err() == nil {
+	// A refusal or a cancel. If the new file did not reach its name, the subtitles placed for it go and the earlier
+	// subtitles come back. If it did (the swap happened), its subtitles stay with it, as on success (review #869).
+	if _, statErr := os.Stat(staged.Path); os.IsNotExist(statErr) {
+		*placed = true
+		e.trashed = nil
+		e.finishSidecars()
+	} else {
 		e.removeSidecars(sidecars)
 		e.restoreTrashed()
 	}
