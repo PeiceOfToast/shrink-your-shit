@@ -24,6 +24,7 @@ import (
 	"github.com/PeiceOfToast/shrink-your-shit/internal/library"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/store"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/system"
+	"github.com/PeiceOfToast/shrink-your-shit/internal/workers"
 )
 
 const (
@@ -72,7 +73,10 @@ type env struct {
 	flows   *flow.Store
 	catalog *library.Catalog
 	queue   *jobs.Queue
-	scans   *scanRecorder
+	workers *workers.Store
+	// cards answers the Workers page's card and encoders when a test sets it before ready().
+	cards CardAnswer
+	scans *scanRecorder
 	// try answers the try route when a test sets it; the real flow.Try is not run here.
 	try func(ctx context.Context, f flow.Flow, file string) (flow.TryResult, error)
 	// stopJob records the worker stop a running job's Cancel asks for (S3-6a); a test sets it, then ready().
@@ -171,6 +175,7 @@ func newEnv(t *testing.T, ready bool) *env {
 	e.catalog = library.NewCatalog(db)
 	e.catalog.Now = e.clock.Now
 	e.queue = jobs.New(jobs.Options{DB: db, Bus: e.bus, Clock: e.clock.Now})
+	e.workers = workers.Open(db)
 	if ready {
 		e.ready()
 	}
@@ -186,6 +191,9 @@ func (e *env) deps() Deps {
 		Wake:     e.scans.wake,
 		StopJob:  e.stopJob,
 		Try:      e.try,
+		Workers:  e.workers,
+		Cards:    e.cards,
+		Now:      e.clock.Now,
 		DiskFree: func(string) (uint64, error) { return 123456789, nil },
 	}
 }

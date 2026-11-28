@@ -273,7 +273,7 @@ func Restore(ctx context.Context, j *Journal, id int64) error {
 	}
 	// The row is claimed before anything moves: a sweep that got there first has purged the copy, and a row that is
 	// no longer done is refused (review N2).
-	claimed, err := j.claim(ctx, id, StateDone, StateMoving)
+	claimed, err := j.claimRestore(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -327,6 +327,8 @@ func Restore(ctx context.Context, j *Journal, id int64) error {
 		_ = os.Remove(holding)
 	}
 	removeHoldingFolder(holding)
+	// A crash here leaves the restore's own kind on the row, and recovery reads the finished restore from it (M2).
+	hookRestoreStep(4)
 	if err := j.SetState(ctx, id, StateRolledBack); err != nil {
 		return fmt.Errorf("restored, but the record could not be saved: %w", err)
 	}
@@ -387,4 +389,30 @@ func holdingOf(r Row) (string, bool) {
 		return "", false
 	}
 	return holding, true
+}
+
+// Migration 14 is the journal's kind (13 is the workers, #896): a swap is "replace", a restore is "restore" (review M2).
+func init() {
+	store.Register(store.Migration{Version: 14, Name: "journal-kind", Up: addJournalKind})
+}
+
+func addJournalKind(tx *sql.Tx) error {
+	_, err := tx.Exec(`ALTER TABLE replace_journal ADD COLUMN kind TEXT NOT NULL DEFAULT 'replace'`)
+	return err
+}
+
+// claimRestore is claim for a restore: the row goes done to moving and is marked a restore, in one write.
+func (j *Journal) claimRestore(ctx context.Context, id int64) (bool, error) {
+	var moved bool
+	err := j.db.Tx(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE replace_journal SET state = 'moving', kind = 'restore', updated_at = ?
+			WHERE id = ? AND state = 'done'`, j.now().Unix(), id)
+		if err != nil {
+			return err
+		}
+		n, err := res.RowsAffected()
+		moved = n == 1
+		return err
+	})
+	return moved, err
 }

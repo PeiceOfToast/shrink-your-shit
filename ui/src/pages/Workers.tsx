@@ -28,7 +28,11 @@ function WorkerRow({ w }: { w: Worker }) {
             {w.now.file}
             <br />
             <span className="muted sm">
-              {w.now.step.name} · step {w.now.step.index} of {w.now.step.count}
+              {w.now.step ? (
+                <>{w.now.step.name} · step {w.now.step.index} of {w.now.step.count}</>
+              ) : (
+                "Starting"
+              )}
             </span>
           </>
         ) : (

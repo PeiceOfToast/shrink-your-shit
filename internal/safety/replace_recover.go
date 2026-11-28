@@ -4,6 +4,7 @@ package safety
 
 import (
 	"context"
+	"fmt"
 	"os"
 
 	"github.com/PeiceOfToast/shrink-your-shit/internal/fsx"
@@ -23,6 +24,9 @@ type RecoverReport struct {
 // stranger's file at the original's name is left alone. A row it cannot settle becomes "attention" and is not purged.
 func Recover(ctx context.Context, j *Journal) (RecoverReport, error) {
 	var rep RecoverReport
+	if err := recoverPurged(ctx, j); err != nil {
+		return rep, err
+	}
 	rows, err := j.Moving(ctx)
 	if err != nil {
 		return rep, err
@@ -33,6 +37,11 @@ func Recover(ctx context.Context, j *Journal) (RecoverReport, error) {
 		}
 		// A restore that stopped partway is settled from where its files are (see settleRestore).
 		state, restored := settleRestore(r)
+		if !restored && r.Kind == "restore" && matches(r.Original, r.Orig) && !matches(r.Final, r.New) {
+			// A restore whose converted copy is already gone and whose original is back: the restore finished, and
+			// only the record was left (review M2).
+			state, restored = StateRolledBack, true
+		}
 		if !restored {
 			state = settle(r)
 			if state == StateRolledBack {
@@ -104,4 +113,39 @@ func putBackOriginal(r Row) bool {
 func exists(path string) bool {
 	_, err := os.Lstat(path)
 	return err == nil
+}
+
+// recoverPurged is the startup pass for a sweep that crashed between its claim (done to purged) and its revert: a purged
+// row whose trash file is still there and is the recorded original goes back to done, so the next sweep can take it
+// and the original is not lost (review M3).
+func recoverPurged(ctx context.Context, j *Journal) error {
+	rows, err := j.db.Read().QueryContext(ctx, `SELECT id, job_id, original, trash, staged, final, state, kind,
+		orig_file_id, orig_size, orig_mtime, orig_ctime, orig_hash,
+		new_file_id, new_size, new_mtime, new_hash
+		FROM replace_journal WHERE state = 'purged'`)
+	if err != nil {
+		return fmt.Errorf("read the purged rows: %w", err)
+	}
+	var found []Row
+	for rows.Next() {
+		var r Row
+		if err := rows.Scan(&r.ID, &r.JobID, &r.Original, &r.Trash, &r.Staged, &r.Final, &r.State, &r.Kind,
+			&r.Orig.FileID, &r.Orig.Size, &r.Orig.MTime, &r.Orig.CTime, &r.Orig.Hash,
+			&r.New.FileID, &r.New.Size, &r.New.MTime, &r.New.Hash); err != nil {
+			rows.Close()
+			return err
+		}
+		found = append(found, r)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, r := range found {
+		if matches(r.Trash, r.Orig) {
+			if err := j.SetState(ctx, r.ID, StateDone); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
