@@ -256,6 +256,35 @@ func FromAnswers(answers, defaults Answers) (Flow, []Problem) {
 	}}, nil
 }
 
+// GreyedAnswer reports the first answer the guide greys today (page 06's Available false) with the
+// reason the page shows. It reads the guide the chips are drawn from, so a choice that becomes
+// available stops being refused here at the same moment.
+func GreyedAnswer(answers, defaults Answers) (Problem, bool) {
+	a := MergeAnswers(answers, defaults)
+	for _, part := range Guide().Parts {
+		for _, f := range part.Fields {
+			if f.Type != "choice" {
+				continue
+			}
+			value, ok := a[f.Key].(string)
+			if !ok {
+				continue
+			}
+			for _, c := range f.Choices {
+				if c.Value != value || c.Available {
+					continue
+				}
+				message := c.Why
+				if message == "" {
+					message = "That choice is not available yet."
+				}
+				return Problem{Field: f.Key, Code: "invalid_answer", Message: message}, true
+			}
+		}
+	}
+	return Problem{}, false
+}
+
 // ToAnswers reads a flow back as the answers that would rebuild it. ok is true only when from those
 // answers FromAnswers makes exactly this flow (the settings decode equal), so a flow the editor
 // changed into something the guide cannot say comes back false and the page sends the person to 07.

@@ -10,7 +10,10 @@
           "settings": {
             "format": "hevc",
             "ifGpuFails": "cpu",
+            "keepDolbyVision": false,
+            "preset": "normal",
             "quality": 3,
+            "size": null,
             "useGpu": false
           },
           "type": "video.convert",
@@ -19,7 +22,9 @@
         {
           "id": "audio",
           "settings": {
-            "format": "copy"
+            "channels": "source",
+            "format": "copy",
+            "subtitles": "keep_all"
           },
           "type": "audio.tracks",
           "version": 1
@@ -28,6 +33,7 @@
           "id": "save",
           "settings": {
             "container": "mkv",
+            "folder": "",
             "nameSuffix": "shrunk",
             "where": "next_to"
           },

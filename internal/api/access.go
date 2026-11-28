@@ -58,13 +58,7 @@ func (s *Server) getStarter(w http.ResponseWriter, r *http.Request) {
 	}
 	// A guided starter opens on its own answers (page 05's card, then page 06 already answered);
 	// a starter the guide cannot say opens on the guide's defaults.
-	answers := flow.DefaultAnswers()
-	if st.Guided {
-		if own, fits := flow.ToAnswers(st.Flow); fits {
-			answers = own
-		}
-	}
-	writeJSON(w, http.StatusOK, starterDetail{starterRow: starterRowOf(st), Answers: answers})
+	writeJSON(w, http.StatusOK, starterDetail{starterRow: starterRowOf(st), Answers: flow.StarterAnswers(st)})
 }
 
 func (s *Server) getGuide(w http.ResponseWriter, r *http.Request) {

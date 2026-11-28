@@ -50,6 +50,17 @@ func Starters() []Starter {
 	}}
 }
 
+// StarterAnswers is the answers a starter opens on (page 05's card, page 06 already answered): its
+// own when the guide can say them, else the guide's defaults.
+func StarterAnswers(st Starter) Answers {
+	if st.Guided {
+		if own, fits := ToAnswers(st.Flow); fits {
+			return own
+		}
+	}
+	return DefaultAnswers()
+}
+
 // StarterByID finds a starter by its id.
 func StarterByID(id string) (Starter, bool) {
 	for _, s := range Starters() {

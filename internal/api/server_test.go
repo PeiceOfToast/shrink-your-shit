@@ -530,7 +530,7 @@ func TestSetupAllOrNothing(t *testing.T) {
 // failingWorkflows makes setup's workflow step fail.
 type failingWorkflows struct{ Workflows }
 
-func (failingWorkflows) CreateFromStarterTx(context.Context, *sql.Tx, string, string) (int64, int, error) {
+func (failingWorkflows) CreateFromStarterTx(context.Context, *sql.Tx, string, string, flow.Answers) (int64, int, error) {
 	return 0, 0, errors.New("the workflow store is unavailable")
 }
 

@@ -102,15 +102,18 @@ type ListItem struct {
 // transaction. Setup (R1-9) calls the Tx variant inside its own all-or-nothing call.
 func (s *Store) CreateFromStarter(ctx context.Context, starterID, name string) (workflowID int64, rev int, err error) {
 	err = s.db.Tx(ctx, func(tx *sql.Tx) error {
-		workflowID, rev, err = s.CreateFromStarterTx(ctx, tx, starterID, name)
+		workflowID, rev, err = s.CreateFromStarterTx(ctx, tx, starterID, name, nil)
 		return err
 	})
 	return workflowID, rev, err
 }
 
 // CreateFromStarterTx is CreateFromStarter on the caller's transaction, so it commits or rolls
-// back with the caller's other writes.
-func (s *Store) CreateFromStarterTx(ctx context.Context, tx *sql.Tx, starterID, name string) (workflowID int64, rev int, err error) {
+// back with the caller's other writes. answers are page 13's chips: nil keeps the starter exactly,
+// and otherwise the flow is FromAnswers' mapping of the starter's own answers under the person's
+// (the same call page 06's save makes). The caller validates them first; a problem here is a
+// refused setup, not a saved one.
+func (s *Store) CreateFromStarterTx(ctx context.Context, tx *sql.Tx, starterID, name string, answers Answers) (workflowID int64, rev int, err error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return 0, 0, errors.New("A workflow needs a name.")
@@ -120,6 +123,14 @@ func (s *Store) CreateFromStarterTx(ctx context.Context, tx *sql.Tx, starterID, 
 		return 0, 0, fmt.Errorf("there is no starter called %q", starterID)
 	}
 	f := starter.Flow
+	if answers != nil {
+		made, problems := FromAnswers(answers, StarterAnswers(starter))
+		if len(problems) > 0 {
+			return 0, 0, fmt.Errorf("the setup answers do not make a flow: %s", problems[0].Message)
+		}
+		made.Name, made.Description = f.Name, f.Description
+		f = made
+	}
 	f.Name = name
 	text, err := json.Marshal(f)
 	if err != nil {
@@ -127,9 +138,9 @@ func (s *Store) CreateFromStarterTx(ctx context.Context, tx *sql.Tx, starterID, 
 	}
 	// A guided starter's answers are stored with it, so the setup-made workflow shows as one the
 	// guide can edit (ui-shop 19:28Z). A starter the guide cannot say keeps NULL.
-	var answers any
+	var answersCol any
 	if starter.Guided {
-		if answers, err = answersColumn(f); err != nil {
+		if answersCol, err = answersColumn(f); err != nil {
 			return 0, 0, err
 		}
 	}
@@ -137,7 +148,7 @@ func (s *Store) CreateFromStarterTx(ctx context.Context, tx *sql.Tx, starterID, 
 	res, err := tx.ExecContext(ctx,
 		`INSERT INTO workflows(name, description, kind, made_with, current_rev, answers, created_at, updated_at)
 		 VALUES(?, ?, 'video', 'starter', 1, ?, ?, ?)`,
-		name, f.Description, answers, now, now)
+		name, f.Description, answersCol, now, now)
 	if err != nil {
 		return 0, 0, fmt.Errorf("save the workflow: %w", err)
 	}
