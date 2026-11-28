@@ -97,10 +97,21 @@ func TestChannelBranchesMatchTheRun(t *testing.T) {
 	if !audioWorkWith(t, mono, 32_000) {
 		t.Error("a mono layout keeps a stereo track: the line's condition says a differing layout converts it")
 	}
+	// A sample rate alone takes the same branch: the 48 kHz track stays at 48000 and converts at 44100.
+	for rate, wantWork := range map[int]bool{48000: false, 44100: true} {
+		f := setStep(t, setStep(t, starter(t), "audio.tracks", "codec", "opus"), "audio.tracks", "sampleRate", rate)
+		c, _, _ := sentencesOf(t, f, 7)
+		if !strings.Contains(c, "a channel layout or sample rate that differs from a track converts that track") {
+			t.Errorf("sample rate %d: converts = %q", rate, c)
+		}
+		if got := audioWorkWith(t, f, 32_000); got != wantWork {
+			t.Errorf("sample rate %d on a 48 kHz track: work = %v, want %v", rate, got, wantWork)
+		}
+	}
 }
 
-// The HDR wording is the video's alone: a file whose video is HDR with HDR set to skip gets no video work, and the run
-// still plans its audio.
+// The HDR wording is the video's alone. The run side (H.264 HDR with skip gets no video work) is pinned by
+// TestVideoHDRSkipLeavesTheFileAlone; this source is already HEVC.
 func TestHDRLineClaimsOnlyTheVideo(t *testing.T) {
 	f := setStep(t, starter(t), "video.convert", "hdr", "skip")
 	_, leave, _ := sentencesOf(t, f, 7)
