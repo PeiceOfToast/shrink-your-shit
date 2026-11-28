@@ -1,10 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { api, type LogEvent, type LogParams } from "../api/index.ts";
+import { api, type LogCounts, type LogEvent, type LogParams } from "../api/index.ts";
 import { useApi } from "../api/useApi.ts";
 import { clock, clockPrecise } from "../format/time.ts";
 import { Link, navigate, useLocation } from "../router.tsx";
 import { Icon } from "../ui/Icon.tsx";
-import { LEVEL_LABEL, addLiveLine, copyText, followsBottom, keptScrollTop, levelBadges, olderCursorAfter, pagingCursor, saveText, showLines, showLoadOlder, type LogLevelName } from "./logParts.ts";
+import { LEVEL_LABEL, addLiveLine, copyText, followsBottom, keptScrollTop, levelBadges, olderCursorAfter, pagingCursor, saveText, shownCounts, showLines, showLoadOlder, startCountReads, type LogLevelName } from "./logParts.ts";
 
 // The System log (page 12): every app-wide event, newest last. Filters live in the URL, so a link can open a filtered log.
 const LEVELS = [
@@ -157,6 +157,7 @@ export function SystemLog() {
   const [older, setOlder] = useState<LogEvent[]>([]);
   // The cursor for the next older page: undefined until an older page is loaded (then the first page's nextBefore is used).
   const [olderCursor, setOlderCursor] = useState<number | null | undefined>(undefined);
+  const [liveCounts, setLiveCounts] = useState<LogCounts | null>(null);
   const [live, setLive] = useState<LogEvent[]>([]);
   const [follow, setFollow] = useState(true);
   const [paused, setPaused] = useState(false);
@@ -170,6 +171,7 @@ export function SystemLog() {
     setOlder([]);
     setLive([]);
     setOlderCursor(undefined);
+    setLiveCounts(null);
   }, [paramKey]);
 
   // Typing in the search box: the URL follows after a short pause.
@@ -194,6 +196,18 @@ export function SystemLog() {
       .catch(() => {});
   }, []);
 
+  // A fresh load carries its own counts, so the last live read is dropped.
+  useEffect(() => {
+    setLiveCounts(null);
+  }, [log.data]);
+
+  // While Follow is on, the level counts are read again from the server every poll (4 s), for this page's own filter.
+  useEffect(() => {
+    if (!follow) return;
+    return startCountReads(() => api.getLog({ ...paramsFor(), limit: 1 }).then((p) => p.counts), setLiveCounts);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [follow, paramKey]);
+
   // Follow: new lines arrive while the page is open. Scrolling up pauses; Follow resumes.
   useEffect(() => {
     if (!follow) return;
@@ -207,8 +221,8 @@ export function SystemLog() {
   const base = log.data?.items ?? [];
   const loaded = [...older, ...base];
   const items = showLines(loaded, live);
-  // The badges are the server's counts (the whole log, as of the last load); the live lines are not added on top of them.
-  const counts = levelBadges(log.data?.counts ?? { info: 0, warn: 0, error: 0 }, live);
+  // The badges: the live read of the server's counts while Follow is on, else the last load's. Live lines are not added on top.
+  const counts = levelBadges(shownCounts(liveCounts, log.data?.counts), live);
 
   // Follow scrolls to the newest line when a new line arrives at the bottom. Older lines prepended by Load older are not new
   // lines at the bottom, so they do not move the view.

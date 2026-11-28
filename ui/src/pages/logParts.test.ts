@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { JobStep, LogEvent, LogKind, LogLevel } from "../api/types.ts";
-import { addLiveLine, followsBottom, keptScrollTop, levelBadges, logsFromEvents, olderCursorAfter, pagingCursor, showLines, showLoadOlder } from "./logParts.ts";
+import { addLiveLine, followsBottom, keptScrollTop, levelBadges, logsFromEvents, olderCursorAfter, pagingCursor, shownCounts, showLines, showLoadOlder, startCountReads } from "./logParts.ts";
 import { readFileSync } from "node:fs";
 
 const steps: JobStep[] = [
@@ -288,5 +288,49 @@ test("the page scrolls through followsBottom and keeps the distance from the bot
   assert.match(src, /followsBottom\(seen\.current\.newest, newestSeq, follow, paused, seen\.current\.on\)/);
   assert.match(src, /keptScrollTop\(el\.scrollHeight, keepFromBottom\.current\)/);
   assert.doesNotMatch(src, /\[items\.length, follow, paused\]/);
+});
+
+test("the badges show the live read while there is one, else the last load's, else zeros", () => {
+  const live = { info: 5, warn: 2, error: 0 };
+  const load = { info: 3, warn: 1, error: 0 };
+  assert.deepEqual(shownCounts(live, load), live);
+  assert.deepEqual(shownCounts(null, load), load);
+  assert.deepEqual(shownCounts(null, null), { info: 0, warn: 0, error: 0 });
+});
+
+test("a count read in flight when Follow stops is dropped, not written over the new filter", async () => {
+  let tick: (() => void) | null = null;
+  const pending: ((c: { info: number; warn: number; error: number }) => void)[] = [];
+  const written: unknown[] = [];
+  const stop = startCountReads(
+    () => new Promise((res) => pending.push(res)),
+    (c) => written.push(c),
+    4_000,
+    (fn) => { tick = fn; return 1; },
+    () => {},
+  );
+  tick!();
+  stop();
+  pending[0]({ info: 9, warn: 9, error: 9 });
+  await new Promise((r) => setTimeout(r, 0));
+  assert.deepEqual(written, []);
+});
+
+test("a count read that lands while Follow is on is written", async () => {
+  let tick: (() => void) | null = null;
+  const pending: ((c: { info: number; warn: number; error: number }) => void)[] = [];
+  const written: unknown[] = [];
+  const stop = startCountReads(
+    () => new Promise((res) => pending.push(res)),
+    (c) => written.push(c),
+    4_000,
+    (fn) => { tick = fn; return 1; },
+    () => {},
+  );
+  tick!();
+  pending[0]({ info: 4, warn: 1, error: 0 });
+  await new Promise((r) => setTimeout(r, 0));
+  assert.deepEqual(written, [{ info: 4, warn: 1, error: 0 }]);
+  stop();
 });
 
