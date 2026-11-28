@@ -47,7 +47,7 @@ export function Processing() {
       <Row label="Low priority" hint="Conversions yield to other work on the machine.">
         <Switch label="Low priority" on={p.lowPriority} onChange={(lowPriority) => setP({ lowPriority })} />
       </Row>
-      <Row id="p-keep" label="Keep originals (days)" hint="Originals go to the trash for this many days after the new file passes. 0 deletes them straight away." field="processing.keepOriginalsDays" problem={f.problem}>
+      <Row id="p-keep" label="Keep originals (days)" hint="Originals wait in the trash this many days after the new file passes. While any workflow replaces originals, keep at least 7. Otherwise 0 deletes them straight away." field="processing.keepOriginalsDays" problem={f.problem}>
         <input id="p-keep" type="number" className="inp" min={0} max={365} value={p.keepOriginalsDays} onChange={(e) => setP({ keepOriginalsDays: e.target.valueAsNumber })} />
       </Row>
       <Row id="p-space" label="Low disk space limit (GB)" hint="A library disk below this gets no new jobs." field="processing.lowSpaceGB" problem={f.problem}>
