@@ -33,9 +33,15 @@ test("a picked size shows as the most the flow converts", () => {
   assert.match(linesFor(answersToFlow({ resolution: "1080" } as never, meta)).converts, /, at most 1080p\.$/);
 });
 
-test("the library panel shows the lines only when the flow sends them", () => {
+test("the library panel asks the flow for its lines", () => {
   const src = readFileSync(new URL("../pages/LibraryPanel.tsx", import.meta.url), "utf8");
   assert.match(src, /api\.getFlow\(wfId\)/);
-  assert.match(src, /\{sum\.data\?\.summary && \(/);
   assert.doesNotMatch(src, /getWorkflow|isReal\("workflows"\)/);
 });
+
+test("the panel hides the summary block when the lines are empty (a draft whose settings do not read yet)", () => {
+  const src = readFileSync(new URL("../pages/LibraryPanel.tsx", import.meta.url), "utf8");
+  assert.match(src, /\{!!sum\.data\?\.summary\?\.converts && \(/);
+  assert.doesNotMatch(src, /\{sum\.data\?\.summary && \(/);
+});
+

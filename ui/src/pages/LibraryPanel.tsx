@@ -209,7 +209,7 @@ export function LibraryPanel({ id, onChange }: { id: string; onChange?: () => vo
                     <option key={w.id} value={w.id}>{w.name}</option>
                   ))}
                 </select>
-                {sum.data?.summary && (
+                {!!sum.data?.summary?.converts && (
                   <div className="wfsum">
                     <span>{sum.data.summary.converts}</span>
                     <span>{sum.data.summary.leavesAlone}</span>
