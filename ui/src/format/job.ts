@@ -1,4 +1,4 @@
-import type { Job, JobOriginal } from "../api/types.ts";
+import type { Job, JobOriginal, JobsActionDone } from "../api/types.ts";
 import { dayOf } from "./time.ts";
 
 // Text the job list and panels build from a job's structured fields. The server sends names and numbers only.
@@ -69,4 +69,10 @@ export function originalText(o: JobOriginal): string {
       throw new Error(`Unknown original action: ${unknown}`);
     }
   }
+}
+
+// The line after a job action: the server answers 200 even when it refuses an id, so a refusal's own sentence
+// is shown instead of the success text.
+export function jobActionText(r: JobsActionDone, done: string): string {
+  return r.refused[0]?.message ?? done;
 }

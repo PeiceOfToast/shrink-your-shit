@@ -45,7 +45,7 @@ test("events and history for an unknown job say so", async () => {
   await assert.rejects(getJobHistory("nope"), (e: unknown) => e instanceof ApiError && e.code === "job_not_found");
 });
 
-test("a job action returns how many were done and which were refused", async () => {
-  assert.deepEqual(await runJobsAction("retry", ["a", "b"]), { done: 2, refused: [] });
+test("a job action returns the ids that were done and which were refused", async () => {
+  assert.deepEqual(await runJobsAction("retry", ["a", "b"]), { done: ["a", "b"], refused: [] });
 });
 

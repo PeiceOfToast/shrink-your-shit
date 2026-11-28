@@ -1,4 +1,4 @@
-import { jobResultText, jobResultTone, originalText } from "../format/job.ts";
+import { jobActionText, jobResultText, jobResultTone, originalText } from "../format/job.ts";
 import { clock, clockPrecise, duration, timeLeft } from "../format/time.ts";
 import { formatGB } from "../api/index.ts";
 
@@ -134,13 +134,14 @@ export function JobDetail({ id, initialTab }: { id: string; initialTab: "summary
     setPicked("log");
   };
 
+  // run may return the line to show (a refused job action's sentence); otherwise "done" is shown.
   const act = async (run: () => Promise<unknown>, done: string) => {
     setBusy(true);
     setMsg("");
     try {
-      await run();
+      const r = await run();
       setConfirm(null);
-      setMsg(done);
+      setMsg(typeof r === "string" ? r : done);
       detail.reload();
     } catch (e) {
       setMsg(e instanceof Error ? e.message : "Something went wrong. Try again.");
@@ -148,6 +149,8 @@ export function JobDetail({ id, initialTab }: { id: string; initialTab: "summary
       setBusy(false);
     }
   };
+  const jobAct = (action: "retry" | "cancel", done: string) =>
+    act(async () => jobActionText(await api.runJobsAction(action, [id]), done), done);
 
   const downloadLog = () => {
     if (!d) return;
@@ -197,10 +200,11 @@ export function JobDetail({ id, initialTab }: { id: string; initialTab: "summary
             <button type="button" className="btn ghost sm" aria-label="Next job" disabled={!nb.data?.next} onClick={() => go(nb.data?.next ?? null)}>›</button>
             {/* An empty actionLabel means retrying isn't the right move (a replace that needs a look). */}
             {state === "failed" && d?.failure?.actionLabel !== "" && (
-              <button type="button" className="btn sm" disabled={busy} onClick={() => act(() => api.runJobsAction("retry", [id]), "Queued to try again.")}>Retry</button>
+              <button type="button" className="btn sm" disabled={busy} onClick={() => jobAct("retry", "Queued to try again.")}>Retry</button>
             )}
             <div className={`jd-more${more ? " open" : ""}`}>
-            {(state === "done" || state === "skipped") && (
+            {/* The server has no convert-again route until S3-6b, so a real install doesn't offer Run again yet. */}
+            {(state === "done" || state === "skipped") && !isReal("jobs") && (
               <button type="button" className="btn sm" disabled={busy} onClick={() => setConfirm("again")}>Run again</button>
             )}
             {(state === "running" || state === "waiting") && (
@@ -265,7 +269,7 @@ export function JobDetail({ id, initialTab }: { id: string; initialTab: "summary
           {confirm === "cancel" && (
             <div className="jd-confirm" role="alert">
               <span>Stop converting? The original stays as it is.</span>
-              <button type="button" className="btn primary sm" disabled={busy} onClick={() => act(() => api.runJobsAction("cancel", [id]), "Stopped.")}>Stop</button>
+              <button type="button" className="btn primary sm" disabled={busy} onClick={() => jobAct("cancel", "Stopped.")}>Stop</button>
               <button type="button" className="btn sm" onClick={() => setConfirm(null)}>Keep going</button>
             </div>
           )}
@@ -293,7 +297,7 @@ export function JobDetail({ id, initialTab }: { id: string; initialTab: "summary
                   </button>
                 ))}
               </nav>
-              {tab === "summary" && <SummaryTab d={d} busy={busy} onRetry={() => act(() => api.runJobsAction("retry", [id]), "Queued to try again.")} />}
+              {tab === "summary" && <SummaryTab d={d} busy={busy} onRetry={() => jobAct("retry", "Queued to try again.")} />}
               {tab === "log" && <LogTab d={d} focus={focusStep} />}
               {tab === "steps" && <StepsTab d={d} onOpenLog={openLog} />}
               {tab === "before" && <BeforeTab rows={d.media} />}

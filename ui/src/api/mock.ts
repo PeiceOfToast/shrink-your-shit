@@ -1,4 +1,4 @@
-import type { Attention, HistoryLine, Job, JobDetail, JobNeighbours, JobsPage, JobsParams, Language, LogEvent, Overview, ScanAllDone, Summary } from "./types.ts";
+import type { Attention, HistoryLine, Job, JobDetail, JobNeighbours, JobsActionDone, JobsPage, JobsParams, Language, LogEvent, Overview, ScanAllDone, Summary } from "./types.ts";
 import { ATTENTION, OVERVIEW, SUMMARY } from "./fixtures/index.ts";
 import { JOBS } from "./fixtures/jobs.ts";
 import { jobDetail } from "./fixtures/jobDetail.ts";
@@ -121,10 +121,10 @@ export function getJobs(params: JobsParams = {}): Promise<JobsPage> {
 }
 
 // POST /api/v2/jobs/actions: {done, refused[{id, code, message}]}. The mock refuses nothing.
-export function runJobsAction(action: "retry" | "cancel" | "top", ids: string[]): Promise<{ done: number; refused: { id: string; code: string; message: string }[] }> {
+export function runJobsAction(action: "retry" | "cancel" | "top", ids: string[]): Promise<JobsActionDone> {
   // The mock refuses nothing, so every id is done.
   void action;
-  return respond(() => ({ done: ids.length, refused: [] }));
+  return respond(() => ({ done: [...ids], refused: [] }));
 }
 
 export function scanAllLibraries(): Promise<ScanAllDone> {
