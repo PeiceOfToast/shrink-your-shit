@@ -125,6 +125,10 @@ trap 'exit 130' INT TERM
 
 # --- what the container installs ------------------------------------------------------------------
 step "The installer to test"
+# The code this log proves: the commit the script itself is checked out at, and the version stamped
+# into the binary being installed. A log without them cannot be matched to a diff later.
+COMMIT=$(git -C "$(dirname "$0")/../.." rev-parse HEAD 2>/dev/null || echo unknown)
+say "commit: $COMMIT"
 ART="${SYP_ARTIFACTS:-}"
 if [ -n "$ART" ]; then
   say "using the prepared folder $ART"
@@ -138,6 +142,9 @@ if [ -n "$ART" ]; then
   fi
   pass "artifacts have syp-linux-amd64, install.sh and checksums.txt"
   say "syp-linux-amd64 sha256: $(sha256sum "$ART/syp-linux-amd64" | cut -d' ' -f1)"
+  # The binary's own -X main.version, so the log names what the installer installed. A copy built for
+  # another architecture (or not runnable here) still leaves the commit line above.
+  say "binary version: $("$ART/syp-linux-amd64" version 2>/dev/null || echo unknown)"
 else
   say "the published release, the exact one-liner with no SYP_BASE_URL:"
   say "  $ONE_LINER"
@@ -276,6 +283,165 @@ case "$ff" in
   "ffmpeg version n8.0.1"*) pass "the installed ffmpeg is the pinned 8 build ($ff)" ;;
   *) fail "the installed ffmpeg is not the pinned 8 build (got: ${ff:-nothing})" ;;
 esac
+
+# --- the root mount helper (S3-7) -------------------------------------------------------------------
+MOUNT_SOCKET=/run/syp/mount.sock
+step "The mount helper's units, folders and socket"
+if ct "test -S $MOUNT_SOCKET"; then
+  pass "the helper socket $MOUNT_SOCKET exists"
+else
+  fail "the helper socket $MOUNT_SOCKET is missing after the install"
+fi
+if ct 'systemctl is-active --quiet syp-mount.socket' && ct 'systemctl is-enabled --quiet syp-mount.socket'; then
+  pass "syp-mount.socket is active and enabled"
+else
+  fail "syp-mount.socket is not active and enabled"
+fi
+sock=$(ct "stat -c '%a %U %G' $MOUNT_SOCKET" 2>/dev/null || true)
+if [ "$sock" = "660 root syp" ]; then
+  pass "the socket is root:syp, mode 0660"
+else
+  fail "the socket's mode and owner are '$sock', not '660 root syp'"
+fi
+# The shares folder is root's to write and the syp user's to read, and it lives outside the app's
+# data folder: the app's user owns that one and could swap anything inside it.
+shares=$(ct "stat -c '%a %U %G' /var/lib/syp-shares" 2>/dev/null || true)
+if [ "$shares" = "750 root syp" ]; then
+  pass "/var/lib/syp-shares is mode 0750, root:syp"
+else
+  fail "/var/lib/syp-shares is '$shares', not '750 root syp'"
+fi
+if ct 'test ! -e /var/lib/syp/shares'; then
+  pass "the shares folder is not under the app's data folder"
+else
+  fail "the shares folder is still under /var/lib/syp"
+fi
+rec=$(ct "stat -c '%a %U %G' /var/lib/syp-helper" 2>/dev/null || true)
+if [ "$rec" = "700 root root" ]; then
+  pass "/var/lib/syp-helper is root's alone (0700 root root)"
+else
+  fail "/var/lib/syp-helper is '$rec', not '700 root root'"
+fi
+# cifs and nfs need internet sockets to resolve a share's host name (AF_UNIX alone measurably fails
+# at getent hosts inside this unit).
+raf=$(ct 'systemctl show -p RestrictAddressFamilies --value syp-mount.service' 2>/dev/null || true)
+case " $raf " in
+  *' AF_INET '*)
+    case " $raf " in
+      *' AF_UNIX '*) pass "the unit keeps unix sockets and may use internet sockets ($raf)" ;;
+      *) fail "RestrictAddressFamilies leaves out AF_UNIX: '$raf'" ;;
+    esac ;;
+  *) fail "RestrictAddressFamilies has no AF_INET, so a share's host name cannot be resolved: '$raf'" ;;
+esac
+# The hardening that narrows the helper without giving it a namespace. The namespace equality below is
+# what fails if someone adds an option that makes one.
+for prop in ProtectHostname RestrictRealtime LockPersonality ProtectClock; do
+  val=$(ct "systemctl show -p $prop --value syp-mount.service" 2>/dev/null || true)
+  if [ "$val" = yes ]; then
+    pass "the unit sets $prop=yes"
+  else
+    fail "the unit's $prop is '$val', wanted 'yes'"
+  fi
+done
+# The helper must refuse a shares folder under the app's data folder: /var/lib/syp belongs to syp, so
+# syp could swap a folder inside it between the helper's check and its mkdir, chown or mount.
+ct '/usr/local/bin/syp helper -shares /var/lib/syp/shares' >"$WORK/refuse.out" 2>&1 && refuse_rc=0 || refuse_rc=$?
+if [ "$refuse_rc" -ne 0 ]; then
+  pass "the helper refuses to start on /var/lib/syp/shares (exit $refuse_rc)"
+else
+  fail "the helper started with -shares /var/lib/syp/shares"
+fi
+if grep -q 'not root' "$WORK/refuse.out"; then
+  pass "the refusal names the folder's owner: $(head -n 1 "$WORK/refuse.out")"
+else
+  fail "the refusal does not name the owner: $(head -n 1 "$WORK/refuse.out")"
+fi
+
+# The request client is the test's tool, not part of the install.
+if ! ct 'command -v python3 >/dev/null 2>&1'; then
+  ct 'DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3' >>"$LOG_TMP" 2>&1 \
+    || fail "python3 could not be installed in the container for the request client"
+fi
+ct 'cat > /usr/local/bin/syp-ask <<"PY"
+#!/usr/bin/env python3
+# One request over the helper socket: JSON on stdin, the answer on stdout.
+import socket, sys
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.settimeout(10)
+s.connect("/run/syp/mount.sock")
+s.sendall(sys.stdin.buffer.read())
+s.shutdown(socket.SHUT_WR)
+out = b""
+while True:
+    b = s.recv(4096)
+    if not b:
+        break
+    out += b
+sys.stdout.write(out.decode())
+PY
+chmod 755 /usr/local/bin/syp-ask' >>"$LOG_TMP" 2>&1 || fail "the request client could not be written in the container"
+
+# The first request also proves the unit starts and passes its sandbox: the answer can only come from
+# a helper that opened the record and run folders and read the mount table.
+step "The helper starts on a request and answers the syp user"
+answer=$(ct 'printf %s "{\"action\":\"probe\",\"id\":1}" | setpriv --reuid=syp --regid=syp --clear-groups /usr/local/bin/syp-ask' 2>/dev/null || true)
+case "$answer" in
+  *'"reason":"not_mounted"'*)
+    pass "the helper answered syp's probe (not_mounted: nothing is mounted)" ;;
+  *)
+    fail "the helper did not answer syp's probe (got: ${answer:-no answer})" ;;
+esac
+if ct 'systemctl is-active --quiet syp-mount.service'; then
+  pass "syp-mount.service is active after the request"
+else
+  fail "syp-mount.service is not active after the request"
+fi
+HELPER_STARTED=$(ct 'systemctl show -p ExecMainStartTimestamp --value syp-mount.service' 2>/dev/null || true)
+# The helper's start chowns its run folder to root:syp and tightens it to 0750. It must not be
+# group-writable: the socket and the temporary credentials files live there.
+run=$(ct "stat -c '%a %U %G' /run/syp" 2>/dev/null || true)
+if [ "$run" = "750 root syp" ]; then
+  pass "/run/syp is 0750 root:syp after the helper's start"
+else
+  fail "/run/syp is '$run', not '750 root syp'"
+fi
+# The helper must act in the host's mount namespace. systemd gives a unit a private one as soon as it
+# has ProtectSystem=, ProtectHome= or ReadWritePaths=, with / a slave of the host's, so a mount made
+# there would stay there. This check is the guard against one being added back.
+# The expansion happens in the container, not here.
+# shellcheck disable=SC2016
+helper_ns=$(ct 'readlink /proc/$(systemctl show -p MainPID --value syp-mount.service)/ns/mnt' 2>/dev/null || true)
+host_ns=$(ct 'readlink /proc/1/ns/mnt' 2>/dev/null || true)
+if [ -n "$helper_ns" ] && [ "$helper_ns" = "$host_ns" ]; then
+  pass "the helper shares the host's mount namespace ($helper_ns)"
+else
+  fail "the helper's mount namespace is '$helper_ns', the host's is '$host_ns'"
+fi
+
+step "The helper refuses an unprivileged uid that is not syp"
+# The socket is group syp, so the client can reach the helper; the helper's own SO_PEERCRED check is
+# what must refuse it. A mount request is used because an accepted one would leave a point behind.
+if ct 'id -u nobody >/dev/null 2>&1'; then
+  unpriv=$(ct 'printf %s "{\"action\":\"mount\",\"id\":7,\"type\":\"smb\",\"source\":\"//127.0.0.1/s7\",\"username\":\"u\",\"password\":\"p\"}" | setpriv --reuid=nobody --regid=syp --clear-groups /usr/local/bin/syp-ask' 2>/dev/null || true)
+  case "$unpriv" in
+    *'"ok":true'*|*'"ok": true'*)
+      fail "the helper answered an unprivileged uid's mount request: $(printf '%s' "$unpriv" | head -c 160)" ;;
+    *)
+      pass "an unprivileged uid's request was refused (no ok:true answer): $(printf '%s' "${unpriv:-no answer}" | head -c 120)" ;;
+  esac
+  if ct 'test ! -e /var/lib/syp-shares/7'; then
+    pass "the refused request created no mount point"
+  else
+    fail "the refused request created /var/lib/syp-shares/7"
+  fi
+  if ct 'systemctl is-active --quiet syp-mount.service'; then
+    pass "the helper is still active after the refused request"
+  else
+    fail "the helper is not active after the refused request"
+  fi
+else
+  fail "the container has no nobody user to test the refusal with"
+fi
 
 # --- the setup page, before there is an account -----------------------------------------------------
 step "The setup page before an account exists"
@@ -424,4 +590,48 @@ if curl -sS -b "$JAR" -c "$JAR" "$BASE/api/v2/libraries" | grep -q "$LIBRARY"; t
   pass "the library is still there after the re-run"
 else
   fail "the library is gone after the re-run"
+fi
+# The backup copies the app's data; the shares' points are outside it, so no live mount is copied.
+# shellcheck disable=SC2016
+if ct 'b=$(ls -d /var/lib/syp.bak-* 2>/dev/null | tail -n 1); [ -n "$b" ] && [ ! -e "$b/shares" ]'; then
+  pass "the update backed up the data without a share point inside it"
+else
+  fail "the update's backup is missing or holds a shares folder"
+fi
+after=$(ct "stat -c '%a %U %G' /var/lib/syp-shares" 2>/dev/null || true)
+if [ "$after" = "750 root syp" ]; then
+  pass "the shares folder is still root:syp 0750 after the update"
+else
+  fail "the shares folder is '$after' after the update, not '750 root syp'"
+fi
+
+# --- the update path restarts the helper's units ------------------------------------------------------
+step "The mount helper after the re-run"
+if ct "test -S $MOUNT_SOCKET"; then
+  pass "the helper socket is present again after the re-run"
+else
+  fail "the helper socket is missing after the re-run"
+fi
+if ct 'systemctl is-active --quiet syp-mount.socket'; then
+  pass "syp-mount.socket is active after the re-run"
+else
+  fail "syp-mount.socket is not active after the re-run"
+fi
+if ct 'systemctl is-failed --quiet syp-mount.socket' || ct 'systemctl is-failed --quiet syp-mount.service'; then
+  fail "a mount unit is in a failed state after the re-run"
+else
+  pass "neither mount unit is failed after the re-run"
+fi
+answer2=$(ct 'printf %s "{\"action\":\"probe\",\"id\":1}" | setpriv --reuid=syp --regid=syp --clear-groups /usr/local/bin/syp-ask' 2>/dev/null || true)
+case "$answer2" in
+  *'"reason":"not_mounted"'*)
+    pass "the helper answers the syp user again after the re-run" ;;
+  *)
+    fail "the helper did not answer syp after the re-run (got: ${answer2:-no answer})" ;;
+esac
+HELPER_STARTED2=$(ct 'systemctl show -p ExecMainStartTimestamp --value syp-mount.service' 2>/dev/null || true)
+if [ -n "$HELPER_STARTED" ] && [ -n "$HELPER_STARTED2" ] && [ "$HELPER_STARTED" != "$HELPER_STARTED2" ]; then
+  pass "the helper was restarted by the re-run ($HELPER_STARTED -> $HELPER_STARTED2)"
+else
+  fail "the helper was not restarted by the re-run (start time was '$HELPER_STARTED', now '$HELPER_STARTED2')"
 fi

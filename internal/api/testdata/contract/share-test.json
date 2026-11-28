@@ -1,0 +1,9 @@
+{
+  "body": {
+    "ok": true
+  },
+  "method": "POST",
+  "path": "/api/v2/shares/test",
+  "status": 200,
+  "type": "ShareTest"
+}

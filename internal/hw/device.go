@@ -57,7 +57,7 @@ func Probe(ctx context.Context, m media.Media, dir string, c Candidate) DeviceRe
 	_, err := m.Run(dctx, append([]string{"ffmpeg"}, decodeArgs(c, clip)...), nil)
 	dcancel()
 	if err != nil {
-		rec.Reasons["decode"] = stepReason(pctx, dctx, err, DecodeTimeout)
+		rec.Reasons["decode"] = stepReason(pctx, dctx, c, err, DecodeTimeout)
 	} else {
 		rec.Decode = true
 	}
@@ -72,7 +72,9 @@ func Probe(ctx context.Context, m media.Media, dir string, c Candidate) DeviceRe
 	if rec.Decode {
 		if _, err := m.Run(pctx, append([]string{"ffmpeg"}, scaleArgs(c, clip, scaled)...), nil); err != nil {
 			rec.Reasons["scale"] = stepFailure(pctx, c, err, "can't scale on this card: ")
-		} else if info, err := m.Probe(pctx, scaled); err != nil || !height240(info) {
+		} else if info, err := m.Probe(pctx, scaled); err != nil {
+			rec.Reasons["scale"] = stepFailure(pctx, c, err, "can't scale on this card: ")
+		} else if !height240(info) {
 			rec.Reasons["scale"] = "can't scale on this card: the output is not 240p"
 		} else {
 			rec.Scale = true
@@ -86,8 +88,10 @@ func Probe(ctx context.Context, m media.Media, dir string, c Candidate) DeviceRe
 	defer os.Remove(tenBit)
 	if rec.Decode {
 		if _, err := m.Run(pctx, append([]string{"ffmpeg"}, encode10Args(c, clip, tenBit)...), nil); err != nil {
-			rec.Reasons["encode10"] = stepFailure(pctx, c, err, "")
-		} else if info, err := m.Probe(pctx, tenBit); err != nil || !namedBy(movieEncoder(info), c.Encoder) {
+			rec.Reasons["encode10"] = stepFailure(pctx, c, err, "the 10-bit encode failed: ")
+		} else if info, err := m.Probe(pctx, tenBit); err != nil {
+			rec.Reasons["encode10"] = stepFailure(pctx, c, err, "the 10-bit output could not be read: ")
+		} else if !namedBy(movieEncoder(info), c.Encoder) {
 			rec.Reasons["encode10"] = "the 10-bit output was not written by " + c.Encoder
 		} else {
 			rec.Encode10 = true
@@ -143,15 +147,16 @@ func hdrEncodeArgs(c Candidate, src, out string) []string {
 	return append(deviceSetup(c), "-i", src, "-vf", uploadFilter(c, "p010"), "-c:v", c.Encoder, "-profile:v", "main10", "-y", out)
 }
 
-// stepReason explains a failed step: its own timeout, the whole probe running out, or the tool's words.
-func stepReason(pctx, sctx context.Context, err error, limit time.Duration) string {
+// stepReason explains a failed step: its own timeout, the whole probe running out, or the tool's words. The candidate
+// is the card the step ran on, so a QSV runtime sentence stays a QSV sentence.
+func stepReason(pctx, sctx context.Context, c Candidate, err error, limit time.Duration) string {
 	if errors.Is(sctx.Err(), context.DeadlineExceeded) && pctx.Err() == nil {
 		return fmt.Sprintf("the decode did not finish in %d s", int(limit.Seconds()))
 	}
 	if pctx.Err() != nil {
 		return fmt.Sprintf("the device probe ran out of its %d s", int(ProbeBudget.Seconds()))
 	}
-	return plainReason(Candidate{}, err)
+	return plainReason(c, err)
 }
 
 func height240(info media.Info) bool {

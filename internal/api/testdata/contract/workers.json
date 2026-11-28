@@ -1,0 +1,25 @@
+{
+  "body": [
+    {
+      "address": "",
+      "doneToday": 0,
+      "gpu": {
+        "family": "qsv",
+        "name": "Intel Quick Sync (hevc_qsv)"
+      },
+      "gpuSlots": 1,
+      "id": "local",
+      "local": true,
+      "name": "This computer",
+      "now": null,
+      "pausedGlobally": false,
+      "since": null,
+      "slots": 1,
+      "state": "idle"
+    }
+  ],
+  "method": "GET",
+  "path": "/api/v2/workers",
+  "status": 200,
+  "type": "Worker[]"
+}

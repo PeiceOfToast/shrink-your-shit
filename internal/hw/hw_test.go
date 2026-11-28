@@ -278,7 +278,7 @@ func TestCancelledPassKeepsTheLastFinishedPass(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	got, ok := d.Current()
-	if !ok || !got.At.Equal(first.At) || len(got.Verdicts) != 2 {
+	if !ok || !got.Inventory.At.Equal(first.At) || len(got.Inventory.Verdicts) != 2 {
 		t.Fatalf("after a cancelled pass Current = %+v (ok %v); want the first finished pass", got, ok)
 	}
 }
@@ -317,8 +317,8 @@ func waitInventory(t *testing.T, d *Detector) Inventory {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
 	for {
-		if inv, ok := d.Current(); ok {
-			return inv
+		if ans, ok := d.Current(); ok {
+			return ans.Inventory
 		}
 		if time.Now().After(deadline) {
 			t.Fatal("no pass finished")

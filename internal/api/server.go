@@ -19,10 +19,13 @@ import (
 
 	"github.com/PeiceOfToast/shrink-your-shit/internal/events"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/flow"
+	"github.com/PeiceOfToast/shrink-your-shit/internal/hw"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/jobs"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/library"
+	"github.com/PeiceOfToast/shrink-your-shit/internal/share"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/store"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/system"
+	"github.com/PeiceOfToast/shrink-your-shit/internal/workers"
 )
 
 const (
@@ -57,6 +60,30 @@ type Deps struct {
 	// Try is flow.Try with the real media and safety behind it (S2-5): the flow run on one file,
 	// bounded, with nothing kept. A test swaps in a double.
 	Try func(ctx context.Context, f flow.Flow, file string) (flow.TryResult, error)
+	// Workers is the built-in worker's stored settings (page 10). nil uses a store over DB.
+	Workers *workers.Store
+	// Cards is the hardware detector's last finished pass, for the Workers page's card and encoders.
+	// nil means no card, as on a machine with none and in most tests.
+	Cards CardAnswer
+	// Shares is the SMB/NFS share service (stage 3 item 7): the store, validation, and the mount
+	// actions behind the Mounter. nil means a server without the shares group.
+	Shares *share.Service
+	// Now is the server's clock, which decides where "Done today" starts. nil means time.Now.
+	Now func() time.Time
+}
+
+// now is when the server thinks it is, for the settings that turn on the server's local day.
+func (d *Deps) now() time.Time {
+	if d.Now != nil {
+		return d.Now()
+	}
+	return time.Now()
+}
+
+// CardAnswer is the hardware detector as the Workers page reads it: the last finished pass.
+// *hw.Detector has this shape.
+type CardAnswer interface {
+	Current() (hw.Answer, bool)
 }
 
 // Workflows is flow.Store as the api uses it.
@@ -75,6 +102,9 @@ type Workflows interface {
 	// ReplaceInUse reports whether a live workflow's published revision replaces originals (K17).
 	ReplaceInUse(ctx context.Context) (bool, error)
 	Revisions(ctx context.Context, id int64) ([]flow.RevisionInfo, error)
+	// Revision reads one saved revision: the Workers page counts a running job's steps from the
+	// revision the job ran.
+	Revision(ctx context.Context, id int64, rev int) (flow.Revision, error)
 	Restore(ctx context.Context, id int64, rev int) (int, error)
 	Duplicate(ctx context.Context, id int64) (flow.Workflow, error)
 	Delete(ctx context.Context, id int64) error
@@ -119,6 +149,10 @@ func New(version string) *Server {
 	s.mux.HandleFunc("GET /api/v2/jobs/{id}/neighbours", s.neighbours)
 	s.mux.HandleFunc("GET /api/v2/jobs/{id}/events", s.jobLog)
 	s.mux.HandleFunc("GET /api/v2/jobs/{id}/history", s.jobHistory)
+	// The Workers page (S3-4): the built-in worker's list row and its settings. Remote workers come later.
+	s.mux.HandleFunc("GET /api/v2/workers", s.listWorkers)
+	s.mux.HandleFunc("GET /api/v2/workers/{id}", s.getWorker)
+	s.mux.HandleFunc("PATCH /api/v2/workers/{id}", s.patchWorker)
 	s.mux.HandleFunc("GET /api/v2/events", s.stream)
 	// Access (R1-9a): the first-run page's calls, the languages and the guide.
 	s.mux.HandleFunc("GET /api/v2/languages", s.getLanguages)
@@ -154,6 +188,13 @@ func New(version string) *Server {
 	s.mux.HandleFunc("DELETE /api/v2/libraries/{id}", s.deleteLibrary)
 	s.mux.HandleFunc("POST /api/v2/libraries/{id}/scan", s.scanLibrary)
 	s.mux.HandleFunc("POST /api/v2/libraries/scan", s.scanAllLibraries)
+
+	// Shares (stage 3 item 7): page 09's Add. The literal /test wins over the {id} routes.
+	s.mux.HandleFunc("GET /api/v2/shares", s.getShares)
+	s.mux.HandleFunc("POST /api/v2/shares", s.postShare)
+	s.mux.HandleFunc("POST /api/v2/shares/test", s.testShare)
+	s.mux.HandleFunc("POST /api/v2/shares/{id}/reconnect", s.reconnectShare)
+	s.mux.HandleFunc("DELETE /api/v2/shares/{id}", s.deleteShare)
 	// The steps' cards (S2-1): the flow editor's form, from the step registry.
 	s.mux.HandleFunc("GET /api/v2/step-definitions", s.getStepDefinitions)
 	// The bitrate ladder (S2-6): page 07's recommended numbers and the Quality slider's table.
