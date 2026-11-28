@@ -12,8 +12,8 @@ import (
 	"github.com/PeiceOfToast/shrink-your-shit/internal/safety"
 )
 
-// replaceKeepDays is how long a replaced original stays in the trash. The page promises 7 days; the daily sweep that
-// removes it is S2-10c, so until then the copies stay.
+// replaceKeepDays is the keep-days a swap plan carries when no store answers. The store's
+// processing.keepOriginalsDays overrides it in RealReplacer, so the page's setting is what counts.
 const replaceKeepDays = 7
 
 // Replacer swaps a job's original for its new file, journalled (S2-10b). The worker's environment has the real one;
@@ -25,8 +25,13 @@ type Replacer interface {
 // RealReplacer is the swap with the replace journal in the store.
 type RealReplacer struct{ Journal *safety.Journal }
 
-// Swap runs safety.Swap against the journal.
+// Swap runs safety.Swap against the journal, with keepOriginalsDays from the store.
 func (r RealReplacer) Swap(ctx context.Context, p safety.SwapPlan) (safety.SwapResult, error) {
+	days, err := r.Journal.KeepDays(ctx)
+	if err != nil {
+		return safety.SwapResult{}, err
+	}
+	p.KeepDays = days
 	return safety.Swap(ctx, r.Journal, p)
 }
 

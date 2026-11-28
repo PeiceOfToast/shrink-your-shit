@@ -63,9 +63,12 @@ const (
 	KindDone    Kind = "done"
 	KindSkipped Kind = "skipped"
 	KindFailed  Kind = "failed"
+	// KindRestored is a replaced original put back from the trash (S2-10c); History shows it as "Original restored".
+	KindRestored Kind = "restored"
 )
 
 var knownKinds = map[Kind]bool{
+	KindRestored: true,
 	KindRunStart: true, KindRunEnd: true, KindStepStart: true, KindStepEnd: true,
 	KindDecision: true, KindCommand: true, KindProbe: true, KindProgress: true,
 	KindSize: true, KindVariable: true, KindMove: true, KindWarning: true,
@@ -83,7 +86,7 @@ var jobKinds = map[Kind]bool{
 // historyKinds are the kinds that belong to a job's history. They keep "job" like jobKinds.
 var historyKinds = map[Kind]bool{
 	KindQueued: true, KindPicked: true, KindRetry: true, KindRequeued: true, KindCancelled: true,
-	KindDone: true, KindSkipped: true, KindFailed: true,
+	KindDone: true, KindSkipped: true, KindFailed: true, KindRestored: true,
 }
 
 // Keep says where an event is kept long-term. Emit sets it from the kind.
