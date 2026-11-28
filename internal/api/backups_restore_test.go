@@ -5,6 +5,8 @@ package api
 import (
 	"bytes"
 	"database/sql"
+	"encoding/json"
+	"errors"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -352,4 +354,73 @@ func TestDownloadRoundTripRestores(t *testing.T) {
 	if got := serverNameOf(t, e, cookie); got != "Den" {
 		t.Errorf("serverName = %q after restoring the download, want Den", got)
 	}
+}
+
+// A restore while a job runs is refused as jobs_running, and no safety backup is made for it.
+func TestApplyRefusedWhileAJobRuns(t *testing.T) {
+	e := newEnv(t, true)
+	cookie := e.setup()
+	id := makeBackup(t, e, cookie)
+	pid := previewKept(t, e, cookie, id)
+	if err := e.db.Tx(t.Context(), func(tx *sql.Tx) error {
+		_, err := tx.Exec(`INSERT INTO jobs(file_id, library_id, path, state, queued_at) VALUES(1, 1, '/x.mkv', 'running', 1)`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	before := countBackups(t, e, cookie)
+	rec := applyPreview(e, cookie, pid)
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "jobs_running") {
+		t.Fatalf("apply = %d %s, want 409 jobs_running", rec.Code, rec.Body)
+	}
+	if after := countBackups(t, e, cookie); after != before {
+		t.Errorf("backups = %d after a refused apply, want %d (no safety backup for it)", after, before)
+	}
+}
+
+// A restore that fails midway is 500 restore_failed, names the safety backup made just before it, and leaves the set-up
+// as it was.
+func TestApplyFailureChangesNothingAndNamesTheSafetyBackup(t *testing.T) {
+	e := newEnv(t, true)
+	cookie := e.setup()
+	setServerName(t, e, cookie, "Den")
+	id := makeBackup(t, e, cookie)
+	setServerName(t, e, cookie, "Live")
+	pid := previewKept(t, e, cookie, id)
+	e.srv.restoreHook = func(table string) error {
+		if table == "libraries" {
+			return errBoomForTest
+		}
+		return nil
+	}
+	defer func() { e.srv.restoreHook = nil }()
+	rec := applyPreview(e, cookie, pid)
+	if rec.Code != http.StatusInternalServerError || !strings.Contains(rec.Body.String(), "restore_failed") {
+		t.Fatalf("apply = %d %s, want 500 restore_failed", rec.Code, rec.Body)
+	}
+	list := e.do(http.MethodGet, "/api/v2/backups", "", withSession(cookie), false)
+	var l struct {
+		Backups []struct {
+			ID string `json:"id"`
+		} `json:"backups"`
+	}
+	decodeInto(t, list, &l)
+	if len(l.Backups) == 0 || !strings.Contains(rec.Body.String(), l.Backups[0].ID) {
+		t.Errorf("the message does not name the safety backup %v: %s", l.Backups, rec.Body)
+	}
+	if got := serverNameOf(t, e, cookie); got != "Live" {
+		t.Errorf("serverName = %q after a failed restore, want Live (rolled back)", got)
+	}
+}
+
+var errBoomForTest = errors.New("disk went away")
+
+func countBackups(t *testing.T, e *env, cookie *http.Cookie) int {
+	t.Helper()
+	rec := e.do(http.MethodGet, "/api/v2/backups", "", withSession(cookie), false)
+	var l struct {
+		Backups []json.RawMessage `json:"backups"`
+	}
+	decodeInto(t, rec, &l)
+	return len(l.Backups)
 }

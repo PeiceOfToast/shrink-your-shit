@@ -11,7 +11,7 @@
     },
     "createdAt": "$DIR",
     "previewId": "$DIR",
-    "warnings": null
+    "warnings": []
   },
   "method": "POST",
   "path": "/api/v2/backups/preview",

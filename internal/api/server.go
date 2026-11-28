@@ -100,6 +100,8 @@ type Server struct {
 	closeOnce sync.Once
 	pingEvery time.Duration
 	restores  restoreBook
+	// restoreHook is called before each set-up table in an apply. nil in production; a test sets it to fail a restore.
+	restoreHook func(table string) error
 }
 
 // New makes a server that answers 503 starting until Ready is called.

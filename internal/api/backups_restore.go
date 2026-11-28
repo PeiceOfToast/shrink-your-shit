@@ -148,6 +148,9 @@ func (s *Server) postBackupPreview(w http.ResponseWriter, r *http.Request) {
 		internalError(w)
 		return
 	}
+	if p.warnings == nil {
+		p.warnings = []string{} // a list is [] when empty, never null
+	}
 	writeJSON(w, http.StatusOK, previewJSON{
 		PreviewID: id, CreatedAt: p.createdAt, AppVersion: p.appVersion, Contents: p.contents, Warnings: p.warnings,
 	})
@@ -299,7 +302,7 @@ func (s *Server) postBackupApply(w http.ResponseWriter, r *http.Request) {
 		internalError(w)
 		return
 	}
-	report, err := rs.DB.RestoreSetUp(ctx, p.path, nil)
+	report, err := rs.DB.RestoreSetUp(ctx, p.path, s.restoreHook)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			writeError(w, http.StatusConflict, "restore_conflict",
@@ -321,6 +324,9 @@ func (s *Server) postBackupApply(w http.ResponseWriter, r *http.Request) {
 	}
 	if warnings == nil {
 		warnings = []string{}
+	}
+	if report.KeptNotInBackup == nil {
+		report.KeptNotInBackup = []store.Kept{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"restored":        report.Restored,

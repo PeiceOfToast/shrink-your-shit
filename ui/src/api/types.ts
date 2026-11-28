@@ -583,6 +583,12 @@ export interface BackupPreview {
   warnings: string[];
 }
 
+// GET /api/v2/backups (page 11, Backup): the kept backups, newest first, and how many are kept.
+export interface BackupList {
+  backups: BackupItem[];
+  keep: number;
+}
+
 export type CheckStatus = "ok" | "warn" | "bad" | "absent";
 
 export interface HealthCheck {

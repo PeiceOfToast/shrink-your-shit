@@ -1,6 +1,7 @@
 // Settings for the mock (pages/11-settings.md "Data and API"). Writes change in-memory copies, so a session behaves like the app.
 import type {
   BackupItem,
+  BackupList,
   BackupPreview,
   Doctor,
   Integration,
@@ -350,7 +351,7 @@ let backups: BackupItem[] = [
 
 const previews = new Map<string, BackupPreview>();
 
-export function getBackups(): Promise<{ backups: BackupItem[]; keep: number }> {
+export function getBackups(): Promise<BackupList> {
   return respond(() => ({ backups: clone(backups), keep: settings.backupKeep }));
 }
 
