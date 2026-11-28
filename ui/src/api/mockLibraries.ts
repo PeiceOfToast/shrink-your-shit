@@ -1,8 +1,8 @@
 // Libraries, workflows and folders for the mock. Writes change an in-memory copy, so a session behaves like the app.
-import type { FolderCheck, FolderListing, Library, LibraryDetail, LibraryInput, LibraryPatch, Preview, Watch, WorkflowSummary } from "./types.ts";
+import type { FolderCheck, FolderListing, Library, LibraryDetail, LibraryInput, LibraryPatch, Preview, Share, ShareTest, Watch, WorkflowSummary } from "./types.ts";
 import { ApiError } from "./errors.ts";
 import { getForcedState, noLibrariesYet, respond, setFreshInstall } from "./mockState.ts";
-import { FOLDERS, LIBRARIES, PREVIEW, SHARE_FOLDERS, WORKFLOW_SUMMARY } from "./fixtures/libraries.ts";
+import { FOLDERS, LIBRARIES, PREVIEW, WORKFLOW_SUMMARY } from "./fixtures/libraries.ts";
 import { WORKFLOW_ROWS } from "./fixtures/workflowRows.ts";
 import { nextScanFor } from "./schedule.ts";
 import { workersTaking } from "./mockWorkers.ts";
@@ -156,12 +156,16 @@ export function scanLibrary(id: string): Promise<Library> {
   });
 }
 
-export function reconnectShare(id: string): Promise<Library> {
+let nextShareId = 1;
+
+// POST /shares/{id}/reconnect: the share's library comes back to watching, and the share is answered as connected.
+export function reconnectShare(shareId: string): Promise<Share> {
   return respond(() => {
-    const cur = findRow(id);
+    const cur = currentLibraries().find((l) => l.shareId === shareId);
+    if (!cur) throw new ApiError("share_not_found", "That share doesn't exist.");
     const next: Library = { ...cur, status: "watching", shareDownAt: undefined };
-    rows = rows.map((r) => (r.id === id ? next : r));
-    return { ...next };
+    rows = rows.map((r) => (r.id === cur.id ? next : r));
+    return shareOf(shareId, `//nas/${cur.name.toLowerCase()}`, {});
   });
 }
 
@@ -194,15 +198,34 @@ export function getFolders(path: string): Promise<FolderListing> {
   });
 }
 
-export function testShare(input: { address: string; user?: string; password?: string }): Promise<{ ok: true; folders: string[] }> {
+// Test the connection (POST /shares/test): {ok:true}, or {ok:false, reason, message} for a share that does not answer.
+export function testShare(input: { address: string; username?: string; password?: string }): Promise<ShareTest> {
   return respond(() => {
     if (!input.address.trim()) throw new ApiError("address_required", "Type the share's address.", "address");
-    return { ok: true as const, folders: SHARE_FOLDERS };
+    if (input.address.includes("offline")) return { ok: false as const, reason: "unreachable", message: "The share did not answer." };
+    return { ok: true as const };
   });
 }
 
-export function createShare(input: { address: string; user?: string; password?: string }): Promise<{ id: string; address: string }> {
-  return respond(() => ({ id: `share-${input.address.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`, address: input.address }));
+// Save the share (POST /shares): from now on it is known by this id.
+export function createShare(input: { address: string; username?: string; password?: string }): Promise<Share> {
+  return respond(() => shareOf(String(nextShareId++), input.address, input));
+}
+
+// The mock's share is always SMB and mounted under /var/lib/syp/shares once connected.
+function shareOf(id: string, address: string, input: { username?: string; password?: string }): Share {
+  return {
+    id,
+    name: address.split("/").filter(Boolean).pop() ?? address,
+    type: "smb",
+    address,
+    username: input.username ?? "",
+    guest: !input.username,
+    hasPassword: !!input.password,
+    connected: true,
+    point: `/var/lib/syp/shares/${id}`,
+    since: new Date().toISOString(),
+  };
 }
 
 export function getWorkflow(id: string): Promise<WorkflowSummary> {

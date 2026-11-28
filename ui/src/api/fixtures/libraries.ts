@@ -38,4 +38,3 @@ export const FOLDERS: Record<string, { name: string; parent: string | null; chil
   "/downloads": { name: "/downloads", parent: null, children: [] },
 };
 
-export const SHARE_FOLDERS = ["anime", "concerts", "movies", "tv"];

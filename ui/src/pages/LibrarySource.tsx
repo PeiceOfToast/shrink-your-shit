@@ -49,10 +49,15 @@ export function LibrarySource({
     onBusy?.(true);
     onProblem(null);
     try {
-      const auth = { address: value.address, user: value.user || undefined, password: value.password || undefined };
+      const auth = { address: value.address, username: value.user || undefined, password: value.password || undefined };
       const r = await api.testShare(auth);
+      if (!r.ok) {
+        onChange({ shareId: null, testRes: null });
+        onProblem({ message: r.message });
+        return;
+      }
       const created = await api.createShare(auth);
-      onChange({ shareId: created.id, testRes: `Connected · ${r.folders.length} folders` });
+      onChange({ shareId: created.id, testRes: "Connected" });
     } catch (e) {
       onChange({ shareId: null, testRes: null });
       onProblem(toProblem(e));

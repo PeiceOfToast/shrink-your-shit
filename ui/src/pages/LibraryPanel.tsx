@@ -108,7 +108,8 @@ export function LibraryPanel({ id, onChange }: { id: string; onChange?: () => vo
     setBusy(true);
     setErr(null);
     try {
-      await api.reconnectShare(id);
+      if (!L?.shareId) throw new Error("This library has no share to reconnect.");
+      await api.reconnectShare(L.shareId);
       lib.reload();
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
