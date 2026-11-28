@@ -1,5 +1,6 @@
 import { LOG_CHOICES, type LogSettings, type ProcessingSettings } from "../../api/index.ts";
 import { LoadState, Row, SaveBar, Switch } from "./parts.tsx";
+import { Link } from "../../router.tsx";
 import { useSettingsForm } from "./useSettingsForm.ts";
 
 const dayLabel = (n: number) => (n === 0 ? "Forever" : `${n} days`);
@@ -27,7 +28,13 @@ export function Processing() {
   return (
     <>
       <h2 className="set-title">Processing</h2>
-      <Row id="p-par" label="Files at once" hint="How many files convert at the same time, across all workers." field="processing.parallelJobs" problem={f.problem}>
+      <Row
+        id="p-par"
+        label="Files at once"
+        hint={<>Files at once for new workers. This computer's own setting is on the <Link to="/workers">Workers page</Link>.</>}
+        field="processing.parallelJobs"
+        problem={f.problem}
+      >
         <input id="p-par" type="number" className="inp" min={1} max={8} value={p.parallelJobs} onChange={(e) => setP({ parallelJobs: e.target.valueAsNumber })} />
       </Row>
       <Row label="Graphics-card jobs separate" hint="Files that need the graphics card don't share a worker with other files.">
