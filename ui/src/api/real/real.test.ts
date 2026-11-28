@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { request } from "../http.ts";
 import { ApiError } from "../errors.ts";
-import { getJobNeighbours, getJobs } from "./jobs.ts";
+import { convertAgain, getJobNeighbours, getJobs, runJobsAction } from "./jobs.ts";
 import { getLibraries, createLibrary } from "./libraries.ts";
 import { getAttention, getOverview } from "./overview.ts";
 import { createDraft, deleteWorkflow, duplicateWorkflow, exportWorkflow, getFlow, getGuideAnswers, guidePreview, listWorkflows, publishFlow, putAnswers, putDraft, tryFlow, validateFlow } from "./workflows.ts";
@@ -46,6 +46,19 @@ test("the job list sends only the values that are set", async () => {
   const calls = stub(200, JSON.stringify({ items: [], next: null, counts: {} }));
   await getJobs({ state: "running", limit: 5, worker: undefined } as never);
   assert.equal(calls[0].url, "/api/v2/jobs?state=running&limit=5");
+});
+
+test("job actions post {action, ids}, and run again posts to the job's own route with no body", async () => {
+  const calls = stub(200, JSON.stringify({ done: ["j-1"], refused: [] }));
+  await runJobsAction("retry", ["j-1"]);
+  assert.equal(calls[0].url, "/api/v2/jobs/actions");
+  assert.equal(calls[0].init.method, "POST");
+  assert.deepEqual(JSON.parse(String(calls[0].init.body)), { action: "retry", ids: ["j-1"] });
+  const again = stub(200, "{}");
+  await convertAgain("j 1");
+  assert.equal(again[0].url, "/api/v2/jobs/j%201/convert-again");
+  assert.equal(again[0].init.method, "POST");
+  assert.equal(again[0].init.body, undefined);
 });
 
 test("neighbours take the state as a query value, and the overview is its own route", async () => {

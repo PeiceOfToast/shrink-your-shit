@@ -203,8 +203,7 @@ export function JobDetail({ id, initialTab }: { id: string; initialTab: "summary
               <button type="button" className="btn sm" disabled={busy} onClick={() => jobAct("retry", "Queued to try again.")}>Retry</button>
             )}
             <div className={`jd-more${more ? " open" : ""}`}>
-            {/* The server has no convert-again route until S3-6b, so a real install doesn't offer Run again yet. */}
-            {(state === "done" || state === "skipped") && !isReal("jobs") && (
+            {(state === "done" || state === "skipped") && (
               <button type="button" className="btn sm" disabled={busy} onClick={() => setConfirm("again")}>Run again</button>
             )}
             {(state === "running" || state === "waiting") && (
@@ -262,7 +261,7 @@ export function JobDetail({ id, initialTab }: { id: string; initialTab: "summary
           {confirm === "again" && job && (
             <div className="jd-confirm" role="alert">
               <span>Run this file through {job.workflow} again? The current file is treated as the original.</span>
-              <button type="button" className="btn primary sm" disabled={busy} onClick={() => act(async () => { const r = await api.convertAgain(id); navigate(`/jobs/${r.jobId}${filterQs}`); }, "Queued again. This panel now shows the new attempt.")}>Run again</button>
+              <button type="button" className="btn primary sm" disabled={busy} onClick={() => act(() => api.convertAgain(id), "Queued again. This panel now shows the new attempt.")}>Run again</button>
               <button type="button" className="btn sm" onClick={() => setConfirm(null)}>Keep it</button>
             </div>
           )}
