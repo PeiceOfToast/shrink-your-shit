@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { api, ApiError } from "../api/index.ts";
 import { FolderBrowser } from "./FolderBrowser.tsx";
-import { SampleBanner } from "../ui/SampleBanner.tsx";
 
 // Where the videos are (page 09). On this server: a folder, typed or browsed. Or a network share: its address is
 // tested, and the test saves the share so a library can use it. Add library and first run both show this field.
@@ -49,10 +48,15 @@ export function LibrarySource({
     onBusy?.(true);
     onProblem(null);
     try {
-      const auth = { address: value.address, user: value.user || undefined, password: value.password || undefined };
+      const auth = { address: value.address, username: value.user || undefined, password: value.password || undefined };
       const r = await api.testShare(auth);
+      if (!r.ok) {
+        onChange({ shareId: null, testRes: null });
+        onProblem({ message: r.message });
+        return;
+      }
       const created = await api.createShare(auth);
-      onChange({ shareId: created.id, testRes: `Connected · ${r.folders.length} folders` });
+      onChange({ shareId: created.id, testRes: "Connected" });
     } catch (e) {
       onChange({ shareId: null, testRes: null });
       onProblem(toProblem(e));
@@ -97,7 +101,9 @@ export function LibrarySource({
         </div>
       ) : (
         <div className="field">
-          <SampleBanner text="network shares aren't connected yet, so the test answer is made up. Use a folder on this server for now." />
+          <div className="note" role="note" style={{ margin: "0 0 12px" }}>
+            <span>Network shares can't be added on this build yet, so use a folder on this server for now.</span>
+          </div>
           <input
             className="inp mono"
             value={value.address}

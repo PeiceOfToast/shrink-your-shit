@@ -15,3 +15,9 @@ export const patchLibrary: typeof mock.patchLibrary = (id, patch) =>
   request<Out<typeof mock.patchLibrary>>("PATCH", `/libraries/${encodeURIComponent(id)}`, patch);
 export const deleteLibrary: typeof mock.deleteLibrary = (id) =>
   request<Out<typeof mock.deleteLibrary>>("DELETE", `/libraries/${encodeURIComponent(id)}`);
+
+// Network shares (contract section 1, shares): test a share's address, save it, reconnect a dropped one.
+export const testShare: typeof mock.testShare = (input) => request<Out<typeof mock.testShare>>("POST", "/shares/test", input);
+export const createShare: typeof mock.createShare = (input) => request<Out<typeof mock.createShare>>("POST", "/shares", input);
+export const reconnectShare: typeof mock.reconnectShare = (id) =>
+  request<Out<typeof mock.reconnectShare>>("POST", `/shares/${encodeURIComponent(id)}/reconnect`);

@@ -172,9 +172,7 @@ export function runAction(method: string, path: string, body?: unknown): Promise
   const share = /^\/api\/v2\/shares\/([^/]+)\/reconnect$/.exec(path);
   if (method === "POST" && share) {
     // The path carries the share's id; the library it belongs to is what reconnects.
-    const lib = currentLibraries().find((l) => l.shareId === share[1]);
-    if (!lib) return Promise.reject(new ApiError("share_not_found", "That share doesn't exist."));
-    return reconnectShare(lib.id).then(() => ({}));
+    return reconnectShare(share[1]).then(() => ({}));
   }
   if (method === "POST" && path === "/api/v2/jobs/actions") {
     const b = body as { action?: unknown; ids?: unknown } | undefined;

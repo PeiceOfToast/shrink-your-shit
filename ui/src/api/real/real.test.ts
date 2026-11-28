@@ -4,7 +4,10 @@ import { test } from "node:test";
 import { request } from "../http.ts";
 import { ApiError } from "../errors.ts";
 import { convertAgain, getJobNeighbours, getJobs, runJobsAction } from "./jobs.ts";
-import { getLibraries, createLibrary, patchLibrary, deleteLibrary } from "./libraries.ts";
+import { getLibraries, createLibrary, patchLibrary, deleteLibrary, testShare, createShare, reconnectShare } from "./libraries.ts";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { getSettings, patchSettings } from "./settings.ts";
 import { getTrash, restoreTrash } from "./trash.ts";
 import { getAttention, getOverview } from "./overview.ts";
@@ -237,4 +240,38 @@ test("removing a library sends DELETE and returns ok", async () => {
   assert.deepEqual(await deleteLibrary("2"), { ok: true });
   assert.equal(calls[0].url, "/api/v2/libraries/2");
   assert.equal(calls[0].init.method, "DELETE");
+});
+
+// The share goldens (internal/api/testdata/contract, written by the Go contract test): the body each route answers with.
+const GOLDEN = join(dirname(fileURLToPath(import.meta.url)), "../../../../internal/api/testdata/contract");
+const golden = (name: string) => JSON.stringify((JSON.parse(readFileSync(join(GOLDEN, `${name}.json`), "utf8")) as { body: unknown }).body);
+
+test("testing a share posts username, not user, and a working share answers {ok:true}", async () => {
+  const calls = stub(200, golden("share-test"));
+  assert.deepEqual(await testShare({ address: "//nas/media", username: "viewer", password: "share-password" }), { ok: true });
+  assert.equal(calls[0].url, "/api/v2/shares/test");
+  assert.equal(calls[0].init.method, "POST");
+  assert.deepEqual(JSON.parse(String(calls[0].init.body)), { address: "//nas/media", username: "viewer", password: "share-password" });
+});
+
+test("a share that does not answer is a 200 with ok:false, not an error", async () => {
+  stub(200, golden("share-test-failed"));
+  assert.deepEqual(await testShare({ address: "//offline/media" }), { ok: false, reason: "unreachable", message: "The share did not answer." });
+});
+
+test("saving a share posts to /shares and returns the Share with its id", async () => {
+  const calls = stub(201, golden("share-post"));
+  const share = await createShare({ address: "//nas/media", username: "viewer", password: "share-password" });
+  assert.equal(share.id, "1");
+  assert.equal(share.username, "viewer");
+  assert.equal(calls[0].url, "/api/v2/shares");
+  assert.equal(calls[0].init.method, "POST");
+});
+
+test("reconnecting a share posts to its own id, not the library's", async () => {
+  const calls = stub(200, golden("share-reconnect"));
+  const share = await reconnectShare("1");
+  assert.equal(share.connected, true);
+  assert.equal(calls[0].url, "/api/v2/shares/1/reconnect");
+  assert.equal(calls[0].init.method, "POST");
 });
