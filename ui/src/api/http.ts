@@ -52,7 +52,8 @@ export async function request<T>(method: Method, path: string, body?: unknown, o
   let text: string;
   try {
     text = await res.text();
-  } catch {
+  } catch (e) {
+    if (opts.signal?.aborted) throw e;
     setConnection(false);
     throw new ApiError("unreachable", "Can't reach the server.");
   }

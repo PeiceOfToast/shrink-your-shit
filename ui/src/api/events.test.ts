@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { isStale, openEvents, parseFrame, viewsFor } from "./events.ts";
+import { isConnected, setConnection } from "./connection.ts";
 
 class FakeSource {
   static made: FakeSource[] = [];
@@ -115,5 +116,46 @@ test("a ping keeps a quiet stream alive without reaching the page", () => {
   assert.equal(src.closed, false, "a ping 40 s ago is not stale");
   assert.equal(h.seen.frames.length, 0, "a ping is not a frame");
   assert.equal(h.seen.resyncs, 0);
+});
+
+test("the stream opening marks the connection up again, with no click", () => {
+  FakeSource.made = [];
+  setConnection(false);
+  const stop = openEvents({ onFrame: () => {}, onResync: () => {}, EventSourceCtor: FakeSource as never, every: () => () => {}, clock: () => 0 });
+  FakeSource.made.at(-1)!.emit("open", "", {});
+  assert.equal(isConnected(), true);
+  stop();
+});
+
+test("a ping marks the connection up too; a stream that never opens leaves it down", () => {
+  FakeSource.made = [];
+  setConnection(false);
+  const stop = openEvents({ onFrame: () => {}, onResync: () => {}, EventSourceCtor: FakeSource as never, every: () => () => {}, clock: () => 0 });
+  assert.equal(isConnected(), false);
+  FakeSource.made.at(-1)!.emit("ping", "", {});
+  assert.equal(isConnected(), true);
+  stop();
+});
+
+test("a failed stream is reopened, and the page resyncs once it opens again", () => {
+  FakeSource.made = [];
+  let resyncs = 0;
+  const waiting: (() => void)[] = [];
+  const stop = openEvents({
+    onFrame: () => {},
+    onResync: () => resyncs++,
+    EventSourceCtor: FakeSource as never,
+    every: () => () => {},
+    later: (fn) => { waiting.push(fn); return () => {}; },
+    clock: () => 0,
+  });
+  FakeSource.made.at(-1)!.emit("error", "", {});
+  assert.equal(FakeSource.made.at(-1)!.closed, true);
+  waiting.shift()!();
+  assert.equal(FakeSource.made.length, 2, "a new stream is opened after the retry");
+  FakeSource.made.at(-1)!.emit("open", "", {});
+  assert.equal(resyncs, 1);
+  assert.equal(isConnected(), true);
+  stop();
 });
 

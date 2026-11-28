@@ -2,6 +2,7 @@
 // resumes with Last-Event-ID; a resync frame means the server can't replay, so the open page refetches.
 // Frames: id = seq, event = kind, data = JSON. The stream has no pings we can see, so a stale stream is one with no frame.
 import type { Summary } from "./types.ts";
+import { setConnection } from "./connection.ts";
 
 export type Frame = { seq: number; kind: string; data: unknown };
 
@@ -56,6 +57,8 @@ export type EventsOptions = {
   clock?: () => number;
   // Schedules the stale check (default: every 5 s). Injected in tests.
   every?: (fn: () => void, ms: number) => () => void;
+  // Schedules the reopen after a failed stream (default: once, after 3 s). Injected in tests.
+  later?: (fn: () => void, ms: number) => () => void;
 };
 
 // Opens the stream and returns close(). A stale stream is closed and reopened, then resynced.
@@ -66,20 +69,49 @@ export function openEvents(opts: EventsOptions): () => void {
   let source: EventSourceLike | null = null;
   let lastFrameAt = clock();
   let closed = false;
+  // A failed stream (the server is down: the proxy answers 502) is not retried by the browser, so it is reopened here.
+  // Once it opens again after a failure, the page resyncs: it may have missed frames.
+  let down = false;
+  let cancelRetry: (() => void) | null = null;
+  const later = opts.later ?? ((fn, ms) => {
+    const t = setTimeout(fn, ms);
+    return () => clearTimeout(t);
+  });
 
   const attach = () => {
     const es = new Ctor(url);
     source = es;
     lastFrameAt = clock();
+    // The stream opening, a ping or a frame is the server answering: the connection is up again, with no click needed.
     // A ping is liveness only: it resets the stale timer and reaches no page.
+    es.addEventListener("open", () => {
+      if (closed || source !== es) return;
+      setConnection(true);
+      if (down) {
+        down = false;
+        opts.onResync();
+      }
+    });
+    es.addEventListener("error", () => {
+      if (closed || source !== es) return;
+      down = true;
+      es.close();
+      source = null;
+      cancelRetry = later(() => {
+        cancelRetry = null;
+        if (!closed) attach();
+      }, 3_000);
+    });
     es.addEventListener("ping", () => {
       if (closed || source !== es) return;
       lastFrameAt = clock();
+      setConnection(true);
     });
     for (const kind of KINDS) {
       es.addEventListener(kind, (e) => {
         if (closed || source !== es) return;
         lastFrameAt = clock();
+        setConnection(true);
         if (kind === "resync") {
           opts.onResync();
           return;
@@ -108,6 +140,7 @@ export function openEvents(opts: EventsOptions): () => void {
   return () => {
     closed = true;
     stop();
+    cancelRetry?.();
     source?.close();
     source = null;
   };

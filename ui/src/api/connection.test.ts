@@ -54,3 +54,27 @@ test("a successful load does not set the connection (sample data resolves withou
   assert.doesNotMatch(src, /setConnection\(true\)/);
 });
 
+test("an abort during the reply's body read is not a lost connection", async () => {
+  setConnection(true);
+  const ac = new AbortController();
+  globalThis.fetch = (async () => ({
+    ok: false,
+    status: 502,
+    text: async () => {
+      ac.abort();
+      throw new TypeError("network error");
+    },
+  })) as unknown as typeof fetch;
+  await assert.rejects(request("GET", "/summary", undefined, { signal: ac.signal }));
+  assert.equal(isConnected(), true);
+  globalThis.fetch = realFetch;
+});
+
+test("a reply from the server brings the connection back up", async () => {
+  setConnection(false);
+  answer(new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }));
+  await request("GET", "/summary");
+  assert.equal(isConnected(), true);
+  globalThis.fetch = realFetch;
+});
+
