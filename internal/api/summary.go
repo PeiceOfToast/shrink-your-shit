@@ -170,7 +170,7 @@ func (s *Server) attentionGroups(ctx context.Context, rs *Deps) ([]Attention, er
 	if rs.Events == nil {
 		return nil, nil
 	}
-	stored, _, err := rs.Events.Query(ctx, events.Filter{MinLevel: events.LevelWarn, Since: time.Now().Add(-attentionWindow)},
+	stored, _, err := rs.Events.Query(ctx, events.Filter{MinLevel: events.LevelWarn, Since: s.now(rs).Add(-attentionWindow)},
 		events.Page{Limit: 1000, Newest: true})
 	if err != nil {
 		return nil, err

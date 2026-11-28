@@ -62,8 +62,8 @@ func mustFailedJob(t *testing.T, e *env, lib library.Library, rel string) int64 
 	return id
 }
 
-// emitAttention stamps one event at the wall clock, because the row's window is the last day of the wall clock
-// and the test env's queue stamps its own events with the fixed test clock.
+// emitAttention emits one event with the time the test picked. The grouping tests leave the server's clock at its
+// default (the wall clock) and stamp their events then; only the contract golden fixes the clock.
 func emitAttention(t *testing.T, e *env, ev events.Event) {
 	t.Helper()
 	if err := e.bus.Emit(ev); err != nil {
@@ -71,18 +71,18 @@ func emitAttention(t *testing.T, e *env, ev events.Event) {
 	}
 }
 
-// attentionSince is the start of the window the handler groups, on the wall clock.
-func attentionSince() int64 { return time.Now().Add(-attentionWindow).UnixMilli() }
+// attentionSince is the start of the window when the server has no fixed clock: the last day of the wall clock.
+func attentionSince() time.Time { return time.Now().Add(-attentionWindow) }
 
-// waitAttentionEvents waits until the bus's database sink has written n warn or error events inside the window.
-// The sink batches, so the wait is on its condition, not on a sleep sized to it.
-func waitAttentionEvents(t *testing.T, e *env, n int) {
+// waitAttentionEvents waits until the bus's database sink has written n warn or error events at or after since. The
+// sink batches, so the wait is on its condition, not on a sleep sized to it.
+func waitAttentionEvents(t *testing.T, e *env, since time.Time, n int) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		var got int
 		if err := e.db.Read().QueryRow(`SELECT count(*) FROM events WHERE level IN ('warn', 'error') AND ts >= ?`,
-			attentionSince()).Scan(&got); err != nil {
+			since.UnixMilli()).Scan(&got); err != nil {
 			t.Fatal(err)
 		}
 		if got >= n {
@@ -120,7 +120,7 @@ func TestAttentionGroupsFailedJobsIntoOneRow(t *testing.T) {
 		Source: "jobs", Message: "The new file was shorter than the original.", TS: now.Add(-2 * time.Minute)})
 	emitAttention(t, e, events.Event{JobID: second, Attempt: 1, Level: events.LevelError, Kind: events.KindFailed,
 		Source: "jobs", Message: "The new file was shorter than the original.", TS: now})
-	waitAttentionEvents(t, e, 2)
+	waitAttentionEvents(t, e, attentionSince(), 2)
 
 	items := getAttentionItems(t, e, cookie.String())
 	if len(items) != 1 {
@@ -165,7 +165,7 @@ func TestAttentionLevelIsTheHighestInTheGroup(t *testing.T) {
 	} {
 		emitAttention(t, e, ev)
 	}
-	waitAttentionEvents(t, e, 3)
+	waitAttentionEvents(t, e, attentionSince(), 3)
 
 	items := getAttentionItems(t, e, cookie.String())
 	if len(items) != 2 {
@@ -210,7 +210,7 @@ func TestAttentionRetryListsOnlyJobsStillFailed(t *testing.T) {
 		emitAttention(t, e, events.Event{JobID: id, Attempt: job.Attempt, Level: events.LevelError,
 			Kind: events.KindFailed, Source: "jobs", Message: "The new file was shorter than the original.", TS: now})
 	}
-	waitAttentionEvents(t, e, 2)
+	waitAttentionEvents(t, e, attentionSince(), 2)
 
 	items := getAttentionItems(t, e, cookie.String())
 	if len(items) != 1 {
@@ -236,4 +236,30 @@ func TestAttentionIsEmptyWithNothingToShow(t *testing.T) {
 	if body := strings.TrimSpace(rec.Body.String()); body != "[]" {
 		t.Errorf("body = %s, want []", body)
 	}
+}
+
+// TestContractAttention pins the filled list at a fixed clock (S3-8b): the jobs row with its Retry action, and a
+// source's row from the log. The clock is the server's seam, so the golden's times are the same on every day. The
+// failed job is a row written straight into the table, so the queue's own events do not join the golden.
+func TestContractAttention(t *testing.T) {
+	e := newEnv(t, true)
+	cookie := e.setup().String()
+	now := time.Date(2026, 3, 15, 12, 0, 0, 0, time.UTC)
+	insertJob(t, e, "failed", "", now.Add(-10*time.Minute).UnixMilli(), now.Add(-9*time.Minute).UnixMilli(), 0, 0, 1)
+	d := e.deps()
+	d.Now = func() time.Time { return now }
+	e.srv.Ready(d)
+
+	emitAttention(t, e, events.Event{JobID: 1, Attempt: 1, Level: events.LevelError, Kind: events.KindFailed,
+		Source: "jobs", Message: "The new file was shorter than the original.", TS: now.Add(-3 * time.Minute)})
+	emitAttention(t, e, events.Event{Level: events.LevelError, Kind: events.KindError, Source: "hw",
+		Message: "The graphics encoder stopped.", TS: now.Add(-5 * time.Minute)})
+	waitAttentionEvents(t, e, now.Add(-attentionWindow), 2)
+
+	items := getAttentionItems(t, e, cookie)
+	if len(items) != 2 || items[0].ID != "events-jobs" || items[1].ID != "events-hw" {
+		t.Fatalf("rows = %+v, want the jobs row and the hw row", items)
+	}
+	rec := e.do(http.MethodGet, "/api/v2/attention", "", map[string]string{"Cookie": cookie}, false)
+	writeGolden(t, "attention", "Attention[]", http.MethodGet, "/api/v2/attention", rec)
 }

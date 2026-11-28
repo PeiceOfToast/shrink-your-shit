@@ -176,9 +176,7 @@ func TestContractGoldens(t *testing.T) {
 	writeGolden(t, "workflow-delete", "WorkflowDeleted", http.MethodDelete, "/api/v2/workflows/1",
 		e.do(http.MethodDelete, "/api/v2/workflows/1", "", write(withSession(cookie)), false))
 
-	// Summary and attention (R1-9a).
+	// Summary (R1-9a). Attention's golden is in attention_test.go, beside the failed job and event it shows.
 	writeGolden(t, "summary", "Summary", http.MethodGet, "/api/v2/summary",
 		e.do(http.MethodGet, "/api/v2/summary", "", withSession(cookie), false), dir)
-	writeGolden(t, "attention", "Attention[]", http.MethodGet, "/api/v2/attention",
-		e.do(http.MethodGet, "/api/v2/attention", "", withSession(cookie), false), dir)
 }
