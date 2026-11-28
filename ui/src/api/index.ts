@@ -8,6 +8,7 @@ import * as realJobs from "./real/jobs.ts";
 import * as realWorkflows from "./real/workflows.ts";
 import * as realOverview from "./real/overview.ts";
 import * as realEvents from "./real/events.ts";
+import * as realSettings from "./real/settings.ts";
 import { isReal, type Group } from "./groups.ts";
 
 const realByGroup: Partial<Record<Group, object>> = {
@@ -18,6 +19,7 @@ const realByGroup: Partial<Record<Group, object>> = {
   workflows: realWorkflows,
   overview: realOverview,
   events: realEvents,
+  settings: realSettings,
 };
 
 function build(): typeof mock {

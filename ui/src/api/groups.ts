@@ -8,6 +8,7 @@ export const REAL = {
   summary: true,
   workflows: true,
   overview: false,
+  settings: true,
 } as const;
 
 export type Group = keyof typeof REAL;

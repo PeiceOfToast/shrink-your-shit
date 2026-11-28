@@ -5,6 +5,7 @@ import { request } from "../http.ts";
 import { ApiError } from "../errors.ts";
 import { convertAgain, getJobNeighbours, getJobs, runJobsAction } from "./jobs.ts";
 import { getLibraries, createLibrary } from "./libraries.ts";
+import { getSettings, patchSettings } from "./settings.ts";
 import { getAttention, getOverview } from "./overview.ts";
 import { createDraft, deleteWorkflow, duplicateWorkflow, exportWorkflow, getFlow, getGuideAnswers, guidePreview, listWorkflows, publishFlow, putAnswers, putDraft, tryFlow, validateFlow } from "./workflows.ts";
 
@@ -184,4 +185,19 @@ test("the list, duplicate and delete use the routes the server has", async () =>
 
 test("the calls with no route answer a plain not-yet the page can show", async () => {
   await assert.rejects(exportWorkflow("7"), (e: unknown) => e instanceof ApiError && e.code === "not_yet");
+});
+
+test("settings: GET the whole document, PATCH only the changed fields nested by group, a refusal keeps its field", async () => {
+  let calls = stub(200, JSON.stringify({ general: { languages: [] } }));
+  await getSettings();
+  assert.equal(calls[0].url, "/api/v2/settings");
+  assert.equal(calls[0].init.method, "GET");
+  calls = stub(200, JSON.stringify({ general: { languages: ["eng"] } }));
+  await patchSettings({ general: { languages: ["eng"] } });
+  assert.equal(calls[0].url, "/api/v2/settings");
+  assert.equal(calls[0].init.method, "PATCH");
+  assert.deepEqual(JSON.parse(calls[0].init.body as string), { general: { languages: ["eng"] } });
+  stub(400, JSON.stringify({ error: { code: "invalid_setting", field: "general.languages", message: "Use three-letter codes like eng, ger, fra." } }));
+  await assert.rejects(patchSettings({ general: { languages: ["english"] } }), (e: unknown) =>
+    e instanceof ApiError && e.code === "invalid_setting" && e.field === "general.languages");
 });
