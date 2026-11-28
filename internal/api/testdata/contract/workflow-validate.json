@@ -2,9 +2,9 @@
   "body": {
     "disabled": [
       {
-        "field": "ifGpuFails",
+        "field": "useGpu",
         "stepId": "video",
-        "why": "The graphics card is not used."
+        "why": "No worker has a graphics card."
       },
       {
         "field": "where",
@@ -23,7 +23,7 @@
     "summaries": {
       "audio": "Same as the source · same channels as the source · my languages · subtitles: keep all",
       "save": "MKV · next to the original",
-      "video": "HEVC · quality 3 · graphics card off"
+      "video": "HEVC · quality 3 · graphics card automatic"
     }
   },
   "method": "POST",

@@ -206,6 +206,25 @@ func fullPipelineOK(plan Plan, rung Rung) error {
 	return nil
 }
 
+// FullPipelineOK reports whether a plan can run with the card decoding and encoding: no frame-rate
+// change, no tone map, and no bit-depth change. The picker asks before it offers the full rung
+// (L-HW-9, L-HW-11), so a job that needs the processor's frames is not offered a rung Build would
+// refuse; Build still refuses the rung it actually got.
+func FullPipelineOK(plan Plan, main media.VideoTrack) bool {
+	if plan.Video.FPS > 0 || plan.Video.HDR == HDRTonemap {
+		return false
+	}
+	depth, capped, err := outputDepth(plan, main)
+	if err != nil || capped {
+		return false
+	}
+	src := 8
+	if main.BitDepth >= 10 {
+		src = 10
+	}
+	return depth == src
+}
+
 // rungSetup is the device arguments a card rung needs before its input: the device the card's
 // filters and encoder use, and for the full pipeline the card's decoder (L-HW-10). The names are
 // the ones the card probe proved (internal/hw).
