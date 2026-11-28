@@ -132,6 +132,9 @@ func (s *Store) CreateFromStarterTx(ctx context.Context, tx *sql.Tx, starterID, 
 		f = made
 	}
 	f.Name = name
+	if p := s.replaceFloorProblem(ctx, f); p != nil {
+		return 0, 0, &PublishBlockedError{Problem: *p}
+	}
 	text, err := json.Marshal(f)
 	if err != nil {
 		return 0, 0, fmt.Errorf("save the starter's flow: %w", err)
@@ -392,6 +395,9 @@ func (s *Store) Publish(ctx context.Context, id int64, given *Flow, vc ValidateC
 	if !rep.OK() {
 		return 0, &PublishBlockedError{Problem: rep.Problems[0]}
 	}
+	if p := s.replaceFloorProblem(ctx, f); p != nil {
+		return 0, &PublishBlockedError{Problem: *p}
+	}
 	if strings.TrimSpace(f.Name) == "" {
 		f.Name = w.Name
 	}
@@ -635,6 +641,9 @@ func (s *Store) Restore(ctx context.Context, id int64, rev int) (newRev int, err
 	var f Flow
 	if err := json.Unmarshal([]byte(text), &f); err != nil {
 		return 0, fmt.Errorf("read the flow of revision %d of workflow %d: %w", rev, id, err)
+	}
+	if p := s.replaceFloorProblem(ctx, f); p != nil {
+		return 0, &PublishBlockedError{Problem: *p}
 	}
 	answers, err := answersColumn(f)
 	if err != nil {
