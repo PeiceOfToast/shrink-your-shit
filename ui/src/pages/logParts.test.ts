@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { JobStep, LogEvent, LogKind, LogLevel } from "../api/types.ts";
-import { addLiveLine, levelBadges, logsFromEvents, olderCursorAfter, pagingCursor, showLines, showLoadOlder } from "./logParts.ts";
+import { addLiveLine, followsBottom, keptScrollTop, levelBadges, logsFromEvents, olderCursorAfter, pagingCursor, showLines, showLoadOlder } from "./logParts.ts";
 import { readFileSync } from "node:fs";
 
 const steps: JobStep[] = [
@@ -268,5 +268,25 @@ test("Load older pages by the paging cursor, not the first row's seq (a fold's s
   assert.match(src, /api\.getLog\(\{ \.\.\.paramsFor\(\), before, limit: api\.LOG_PAGE_SIZE \}\)/);
   assert.doesNotMatch(src, /before: oldest/);
   assert.doesNotMatch(src, /items\[0\]\?\.seq;\s*if \(oldest/);
+});
+
+test("Follow scrolls to the bottom for a new line at the end, or when following is turned on; not for prepends, pauses or off", () => {
+  assert.equal(followsBottom(10, 11, true, false, true), true, "a new newest line while following");
+  assert.equal(followsBottom(10, 10, true, false, true), false, "older lines prepended: the newest is unchanged");
+  assert.equal(followsBottom(10, 11, true, true, true), false, "paused: the person scrolled up");
+  assert.equal(followsBottom(10, 11, false, false, false), false, "not following");
+  assert.equal(followsBottom(10, 10, true, false, false), true, "Follow turned on with the same newest line: go to the newest");
+});
+
+test("Load older keeps the distance from the bottom", () => {
+  // The view was 300 px above the bottom; 40 rows (800 px) are added above it.
+  assert.equal(keptScrollTop(2000 + 800, 300), 2500);
+});
+
+test("the page scrolls through followsBottom and keeps the distance from the bottom through keptScrollTop", () => {
+  const src = readFileSync(new URL("./SystemLog.tsx", import.meta.url), "utf8");
+  assert.match(src, /followsBottom\(seen\.current\.newest, newestSeq, follow, paused, seen\.current\.on\)/);
+  assert.match(src, /keptScrollTop\(el\.scrollHeight, keepFromBottom\.current\)/);
+  assert.doesNotMatch(src, /\[items\.length, follow, paused\]/);
 });
 

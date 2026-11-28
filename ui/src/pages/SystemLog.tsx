@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api, type LogEvent, type LogParams } from "../api/index.ts";
 import { useApi } from "../api/useApi.ts";
 import { clock, clockPrecise } from "../format/time.ts";
 import { Link, navigate, useLocation } from "../router.tsx";
 import { Icon } from "../ui/Icon.tsx";
-import { LEVEL_LABEL, addLiveLine, copyText, levelBadges, olderCursorAfter, pagingCursor, saveText, showLines, showLoadOlder, type LogLevelName } from "./logParts.ts";
+import { LEVEL_LABEL, addLiveLine, copyText, followsBottom, keptScrollTop, levelBadges, olderCursorAfter, pagingCursor, saveText, showLines, showLoadOlder, type LogLevelName } from "./logParts.ts";
 
 // The System log (page 12): every app-wide event, newest last. Filters live in the URL, so a link can open a filtered log.
 const LEVELS = [
@@ -210,10 +210,26 @@ export function SystemLog() {
   // The badges are the server's counts (the whole log, as of the last load); the live lines are not added on top of them.
   const counts = levelBadges(log.data?.counts ?? { info: 0, warn: 0, error: 0 }, live);
 
+  // Follow scrolls to the newest line when a new line arrives at the bottom. Older lines prepended by Load older are not new
+  // lines at the bottom, so they do not move the view.
+  const newestSeq = items[items.length - 1]?.seq;
+  const seen = useRef<{ newest: number | undefined; on: boolean }>({ newest: undefined, on: false });
   useEffect(() => {
+    const go = followsBottom(seen.current.newest, newestSeq, follow, paused, seen.current.on);
+    seen.current = { newest: newestSeq, on: follow && !paused };
     const el = listRef.current;
-    if (el && follow && !paused) el.scrollTop = el.scrollHeight;
-  }, [items.length, follow, paused]);
+    if (el && go) el.scrollTop = el.scrollHeight;
+  }, [newestSeq, follow, paused]);
+
+  // Load older keeps the distance from the bottom: the lines the person was reading stay where they were.
+  const keepFromBottom = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    const el = listRef.current;
+    if (el && keepFromBottom.current != null) {
+      el.scrollTop = keptScrollTop(el.scrollHeight, keepFromBottom.current);
+      keepFromBottom.current = null;
+    }
+  }, [older]);
 
   const onScroll = () => {
     const el = listRef.current;
@@ -226,6 +242,8 @@ export function SystemLog() {
     if (before == null) return;
     try {
       const p = await api.getLog({ ...paramsFor(), before, limit: api.LOG_PAGE_SIZE });
+      const el = listRef.current;
+      if (el) keepFromBottom.current = el.scrollHeight - el.scrollTop;
       setOlder((o) => [...p.items, ...o]);
       setOlderCursor(olderCursorAfter(p));
     } catch (e) {
