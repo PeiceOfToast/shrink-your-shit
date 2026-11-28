@@ -579,7 +579,38 @@ export interface BackupPreview {
   previewId: string;
   createdAt: string;
   appVersion: string;
-  contents: { settings: boolean; workflows: number; libraries: number; shares: number; connections: number; jobs: number };
+  contents: BackupContents;
+  warnings: string[];
+}
+
+// GET /api/v2/backups (page 11, Backup): the kept backups, newest first, and how many are kept.
+export interface BackupList {
+  backups: BackupItem[];
+  keep: number;
+}
+
+// The set-up a backup holds, counted (page 11, Backup): what a preview shows and what a restore brought back.
+export interface BackupContents {
+  settings: boolean;
+  workflows: number;
+  libraries: number;
+  shares: number;
+  connections: number;
+  jobs: number;
+}
+
+// A library or workflow the live set-up has and the backup does not. A restore keeps it and lists it.
+export interface BackupKept {
+  type: "library" | "workflow";
+  id: string;
+  name: string;
+}
+
+// POST /api/v2/backups/apply {previewId} (page 11, Backup): what a restore did.
+export interface BackupRestored {
+  restored: BackupContents;
+  safetyBackup: BackupItem;
+  keptNotInBackup: BackupKept[];
   warnings: string[];
 }
 

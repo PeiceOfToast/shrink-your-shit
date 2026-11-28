@@ -1,0 +1,14 @@
+{
+  "body": {
+    "appVersion": "",
+    "createdAt": "$DIR",
+    "id": "$DIR",
+    "name": "$DIR",
+    "reason": "manual",
+    "sizeBytes": 151552
+  },
+  "method": "POST",
+  "path": "/api/v2/backups",
+  "status": 201,
+  "type": "BackupItem"
+}

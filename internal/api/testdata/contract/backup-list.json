@@ -1,0 +1,19 @@
+{
+  "body": {
+    "backups": [
+      {
+        "appVersion": "",
+        "createdAt": "$DIR",
+        "id": "$DIR",
+        "name": "$DIR",
+        "reason": "manual",
+        "sizeBytes": 151552
+      }
+    ],
+    "keep": 10
+  },
+  "method": "GET",
+  "path": "/api/v2/backups",
+  "status": 200,
+  "type": "BackupList"
+}

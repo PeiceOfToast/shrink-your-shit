@@ -1,0 +1,32 @@
+{
+  "body": {
+    "keptNotInBackup": [
+      {
+        "id": "7",
+        "name": "Kept library",
+        "type": "library"
+      }
+    ],
+    "restored": {
+      "connections": 0,
+      "jobs": 0,
+      "libraries": 0,
+      "settings": false,
+      "shares": 0,
+      "workflows": 1
+    },
+    "safetyBackup": {
+      "appVersion": "",
+      "createdAt": "$DIR",
+      "id": "$DIR",
+      "name": "$DIR",
+      "reason": "manual",
+      "sizeBytes": 151552
+    },
+    "warnings": []
+  },
+  "method": "POST",
+  "path": "/api/v2/backups/apply",
+  "status": 200,
+  "type": "BackupRestored"
+}

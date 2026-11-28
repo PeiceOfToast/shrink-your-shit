@@ -1,0 +1,20 @@
+{
+  "body": {
+    "appVersion": "",
+    "contents": {
+      "connections": 0,
+      "jobs": 0,
+      "libraries": 0,
+      "settings": false,
+      "shares": 0,
+      "workflows": 1
+    },
+    "createdAt": "$DIR",
+    "previewId": "$DIR",
+    "warnings": []
+  },
+  "method": "POST",
+  "path": "/api/v2/backups/preview",
+  "status": 200,
+  "type": "BackupPreview"
+}
