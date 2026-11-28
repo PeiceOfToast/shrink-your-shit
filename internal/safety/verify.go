@@ -48,8 +48,9 @@ const (
 	// CodeColor is the colour description the result carries not being the one the plan writes.
 	CodeColor = "check.color"
 
-	// NextKeepOriginal is what every "no" tells the job.
-	NextKeepOriginal = "keep_original"
+	// NextKeepOriginal is what every "no" tells the job: the new file was not used, and the original is
+	// exactly as it was (S3-6a: the job row keeps this sentence, not a code, because the page shows it).
+	NextKeepOriginal = "The original is untouched; the new file was not used."
 )
 
 // MaxAudioChannels is the bound check 3 gives a track whose planned channel count is unknown: a

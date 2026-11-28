@@ -492,6 +492,9 @@ func TestRunMayPassWhenTheCheckCouldNotRun(t *testing.T) {
 	if res.Outcome != flow.OutcomeMayPass || res.Reason != "check.unavailable" {
 		t.Fatalf("result = %+v, want may_pass check.unavailable", res)
 	}
+	if res.NextAction != flow.NextTriedAgain {
+		t.Errorf("next action = %q, want %q", res.NextAction, flow.NextTriedAgain)
+	}
 }
 
 func TestRunKeepsTheOriginalWhenTheResultIsNotSmaller(t *testing.T) {
@@ -564,6 +567,9 @@ func TestRunEncodeFailureIsFatalWithKeyLines(t *testing.T) {
 		newEnv(m, sf, &recorder{}, starterFlow(t), &raw))
 	if res.Outcome != flow.OutcomeFatal || res.Reason != "encode.failed" || res.FailedStep != "video" {
 		t.Fatalf("result = %+v, want fatal encode.failed in the video step", res)
+	}
+	if res.NextAction != flow.NextRetryLog {
+		t.Errorf("next action = %q, want %q", res.NextAction, flow.NextRetryLog)
 	}
 	if len(res.KeyLines) != 1 || res.KeyLines[0] != "x265 [error]: out of memory" {
 		t.Errorf("key lines = %v", res.KeyLines)

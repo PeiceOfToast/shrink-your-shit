@@ -380,12 +380,13 @@ func TestRunSRTRecordFailureLeadsWithTheOutcome(t *testing.T) {
 	env.Sidecars = journal
 	res := flow.Run(context.Background(), runInput(t, root, src), env)
 
-	want := "The subtitle files could not be recorded, so nothing was changed. Press Retry. (the database is locked)"
+	want := "The subtitle files could not be recorded, so nothing was changed. (the database is locked)"
 	if res.Outcome != flow.OutcomeFatal || res.Reason != "subtitle.record_failed" || res.Message != want {
 		t.Fatalf("result = %+v, want the record failure with %q", res, want)
 	}
-	if res.NextAction != "retry" {
-		t.Errorf("next action = %q, want retry: the sentence says Press Retry", res.NextAction)
+	// S3-6a: the retry instruction is the next-action sentence, once, not a second time in the message.
+	if res.NextAction != flow.NextRetry {
+		t.Errorf("next action = %q, want %q", res.NextAction, flow.NextRetry)
 	}
 	if sf.placedTo != "" {
 		t.Errorf("placed %q; the sentence says nothing was changed", sf.placedTo)

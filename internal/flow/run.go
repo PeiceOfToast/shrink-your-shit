@@ -145,7 +145,7 @@ func (e *engine) run(ctx context.Context) (res Result) {
 		if ctx.Err() != nil {
 			return cancelled()
 		}
-		return fatal("invalid_flow", err.Error(), "", "")
+		return fatal("invalid_flow", err.Error(), "", NextOpenWorkflow)
 	}
 	var decisions Decisions
 	var plan encode.Plan
@@ -181,7 +181,7 @@ func (e *engine) run(ctx context.Context) (res Result) {
 	}
 	extracts, err := encode.Extracts(plan, info)
 	if err != nil {
-		return fatal("encode.plan_failed", err.Error(), e.encodeOwner(decisions), "")
+		return fatal("encode.plan_failed", err.Error(), e.encodeOwner(decisions), NextFixWorkflow)
 	}
 	if len(extracts) > 0 && !e.in.Try {
 		// A replace takes the original's stem with the new extension. The swap moves the original out first, and
@@ -193,7 +193,7 @@ func (e *engine) run(ctx context.Context) (res Result) {
 				// Nothing has been written yet: the original is untouched and no new file exists.
 				return fatal("save.name_failed",
 					"The original was left as it is and no new file was made, because no free name for it could be found. ("+err.Error()+")",
-					"save", "")
+					"save", NextFreeName)
 			}
 			plan.Output = name
 		}
@@ -204,7 +204,7 @@ func (e *engine) run(ctx context.Context) (res Result) {
 			// file of that name still refuses, as it always has.
 			if p := encode.SrtName(plan.Output, x.Part); exists(p) && !(e.replace && e.ownSubtitle(p)) {
 				return Result{Outcome: OutcomeFatal, Reason: "save.srt_exists", Message: srtTaken(p),
-					FailedStep: "save", NextAction: "retry"}
+					FailedStep: "save", NextAction: NextMoveSrt}
 			}
 		}
 	}
@@ -213,7 +213,7 @@ func (e *engine) run(ctx context.Context) (res Result) {
 	// has checked the result; extracted subtitles are staged in the same private folder.
 	staged, err := e.env.Safety.Stage(e.in.StageBase, plan.Output)
 	if err != nil {
-		return fatal("save.stage_failed", err.Error(), "save", "Check the destination folder's permissions.")
+		return fatal("save.stage_failed", err.Error(), "save", NextDestination)
 	}
 	placed := false
 	defer func() {
@@ -228,14 +228,14 @@ func (e *engine) run(ctx context.Context) (res Result) {
 	// 5. Build the command.
 	rung, err := e.pick(plan)
 	if err != nil {
-		return fatal("encoder.unavailable", err.Error(), "", "")
+		return fatal("encoder.unavailable", err.Error(), "", NextEncoder)
 	}
 	built, err := encode.Build(plan, info, rung)
 	if err != nil {
 		if errors.Is(err, encode.ErrSkip) {
 			return skip("encode.skip", err.Error())
 		}
-		return fatal("encode.plan_failed", err.Error(), e.encodeOwner(decisions), "")
+		return fatal("encode.plan_failed", err.Error(), e.encodeOwner(decisions), NextFixWorkflow)
 	}
 	// A stream the file type cannot hold is left out of the output, and the note says which and
 	// why. Some of this is invisible to the check: Audio copies a track, so the flow's container
@@ -247,7 +247,7 @@ func (e *engine) run(ctx context.Context) (res Result) {
 	argv := append([]string{"ffmpeg"}, built.Argv...)
 	// Build always ends the command with the plan's destination; the run writes the staged file.
 	if argv[len(argv)-1] != plan.Output {
-		return fatal("encode.plan_failed", "the command does not end in the output path", e.encodeOwner(decisions), "")
+		return fatal("encode.plan_failed", "the command does not end in the output path", e.encodeOwner(decisions), NextFixWorkflow)
 	}
 	argv[len(argv)-1] = staged.Path
 	e.command(argv)
@@ -260,14 +260,14 @@ func (e *engine) run(ctx context.Context) (res Result) {
 	if err != nil {
 		return Result{
 			Outcome: OutcomeFatal, Reason: "encode.failed", Message: err.Error(),
-			FailedStep: e.encodeOwner(decisions), NextAction: "retry", KeyLines: run.KeyLines,
+			FailedStep: e.encodeOwner(decisions), NextAction: NextRetryLog, KeyLines: run.KeyLines,
 		}
 	}
 
 	// 6. Check the result against the source (§7.1 checks 1-3 in stage 1).
 	want, err := e.verifyWant(plan, info)
 	if err != nil {
-		return fatal("encode.plan_failed", err.Error(), "save", "")
+		return fatal("encode.plan_failed", err.Error(), "save", NextFixWorkflow)
 	}
 	verdict, err := e.env.Safety.Verify(ctx, e.env.Media, e.env.SafetyLog, staged, info, want, safety.DefaultVerifyTimeout)
 	if err != nil {
@@ -278,7 +278,7 @@ func (e *engine) run(ctx context.Context) (res Result) {
 		return Result{
 			Outcome: OutcomeMayPass, Reason: "check.unavailable",
 			Message:    fmt.Sprintf("The new file could not be checked: %v", err),
-			SizeBefore: e.in.Size, NextAction: "retry",
+			SizeBefore: e.in.Size, NextAction: NextTriedAgain,
 		}
 	}
 	if !verdict.OK {
@@ -300,7 +300,7 @@ func (e *engine) run(ctx context.Context) (res Result) {
 	// 7. The size rule: a result that is not smaller is not worth keeping.
 	st, err := os.Stat(staged.Path)
 	if err != nil {
-		return fatal("save.read_failed", err.Error(), "save", "")
+		return fatal("save.read_failed", err.Error(), "save", NextDestination)
 	}
 	after := st.Size()
 	e.size(e.in.Size, after)
@@ -364,7 +364,7 @@ func (e *engine) run(ctx context.Context) (res Result) {
 			}
 		}
 		e.removeSidecars(sidecars) // the new file was not placed: our .srt files go again
-		return fatal("save.failed", err.Error(), "save", "Check the destination folder.")
+		return fatal("save.failed", err.Error(), "save", NextDestination)
 	}
 	placed = true
 	e.move(staged.Path, final)
@@ -394,7 +394,7 @@ func (e *engine) recheck(ctx context.Context) Result {
 		return skip("file.gone", "The file is gone.")
 	}
 	if err != nil {
-		return fatal("file.unreadable", fmt.Sprintf("Cannot read %s: %v", src, err), "", "")
+		return fatal("file.unreadable", fmt.Sprintf("Cannot read %s: %v", src, err), "", NextFileReadable)
 	}
 	if lst.Mode()&os.ModeSymlink != 0 {
 		return skip("file.linked", "The file is a link, and links are never converted.")
@@ -410,12 +410,12 @@ func (e *engine) recheck(ctx context.Context) Result {
 	}
 	st, err := os.Stat(src)
 	if err != nil {
-		return fatal("file.unreadable", fmt.Sprintf("Cannot read %s: %v", src, err), "", "")
+		return fatal("file.unreadable", fmt.Sprintf("Cannot read %s: %v", src, err), "", NextFileReadable)
 	}
 	if e.in.FileID != "" {
 		id, err := fsx.FileID(src)
 		if err != nil {
-			return fatal("file.unreadable", fmt.Sprintf("Cannot identify %s: %v", src, err), "", "")
+			return fatal("file.unreadable", fmt.Sprintf("Cannot identify %s: %v", src, err), "", NextFileReadable)
 		}
 		if id != e.in.FileID {
 			return skip("file.changed", "The file was replaced since it was scanned.")
@@ -432,7 +432,7 @@ func (e *engine) recheck(ctx context.Context) Result {
 		return skip("file.gone", "The file is gone.")
 	}
 	if err != nil {
-		return fatal("file.unreadable", fmt.Sprintf("Cannot read %s: %v", src, err), "", "")
+		return fatal("file.unreadable", fmt.Sprintf("Cannot read %s: %v", src, err), "", NextFileReadable)
 	}
 	if st2.Size() != size || !st2.ModTime().Equal(mtime) {
 		return Result{Outcome: OutcomeRequeue, Reason: "file.still_changing",
@@ -467,7 +467,7 @@ func (e *engine) probeSource(ctx context.Context) (media.Info, Result) {
 		}
 		// ffprobe missing or crashing says nothing about this file (L-SAFE-5).
 		return media.Info{}, Result{Outcome: OutcomeMayPass, Reason: "source.uncheckable",
-			Message: fmt.Sprintf("The file could not be read: %v", err), NextAction: "retry"}
+			Message: fmt.Sprintf("The file could not be read: %v", err), NextAction: NextTriedAgain}
 	}
 	e.probeEvent("before", info)
 	return info, Result{}
@@ -494,7 +494,7 @@ func (e *engine) plan(ctx context.Context, rev Revision, info media.Info) (Decis
 	var d Decisions
 	var plan encode.Plan
 	if problems := shapeProblems(rev.Flow); len(problems) > 0 {
-		return d, plan, fatal("invalid_flow", strings.Join(problems, " "), "", "")
+		return d, plan, fatal("invalid_flow", strings.Join(problems, " "), "", NextOpenWorkflow)
 	}
 	e.replace = saveReplaces(rev.Flow)
 	for i, ref := range rev.Flow.Steps {
@@ -512,7 +512,7 @@ func (e *engine) plan(ctx context.Context, rev Revision, info media.Info) (Decis
 		if err != nil {
 			dur := e.env.now().Sub(started)
 			e.stepEvent(events.KindStepEnd, ref, name, i+1, events.LevelError, "setting.invalid", err.Error(), dur, nil)
-			return d, plan, fatal("invalid_settings", err.Error(), ref.ID, "")
+			return d, plan, fatal("invalid_settings", err.Error(), ref.ID, NextFixSettings)
 		}
 		decision, err := step.Plan(settings, PlanInput{Info: info, Env: e.env}, &plan)
 		dur := e.env.now().Sub(started)
@@ -520,7 +520,7 @@ func (e *engine) plan(ctx context.Context, rev Revision, info media.Info) (Decis
 			pe := planError(ref.ID, err)
 			e.stepEvent(events.KindStepEnd, ref, name, i+1, events.LevelError, pe.Code, pe.Message, dur, nil)
 			return d, plan, Result{Outcome: OutcomeFatal, Reason: pe.Code, Message: pe.Message,
-				FailedStep: pe.Step, NextAction: pe.NextAction}
+				FailedStep: pe.Step, NextAction: orDefault(pe.NextAction, nextForPlan(pe.Code))}
 		}
 		sd := StepDecision{ID: ref.ID, Type: ref.Type, Name: name, Version: ref.Version, Index: i + 1, Decision: decision}
 		d.Steps = append(d.Steps, sd)
@@ -637,7 +637,7 @@ func (e *engine) sourceCheck(ctx context.Context, info media.Info) Result {
 		return Result{
 			Outcome: OutcomeMayPass, Reason: "check.unavailable",
 			Message:    fmt.Sprintf("The original file could not be checked: %v", err),
-			SizeBefore: e.in.Size, NextAction: "retry",
+			SizeBefore: e.in.Size, NextAction: NextTriedAgain,
 		}
 	}
 	if !verdict.OK {
@@ -851,22 +851,22 @@ func (e *engine) placeSidecars(plan encode.Plan, extracts []encode.StreamPlan, s
 	}
 	vst, err := os.Stat(staged.Path)
 	if err != nil {
-		return nil, fatal("save.read_failed", err.Error(), "save", "")
+		return nil, fatal("save.read_failed", err.Error(), "save", NextDestination)
 	}
 	vhash, err := fsx.SampleHash(staged.Path)
 	if err != nil {
-		return nil, fatal("save.read_failed", err.Error(), "save", "")
+		return nil, fatal("save.read_failed", err.Error(), "save", NextDestination)
 	}
 	recs := make([]safety.Sidecar, 0, len(extracts))
 	for k, x := range extracts {
 		stagedSrt := encode.StagedSidecar(plan.SidecarDir, k)
 		st, err := os.Stat(stagedSrt)
 		if err != nil {
-			return nil, fatal("subtitle.not_saved", err.Error(), "save", "retry")
+			return nil, fatal("subtitle.not_saved", err.Error(), "save", NextRetry)
 		}
 		h, err := fsx.SHA256(stagedSrt)
 		if err != nil {
-			return nil, fatal("subtitle.not_saved", err.Error(), "save", "retry")
+			return nil, fatal("subtitle.not_saved", err.Error(), "save", NextRetry)
 		}
 		recs = append(recs, safety.Sidecar{
 			JobID: e.in.JobID, Path: encode.SrtName(plan.Output, x.Part),
@@ -879,8 +879,8 @@ func (e *engine) placeSidecars(plan encode.Plan, extracts []encode.StreamPlan, s
 			// The records go in before any .srt is renamed into place and before Place: on this
 			// path nothing has changed.
 			return nil, fatal("subtitle.record_failed",
-				"The subtitle files could not be recorded, so nothing was changed. Press Retry. ("+err.Error()+")",
-				"save", "retry")
+				"The subtitle files could not be recorded, so nothing was changed. ("+err.Error()+")",
+				"save", NextRetry)
 		}
 	}
 	var placed []safety.Sidecar
@@ -897,11 +897,11 @@ func (e *engine) placeSidecars(plan encode.Plan, extracts []encode.StreamPlan, s
 			e.removeSidecars(placed)
 			if errors.Is(err, os.ErrExist) {
 				return nil, Result{Outcome: OutcomeFatal, Reason: "save.srt_exists", Message: srtTaken(c.Path),
-					FailedStep: "save", NextAction: "retry"}
+					FailedStep: "save", NextAction: NextMoveSrt}
 			}
 			return nil, Result{Outcome: OutcomeFatal, Reason: "subtitle.place_failed",
 				Message:    "A subtitle file could not be put next to the new file, so nothing was changed.",
-				FailedStep: "save", NextAction: "retry"}
+				FailedStep: "save", NextAction: NextRetry}
 		}
 		e.move(from, c.Path)
 		placed = append(placed, c)
@@ -1031,7 +1031,7 @@ func (e *engine) trashOwnSubtitles(plan encode.Plan, extracts []encode.StreamPla
 	}
 	recs, err := e.env.Sidecars.Sidecars()
 	if err != nil {
-		return fatal("subtitle.record_failed", "The subtitle records could not be read, so nothing was changed. ("+err.Error()+")", "save", "retry")
+		return fatal("subtitle.record_failed", "The subtitle records could not be read, so nothing was changed. ("+err.Error()+")", "save", NextRetry)
 	}
 	for _, x := range extracts {
 		p := encode.SrtName(plan.Output, x.Part)
@@ -1047,7 +1047,7 @@ func (e *engine) trashOwnSubtitles(plan encode.Plan, extracts []encode.StreamPla
 				e.restoreTrashed()
 				return fatal("replace.subtitle_trash_failed",
 					"An earlier subtitle file of this app could not be moved to the trash, so nothing was changed. ("+err.Error()+")",
-					"save", "retry")
+					"save", NextRetry)
 			}
 			_ = e.env.Sidecars.DropSidecar(c.JobID, p)
 			e.trashed = append(e.trashed, trashedSub{trash: trash, path: p, rec: c})

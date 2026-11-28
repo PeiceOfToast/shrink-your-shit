@@ -35,6 +35,9 @@ type Job struct {
 	Outcome     string
 	FailedStep  string
 	Reason      string
+	// FailureCode is the stable code of the failure, next to its sentence (S3-6a): "encode.failed",
+	// "replace.record_unsettled". It decides whether a retry is offered at all.
+	FailureCode string
 	NextAction  string
 	SkipReason  string
 	OutputPath  string
@@ -65,7 +68,7 @@ type ListFilter struct {
 const jobColumns = `id, file_id, library_id, workflow_id, COALESCE(workflow_rev, 0), path, state, top,
 	queued_at, queued_by, started_at, finished_at, next_try_at, COALESCE(worker_id, ''), attempt, tries,
 	size_before, size_after, COALESCE(outcome, ''), COALESCE(failed_step, ''), COALESCE(reason, ''),
-	COALESCE(next_action, ''), COALESCE(skip_reason, ''), COALESCE(output_path, '')`
+	COALESCE(failure_code, ''), COALESCE(next_action, ''), COALESCE(skip_reason, ''), COALESCE(output_path, '')`
 
 type rowScanner interface {
 	Scan(dest ...any) error
@@ -79,7 +82,7 @@ func scanJob(r rowScanner) (Job, error) {
 	var started, finished, nextTry, sizeBefore, sizeAfter sql.NullInt64
 	err := r.Scan(&j.ID, &j.FileID, &j.LibraryID, &j.WorkflowID, &j.WorkflowRev, &j.Path, &state, &top,
 		&queuedAt, &j.QueuedBy, &started, &finished, &nextTry, &j.WorkerID, &j.Attempt, &j.Tries,
-		&sizeBefore, &sizeAfter, &j.Outcome, &j.FailedStep, &j.Reason,
+		&sizeBefore, &sizeAfter, &j.Outcome, &j.FailedStep, &j.Reason, &j.FailureCode,
 		&j.NextAction, &j.SkipReason, &j.OutputPath)
 	if err != nil {
 		return Job{}, err

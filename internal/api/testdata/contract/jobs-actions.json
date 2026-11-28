@@ -1,0 +1,18 @@
+{
+  "body": {
+    "done": [
+      "1"
+    ],
+    "refused": [
+      {
+        "code": "not_movable",
+        "id": "3",
+        "message": "Only a waiting job can be moved to the top."
+      }
+    ]
+  },
+  "method": "POST",
+  "path": "/api/v2/jobs/actions",
+  "status": 200,
+  "type": "JobsActionDone"
+}

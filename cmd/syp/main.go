@@ -156,7 +156,10 @@ func run(dataDir, listen string) error {
 		Jobs:      q,
 		Scanner:   newScanner(catalog, flows, q, bus, wk.Wake),
 		Wake:      wk.Wake,
-		DiskFree:  fsx.FreeBytes,
+		// Cancel of a running job (S3-6a): the api marks the row cancelled, then this ends the run's
+		// context, which kills ffmpeg and lets the flow remove its staging.
+		StopJob:  func(id int64) { wk.CancelJob(id) },
+		DiskFree: fsx.FreeBytes,
 		// Try on one file (S2-5): the same engine as a job, with its own events that answer the
 		// page rather than going to the log.
 		Try: func(ctx context.Context, f flow.Flow, file string) (flow.TryResult, error) {

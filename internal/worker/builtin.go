@@ -92,3 +92,12 @@ func (b Builtin) Cancel(ctx context.Context, id int64) error {
 	_, err := b.Queue.Cancel(ctx, id)
 	return err
 }
+
+// Running says whether the job is still running in the queue.
+func (b Builtin) Running(ctx context.Context, id int64) (bool, error) {
+	j, err := b.Queue.Get(ctx, id)
+	if err != nil {
+		return false, err
+	}
+	return j.State == jobs.Running, nil
+}

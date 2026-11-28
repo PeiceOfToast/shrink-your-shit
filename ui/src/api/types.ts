@@ -250,6 +250,19 @@ export interface JobNeighbours {
   next: string | null;
 }
 
+// POST /api/v2/jobs/actions (S3-6a): one action ("retry" | "cancel" | "top") for a list of jobs. "done" holds
+// the ids that changed; a refused id changed nothing, and its "message" is the sentence the page shows.
+export interface JobActionRefusal {
+  id: string;
+  code: "job_not_found" | "not_retryable" | "not_movable" | "file_busy" | "not_cancellable" | "internal";
+  message: string;
+}
+
+export interface JobsActionDone {
+  done: string[];
+  refused: JobActionRefusal[];
+}
+
 export interface JobsParams {
   state?: JobState | "all";
   worker?: string; // a worker id; the jobs it ran or is running

@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/PeiceOfToast/shrink-your-shit/internal/events"
@@ -43,6 +44,9 @@ type Source interface {
 	Finish(ctx context.Context, id int64, attempt int, r jobs.Result) error
 	Requeue(ctx context.Context, id int64, why string) error
 	Cancel(ctx context.Context, id int64) error
+	// Running says whether the job is still running in the queue. The worker asks once before a run starts, so
+	// a cancel that landed between the claim and the run still stops the run before anything is encoded.
+	Running(ctx context.Context, id int64) (bool, error)
 }
 
 // RunFunc runs one attempt. flow.Run has this shape.
@@ -71,6 +75,11 @@ type Config struct {
 type Worker struct {
 	cfg  Config
 	wake chan struct{}
+
+	// mu guards stops: the cancel of each job this worker is running now. The api reaches it through
+	// CancelJob when a person cancels a running job (S3-6a).
+	mu    sync.Mutex
+	stops map[int64]context.CancelFunc
 }
 
 // New returns a worker with defaults filled in. Slots below 1 means 1.
@@ -87,7 +96,21 @@ func New(cfg Config) *Worker {
 	if cfg.WorkerID == "" {
 		cfg.WorkerID = "local"
 	}
-	return &Worker{cfg: cfg, wake: make(chan struct{}, 1)}
+	return &Worker{cfg: cfg, wake: make(chan struct{}, 1), stops: make(map[int64]context.CancelFunc)}
+}
+
+// CancelJob stops the job if this worker is running it: its run context ends, which kills ffmpeg and lets the
+// flow remove its staging. The queue row is cancelled by the caller before this; the run then reports cancelled,
+// which the queue treats as already done. It says whether this worker had the job running.
+func (w *Worker) CancelJob(id int64) bool {
+	w.mu.Lock()
+	stop := w.stops[id]
+	w.mu.Unlock()
+	if stop == nil {
+		return false
+	}
+	stop()
+	return true
 }
 
 // Wake tells an idle slot that work may be waiting. Call it after a job is enqueued. It never blocks, and a wake
@@ -154,19 +177,33 @@ func (w *Worker) execute(ctx context.Context, work Work) {
 		if work.Transient {
 			w.finish(wctx, j, jobs.Result{
 				Verdict: jobs.VerdictRetry, Reason: "could not read the library right now: " + work.Err.Error(),
-				FailedStep: "worker", NextAction: "retry",
+				Code: "worker.read_failed", FailedStep: "worker", NextAction: flow.NextTriedAgain,
 			})
 			return
 		}
 		w.finish(wctx, j, jobs.Result{
 			Verdict: jobs.VerdictFail, Reason: "could not build the run: " + work.Err.Error(),
-			FailedStep: "worker", NextAction: "fix_and_retry",
+			Code: "worker.build_failed", FailedStep: "worker", NextAction: flow.NextWorker,
 		})
 		return
 	}
 
 	runCtx, cancel := context.WithCancel(wctx)
 	defer cancel()
+	w.mu.Lock()
+	w.stops[j.ID] = cancel
+	w.mu.Unlock()
+	defer func() {
+		w.mu.Lock()
+		delete(w.stops, j.ID)
+		w.mu.Unlock()
+	}()
+	// A person may have cancelled the job between the claim and this point: the row is already cancelled, and
+	// nothing should be encoded for it. A read that fails leaves the run going; if the job really was cancelled,
+	// the result write is refused and startup recovery has nothing left to do.
+	if running, err := w.cfg.Source.Running(wctx, j.ID); err == nil && !running {
+		cancel()
+	}
 	done := make(chan struct{})
 	defer close(done)
 	go func() {
@@ -188,7 +225,8 @@ func (w *Worker) execute(ctx context.Context, work Work) {
 		w.record(events.KindError, events.LevelError, j.ID, j.Attempt, "internal_error",
 			fmt.Sprintf("panic in run: %v\n%s", p.value, p.stack))
 		w.finish(wctx, j, jobs.Result{
-			Verdict: jobs.VerdictFail, Reason: "internal_error", FailedStep: "worker", NextAction: "report_bug",
+			Verdict: jobs.VerdictFail, Reason: "internal_error", Code: "internal_error",
+			FailedStep: "worker", NextAction: flow.NextBug,
 		})
 		return
 	}

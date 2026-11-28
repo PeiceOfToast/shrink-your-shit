@@ -117,8 +117,8 @@ func TestAnInstallAtSchemaSixUpgradesThroughSeven(t *testing.T) {
 		t.Fatalf("queue the old job: %v", err)
 	}
 
-	// Take the schema back to 6: remove what migrations 7, 8, 9 and 10 add, and say the database is at
-	// 6. All the data above stays, as it would on a real stage 1 install.
+	// Take the schema back to 6: remove what migrations 7, 8, 9, 10 and 11 add, and say the database is
+	// at 6. All the data above stays, as it would on a real stage 1 install.
 	if err := db.Tx(ctx, func(tx *sql.Tx) error {
 		for _, s := range []string{
 			`DROP TABLE IF EXISTS encoder_state`,
@@ -126,6 +126,7 @@ func TestAnInstallAtSchemaSixUpgradesThroughSeven(t *testing.T) {
 			`DROP TABLE IF EXISTS sidecars`,
 			`DROP TABLE IF EXISTS replace_journal`,
 			`ALTER TABLE jobs DROP COLUMN subtitle_files`,
+			`ALTER TABLE jobs DROP COLUMN failure_code`,
 			`PRAGMA user_version = 6`,
 		} {
 			if _, err := tx.Exec(s); err != nil {
@@ -155,9 +156,10 @@ func TestAnInstallAtSchemaSixUpgradesThroughSeven(t *testing.T) {
 	if err := db.Read().QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	// The newest migration is 10 (the replace journal); 9 is the subtitles change (#854).
-	if version != 10 {
-		t.Errorf("schema version after the upgrade = %d, want 10", version)
+	// The newest migration is 11 (the failure code, S3-6a); 10 is the replace journal, 9 the subtitles
+	// change (#854).
+	if version != 11 {
+		t.Errorf("schema version after the upgrade = %d, want 11", version)
 	}
 	if err := db.Read().QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'encoder_state'`).
 		Scan(&encoderState); err != nil {
@@ -173,6 +175,14 @@ func TestAnInstallAtSchemaSixUpgradesThroughSeven(t *testing.T) {
 	}
 	if sidecarTable != 1 {
 		t.Error("migration 9 did not run: sidecars is missing")
+	}
+	var failureCode int
+	if err := db.Read().QueryRow(`SELECT count(*) FROM pragma_table_info('jobs') WHERE name = 'failure_code'`).
+		Scan(&failureCode); err != nil {
+		t.Fatal(err)
+	}
+	if failureCode != 1 {
+		t.Error("migration 11 did not run: jobs.failure_code is missing")
 	}
 	// The job queued before subtitle files were recorded keeps its NULL, not an invented list.
 	var subtitleFiles sql.NullString
@@ -265,9 +275,10 @@ func TestTheStartupSweepClearsOlderTriesOnly(t *testing.T) {
 	})
 }
 
-// TestAnInstallAtSchemaNineUpgradesToTen: an install at schema 9 (the subtitles change) upgrades through the program's
-// own open-and-migrate path to 10, with the replace journal made and the data kept (review #865 add-on).
-func TestAnInstallAtSchemaNineUpgradesToTen(t *testing.T) {
+// TestAnInstallAtSchemaNineUpgradesToEleven: an install at schema 9 (the subtitles change) upgrades through the
+// program's own open-and-migrate path to 11, with the replace journal and the failure code made and the data kept
+// (review #865 add-on, then S3-6a).
+func TestAnInstallAtSchemaNineUpgradesToEleven(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 
@@ -291,13 +302,18 @@ func TestAnInstallAtSchemaNineUpgradesToTen(t *testing.T) {
 		t.Fatalf("add the library: %v", err)
 	}
 
-	// Take the schema back to 9: remove what migration 10 adds and say the database is at 9.
+	// Take the schema back to 9: remove what migrations 10 and 11 add and say the database is at 9.
 	if err := db.Tx(ctx, func(tx *sql.Tx) error {
-		if _, err := tx.Exec(`DROP TABLE IF EXISTS replace_journal`); err != nil {
-			return err
+		for _, s := range []string{
+			`DROP TABLE IF EXISTS replace_journal`,
+			`ALTER TABLE jobs DROP COLUMN failure_code`,
+			`PRAGMA user_version = 9`,
+		} {
+			if _, err := tx.Exec(s); err != nil {
+				return err
+			}
 		}
-		_, err := tx.Exec(`PRAGMA user_version = 9`)
-		return err
+		return nil
 	}); err != nil {
 		db.Close()
 		t.Fatalf("make the database a schema 9 install: %v", err)
@@ -319,8 +335,8 @@ func TestAnInstallAtSchemaNineUpgradesToTen(t *testing.T) {
 	if err := db.Read().QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 10 {
-		t.Errorf("schema version after the upgrade = %d, want 10", version)
+	if version != 11 {
+		t.Errorf("schema version after the upgrade = %d, want 11", version)
 	}
 	if err := db.Read().QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'replace_journal'`).
 		Scan(&journal); err != nil {
@@ -328,6 +344,14 @@ func TestAnInstallAtSchemaNineUpgradesToTen(t *testing.T) {
 	}
 	if journal != 1 {
 		t.Errorf("replace_journal tables = %d, want 1", journal)
+	}
+	var failureCode int
+	if err := db.Read().QueryRow(`SELECT count(*) FROM pragma_table_info('jobs') WHERE name = 'failure_code'`).
+		Scan(&failureCode); err != nil {
+		t.Fatal(err)
+	}
+	if failureCode != 1 {
+		t.Errorf("jobs.failure_code columns = %d, want 1", failureCode)
 	}
 	libs, err := library.NewCatalog(db).ListLibraries(ctx)
 	if err != nil || len(libs) != 1 {
