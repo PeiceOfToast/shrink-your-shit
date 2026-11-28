@@ -3,6 +3,7 @@ import type {
   BackupItem,
   BackupList,
   BackupPreview,
+  BackupRestored,
   Doctor,
   Integration,
   IntegrationInput,
@@ -396,7 +397,7 @@ export function previewBackup(input: { backupId?: string; file?: File }): Promis
   });
 }
 
-export function applyBackup(previewId: string): Promise<{ restored: BackupPreview["contents"]; safetyBackup: BackupItem }> {
+export function applyBackup(previewId: string): Promise<BackupRestored> {
   return respond(() => {
     const p = previews.get(previewId);
     if (!p) throw new ApiError("preview_expired", "That backup check has run out. Pick the backup again.");
@@ -404,7 +405,7 @@ export function applyBackup(previewId: string): Promise<{ restored: BackupPrevie
     previews.delete(previewId);
     const safetyBackup: BackupItem = { id: `bk-safety-${Date.now().toString(36)}`, name: "Before restore, 26 Nov, 23:31", createdAt: "2026-11-26T23:31:00Z", reason: "before_import", appVersion: "0.9.4", sizeBytes: 412_500 };
     backups = [safetyBackup, ...backups];
-    return { restored: p.contents, safetyBackup };
+    return { restored: p.contents, safetyBackup, keptNotInBackup: [], warnings: [] };
   });
 }
 

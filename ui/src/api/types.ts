@@ -589,6 +589,31 @@ export interface BackupList {
   keep: number;
 }
 
+// The set-up a backup holds, counted (page 11, Backup): what a preview shows and what a restore brought back.
+export interface BackupContents {
+  settings: boolean;
+  workflows: number;
+  libraries: number;
+  shares: number;
+  connections: number;
+  jobs: number;
+}
+
+// A library or workflow the live set-up has and the backup does not. A restore keeps it and lists it.
+export interface BackupKept {
+  type: "library" | "workflow";
+  id: number;
+  name: string;
+}
+
+// POST /api/v2/backups/apply {previewId} (page 11, Backup): what a restore did.
+export interface BackupRestored {
+  restored: BackupContents;
+  safetyBackup: BackupItem;
+  keptNotInBackup: BackupKept[];
+  warnings: string[];
+}
+
 export type CheckStatus = "ok" | "warn" | "bad" | "absent";
 
 export interface HealthCheck {
