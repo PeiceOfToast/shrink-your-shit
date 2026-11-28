@@ -35,7 +35,7 @@ function Body({ section }: { section: SettingsSection }) {
     case "connections": return <><SampleBanner /><Connections /></>;
     case "notifications": return <><SampleBanner /><Notifications /></>;
     case "backup": return <><SampleBanner /><Backup /></>;
-    case "health": return <><SampleBanner text="these checks are made up. The health check isn't connected yet." /><Health /></>;
+    case "health": return <><SampleBanner group="settings" text="these checks are made up. The health check isn't connected yet." /><Health /></>;
     // Token and password changes have no server route yet; a made-up token would read as real.
     case "access":
       return sampleOnly() ? (
@@ -51,7 +51,7 @@ function Body({ section }: { section: SettingsSection }) {
 export function SettingsPage({ section }: { section: SettingsSection | null }) {
   const doctor = useApi(() => api.getDoctor(false), []);
   // The sample checks include a problem; its red dot would read as real.
-  const healthBad = !sampleOnly() && (doctor.data?.checks.some((c) => c.status === "bad") ?? false);
+  const healthBad = !sampleOnly("settings") && (doctor.data?.checks.some((c) => c.status === "bad") ?? false);
   const [leave, setLeave] = useState<(() => void) | null>(null);
 
   useEffect(() => {
