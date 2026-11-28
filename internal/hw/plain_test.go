@@ -21,46 +21,71 @@ func TestPlainReasonForTheProofCards(t *testing.T) {
 		c    Candidate
 		raw  string
 		want string
+		// works is true for a card that proved another encoder: only that reading makes
+		// "Conversion failed!" mean the card has no AV1 encoder (build-order item 3).
+		works bool
 	}{
 		{"Debian 13 Intel QSV has no runtime",
 			Candidate{Encoder: "hevc_qsv", Family: encode.FamilyQSV, Codec: "hevc"},
 			"run ffmpeg: ffmpeg exited with code 171: Error parsing global options: Unknown error occurred",
-			"no QSV runtime for this chip on this system"},
+			"no QSV runtime for this chip on this system", false},
 		{"QSV with a generic library error",
 			Candidate{Encoder: "h264_qsv", Family: encode.FamilyQSV, Codec: "h264"},
 			"run ffmpeg: ffmpeg exited with code 187: Error parsing global options: Generic error in an external library",
-			"no QSV runtime for this chip on this system"},
+			"no QSV runtime for this chip on this system", false},
 		{"NVIDIA AV1 has no encoder on the card",
 			Candidate{Encoder: "av1_nvenc", Family: encode.FamilyNVENC, Codec: "av1"},
 			"run ffmpeg: ffmpeg exited with code 255: Conversion failed!",
-			"this card has no AV1 encoder"},
+			"this card has no AV1 encoder", true},
 		{"Intel gen9 VAAPI AV1 has no encoder on the card",
 			Candidate{Encoder: "av1_vaapi", Family: encode.FamilyVAAPI, Codec: "av1", Device: "/dev/dri/renderD128"},
 			"run ffmpeg: ffmpeg exited with code 218: Conversion failed!",
-			"this card has no AV1 encoder"},
+			"this card has no AV1 encoder", true},
 		{"the driver has no HEVC encode entrypoint",
 			Candidate{Encoder: "hevc_vaapi", Family: encode.FamilyVAAPI, Codec: "hevc", Device: "/dev/dri/renderD128"},
 			"run ffmpeg: ffmpeg exited with code 218: [hevc_vaapi @ 0x1] No usable encoding entrypoint found for profile VAProfileHEVCMain (17).",
-			"this card's VA-API driver has no HEVC encoder"},
+			"this card's VA-API driver has no HEVC encoder", false},
 		{"the static ffmpeg's libva is too old",
 			Candidate{Encoder: "h264_vaapi", Family: encode.FamilyVAAPI, Codec: "h264", Device: "/dev/dri/renderD128"},
 			"run ffmpeg: ffmpeg exited with code -1: ffmpeg: libva.so.2.init.c:290: _libva_so_2_tramp_resolve: Assertion `0 && \"Assertion in generated code\"' failed.",
-			"the VA-API library on this system is too old for this ffmpeg"},
+			"the VA-API library on this system is too old for this ffmpeg", false},
 		{"the libva-drm assertion reads the same way",
 			Candidate{Encoder: "hevc_vaapi", Family: encode.FamilyVAAPI, Codec: "hevc", Device: "/dev/dri/renderD128"},
 			"run ffmpeg: ffmpeg exited with code -1: ffmpeg: libva-drm.so.2.init.c:122: load_library: Assertion `0 && \"Assertion in generated code\"' failed.",
-			"the VA-API library on this system is too old for this ffmpeg"},
+			"the VA-API library on this system is too old for this ffmpeg", false},
 		{"an unknown message keeps its own words",
 			Candidate{Encoder: "hevc_nvenc", Family: encode.FamilyNVENC, Codec: "hevc"},
 			"run ffmpeg: ffmpeg exited with code 1: something new",
-			"the driver refused: run ffmpeg: ffmpeg exited with code 1: something new"},
+			"the driver refused: run ffmpeg: ffmpeg exited with code 1: something new", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := plainReason(tc.c, errString(tc.raw)); got != tc.want {
+			if got := plainReasonOn(tc.c, errString(tc.raw), tc.works); got != tc.want {
 				t.Errorf("plainReason = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// "Conversion failed!" is only read as a missing AV1 encoder on a card that proved another encoder;
+// on a card that proved nothing it keeps the driver's words (build-order item 3).
+func TestConversionFailedOnlyForACardThatWorks(t *testing.T) {
+	c := Candidate{Encoder: "av1_nvenc", Family: encode.FamilyNVENC, Codec: "av1"}
+	raw := errString("run ffmpeg: ffmpeg exited with code 255: Conversion failed!")
+	if got := plainReasonOn(c, raw, false); strings.Contains(got, "AV1") {
+		t.Errorf("a card that proved nothing got the AV1 sentence: %q", got)
+	}
+	if got := plainReasonOn(c, raw, true); got != "this card has no AV1 encoder" {
+		t.Errorf("a working card = %q, want the AV1 sentence", got)
+	}
+}
+
+// The decode step keeps the QSV runtime sentence, so a chip with no runtime is not blamed on the driver.
+func TestDecodeKeepsTheQSVRuntimeSentence(t *testing.T) {
+	c := Candidate{Encoder: "hevc_qsv", Family: encode.FamilyQSV, Codec: "hevc"}
+	if got := stepReason(context.Background(), context.Background(), c,
+		errString("run ffmpeg: ffmpeg exited with code 171: Error parsing global options: Unknown error occurred"), DecodeTimeout); got != "no QSV runtime for this chip on this system" {
+		t.Errorf("decode reason = %q, want the QSV runtime sentence", got)
 	}
 }
 

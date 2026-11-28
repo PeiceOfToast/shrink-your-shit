@@ -17,7 +17,7 @@
       "slower": false,
       "subtitleLanguages": [],
       "subtitles": "keep_all",
-      "useGpu": false
+      "useGpu": true
     },
     "fitsGuided": true,
     "rev": 0

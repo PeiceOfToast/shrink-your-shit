@@ -227,6 +227,49 @@ func TestGlobalStreamSpeaksTheContractNames(t *testing.T) {
 	}
 }
 
+// A worker's encoder test reaches the global stream as probe, scoped to the worker (page 10). A file probe belongs
+// to its job's log, so it stays on ?job= and off the global stream.
+func TestGlobalStreamCarriesWorkerProbesOnly(t *testing.T) {
+	f := newJobsFixture(t)
+	ts := streamServer(t, f)
+	frames, body := openStream(t, ts, f.cookie.String(), "/api/v2/events", "0")
+	defer body.Close()
+	if err := f.e.bus.Emit(events.Event{Kind: events.KindProbe, Level: events.LevelInfo, Source: "hw",
+		WorkerID: "local", Message: "hevc_qsv: passed its test"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.e.bus.Emit(events.Event{JobID: f.waiting, Kind: events.KindProbe, Level: events.LevelInfo,
+		Source: "flow", Message: "JOB-PROBE"}); err != nil {
+		t.Fatal(err)
+	}
+	var got sseFrame
+	for {
+		fr := nextFrame(t, frames, "the worker's probe")
+		if fr.event == "probe" {
+			got = fr
+			break
+		}
+	}
+	if !strings.Contains(got.data, "hevc_qsv") || !strings.Contains(got.data, `"workerId":"local"`) {
+		t.Errorf("probe frame = %+v; want the worker's line", got)
+	}
+	// The job's probe is not behind the worker's: read a little longer to be sure.
+	deadline := time.After(300 * time.Millisecond)
+	for {
+		select {
+		case fr, ok := <-frames:
+			if !ok {
+				t.Fatal("the stream ended early")
+			}
+			if strings.Contains(fr.data, "JOB-PROBE") {
+				t.Errorf("the global stream sent a job's probe: %+v", fr)
+			}
+		case <-deadline:
+			return
+		}
+	}
+}
+
 // Progress is live only: a job's stream gets it with no id line, and the store never keeps it.
 func TestProgressReachesAJobStreamAndIsNotStored(t *testing.T) {
 	f := newJobsFixture(t)
@@ -268,6 +311,8 @@ func TestContractKindMapsTheLifecycle(t *testing.T) {
 		events.KindDone: "job.done", events.KindSkipped: "job.done", events.KindFailed: "job.failed",
 		events.KindScanStart: "scan.start", events.KindScanEnd: "scan.end",
 		events.KindLibraryChanged: "library.changed",
+		// A worker's encoder test reports as probe (page 10); a file probe is filtered out by the stream.
+		events.KindProbe: "probe",
 	}
 	for k, name := range want {
 		if got, ok := contractKind(k); !ok || got != name {
