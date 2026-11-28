@@ -47,20 +47,35 @@ export async function request<T>(method: Method, path: string, body?: unknown, o
     setConnection(false);
     throw new ApiError("unreachable", "Can't reach the server.");
   }
-  setConnection(true);
-  const text = await res.text();
+  // The connection is up only when the server answered in its own format. A proxy's 502 page or a body that
+  // breaks off mid-way is not the server, so it counts as unreachable.
+  let text: string;
+  try {
+    text = await res.text();
+  } catch {
+    setConnection(false);
+    throw new ApiError("unreachable", "Can't reach the server.");
+  }
   let data: unknown = null;
   try {
     data = text ? JSON.parse(text) : null;
   } catch {
-    if (!res.ok) throw new ApiError("unreachable", "The server sent something unexpected.");
+    if (!res.ok) {
+      setConnection(false);
+      throw new ApiError("unreachable", "The server sent something unexpected.");
+    }
   }
   if (!res.ok) {
     const err = (data as { error?: { code?: string; message?: string; field?: string } } | null)?.error;
-    if (!err?.code || !err.message) throw new ApiError("unreachable", "The server sent something unexpected.");
+    if (!err?.code || !err.message) {
+      setConnection(false);
+      throw new ApiError("unreachable", "The server sent something unexpected.");
+    }
+    setConnection(true);
     onRouteCode(res.status, err.code);
     throw new ApiError(err.code, err.message, err.field);
   }
+  setConnection(true);
   return data as T;
 }
 

@@ -23,6 +23,10 @@ function subscribe(cb: () => void): () => void {
   return () => listeners.delete(cb);
 }
 
+export function isConnected(): boolean {
+  return ok;
+}
+
 export function useConnectionOk(): boolean {
   return useSyncExternalStore(subscribe, () => ok, () => true);
 }
