@@ -11,8 +11,8 @@ test("the real log module is overlaid onto the api, under the log group", () => 
   assert.match(src("./index.ts"), /\n  log: realLog,\n/);
 });
 
-test("the log group's flag is off until the server's log routes are live", () => {
-  assert.match(src("./groups.ts"), /\n  log: false,\n/);
+test("the log group's flag is on: the real System log reads the server", () => {
+  assert.match(src("./groups.ts"), /\n  log: true,\n/);
 });
 
 test("the mock's seen reply is the server's {seenSeq}", async () => {
