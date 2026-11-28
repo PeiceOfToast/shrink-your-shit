@@ -186,3 +186,15 @@ test("an older live fold does not replace a newer fold the page already holds", 
   assert.deepEqual(showLines([newer], [older]), [newer]);
 });
 
+test("a run longer than the poll window holds one row across polls (base page 20, Follow polls 50)", () => {
+  // 60 identical refusals, one per second. The base page is the newest 20 (a fold of seq 60, count 20); each poll reads the
+  // newest 50, so its fold's firstAt slides with every poll. The page must still show one row for the run.
+  const at = (k: number) => new Date(Date.UTC(2026, 10, 28, 7, 0, 0) + k * 1000).toISOString();
+  const run = (seq: number, count: number) => liveEv(seq, at(seq), "sign-in refused", { count, firstAt: at(seq - count + 1), lastAt: at(seq) });
+  let shown = [run(60, 20)];
+  for (let n = 61; n <= 64; n++) shown = showLines(shown, [run(n, 50)]);
+  assert.equal(shown.length, 1);
+  assert.equal(shown[0].seq, 64);
+  assert.equal(shown[0].repeat?.count, 50);
+});
+
