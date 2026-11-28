@@ -47,3 +47,37 @@ func TestConvertsLineStatesTheAudioKeepRule(t *testing.T) {
 		t.Error("a 512 kbps AAC track is kept, but the line says it converts")
 	}
 }
+
+// Loudness evening converts a track whatever its bitrate, so the line leaves the keep clause out, and the run agrees: a
+// 32 kbps AAC track that would otherwise stay is converted.
+func TestLoudnessLeavesTheKeepClauseOut(t *testing.T) {
+	f := setStep(t, setStep(t, starter(t), "audio.tracks", "codec", "opus"), "audio.tracks", "loudnorm", true)
+	c, _, _ := sentencesOf(t, f, 7)
+	if strings.Contains(c, "except") || !strings.Contains(c, "Converts audio to Opus.") {
+		t.Errorf("converts = %q, want no keep clause when loudness forces the conversion", c)
+	}
+	if !audioWorkWith(t, f, 32_000) {
+		t.Error("loudness is on but a 32 kbps AAC track is kept")
+	}
+}
+
+// audioWorkWith is audioWork for a given flow.
+func audioWorkWith(t *testing.T, f flow.Flow, bitRate int64) bool {
+	t.Helper()
+	info := media.Info{
+		Format: media.Format{Names: []string{"matroska", "webm"}, Duration: time.Hour, Size: 900_000_000},
+		Video:  []media.VideoTrack{{Codec: "hevc", Profile: "Main", Width: 1920, Height: 1080, FrameRate: media.Rational{Num: 25, Den: 1}, PixelFormat: "yuv420p", BitDepth: 8}},
+		Audio:  []media.AudioTrack{{Codec: "aac", Channels: 2, SampleRate: 48000, Language: "eng", BitRate: bitRate}},
+	}
+	d, _, err := flow.PlanFile(flow.Revision{WorkflowID: 1, Rev: 1, Flow: f}, info, flow.Env{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range d.Steps {
+		if s.ID == "audio" {
+			return s.Decision.Work
+		}
+	}
+	t.Fatal("no audio step decision")
+	return false
+}

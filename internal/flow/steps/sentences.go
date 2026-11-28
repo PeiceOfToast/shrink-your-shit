@@ -61,10 +61,14 @@ func convertsSentence(video *VideoSettings, audio *AudioSettings) string {
 			parts = append(parts, "Keeps the audio as it is.")
 		default:
 			// The exceptions are the audio step's keep rule (keepAsIs): a track already in this codec stays, and so does a
-			// lossy track already at or below the target bitrate. The channel, sample rate and loudness settings can
-			// still force a conversion; the line states the rule, not each track.
-			parts = append(parts, fmt.Sprintf("Converts audio to %s, except tracks already in %s and lossy tracks already at or below the target bitrate.",
-				audioCodecLabel(audio.AudioCodec()), audioCodecLabel(audio.AudioCodec())))
+			// lossy track already at or below the target bitrate. A channel layout, a sample rate or loudness evening
+			// forces the conversion (keepAsIs returns no keep for them), so the clause is left out then.
+			codec := audioCodecLabel(audio.AudioCodec())
+			if audioSettingForcesConversion(*audio) {
+				parts = append(parts, fmt.Sprintf("Converts audio to %s.", codec))
+			} else {
+				parts = append(parts, fmt.Sprintf("Converts audio to %s, except tracks already in %s and lossy tracks already at or below the target bitrate.", codec, codec))
+			}
 		}
 	}
 	if len(parts) == 0 {
@@ -165,4 +169,10 @@ func fieldTag(t reflect.Type, field, tag string) string {
 		return ""
 	}
 	return f.Tag.Get(tag)
+}
+
+// audioSettingForcesConversion is true when a setting makes the step convert a track whatever its codec or bitrate: an
+// explicit channel layout (it may differ from the track's), a sample rate (the same), or loudness evening.
+func audioSettingForcesConversion(a AudioSettings) bool {
+	return a.Loudnorm || a.SampleRate != nil || (a.Channels != "" && a.Channels != "source")
 }
