@@ -53,6 +53,7 @@ func saveReplaces(f Flow) bool {
 func (e *engine) replaceOriginal(ctx context.Context, staged safety.Staged, final string, after int64, placed *bool, sidecars []safety.Sidecar) Result {
 	if e.env.Replacer == nil {
 		e.removeSidecars(sidecars)
+		e.restoreTrashed()
 		return fatal("replace.unavailable", "This worker has no replace journal, so the original was kept.", "save", "")
 	}
 	_, err := e.env.Replacer.Swap(ctx, safety.SwapPlan{
@@ -67,6 +68,7 @@ func (e *engine) replaceOriginal(ctx context.Context, staged safety.Staged, fina
 	}
 	if err == nil {
 		*placed = true
+		e.trashed = nil
 		e.finishSidecars()
 		_ = os.Remove(staged.Folder) // the staged file has left it; the folder goes too
 		e.probeSide(ctx, "after", final)
@@ -77,6 +79,7 @@ func (e *engine) replaceOriginal(ctx context.Context, staged safety.Staged, fina
 	}
 	if ctx.Err() == nil {
 		e.removeSidecars(sidecars)
+		e.restoreTrashed()
 	}
 	switch {
 	case ctx.Err() != nil:

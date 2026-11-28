@@ -97,3 +97,9 @@ func TrashSidecar(libDir string, jobID int64, path string) (string, error) {
 	}
 	return trash, nil
 }
+
+// RestoreSubtitle moves a subtitle moved to the trash by TrashSidecar back to its name, with a no-replace rename. A
+// name taken meanwhile is an error, and the file stays in the trash.
+func RestoreSubtitle(trash, path string) error {
+	return fsx.RenameNoReplace(trash, path)
+}

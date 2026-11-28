@@ -119,6 +119,8 @@ type engine struct {
 	started time.Time
 	// replace is true when the flow's save step replaces the original (S2-10b).
 	replace bool
+	// trashed are the earlier subtitles of ours a replace moved to the trash, to put back if the swap refuses.
+	trashed []trashedSub
 }
 
 func (e *engine) run(ctx context.Context) (res Result) {
@@ -327,6 +329,7 @@ func (e *engine) run(ctx context.Context) (res Result) {
 	}
 	sidecars, res := e.placeSidecars(plan, extracts, staged)
 	if res.Outcome != "" {
+		e.restoreTrashed()
 		return res
 	}
 	if e.replace {
@@ -1030,13 +1033,37 @@ func (e *engine) trashOwnSubtitles(plan encode.Plan, extracts []encode.StreamPla
 			if c.Path != p {
 				continue
 			}
-			if _, err := safety.TrashSidecar(filepath.Dir(p), c.JobID, p); err != nil {
+			trash, err := safety.TrashSidecar(filepath.Dir(p), c.JobID, p)
+			if err != nil {
+				e.restoreTrashed()
 				return fatal("replace.subtitle_trash_failed",
 					"An earlier subtitle file of this app could not be moved to the trash, so nothing was changed. ("+err.Error()+")",
 					"save", "retry")
 			}
 			_ = e.env.Sidecars.DropSidecar(c.JobID, p)
+			e.trashed = append(e.trashed, trashedSub{trash: trash, path: p, rec: c})
 		}
 	}
 	return Result{}
+}
+
+// trashedSub is an earlier subtitle of ours moved to the trash for a replace, with the record it had.
+type trashedSub struct {
+	trash, path string
+	rec         safety.Sidecar
+}
+
+// restoreTrashed puts back the earlier subtitles a refused replace moved to the trash: each goes to its name again
+// (no-replace) and its record comes back. A name taken meanwhile leaves the file in the trash and says so.
+func (e *engine) restoreTrashed() {
+	for _, t := range e.trashed {
+		if err := safety.RestoreSubtitle(t.trash, t.path); err != nil {
+			e.warn("The earlier subtitle " + filepath.Base(t.path) + " stays in the trash folder: " + err.Error() + ".")
+			continue
+		}
+		if e.env.Sidecars != nil {
+			_ = e.env.Sidecars.AddSidecars([]safety.Sidecar{t.rec})
+		}
+	}
+	e.trashed = nil
 }

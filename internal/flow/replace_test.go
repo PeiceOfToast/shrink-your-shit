@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/PeiceOfToast/shrink-your-shit/internal/flow"
@@ -254,5 +255,47 @@ func TestRunReplaceRefusesAForeignSubtitle(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(foreign); string(b) != "SOMEONE ELSE" {
 		t.Errorf("the foreign subtitle = %q, want it untouched", b)
+	}
+}
+
+// TestRunRefusedSwapPutsTheEarlierSubtitleBack: a replace trashes an earlier subtitle of ours, then the swap refuses.
+// The subtitle goes back to its name with its record, the trash no longer holds it, and the message is a plain sentence
+// (the review's "put it back on a refused swap").
+func TestRunRefusedSwapPutsTheEarlierSubtitleBack(t *testing.T) {
+	root, src, info, rev := srtRun(t)
+	rev = setReplace(t, rev)
+	earlier := filepath.Join(root, "clip.eng.srt")
+	if err := os.WriteFile(earlier, []byte("EDITED-BY-HAND"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte("EARLIER"))
+	rec := safety.Sidecar{JobID: 7, Path: earlier, Bytes: 7, Hash: hex.EncodeToString(sum[:])}
+	journal := &fakeJournal{recs: []safety.Sidecar{rec}}
+	m := &srtWriting{Media: &fake.Media{Probes: map[string]media.Info{src: info}}}
+	sf := &fakeSafety{verify: safety.Verdict{OK: true}}
+	env := newEnv(m, sf, &recorder{}, rev, nil)
+	env.Replacer = &fakeReplacer{err: safety.ErrSwapFailed}
+	env.Sidecars = journal
+	res := flow.Run(context.Background(), runInput(t, root, src), env)
+	if res.Outcome != flow.OutcomeFatal || res.Reason != "replace.failed" {
+		t.Fatalf("result = %+v, want fatal replace.failed", res)
+	}
+	if strings.Contains(res.Message, "safety:") || !strings.Contains(res.Message, "put back") {
+		t.Errorf("message = %q, want the plain sentence", res.Message)
+	}
+	if b, err := os.ReadFile(earlier); err != nil || string(b) != "EDITED-BY-HAND" {
+		t.Errorf("clip.eng.srt = %q (%v), want the earlier subtitle back at its name", b, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".syp-trash", "clip.eng.7.srt")); !os.IsNotExist(err) {
+		t.Errorf("the earlier subtitle is still in the trash: %v", err)
+	}
+	restored := false
+	for _, r := range journal.added {
+		if r.Path == earlier && r.JobID == 7 {
+			restored = true
+		}
+	}
+	if !restored {
+		t.Errorf("added = %+v, want the earlier record back", journal.added)
 	}
 }

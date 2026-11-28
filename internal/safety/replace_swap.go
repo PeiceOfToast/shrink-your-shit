@@ -29,7 +29,7 @@ type SwapResult struct {
 }
 
 // ErrSwapFailed means the new file did not reach its name; the original was put back, so nothing is lost.
-var ErrSwapFailed = errors.New("safety: the new file could not be placed; the original is back in place")
+var ErrSwapFailed = errors.New("the new file could not be placed, so the original was put back")
 
 // ErrStrangerInTrash means a file that was not the original took the name and was moved to the trash, and it could
 // not be put back. It is in the trash folder; the original was not replaced (review #865).
