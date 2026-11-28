@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/PeiceOfToast/shrink-your-shit/internal/events"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/library"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/safety"
 )
@@ -81,6 +82,24 @@ func (s *Server) getSummary(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	out.Failed24h = tally.Failed24h
+	seen, err := readLogSeen(ctx, rs.DB)
+	if err != nil {
+		internalError(w)
+		return
+	}
+	out.SeenSeq = int(seen.Seq)
+	if seen.At != "" {
+		at := seen.At
+		out.SeenAt = &at
+	}
+	if rs.Events != nil {
+		counts, err := rs.Events.Counts(ctx, events.Filter{AppOnly: true, AfterRowID: seen.Seq})
+		if err != nil {
+			internalError(w)
+			return
+		}
+		out.NewErrors = counts[events.LevelError]
+	}
 	out.Workers.Paused = false
 	out.Workers.Finishing = 0
 	writeJSON(w, http.StatusOK, out)
