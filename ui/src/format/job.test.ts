@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { jobHint, jobResultText, jobResultTone, jobStepText, originalText, sizeText } from "./job.ts";
+import { jobActionText, jobHint, jobResultText, jobResultTone, jobStepText, originalText, sizeText } from "./job.ts";
 import { dayOf } from "./time.ts";
 import type { Job, JobResult } from "../api/types.ts";
 
@@ -106,4 +106,10 @@ test("jobResultText: a check-kept job shows its reason, not a percentage", () =>
 
 test("jobResultText: a check-kept job with no reason says Original kept", () => {
   assert.equal(jobResultText(job({ result: result({ sizeAfter: null, outcome: "bigger_kept" }) })), "Original kept");
+});
+
+test("jobActionText: success text when nothing was refused, the server's sentence when it was", () => {
+  assert.equal(jobActionText({ done: ["1"], refused: [] }, "Queued to try again."), "Queued to try again.");
+  const message = "The original is in the trash. Put it back before running this file again.";
+  assert.equal(jobActionText({ done: [], refused: [{ id: "1", code: "not_retryable", message }] }, "Queued to try again."), message);
 });
