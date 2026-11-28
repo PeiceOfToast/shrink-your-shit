@@ -107,6 +107,12 @@ func TestContractGoldens(t *testing.T) {
 		e.do(http.MethodPost, "/api/v2/libraries/1/scan", "", write(withSession(cookie)), false), dir)
 	writeGolden(t, "libraries-scan", "ScanAllDone", http.MethodPost, "/api/v2/libraries/scan",
 		e.do(http.MethodPost, "/api/v2/libraries/scan", "", write(withSession(cookie)), false), dir)
+	// The library panel's Save and Remove (S4). Both are library 2, which Remove then takes away, so
+	// the goldens after this one still show library 1 as it was.
+	writeGolden(t, "library-patch", "LibraryDetail", http.MethodPatch, "/api/v2/libraries/2",
+		e.do(http.MethodPatch, "/api/v2/libraries/2", mustJSON(t, map[string]any{"name": "More clips"}), write(withSession(cookie)), false), dir)
+	writeGolden(t, "library-delete", "LibraryRemoved", http.MethodDelete, "/api/v2/libraries/2",
+		e.do(http.MethodDelete, "/api/v2/libraries/2", "", write(withSession(cookie)), false), dir)
 
 	// The steps' cards (S2-1): page 07's form, from the registry.
 	writeGolden(t, "step-definitions", "StepDefinition[]", http.MethodGet, "/api/v2/step-definitions",

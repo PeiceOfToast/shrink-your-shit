@@ -305,6 +305,13 @@ func (c *Catalog) ListLibraries(ctx context.Context) ([]Library, error) {
 
 // UpdateLibrary changes the set fields of a library and moves next_scan_at when the schedule did.
 func (c *Catalog) UpdateLibrary(ctx context.Context, id int64, in Patch) (Library, error) {
+	return c.UpdateLibraryWith(ctx, id, in, nil)
+}
+
+// UpdateLibraryWith is UpdateLibrary with onPathChange run inside its transaction when the folder
+// changes, before the old folder's rows are dropped: the library's waiting jobs are queued against
+// files that are about to go, so their cancellation must commit with the change.
+func (c *Catalog) UpdateLibraryWith(ctx context.Context, id int64, in Patch, onPathChange func(tx *sql.Tx) error) (Library, error) {
 	lib, err := c.GetLibrary(ctx, id)
 	if err != nil {
 		return Library{}, err
@@ -316,6 +323,7 @@ func (c *Catalog) UpdateLibrary(ctx context.Context, id int64, in Patch) (Librar
 			lib.Name = filepath.Base(lib.Path)
 		}
 	}
+	pathMoved := false
 	if in.Path != nil {
 		path, err := c.checkPath(*in.Path)
 		if err != nil {
@@ -324,6 +332,7 @@ func (c *Catalog) UpdateLibrary(ctx context.Context, id int64, in Patch) (Librar
 		if err := c.refuseWatched(ctx, path, id); err != nil {
 			return Library{}, err
 		}
+		pathMoved = path != lib.Path
 		lib.Path = path
 	}
 	if in.ClearWorkflow {
@@ -351,10 +360,27 @@ func (c *Catalog) UpdateLibrary(ctx context.Context, id int64, in Patch) (Librar
 		lib.NextScanAt = c.arm(lib, c.clock().UTC().Truncate(time.Millisecond))
 	}
 	err = c.db.Tx(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx,
+		if _, err := tx.ExecContext(ctx,
 			`UPDATE libraries SET name = ?, path = ?, workflow_id = ?, watch = ?, paused = ?, next_scan_at = ? WHERE id = ?`,
-			lib.Name, lib.Path, lib.WorkflowID, string(lib.Watch), boolInt(lib.Paused), timePtr(lib.NextScanAt), id)
-		return err
+			lib.Name, lib.Path, lib.WorkflowID, string(lib.Watch), boolInt(lib.Paused), timePtr(lib.NextScanAt), id); err != nil {
+			return err
+		}
+		if pathMoved {
+			// The library's waiting jobs name files of the old folder; they are cancelled with it,
+			// before the rows go (review-890 path change).
+			if onPathChange != nil {
+				if err := onPathChange(tx); err != nil {
+					return err
+				}
+			}
+			// The rows describe files under the old folder, not the new one: leaving them would have
+			// the next scan mark every one gone and a workflow set in the same Save queue files that
+			// are not there. The next scan counts the new folder (review-890 item 3).
+			if _, err := tx.ExecContext(ctx, `DELETE FROM files WHERE library_id = ?`, id); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		return Library{}, fmt.Errorf("save the library %d: %w", id, err)
@@ -364,8 +390,20 @@ func (c *Catalog) UpdateLibrary(ctx context.Context, id int64, in Patch) (Librar
 
 // DeleteLibrary removes the library and its catalog rows. Files on disk are not touched.
 func (c *Catalog) DeleteLibrary(ctx context.Context, id int64) error {
+	return c.DeleteLibraryWith(ctx, id, nil)
+}
+
+// DeleteLibraryWith is DeleteLibrary with before run inside its transaction, just before the row
+// goes: the library's waiting jobs are cancelled there, so the cancellations and the removal commit
+// together.
+func (c *Catalog) DeleteLibraryWith(ctx context.Context, id int64, before func(tx *sql.Tx) error) error {
 	var n int64
 	err := c.db.Tx(ctx, func(tx *sql.Tx) error {
+		if before != nil {
+			if err := before(tx); err != nil {
+				return err
+			}
+		}
 		res, err := tx.ExecContext(ctx, `DELETE FROM libraries WHERE id = ?`, id)
 		if err != nil {
 			return err

@@ -285,6 +285,7 @@ func (q *Queue) Finish(ctx context.Context, id int64, attempt int, r Result) err
 	var tries, newTries int
 	var to State
 	var nextTry *int64
+	removed := false
 	now := q.now()
 	err := q.db.Tx(ctx, func(tx *sql.Tx) error {
 		if err := tx.QueryRow(`SELECT tries, library_id FROM jobs WHERE id = ?`, id).Scan(&tries, &libraryID); err != nil {
@@ -305,7 +306,17 @@ func (q *Queue) Finish(ctx context.Context, id int64, attempt int, r Result) err
 			to = Failed
 		case VerdictRetry:
 			newTries = tries + 1
-			if newTries < maxTries {
+			gone, err := libraryGone(tx, libraryID)
+			if err != nil {
+				return err
+			}
+			if gone {
+				// The library was removed while this run went, so a retry_wait job would wait for a
+				// try nothing claims. It ends cancelled, as Remove's own cancellations do.
+				to = Cancelled
+				removed = true
+				nextAction = ""
+			} else if newTries < maxTries {
 				to = RetryWait
 				wait := now.Add(retryWaits[newTries-1])
 				nextTry = ptr(ms(wait))
@@ -318,12 +329,20 @@ func (q *Queue) Finish(ctx context.Context, id int64, attempt int, r Result) err
 				nextAction = usedUpTries
 			}
 		}
-		if err := move(tx, id, verbFinish, to, change{
+		// A run that ended on a removed library is cancelled, not finished: the cancel verb is the
+		// transition that reaches Cancelled, and none of the retry promises apply.
+		verb := verbFinish
+		attemptResult, reasonText := attemptOutcome(r), nz(r.Reason)
+		if removed {
+			verb = verbCancel
+			attemptResult, reasonText = "cancelled", ""
+		}
+		if err := move(tx, id, verb, to, change{
 			set: `, outcome = ?, failed_step = ?, reason = ?, failure_code = ?, next_action = ?, skip_reason = ?,
 				size_before = ?, size_after = ?, output_path = ?, tries = ?, next_try_at = ?,
 				finished_at = ?, worker_id = NULL`,
 			args: []any{
-				nz(r.Outcome), nz(r.FailedStep), nz(r.Reason), nz(r.Code), nz(nextAction), nz(r.SkipReason),
+				nz(r.Outcome), nz(r.FailedStep), reasonText, nz(r.Code), nz(nextAction), nz(r.SkipReason),
 				nzInt(r.SizeBefore), nzInt(r.SizeAfter), nz(r.OutputPath), newTries, nullInt(nextTry), finishedAt,
 			},
 			cond:     ` AND attempt = ?`,
@@ -334,7 +353,7 @@ func (q *Queue) Finish(ctx context.Context, id int64, attempt int, r Result) err
 		res, err := tx.Exec(`
 			UPDATE job_attempts SET finished_at = ?, outcome = ?, size_before = ?, size_after = ?, output_path = ?, failure = ?
 			WHERE job_id = ? AND attempt = ? AND finished_at IS NULL`,
-			ms(now), attemptOutcome(r), nzInt(r.SizeBefore), nzInt(r.SizeAfter), nz(r.OutputPath), nz(r.Reason),
+			ms(now), attemptResult, nzInt(r.SizeBefore), nzInt(r.SizeAfter), nz(r.OutputPath), nz(r.Reason),
 			id, attempt)
 		if err != nil {
 			return err
@@ -356,6 +375,8 @@ func (q *Queue) Finish(ctx context.Context, id int64, attempt int, r Result) err
 		_ = q.emit(events.KindSkipped, events.LevelInfo, id, attempt, libraryID, r.SkipReason, r.Reason)
 	case Failed:
 		_ = q.emit(events.KindFailed, events.LevelError, id, attempt, libraryID, r.FailedStep, r.Reason)
+	case Cancelled:
+		return q.emit(events.KindCancelled, events.LevelInfo, id, attempt, libraryID, "library removed", "library removed")
 	}
 	return nil
 }
@@ -388,10 +409,13 @@ func attemptOutcome(r Result) string {
 }
 
 // Requeue puts a running job back to waiting. It is not a try (L-Q-5). Startup recovery and a worker that lost its
-// lease both use it.
+// lease both use it. A job whose library was removed while it ran is cancelled instead of waited again: no claim
+// can take it, since a job is claimed only through a library that exists (page 09 Remove, review-890 Finding 2).
 func (q *Queue) Requeue(ctx context.Context, id int64, why string) error {
 	var libraryID int64
 	var attempt int
+	removed := false
+	now := q.now()
 	err := q.db.Tx(ctx, func(tx *sql.Tx) error {
 		if err := tx.QueryRow(`SELECT attempt, library_id FROM jobs WHERE id = ?`, id).Scan(&attempt, &libraryID); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
@@ -399,19 +423,49 @@ func (q *Queue) Requeue(ctx context.Context, id int64, why string) error {
 			}
 			return err
 		}
+		gone, err := libraryGone(tx, libraryID)
+		if err != nil {
+			return err
+		}
+		if gone {
+			removed = true
+			if err := move(tx, id, verbCancel, Cancelled, change{set: ", finished_at = ?, worker_id = NULL", args: []any{ms(now)}}); err != nil {
+				return err
+			}
+			// The attempt the job was running is over.
+			_, err := tx.Exec(`
+				UPDATE job_attempts SET finished_at = ?, outcome = 'cancelled'
+				WHERE job_id = ? AND attempt = ? AND finished_at IS NULL`,
+				ms(now), id, attempt)
+			return err
+		}
 		if err := move(tx, id, verbRequeue, Waiting, change{set: ", worker_id = NULL, started_at = NULL"}); err != nil {
 			return err
 		}
-		_, err := tx.Exec(`
+		_, err = tx.Exec(`
 			UPDATE job_attempts SET finished_at = ?, outcome = 'requeued', failure = ?
 			WHERE job_id = ? AND attempt = ? AND finished_at IS NULL`,
-			ms(q.now()), nz(why), id, attempt)
+			ms(now), nz(why), id, attempt)
 		return err
 	})
 	if err != nil {
 		return err
 	}
+	if removed {
+		// The same History line Remove's cancellations write.
+		return q.emit(events.KindCancelled, events.LevelInfo, id, attempt, libraryID, "library removed", "library removed")
+	}
 	return q.emit(events.KindRequeued, events.LevelInfo, id, attempt, libraryID, why, why)
+}
+
+// libraryGone reports whether a job's library row is no longer there.
+func libraryGone(tx *sql.Tx, id int64) (bool, error) {
+	var one int64
+	err := tx.QueryRow(`SELECT 1 FROM libraries WHERE id = ?`, id).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return true, nil
+	}
+	return false, err
 }
 
 // CancelResult tells the caller what to stop. WorkerID and Attempt are set when the job was running; the worker
@@ -456,6 +510,56 @@ func (q *Queue) Cancel(ctx context.Context, id int64) (CancelResult, error) {
 	return res, q.emit(events.KindCancelled, events.LevelInfo, id, res.Attempt, libraryID, "cancelled", "cancelled")
 }
 
+// CancelledWaiting is a job CancelledWaitingIn took out of the queue, kept for its History line.
+type CancelledWaiting struct {
+	ID      int64
+	Attempt int
+}
+
+// CancelWaitingIn cancels every waiting or retry_wait job of one library inside tx and answers what it cancelled,
+// leaving a running one alone: page 09's Remove and a folder change both cancel what has not started, while what is
+// already converting finishes. The caller owns the transaction and writes the History lines once it commits
+// (CancelledWaitingHistory), so a change to the library and its cancellations commit together.
+func (q *Queue) CancelWaitingIn(tx *sql.Tx, libraryID int64) ([]CancelledWaiting, error) {
+	now := q.now()
+	rows, err := tx.Query(
+		`SELECT id, attempt FROM jobs WHERE library_id = ? AND state IN (?, ?) ORDER BY id`,
+		libraryID, string(Waiting), string(RetryWait))
+	if err != nil {
+		return nil, err
+	}
+	var cancelled []CancelledWaiting
+	for rows.Next() {
+		var c CancelledWaiting
+		if err := rows.Scan(&c.ID, &c.Attempt); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		cancelled = append(cancelled, c)
+	}
+	// The updates below need the transaction's connection back, and every row is read by now.
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for _, c := range cancelled {
+		if err := move(tx, c.ID, verbCancel, Cancelled, change{set: ", finished_at = ?, worker_id = NULL", args: []any{ms(now)}}); err != nil {
+			return nil, err
+		}
+	}
+	return cancelled, nil
+}
+
+// CancelledWaitingHistory writes each cancelled job's History line, in the caller's words for why.
+func (q *Queue) CancelledWaitingHistory(cancelled []CancelledWaiting, libraryID int64, reason string) error {
+	for _, c := range cancelled {
+		if err := q.emit(events.KindCancelled, events.LevelInfo, c.ID, c.Attempt, libraryID, reason, reason); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Retry puts a failed or cancelled job back to waiting on the same row. Its tries start again at zero, and the
 // next claim makes a new attempt row. It is refused while the file has another open job, and for the failures a
 // retry cannot help (see retryRefused).
@@ -480,8 +584,16 @@ func (q *Queue) Retry(ctx context.Context, id int64) error {
 		if message, refused := RetryRefused(failureCode); refused {
 			return &ErrNotRetryable{Message: message}
 		}
+		gone, err := libraryGone(tx, libraryID)
+		if err != nil {
+			return err
+		}
+		if gone {
+			// A job of a removed library would wait forever: nothing claims it (review-890 Finding 2).
+			return &ErrNotRetryable{Message: "This job's library was removed, so it can't run again."}
+		}
 		var other int64
-		err := tx.QueryRow(
+		err = tx.QueryRow(
 			`SELECT id FROM jobs WHERE file_id = ? AND id <> ? AND state IN (`+marks(len(openStates))+`) LIMIT 1`,
 			append([]any{fileID, id}, stateArgs(openStates)...)...,
 		).Scan(&other)

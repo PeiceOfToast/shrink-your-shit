@@ -1,0 +1,9 @@
+{
+  "body": {
+    "ok": true
+  },
+  "method": "DELETE",
+  "path": "/api/v2/libraries/2",
+  "status": 200,
+  "type": "LibraryRemoved"
+}

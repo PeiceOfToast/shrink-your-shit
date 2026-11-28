@@ -4,8 +4,13 @@ package jobs
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"strings"
 	"testing"
+	"time"
+
+	"github.com/PeiceOfToast/shrink-your-shit/internal/events"
 )
 
 // TestManualRetryClearsThePinnedRevision: a person pressing Retry runs the workflow as published now, so the retry
@@ -217,5 +222,191 @@ func TestRetryClearsTheOldOutputDetails(t *testing.T) {
 	if got.OutputPath != "" || got.SizeBefore != nil || got.SizeAfter != nil || got.Outcome != "" {
 		t.Fatalf("after retry: output %q before %v after %v outcome %q; want all empty",
 			got.OutputPath, got.SizeBefore, got.SizeAfter, got.Outcome)
+	}
+}
+
+// TestCancelWaitingForCancelsOnlyWaiting: removing a library cancels the jobs that have not started, in
+// one go, and leaves the running one to finish (page 09, Remove). Another library's jobs are not touched.
+func TestCancelWaitingForCancelsOnlyWaiting(t *testing.T) {
+	ctx := context.Background()
+	env := newEnv(t)
+	env.addLibrary(t, 1, false)
+	env.addLibrary(t, 2, false)
+	running := env.enqueue(t, 1, 1)
+	waitingA := env.enqueue(t, 2, 1)
+	waitingB := env.enqueue(t, 3, 1)
+	other := env.enqueue(t, 4, 2)
+	// The oldest first, so the running job is library 1's first one.
+	if _, err := env.q.Claim(ctx, "worker-1", ClaimOptions{Order: OrderOldest}); err != nil {
+		t.Fatal(err)
+	}
+	if got := env.stateOf(t, running); got != Running {
+		t.Fatalf("setup: first job is %s, want running", got)
+	}
+
+	cancelled, stop := env.bus.Subscribe(events.Filter{Kind: events.KindCancelled})
+	defer stop()
+	// As Delete and a path change do it: inside the caller's transaction, then the History lines.
+	var waitingCancelled []CancelledWaiting
+	if err := env.q.db.Tx(ctx, func(tx *sql.Tx) error {
+		var err error
+		waitingCancelled, err = env.q.CancelWaitingIn(tx, 1)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := env.q.CancelledWaitingHistory(waitingCancelled, 1, "library removed"); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(waitingCancelled); n != 2 {
+		t.Fatalf("cancelled %d jobs, want 2", n)
+	}
+	if got := env.stateOf(t, running); got != Running {
+		t.Fatalf("running job state = %s, want running", got)
+	}
+	for _, id := range []int64{waitingA, waitingB} {
+		if got := env.stateOf(t, id); got != Cancelled {
+			t.Fatalf("waiting job %d state = %s, want cancelled", id, got)
+		}
+	}
+	if got := env.stateOf(t, other); got != Waiting {
+		t.Fatalf("other library's job state = %s, want waiting", got)
+	}
+
+	// Each cancelled job gets the same History line a Cancel writes.
+	seen := map[int64]bool{}
+	for len(seen) < 2 {
+		select {
+		case e := <-cancelled:
+			seen[e.JobID] = true
+		case <-time.After(5 * time.Second):
+			t.Fatalf("only %d cancelled events, want 2", len(seen))
+		}
+	}
+	if !seen[waitingA] || !seen[waitingB] {
+		t.Fatalf("cancelled events for %v, want %d and %d", seen, waitingA, waitingB)
+	}
+
+	// The running job is still the queue's, and the cancelled ones are out of the list.
+	all, err := env.q.List(ctx, ListFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("listed %d jobs, want the running one and the other library's", len(all))
+	}
+}
+
+// TestRequeueOfARemovedLibraryCancelsTheJob: Remove leaves a running job to finish, but if that job is
+// requeued (lost lease, or a restart) its library is gone and no claim can take it. It ends cancelled,
+// with Remove's History line, never waiting (review-890 Finding 2).
+func TestRequeueOfARemovedLibraryCancelsTheJob(t *testing.T) {
+	ctx := context.Background()
+	env := newEnv(t)
+	env.addLibrary(t, 1, false)
+	id := env.enqueue(t, 1, 1)
+	mustClaim(t, env, id)
+	// Remove takes the row; the waiting jobs (none here) go with it in the same transaction.
+	env.exec(t, `DELETE FROM libraries WHERE id = ?`, 1)
+
+	cancelled, stop := env.bus.Subscribe(events.Filter{Kind: events.KindCancelled})
+	defer stop()
+	if err := env.q.Requeue(ctx, id, "the worker lost its lease"); err != nil {
+		t.Fatalf("requeue: %v", err)
+	}
+	if got := env.stateOf(t, id); got != Cancelled {
+		t.Fatalf("state after requeue = %s, want cancelled", got)
+	}
+	expectEvent(t, cancelled, events.KindCancelled, id)
+	if job, err := env.q.Claim(ctx, "worker-1", ClaimOptions{}); err != nil || job != nil {
+		t.Fatalf("claim after the requeue = %+v, %v; want nothing", job, err)
+	}
+}
+
+// TestFinishRetryWithARemovedLibraryCancels: a may-pass run whose library was removed while it ran
+// must not wait for a try nothing will claim. It ends cancelled with Remove's History line, while
+// the same run on a kept library waits and comes back after the wait (review2-890).
+func TestFinishRetryWithARemovedLibraryCancels(t *testing.T) {
+	ctx := context.Background()
+	retry := Result{
+		Verdict: VerdictRetry, Reason: "the encoder stopped",
+		NextAction: "This file will be tried again in a few minutes.",
+	}
+
+	t.Run("kept", func(t *testing.T) {
+		env := newEnv(t)
+		env.addLibrary(t, 1, false)
+		id := env.enqueue(t, 1, 1)
+		job := mustClaim(t, env, id)
+		if err := env.q.Finish(ctx, id, job.Attempt, retry); err != nil {
+			t.Fatal(err)
+		}
+		if got := env.stateOf(t, id); got != RetryWait {
+			t.Fatalf("state after a may-pass = %s, want retry_wait", got)
+		}
+		// Past the first wait it is the queue's again.
+		env.clk.advance(6 * time.Minute)
+		if next, err := env.q.Claim(ctx, "worker-1", ClaimOptions{}); err != nil || next == nil || next.ID != id {
+			t.Fatalf("claim after the wait = %+v, %v; want job %d", next, err, id)
+		}
+	})
+
+	t.Run("removed", func(t *testing.T) {
+		env := newEnv(t)
+		env.addLibrary(t, 1, false)
+		id := env.enqueue(t, 1, 1)
+		job := mustClaim(t, env, id)
+		cancelled, stop := env.bus.Subscribe(events.Filter{Kind: events.KindCancelled})
+		defer stop()
+		env.exec(t, `DELETE FROM libraries WHERE id = ?`, 1)
+
+		if err := env.q.Finish(ctx, id, job.Attempt, retry); err != nil {
+			t.Fatal(err)
+		}
+		if got := env.stateOf(t, id); got != Cancelled {
+			t.Fatalf("state after a may-pass on a removed library = %s, want cancelled", got)
+		}
+		expectEvent(t, cancelled, events.KindCancelled, id)
+		got, err := env.q.Get(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.NextAction != "" || got.NextTryAt != nil {
+			t.Fatalf("cancelled job still promises a try: next %q at %v", got.NextAction, got.NextTryAt)
+		}
+		// Long after the wait it is still not claimed: nothing can take it.
+		env.clk.advance(31 * time.Minute)
+		if next, err := env.q.Claim(ctx, "worker-1", ClaimOptions{}); err != nil || next != nil {
+			t.Fatalf("claim after the wait = %+v, %v; want nothing", next, err)
+		}
+	})
+}
+
+// TestRetryRefusedForARemovedLibrary: a failed or cancelled job whose library was removed cannot run
+// again, and says so plainly (review-890 Finding 2).
+func TestRetryRefusedForARemovedLibrary(t *testing.T) {
+	ctx := context.Background()
+	env := newEnv(t)
+	env.addLibrary(t, 1, false)
+	failed := env.enqueue(t, 1, 1)
+	job := mustClaim(t, env, failed)
+	if err := env.q.Finish(ctx, failed, job.Attempt, Result{Verdict: VerdictFail, Reason: "bad"}); err != nil {
+		t.Fatal(err)
+	}
+	cancelledID := env.enqueue(t, 2, 1)
+	if _, err := env.q.Cancel(ctx, cancelledID); err != nil {
+		t.Fatal(err)
+	}
+	env.exec(t, `DELETE FROM libraries WHERE id = ?`, 1)
+
+	for _, id := range []int64{failed, cancelledID} {
+		err := env.q.Retry(ctx, id)
+		var refused *ErrNotRetryable
+		if !errors.As(err, &refused) || !strings.Contains(refused.Message, "removed") {
+			t.Fatalf("retry %d = %v, want a plain refusal saying the library was removed", id, err)
+		}
+		if got := env.stateOf(t, id); got == Waiting {
+			t.Fatalf("retry %d left the job waiting", id)
+		}
 	}
 }
