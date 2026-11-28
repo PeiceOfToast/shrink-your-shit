@@ -14,6 +14,8 @@ type RecoverReport struct {
 	Done       int // the new file is at its name and the original is in the trash (or purged)
 	RolledBack int // the original is back at its name, or put back there
 	Attention  int // neither file can be shown in place: the row waits for a person, and nothing is removed
+	// Restored lists the job of each restore that recovery finished, so the caller writes its History line (review N4).
+	Restored []int64
 }
 
 // Recover settles the swaps a crash left in "moving" (L-SAFE-9). It decides from identity, never from names: a file is
@@ -44,6 +46,9 @@ func Recover(ctx context.Context, j *Journal) (RecoverReport, error) {
 		}
 		if err := j.SetState(ctx, r.ID, state); err != nil {
 			return rep, err
+		}
+		if restored && state == StateRolledBack {
+			rep.Restored = append(rep.Restored, r.JobID)
 		}
 		switch state {
 		case StateDone:

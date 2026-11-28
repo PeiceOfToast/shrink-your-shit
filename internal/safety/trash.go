@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/PeiceOfToast/shrink-your-shit/internal/fsx"
@@ -186,6 +187,10 @@ func (j *Journal) Attention(ctx context.Context) ([]AttentionEntry, error) {
 	return out, rows.Err()
 }
 
+// hookBeforeSweepClaim is a test hook: it runs after the sweep has listed a row and before it claims the row, the window
+// in which a restore can take it.
+var hookBeforeSweepClaim = func(id int64) {}
+
 // TrashSweepReport says what the daily trash sweep did.
 type TrashSweepReport struct {
 	Purged int // trash copies past their keep days, removed
@@ -208,21 +213,58 @@ func SweepTrash(ctx context.Context, j *Journal, now time.Time, keepDays int) (T
 		if err := ctx.Err(); err != nil {
 			return rep, err
 		}
-		if !matches(r.Trash, r.Orig) {
-			rep.Kept++
-			continue
-		}
-		if err := os.Remove(r.Trash); err != nil {
-			rep.Kept++
-			continue
-		}
-		if err := j.SetState(ctx, r.ID, StatePurged); err != nil {
+		// The row is claimed before its file is touched: a restore that has it leaves it alone (review N2).
+		hookBeforeSweepClaim(r.ID)
+		claimed, err := j.claim(ctx, r.ID, StateDone, StatePurged)
+		if err != nil {
 			return rep, err
+		}
+		if !claimed {
+			continue
+		}
+		if !matches(r.Trash, r.Orig) || os.Remove(r.Trash) != nil {
+			// Not the recorded original, or it would not go: the row is kept as it was.
+			_, _ = j.claim(ctx, r.ID, StatePurged, StateDone)
+			rep.Kept++
+			continue
 		}
 		rep.Purged++
 	}
 	return rep, nil
 }
+
+// claim moves a journal row from one state to another only if it is still in the first state. It is the compare-and-set
+// that stops a restore and a sweep from acting on the same trash copy (review N2). It reports whether the row moved.
+func (j *Journal) claim(ctx context.Context, id int64, from, to string) (bool, error) {
+	var moved bool
+	err := j.db.Tx(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE replace_journal SET state = ?, updated_at = ? WHERE id = ? AND state = ?`,
+			to, j.now().Unix(), id, from)
+		if err != nil {
+			return err
+		}
+		n, err := res.RowsAffected()
+		moved = n == 1
+		return err
+	})
+	return moved, err
+}
+
+// holdingPath is where a restore moves the converted file while the original returns. It is named by the row, so
+// recovery looks only at its own copy (review N3).
+func holdingPath(trashDir string, id int64, final string) string {
+	return filepath.Join(trashDir, holdingDir, strconv.FormatInt(id, 10), filepath.Base(final))
+}
+
+// removeHoldingFolder removes a row's holding folder, and the holding parent when no other row has one left. A folder
+// that is not empty stays, which is the point.
+func removeHoldingFolder(holding string) {
+	_ = os.Remove(filepath.Dir(holding))
+	_ = os.Remove(filepath.Dir(filepath.Dir(holding)))
+}
+
+// holdingDir is the folder under the trash that holds a restore's converted file.
+const holdingDir = ".holding"
 
 // hookRestoreStep is a test hook: it runs after each step of a restore, so a test can stop there.
 var hookRestoreStep = func(step int) {}
@@ -250,21 +292,27 @@ func Restore(ctx context.Context, j *Journal, id int64) error {
 	if r.Original != r.Final && exists(r.Original) {
 		return ErrNameTaken
 	}
-	if err := j.SetState(ctx, id, StateMoving); err != nil {
+	// The row is claimed before anything moves: a sweep that got there first has purged the copy, and a row that is
+	// no longer done is refused (review N2).
+	claimed, err := j.claim(ctx, id, StateDone, StateMoving)
+	if err != nil {
 		return err
+	}
+	if !claimed {
+		return ErrOriginalGone
 	}
 	hookRestoreStep(1)
 	// Step 2: the converted file is moved aside into the trash, not deleted, so a refusal from here on can put it back.
 	// It is identified before the move; a file that changed since the check is left where it is.
 	trashDir := filepath.Dir(r.Trash)
-	holding, err := trashPath(trashDir, r.Final, r.JobID)
-	if err != nil {
-		_ = j.SetState(ctx, id, StateDone)
-		return err
-	}
+	holding := holdingPath(trashDir, id, r.Final)
 	if !matches(r.Final, r.New) {
 		_ = j.SetState(ctx, id, StateDone)
 		return ErrConvertedChanged
+	}
+	if err := os.MkdirAll(filepath.Dir(holding), 0o755); err != nil {
+		_ = j.SetState(ctx, id, StateDone)
+		return fmt.Errorf("make the restore folder: %w", err)
 	}
 	if err := fsx.RenameNoReplace(r.Final, holding); err != nil {
 		_ = j.SetState(ctx, id, StateDone)
@@ -291,11 +339,12 @@ func Restore(ctx context.Context, j *Journal, id int64) error {
 		_ = j.SetState(ctx, id, StateAttention)
 		return ErrOriginalGone
 	}
-	// Step 4: the original is back and verified, so the converted copy is removed. If that removal fails the original
-	// is still restored; the copy stays in the trash and nothing is lost.
+	// Step 4: the original is back and verified, so the converted copy is removed, and its folder with it. If that
+	// removal fails the original is still restored; the copy stays in the trash and nothing is lost (review N1).
 	if matches(holding, r.New) {
 		_ = os.Remove(holding)
 	}
+	removeHoldingFolder(holding)
 	if err := j.SetState(ctx, id, StateRolledBack); err != nil {
 		return fmt.Errorf("restored, but the record could not be saved: %w", err)
 	}
@@ -306,12 +355,13 @@ func Restore(ctx context.Context, j *Journal, id int64) error {
 const RestoredSentence = "Original restored"
 
 // settleRestore settles a restore a crash left partway (L-SAFE-19). Restore moves the converted file aside before the
-// original returns to its name, so a crash in between leaves the name empty and the converted copy in the trash. The
-// copy is found by its identity, not its name. The restore is finished when the original is back, and undone when it
-// is not: the converted file returns to its name and the row is done, as if the restore never began. The second
-// result is false when no such copy exists, and the caller settles the row as before.
+// original returns to its name, so a crash in between leaves the name empty and the converted copy in the row's own
+// holding folder. The copy is found by its path and its identity, never by a scan of the trash (review N3). The
+// restore is finished when the original is back, and undone when it is not: the converted file returns to its name
+// and the row is done, as if the restore never began. The second result is false when there is no such copy, and the
+// caller settles the row as before.
 func settleRestore(r Row) (string, bool) {
-	holding, ok := findHolding(r)
+	holding, ok := holdingOf(r)
 	if !ok {
 		return "", false
 	}
@@ -321,36 +371,28 @@ func settleRestore(r Row) (string, bool) {
 		if err := os.Remove(holding); err != nil {
 			return StateAttention, true
 		}
+		removeHoldingFolder(holding)
 		return StateRolledBack, true
 	case matches(r.Trash, r.Orig) && !exists(r.Final):
 		// The original is still in the trash: the restore is undone, and the converted file returns to its name.
 		if err := fsx.RenameNoReplace(holding, r.Final); err != nil {
 			return StateAttention, true
 		}
+		removeHoldingFolder(holding)
 		return StateDone, true
 	default:
 		return StateAttention, true
 	}
 }
 
-// findHolding is the trash file, other than the original's trash copy, whose identity is the converted file's.
-func findHolding(r Row) (string, bool) {
+// holdingOf is the row's own holding copy, when one is there with the converted file's identity.
+func holdingOf(r Row) (string, bool) {
 	if matches(r.Final, r.New) {
 		return "", false
 	}
-	dir := filepath.Dir(r.Trash)
-	entries, err := os.ReadDir(dir)
-	if err != nil {
+	holding := holdingPath(filepath.Dir(r.Trash), r.ID, r.Final)
+	if !matches(holding, r.New) {
 		return "", false
 	}
-	for _, e := range entries {
-		path := filepath.Join(dir, e.Name())
-		if path == r.Trash || !e.Type().IsRegular() {
-			continue
-		}
-		if matches(path, r.New) {
-			return path, true
-		}
-	}
-	return "", false
+	return holding, true
 }

@@ -106,10 +106,17 @@ func run(dataDir, listen string) error {
 	if rep, err := safety.Recover(ctx, journal); err != nil {
 		_ = bus.Emit(events.Event{Level: events.LevelWarn, Kind: events.KindWarning,
 			Source: "safety", Code: "replace.recover_failed", Message: err.Error()})
-	} else if rep.Attention > 0 {
-		_ = bus.Emit(events.Event{Level: events.LevelWarn, Kind: events.KindWarning,
-			Source: "safety", Code: "replace.attention",
-			Message: fmt.Sprintf("%d replaced original(s) need a look: the original is in the library's %s folder, and nothing was removed.", rep.Attention, safety.TrashDir)})
+	} else {
+		// A restore a crash left was finished now: its job's History says so (page 03), as a live restore does.
+		for _, job := range rep.Restored {
+			_ = bus.Emit(events.Event{JobID: job, Level: events.LevelInfo, Kind: events.KindRestored,
+				Source: "safety", Code: "replace.restored", Message: safety.RestoredSentence})
+		}
+		if rep.Attention > 0 {
+			_ = bus.Emit(events.Event{Level: events.LevelWarn, Kind: events.KindWarning,
+				Source: "safety", Code: "replace.attention",
+				Message: fmt.Sprintf("%d replaced original(s) need a look: the original is in the library's %s folder, and nothing was removed.", rep.Attention, safety.TrashDir)})
+		}
 	}
 	// The trash is emptied once a day: copies past keepOriginalsDays go, and nothing else (S2-10c).
 	go trashSweepLoop(ctx, journal, bus)

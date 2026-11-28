@@ -295,8 +295,13 @@ func TestRestoreCrashAfterTheOriginalIsBackFinishesIt(t *testing.T) {
 	f, id := doneSwap(t)
 	crashAt(t, 3)
 	restoreUntilCrash(f, id)
-	if _, err := Recover(context.Background(), f.j); err != nil {
+	rep, err := Recover(context.Background(), f.j)
+	if err != nil {
 		t.Fatal(err)
+	}
+	// N4: the restore recovery finished names its job, so the caller can write its History line.
+	if len(rep.Restored) != 1 || rep.Restored[0] != 7 {
+		t.Errorf("restored jobs = %v, want [7]", rep.Restored)
 	}
 	if got := readFile(t, f.original); got != origBytes {
 		t.Errorf("the original is %q after recovery, want its own bytes", got)
@@ -344,14 +349,74 @@ func TestRestoreRefusalKeepsTheConvertedFile(t *testing.T) {
 		t.Fatal("the restore was not refused")
 	}
 	found := false
-	entries, _ := os.ReadDir(filepath.Join(f.lib, TrashDir))
-	for _, e := range entries {
-		b, _ := os.ReadFile(filepath.Join(f.lib, TrashDir, e.Name()))
-		if string(b) == newBytes {
-			found = true
+	_ = filepath.WalkDir(filepath.Join(f.lib, TrashDir), func(p string, d os.DirEntry, err error) error {
+		if err == nil && !d.IsDir() {
+			if b, rerr := os.ReadFile(p); rerr == nil && string(b) == newBytes {
+				found = true
+			}
 		}
-	}
+		return nil
+	})
 	if !found {
 		t.Errorf("the converted bytes are in no trash file: a refused restore lost the converted file")
+	}
+}
+
+// N1: a successful restore leaves no copy of the converted bytes, and no holding folder, in the trash.
+func TestRestoreLeavesNoHoldingCopy(t *testing.T) {
+	f, id := doneSwap(t)
+	if err := Restore(context.Background(), f.j, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(f.lib, TrashDir, holdingDir)); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the holding folder is still there after a restore: %v", err)
+	}
+}
+
+// N2: a row a restore has claimed is not purged by a sweep; the copy stays for the restore.
+func TestSweepSkipsARowBeingRestored(t *testing.T) {
+	f, id := doneSwap(t)
+	r, _, _ := f.j.Entry(context.Background(), id)
+	// A restore takes the row after the sweep has listed it and before the sweep claims it.
+	hookBeforeSweepClaim = func(got int64) {
+		if got == id {
+			_ = f.j.SetState(context.Background(), id, StateMoving)
+		}
+	}
+	defer func() { hookBeforeSweepClaim = func(int64) {} }()
+	rep, err := SweepTrash(context.Background(), f.j, time.Now().Add(30*24*time.Hour), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Purged != 0 {
+		t.Errorf("purged = %d, want 0 for a row being restored", rep.Purged)
+	}
+	if _, err := os.Stat(r.Trash); err != nil {
+		t.Errorf("the copy a restore claimed was removed: %v", err)
+	}
+}
+
+// N3: recovery touches only its own row's holding copy. A stranger file with the same identity, in another row's
+// holding folder, is left where it is.
+func TestRecoverTouchesOnlyItsOwnHoldingCopy(t *testing.T) {
+	f, id := doneSwap(t)
+	crashAt(t, 2)
+	restoreUntilCrash(f, id)
+	own := holdingPath(filepath.Join(f.lib, TrashDir), id, f.final)
+	other := filepath.Join(f.lib, TrashDir, holdingDir, "999", filepath.Base(f.final))
+	if err := os.MkdirAll(filepath.Dir(other), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(own, other); err != nil {
+		t.Skipf("hard links are not available here: %v", err)
+	}
+	if _, err := Recover(context.Background(), f.j); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(other); err != nil {
+		t.Errorf("another row's holding copy was moved or removed: %v", err)
+	}
+	if got := readFile(t, f.final); got != newBytes {
+		t.Errorf("the converted file is %q after recovery, want its own bytes", got)
 	}
 }
