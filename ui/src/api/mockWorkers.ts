@@ -22,6 +22,7 @@ const JOINER: WorkerDetail = {
   now: null,
   doneToday: 0,
   pausedGlobally: false,
+  test: null,
   hours: null,
   primaryEncoder: null,
   encoders: [],
@@ -42,6 +43,7 @@ const summary = (w: WorkerDetail): Worker => ({
   now: w.now,
   doneToday: w.doneToday,
   pausedGlobally: globalPaused,
+  test: w.test,
 });
 
 function copy(w: WorkerDetail): WorkerDetail {
