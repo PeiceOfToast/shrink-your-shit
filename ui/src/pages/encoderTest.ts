@@ -1,11 +1,6 @@
-// Waiting for a worker's encoder test. The test answers a run id; the worker then carries that run in its test state
-// (test: {runId, running, finishedAt}, workshop #904). The page reads the worker again until this run has finished.
-// The shape is typed here until #904's golden is on origin; then take the type from the golden.
-export interface WorkerTestState {
-  runId: string;
-  running: boolean;
-  finishedAt: string | null;
-}
+// Waiting for a worker's encoder test. The test answers a run id, and the worker then carries that run in its test state
+// (Worker.test in types.ts, workshop #904). The page reads the worker again until this run has finished.
+import type { Worker } from "../api/types.ts";
 
 export interface PollOptions {
   tries: number;
@@ -13,9 +8,9 @@ export interface PollOptions {
   sleep: (ms: number) => Promise<void>;
 }
 
-// True when the worker's test is this run and has finished.
-export function testFinished(worker: unknown, runId: string): boolean {
-  const t = (worker as { test?: WorkerTestState | null } | null)?.test;
+// True when the worker's test is this run and has finished. Null (never run, always for a remote worker) is not finished.
+export function testFinished(worker: { test: Worker["test"] } | null | undefined, runId: string): boolean {
+  const t = worker?.test;
   return Boolean(t && t.runId === runId && !t.running);
 }
 

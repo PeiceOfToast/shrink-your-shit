@@ -264,8 +264,8 @@ export function startEncoderTest(id: string): { runId: string } {
   if (w.state === "offline") throw new ApiError("worker_offline", "That worker is offline. Bring it back, then test again.");
   const runId = `encoder-test-${++runSeq}`;
   // The worker's test state (workshop #904): this run, running until it finishes.
-  const set = (test: { runId: string; running: boolean; finishedAt: string | null }) => {
-    const cur = rows.find((r) => r.id === id) as (WorkerDetail & { test?: unknown }) | undefined;
+  const set = (test: WorkerDetail["test"]) => {
+    const cur = rows.find((r) => r.id === id);
     if (cur) cur.test = test;
   };
   set({ runId, running: true, finishedAt: null });
