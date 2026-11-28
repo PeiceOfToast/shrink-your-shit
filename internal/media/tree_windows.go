@@ -32,6 +32,10 @@ type tree struct {
 // rights) falls back to walking the tree with taskkill; Run keeps the same promise there.
 func startTree(cmd *exec.Cmd) (*tree, error) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_NEW_PROCESS_GROUP}
+	if LowPriority() {
+		// Windows' low priority is a process creation flag, so it is set before the tool starts.
+		cmd.SysProcAttr.PriorityClass = syscall.BELOW_NORMAL_PRIORITY_CLASS
+	}
 	job, err := windows.CreateJobObject(nil, nil)
 	if err != nil {
 		job = 0

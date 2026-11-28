@@ -11,6 +11,7 @@ import (
 
 	"github.com/PeiceOfToast/shrink-your-shit/internal/encode"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/events"
+	"github.com/PeiceOfToast/shrink-your-shit/internal/hw"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/media"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/safety"
 )
@@ -58,9 +59,6 @@ func (e *engine) convert(ctx context.Context, plan encode.Plan, info media.Info,
 			return fatal("encoder.unavailable", err.Error(), "", NextEncoder)
 		}
 		card = got
-		if card.Line != "" {
-			e.note(card.Line)
-		}
 	}
 	if !picked && stop {
 		// No picker is the same answer as a picker that found no card: there is no card here for
@@ -85,6 +83,51 @@ func (e *engine) convert(ctx context.Context, plan encode.Plan, info media.Info,
 		}
 	}
 
+	// L-HW-8: the card's places are one count for the whole process. A job the card's rungs will encode takes
+	// one before the first encode and gives it back when the card is done with it: on every return from here,
+	// and before the processor rung when the ladder steps down to it. With the setting at 0 the processor
+	// converts the file and the log says why, exactly as when no card could take it.
+	var giveBack func()
+	if hasCardRung(card.Rungs) {
+		limit := -1 // no limit set (a try-on-one-file run, a test): the card takes every job, counted
+		if e.env.GPUSlots != nil {
+			limit = e.env.GPUSlots()
+		}
+		if limit == 0 {
+			e.warn("the graphics slots are set to 0, so the processor does the encoding")
+			card = Attempt{}
+			if stop {
+				return Result{
+					Outcome: OutcomeFatal, Reason: "encode.gpu_unavailable",
+					Message:    "The graphics slots are set to 0, and this step stops rather than use the processor.",
+					FailedStep: e.encodeOwner(d), NextAction: stopNextAction,
+				}
+			}
+		} else {
+			if limit > 0 && hw.Running() >= limit {
+				e.warn(fmt.Sprintf("waiting for a graphics slot (%d of %d in use)", hw.Running(), limit))
+			}
+			slot, err := hw.TakeSlot(ctx, limit)
+			if err != nil {
+				if res := ctxStop(ctx); res.Outcome != "" {
+					return res
+				}
+				return fatal("encode.slot_failed", err.Error(), e.encodeOwner(d), NextRetryLog)
+			}
+			giveBack = slot.Release
+			// The picker's line describes what the card will do, so it is said once the place is held: a job
+			// whose card has no places must not claim the card first (L-HW-8).
+			if card.Line != "" {
+				e.note(card.Line)
+			}
+			defer func() {
+				if giveBack != nil {
+					giveBack()
+				}
+			}()
+		}
+	}
+
 	rungs := append([]encode.Rung(nil), card.Rungs...)
 	// The processor rung ends the ladder, unless the step stops first or the picker named it.
 	if !stop && !namesProcessor(rungs) {
@@ -97,6 +140,12 @@ func (e *engine) convert(ctx context.Context, plan encode.Plan, info media.Info,
 
 	var run media.Result
 	for i, rung := range rungs {
+		if giveBack != nil && rung.Family == encode.FamilyCPU {
+			// The processor takes over: the place on the card goes back now, not when the processor's
+			// encode ends (L-HW-8).
+			giveBack()
+			giveBack = nil
+		}
 		built, err := encode.Build(plan, info, rung)
 		if err != nil {
 			if errors.Is(err, encode.ErrSkip) {
@@ -185,6 +234,17 @@ func (e *engine) convert(ctx context.Context, plan encode.Plan, info media.Info,
 func namesProcessor(rungs []encode.Rung) bool {
 	for _, r := range rungs {
 		if r.Family == encode.FamilyCPU {
+			return true
+		}
+	}
+	return false
+}
+
+// hasCardRung says whether any rung encodes on the graphics card. A processor-only attempt (a worker with
+// no detector, a try-on-one-file run) has none, so it takes no place on the card (L-HW-8).
+func hasCardRung(rungs []encode.Rung) bool {
+	for _, r := range rungs {
+		if r.Family != encode.FamilyCPU {
 			return true
 		}
 	}

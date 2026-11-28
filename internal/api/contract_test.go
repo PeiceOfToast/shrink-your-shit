@@ -181,4 +181,19 @@ func TestContractGoldens(t *testing.T) {
 		e.do(http.MethodGet, "/api/v2/summary", "", withSession(cookie), false), dir)
 	writeGolden(t, "attention", "Attention[]", http.MethodGet, "/api/v2/attention",
 		e.do(http.MethodGet, "/api/v2/attention", "", withSession(cookie), false), dir)
+
+	// The Workers page's goldens come from an env whose detector found an Intel card, so the detail
+	// carries the card and its encoders rather than the empty-answer shape.
+	w := newEnv(t, false)
+	w.cards = qsvCards()
+	w.ready()
+	wcookie := w.setup()
+	writeGolden(t, "workers", "Worker[]", http.MethodGet, "/api/v2/workers",
+		w.do(http.MethodGet, "/api/v2/workers", "", withSession(wcookie), false))
+	writeGolden(t, "worker", "WorkerDetail", http.MethodGet, "/api/v2/workers/local",
+		w.do(http.MethodGet, "/api/v2/workers/local", "", withSession(wcookie), false))
+	writeGolden(t, "worker-patch", "WorkerDetail", http.MethodPatch, "/api/v2/workers/local",
+		w.do(http.MethodPatch, "/api/v2/workers/local",
+			`{"slots":2,"gpuSlots":0,"hours":{"from":"22:00","to":"06:00"},"primaryEncoder":"hevc_qsv"}`,
+			write(withSession(wcookie)), false))
 }

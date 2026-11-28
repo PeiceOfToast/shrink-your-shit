@@ -32,6 +32,7 @@ import (
 	"github.com/PeiceOfToast/shrink-your-shit/internal/system"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/ui"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/worker"
+	"github.com/PeiceOfToast/shrink-your-shit/internal/workers"
 )
 
 // version is set at build time with -ldflags "-X main.version=...".
@@ -140,7 +141,6 @@ func run(dataDir, listen string) error {
 		_ = bus.Emit(events.Event{Level: events.LevelWarn, Kind: events.KindWarning,
 			Source: "safety", Code: "sidecar.recovered", Message: said})
 	}
-	// parallelJobs is the default a new worker starts with (page 11); it is read once, at start, and clamped to 1-8.
 	// The card detector: one background pass over the encoders this machine lists, with a device
 	// probe for each one it finds, so a job can choose a card rung only for the tests the card
 	// passed (L-HW-3, L-HW-9). A job that starts before the pass ends converts on the processor and
@@ -162,10 +162,26 @@ func run(dataDir, listen string) error {
 		cards.Start(ctx)
 		pick = cardPicker(cards)
 	}
+	// The worker's own settings (page 10): the files it runs at once are its setting at start, its
+	// graphics slots are read per job, and its hours decide whether a slot may take a new job. The
+	// migration created the built-in row, so a read that fails is a real problem worth stopping for.
+	// The worker's row is the authority for files at once (the brief's reading): page 11's
+	// processing.parallelJobs is only the default a new worker row is created with.
+	media.SetLowPriority(settings.Get(ctx, db, "processing.lowPriority", true))
+	workerStore := workers.Open(db)
+	local, err := workerStore.Get(ctx, workers.LocalID)
+	if err != nil {
+		httpSrv.Close()
+		bus.Close(context.Background())
+		return fmt.Errorf("read the worker's settings: %w", err)
+	}
+	env := workerEnv(flows, bus, db, pick)
+	env.GPUSlots = gpuSlots(workerStore)
 	wk := worker.New(worker.Config{
-		Slots: startSlots(ctx, db), WorkerID: "local", DataDir: dataDir, Bus: bus,
-		Source: worker.Builtin{Queue: q, DB: db, Flows: flows},
-		Run:    flow.Run, Env: workerEnv(flows, bus, db, pick),
+		Slots: local.Slots, WorkerID: local.ID, DataDir: dataDir, Bus: bus,
+		MayClaim: mayClaim(workerStore),
+		Source:   worker.Builtin{Queue: q, DB: db, Flows: flows},
+		Run:      flow.Run, Env: env,
 	})
 	wctx, stopWorker := context.WithCancel(ctx)
 	workerDone := make(chan struct{})
@@ -178,6 +194,12 @@ func run(dataDir, listen string) error {
 	// finished; the same Wake is what the api's setup uses after the first scan.
 	catalog := library.NewCatalog(db)
 	reportLibraryOverlaps(ctx, catalog, bus)
+	// A detector that could not be built leaves the card answers nil, not a nil pointer behind the
+	// interface: the Workers page then shows no card.
+	var cardAnswer api.CardAnswer
+	if cards != nil {
+		cardAnswer = cards
+	}
 	srv.Ready(api.Deps{
 		Access:     access,
 		Events:     bus,
@@ -188,6 +210,8 @@ func run(dataDir, listen string) error {
 		Jobs:       q,
 		Scanner:    newScanner(catalog, flows, q, bus, wk.Wake),
 		Wake:       wk.Wake,
+		Workers:    workerStore,
+		Cards:      cardAnswer,
 		// Cancel of a running job (S3-6a): the api marks the row cancelled, then this ends the run's
 		// context, which kills ffmpeg and lets the flow remove its staging.
 		StopJob:  func(id int64) { wk.CancelJob(id) },
@@ -258,16 +282,6 @@ func loadRevisionFor(flows *flow.Store, db *store.DB) func(ctx context.Context, 
 		}
 		return flow.ResolveMyLanguages(r.Flow, settings.Languages(ctx, db)), nil
 	}
-}
-
-// startSlots is the number of slots a new worker starts with: processing.parallelJobs, read once at start and clamped
-// to 1 to 8.
-func startSlots(ctx context.Context, db *store.DB) int {
-	slots := settings.Get(ctx, db, "processing.parallelJobs", 1)
-	if slots < 1 || slots > 8 {
-		return 1
-	}
-	return slots
 }
 
 // trashSweepLoop runs the trash sweep at start and then every day until the app stops.
@@ -373,6 +387,28 @@ func cardPicker(cards *hw.Detector) func(flow.Want) (flow.Attempt, error) {
 			return flow.Attempt{Reason: "the graphics card has not been tested yet"}, nil
 		}
 		return flow.PickFromAnswer(ans, want), nil
+	}
+}
+
+// gpuSlots is the built-in worker's graphics slots, read before each job's first card encode (L-HW-8).
+// A read that fails leaves the card without a limit rather than failing the job: the setting is a
+// schedule of the card, and the job's log already has the database's problem.
+func gpuSlots(store *workers.Store) func() int {
+	return func() int {
+		w, err := store.Get(context.Background(), workers.LocalID)
+		if err != nil {
+			return -1
+		}
+		return w.GPUSlots
+	}
+}
+
+// mayClaim says whether the built-in worker's hours allow a new job now (page 10). A read that fails
+// allows it, for the same reason as gpuSlots.
+func mayClaim(store *workers.Store) func() bool {
+	return func() bool {
+		w, err := store.Get(context.Background(), workers.LocalID)
+		return err != nil || w.AllowsWork(time.Now())
 	}
 }
 

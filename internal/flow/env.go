@@ -68,6 +68,9 @@ type Env struct {
 	// over the hardware detector's answer). nil means this worker has no card and every job runs on
 	// the processor.
 	Pick func(Want) (Attempt, error)
+	// GPUSlots is the worker's graphics slots (the Workers page): how many jobs may encode on the card
+	// at once. nil means no limit is set; the card still counts the jobs that use it (L-HW-8).
+	GPUSlots func() int
 	// LoadRevision reads one saved revision; the store's Revision method has this shape.
 	LoadRevision func(ctx context.Context, workflowID int64, rev int) (Flow, error)
 	// Progress receives ffmpeg's progress blocks. It is live only and never stored.
