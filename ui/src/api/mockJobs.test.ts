@@ -1,7 +1,7 @@
 // Convert again (API: a finished job runs again as the same job, with a new attempt).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { convertAgain, getJob, getJobEvents, getJobHistory, runJobsAction } from "./mock.ts";
+import { convertAgain, getJob, getJobEvents, getJobHistory, getJobNeighbours, getJobs, runJobsAction } from "./mock.ts";
 import { JOBS } from "./fixtures/jobs.ts";
 import { ApiError } from "./errors.ts";
 import { jobDetail } from "./fixtures/jobDetail.ts";
@@ -55,4 +55,20 @@ test("Stop leaves the job cancelled, as the server returns it, and Retry puts it
   assert.equal((await getJob(open.id)).job.state, "cancelled");
   await runJobsAction("retry", [open.id]);
   assert.equal((await getJob(open.id)).job.state, "waiting");
+});
+
+test("a stopped job is left out of every list, as the server does; Retry clears the old result", async () => {
+  const open = JOBS.find((j) => j.state === "waiting")!;
+  await runJobsAction("cancel", [open.id]);
+  for (const state of ["all", "waiting"]) assert.ok(!(await getJobs({ state })).items.some((j) => j.id === open.id), state);
+  for (const j of JOBS.filter((x) => x.state !== "cancelled")) {
+    const nb = await getJobNeighbours(j.id);
+    assert.ok(nb.prev !== open.id && nb.next !== open.id, j.id);
+  }
+  const failed = JOBS.find((j) => j.state === "failed" && j.result.outcome !== null)!;
+  await runJobsAction("retry", [failed.id]);
+  const after = (await getJob(failed.id)).job;
+  assert.equal(after.state, "waiting");
+  assert.equal(after.result.outcome, null);
+  assert.equal(after.result.reason, null);
 });

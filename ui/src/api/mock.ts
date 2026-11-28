@@ -102,8 +102,9 @@ export function getJobs(params: JobsParams = {}): Promise<JobsPage> {
     if (forced === "empty") {
       return { counts: { ...counts, all: 0, waiting: 0, running: 0, failed: 0, done: 0, skipped: 0 }, items: [], next: null };
     }
-    let items: Job[] = JOBS;
-    if (forced === "running") items = JOBS.filter((j) => j.state === "running");
+    // The server never lists a stopped (cancelled) job: only its open panel can Retry it (internal/jobs/read.go).
+    let items: Job[] = JOBS.filter((j) => j.state !== "cancelled");
+    if (forced === "running") items = items.filter((j) => j.state === "running");
     // While the switch is off only the files still finishing are running; the other running jobs are over.
     const sw = workersSwitch();
     const over = new Set(sw.paused ? items.filter((j) => j.state === "running").slice(sw.finishing).map((j) => j.id) : []);
@@ -128,7 +129,10 @@ export function runJobsAction(action: "retry" | "cancel" | "top", ids: string[])
       const i = JOBS.findIndex((j) => j.id === id);
       if (i < 0) continue;
       if (action === "cancel") JOBS[i] = { ...JOBS[i], state: "cancelled", step: null, progress: null };
-      if (action === "retry") JOBS[i] = { ...JOBS[i], state: "waiting", step: null, progress: null, startedAt: null, finishedAt: null };
+      if (action === "retry") {
+        const job = JOBS[i];
+        JOBS[i] = { ...job, state: "waiting", step: null, progress: null, startedAt: null, finishedAt: null, tookMs: null, result: { ...job.result, sizeAfter: null, outcome: null, failedStep: null, reason: null } };
+      }
     }
     return { done: [...ids], refused: [] };
   });
@@ -213,7 +217,8 @@ export function getJobHistory(id: string): Promise<HistoryLine[]> {
 // GET /api/v2/jobs/{id}/neighbours?state=: the ids before and after this one in the list behind the panel.
 export function getJobNeighbours(id: string, state?: string): Promise<JobNeighbours> {
   return respond(() => {
-    const list = state && state !== "all" ? JOBS.filter((j) => j.state === state) : JOBS;
+    const shown = JOBS.filter((j) => j.state !== "cancelled");
+    const list = state && state !== "all" ? shown.filter((j) => j.state === state) : shown;
     const i = list.findIndex((j) => j.id === id);
     return { prev: i > 0 ? list[i - 1].id : null, next: i >= 0 && i < list.length - 1 ? list[i + 1].id : null };
   });
