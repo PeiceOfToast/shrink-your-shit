@@ -199,6 +199,54 @@ func run(dataDir, listen string) error {
 	// finished; the same Wake is what the api's setup uses after the first scan.
 	catalog := library.NewCatalog(db)
 	reportLibraryOverlaps(ctx, catalog, bus)
+	// The health check (page 11): the app's checks on itself, run at start and then every few minutes. A change of
+	// a check's status is one event in the system log, which is what the attention row reads.
+	doctor := system.NewDoctor(system.Sources{
+		DataDir:  dataDir,
+		DiskFree: fsx.FreeBytes,
+		LowSpaceGB: func() int {
+			return settings.Get(ctx, db, "processing.lowSpaceGB", system.LowSpaceDefault)
+		},
+		Tools: func(ctx context.Context) (string, string, error) {
+			ffmpeg, err := media.ToolVersion(ctx, "ffmpeg")
+			if err != nil {
+				return "", "", err
+			}
+			ffprobe, err := media.ToolVersion(ctx, "ffprobe")
+			return ffmpeg, ffprobe, err
+		},
+		Libraries: func(ctx context.Context) ([]system.Library, error) {
+			libs, err := catalog.ListLibraries(ctx)
+			if err != nil {
+				return nil, err
+			}
+			out := make([]system.Library, 0, len(libs))
+			for _, l := range libs {
+				out = append(out, system.Library{ID: l.ID, Name: l.Name, Path: l.Path})
+			}
+			return out, nil
+		},
+		Cards: func() (ready []string, found, tested bool) {
+			if cards == nil {
+				return nil, false, false
+			}
+			ans, ok := cards.Current()
+			if !ok {
+				return nil, false, false
+			}
+			seen := map[encode.Family]bool{}
+			for _, v := range ans.Inventory.Verdicts {
+				if !v.Available || seen[v.Family] {
+					continue
+				}
+				seen[v.Family] = true
+				ready = append(ready, hw.ProductName(v.Family))
+			}
+			return ready, len(ans.Inventory.Verdicts) > 0, true
+		},
+		Emit: bus,
+	})
+	doctor.Start(ctx)
 	// A detector that could not be built leaves the card answers nil, not a nil pointer behind the
 	// interface: the Workers page then shows no card.
 	var cardAnswer api.CardAnswer
@@ -221,6 +269,7 @@ func run(dataDir, listen string) error {
 		// context, which kills ffmpeg and lets the flow remove its staging.
 		StopJob:  func(id int64) { wk.CancelJob(id) },
 		DiskFree: fsx.FreeBytes,
+		Doctor:   doctor,
 		// Try on one file (S2-5): the same engine as a job, with its own events that answer the
 		// page rather than going to the log.
 		Try: func(ctx context.Context, f flow.Flow, file string) (flow.TryResult, error) {

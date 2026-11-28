@@ -18,8 +18,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/PeiceOfToast/shrink-your-shit/internal/encode"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/events"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/flow"
+	"github.com/PeiceOfToast/shrink-your-shit/internal/hw"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/jobs"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/library"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/store"
@@ -76,7 +78,9 @@ type env struct {
 	workers *workers.Store
 	// cards answers the Workers page's card and encoders when a test sets it before ready().
 	cards CardAnswer
-	scans *scanRecorder
+	// doctor is the health check GET /doctor serves, over the env's own clock and folders.
+	doctor *system.Doctor
+	scans  *scanRecorder
 	// try answers the try route when a test sets it; the real flow.Try is not run here.
 	try func(ctx context.Context, f flow.Flow, file string) (flow.TryResult, error)
 	// stopJob records the worker stop a running job's Cancel asks for (S3-6a); a test sets it, then ready().
@@ -176,6 +180,44 @@ func newEnv(t *testing.T, ready bool) *env {
 	e.catalog.Now = e.clock.Now
 	e.queue = jobs.New(jobs.Options{DB: db, Bus: e.bus, Clock: e.clock.Now})
 	e.workers = workers.Open(db)
+	e.doctor = system.NewDoctor(system.Sources{
+		Now:      e.clock.Now,
+		DataDir:  dir,
+		DiskFree: func(string) (uint64, error) { return 400 << 30, nil },
+		Tools:    func(context.Context) (string, string, error) { return "7.0.2", "7.0.2", nil },
+		Libraries: func(ctx context.Context) ([]system.Library, error) {
+			libs, err := e.catalog.ListLibraries(ctx)
+			if err != nil {
+				return nil, err
+			}
+			out := make([]system.Library, 0, len(libs))
+			for _, l := range libs {
+				out = append(out, system.Library{ID: l.ID, Name: l.Name, Path: l.Path})
+			}
+			return out, nil
+		},
+		// The page's card answer, as cmd/syp reads the detector: the families that passed a test.
+		Cards: func() ([]string, bool, bool) {
+			if e.cards == nil {
+				return nil, false, false
+			}
+			ans, ok := e.cards.Current()
+			if !ok {
+				return nil, false, false
+			}
+			seen := map[encode.Family]bool{}
+			var ready []string
+			for _, v := range ans.Inventory.Verdicts {
+				if !v.Available || seen[v.Family] {
+					continue
+				}
+				seen[v.Family] = true
+				ready = append(ready, hw.ProductName(v.Family))
+			}
+			return ready, len(ans.Inventory.Verdicts) > 0, true
+		},
+		Emit: e.bus,
+	})
 	if ready {
 		e.ready()
 	}
@@ -195,6 +237,7 @@ func (e *env) deps() Deps {
 		Cards:    e.cards,
 		Now:      e.clock.Now,
 		DiskFree: func(string) (uint64, error) { return 123456789, nil },
+		Doctor:   e.doctor,
 	}
 }
 

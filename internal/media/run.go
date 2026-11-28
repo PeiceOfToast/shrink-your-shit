@@ -329,6 +329,35 @@ func toolCommand(ctx context.Context, program string, args ...string) *exec.Cmd 
 	return cmd
 }
 
+// ToolVersion is what ffmpeg or ffprobe says it is: the version word on the first line of -version output, found
+// through tool(), so the installer's folder is where it looks. The health check asks this to say what is installed.
+func ToolVersion(ctx context.Context, name string) (string, error) {
+	if name != "ffmpeg" && name != "ffprobe" {
+		return "", fmt.Errorf("tool version: %q is not ffmpeg or ffprobe", name)
+	}
+	if _, err := exec.LookPath(tool(name)); err != nil {
+		return "", errors.New(name + " not found")
+	}
+	out, err := toolCommand(ctx, name, "-version").Output()
+	if err != nil {
+		return "", fmt.Errorf("%s did not answer: %w", name, err)
+	}
+	line, _, _ := strings.Cut(string(out), "\n")
+	if version, ok := versionOf(name, line); ok {
+		return version, nil
+	}
+	return "", errors.New(name + " did not say its version")
+}
+
+// versionOf reads the version word from a tool's first -version line: "ffmpeg version 7.0.2 Copyright …".
+func versionOf(name, line string) (string, bool) {
+	fields := strings.Fields(line)
+	if len(fields) >= 3 && fields[0] == name && fields[1] == "version" {
+		return fields[2], true
+	}
+	return "", false
+}
+
 // toolEnv is the environment of one ffmpeg or ffprobe process. When the tool folder has a lib folder (the installer's
 // libva 2.22, S3-1c), that folder goes first on LD_LIBRARY_PATH for this process only: the service keeps its own
 // environment, and LIBVA_DRIVERS_PATH stays the system's, so the system's Mesa and Intel drivers still load. nil means

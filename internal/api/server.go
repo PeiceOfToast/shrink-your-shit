@@ -66,6 +66,8 @@ type Deps struct {
 	Cards CardAnswer
 	// Now is the server's clock, which decides where "Done today" starts. nil means time.Now.
 	Now func() time.Time
+	// Doctor is the app's own health check (page 11): GET /doctor serves its last run or runs it again.
+	Doctor *system.Doctor
 }
 
 // now is when the server thinks it is, for the settings that turn on the server's local day.
@@ -200,6 +202,8 @@ func New(version string) *Server {
 	s.mux.HandleFunc("GET /api/v2/attention", s.getAttention)
 	s.mux.HandleFunc("GET /api/v2/trash", s.getTrash)
 	s.mux.HandleFunc("GET /api/v2/settings", s.getSettings)
+	// The health check (S4): page 11's results, run again only when asked.
+	s.mux.HandleFunc("GET /api/v2/doctor", s.getDoctor)
 	s.mux.HandleFunc("PATCH /api/v2/settings", s.patchSettings)
 	s.mux.HandleFunc("POST /api/v2/trash/{id}/restore", s.restoreTrash)
 	s.mux.HandleFunc("/", s.static)
