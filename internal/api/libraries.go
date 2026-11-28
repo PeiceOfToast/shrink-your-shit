@@ -192,7 +192,7 @@ func (s *Server) libraryShare(w http.ResponseWriter, r *http.Request, raw string
 	point := sh.Point
 	if sh.Sub != "" {
 		point = filepath.Join(point, filepath.FromSlash(sh.Sub))
-		if fi, err := os.Stat(point); err != nil || !fi.IsDir() {
+		if !folderInside(sh.Point, sh.Sub) {
 			writeError(w, http.StatusBadRequest, "invalid_request",
 				"The share has no folder named "+sh.Sub+".", "shareId", 0)
 			return 0, false
@@ -203,6 +203,29 @@ func (s *Server) libraryShare(w http.ResponseWriter, r *http.Request, raw string
 		*name = sh.Name
 	}
 	return id, true
+}
+
+// folderInside is true when sub is a real folder inside the mount at point, reached without a link or
+// "..". The share's server controls what is in it: a link there (an NFS absolute link resolves on this
+// computer) would aim the library, and replace's moves and writes, at a local folder.
+func folderInside(point, sub string) bool {
+	clean := filepath.Clean(filepath.FromSlash(sub))
+	if clean == "." || filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return false
+	}
+	base, err := filepath.EvalSymlinks(point)
+	if err != nil {
+		return false
+	}
+	real, err := filepath.EvalSymlinks(filepath.Join(point, clean))
+	if err != nil {
+		return false
+	}
+	if rel, err := filepath.Rel(base, real); err != nil || rel != clean {
+		return false
+	}
+	fi, err := os.Stat(real)
+	return err == nil && fi.IsDir()
 }
 
 // shareDownSentence is why a library cannot be added on a down share: the share's own words, or the

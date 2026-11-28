@@ -506,6 +506,40 @@ func TestAddLibraryOnAShareUsesTheAddressesSubfolder(t *testing.T) {
 	}
 }
 
+// TestAddLibraryOnAShareRefusesALinkedSubfolder: the share's server decides what its folders are. A
+// subfolder that is a link out of the mount (an NFS absolute link resolves on this computer) must not
+// become a library, or replace would move and write files in a local folder.
+func TestAddLibraryOnAShareRefusesALinkedSubfolder(t *testing.T) {
+	e := newEnv(t, true)
+	cookie := e.setup()
+	point := mustAddShare(t, e, cookie, `\\nas\media\Films`, "viewer", "pw-1234-5678")
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(point, "Films")); err != nil {
+		t.Skipf("no symlinks here: %v", err)
+	}
+	rec := e.do(http.MethodPost, "/api/v2/libraries", `{"shareId":"1"}`, write(withSession(cookie)), false)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "no folder named Films") {
+		t.Fatalf("linked subfolder: %d %s, want 400", rec.Code, rec.Body)
+	}
+	rec = e.do(http.MethodGet, "/api/v2/libraries", "", withSession(cookie), false)
+	if strings.Contains(rec.Body.String(), "Films") {
+		t.Errorf("a library was added on the link: %s", rec.Body)
+	}
+}
+
+// TestFolderInside: only a real folder under the point, reached without a link or "..", passes.
+func TestFolderInside(t *testing.T) {
+	point := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(point, "a", "b"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for sub, want := range map[string]bool{"a": true, "a/b": true, "a/../a": true, "": false, ".": false, "..": false, "../x": false, "a/../../x": false, "/a": false, "missing": false} {
+		if got := folderInside(point, sub); got != want {
+			t.Errorf("folderInside(%q) = %v, want %v", sub, got, want)
+		}
+	}
+}
+
 // TestAddLibraryOnADownShareIsRefused: a share the helper could not mount has no folder to add, and
 // the answer says what the helper said. Nothing is added.
 func TestAddLibraryOnADownShareIsRefused(t *testing.T) {
