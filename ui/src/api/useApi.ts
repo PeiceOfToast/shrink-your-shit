@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { onForcedStateChange } from "./mock.ts";
-import { setConnection } from "./connection.ts";
+import { connectionAfterError, setConnection } from "./connection.ts";
 import { ApiError } from "./errors.ts";
 import { onRefresh } from "./refresh.ts";
 
@@ -33,7 +33,8 @@ export function useApi<T>(load: () => Promise<T>, deps: unknown[] = []): ApiStat
       },
       (e: unknown) => {
         if (!alive) return;
-        setConnection(false);
+        const conn = connectionAfterError(e);
+        if (conn !== null) setConnection(conn);
         setState({ loading: false, error: e instanceof Error ? e.message : String(e), code: e instanceof ApiError ? e.code : undefined });
       },
     );
