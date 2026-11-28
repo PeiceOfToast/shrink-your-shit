@@ -12,6 +12,7 @@ import (
 	"github.com/PeiceOfToast/shrink-your-shit/internal/flow"
 	// The real steps, so the step-definitions golden is the registry the binary serves.
 	_ "github.com/PeiceOfToast/shrink-your-shit/internal/flow/steps"
+	"github.com/PeiceOfToast/shrink-your-shit/internal/share"
 )
 
 // writeGolden writes internal/api/testdata/contract/<slug>.json from a real response. The UI's `npm run contract`
@@ -113,6 +114,31 @@ func TestContractGoldens(t *testing.T) {
 		e.do(http.MethodPatch, "/api/v2/libraries/2", mustJSON(t, map[string]any{"name": "More clips"}), write(withSession(cookie)), false), dir)
 	writeGolden(t, "library-delete", "LibraryRemoved", http.MethodDelete, "/api/v2/libraries/2",
 		e.do(http.MethodDelete, "/api/v2/libraries/2", "", write(withSession(cookie)), false), dir)
+
+	// Shares (S3-7): Add, the list, Test's two answers, Try again and Remove. The fake mounter is
+	// the API tests' stand-in for the root helper, so this golden run needs no privilege.
+	shareBody := mustJSON(t, map[string]any{
+		"address": "//nas/media", "username": "viewer", "password": "share-password",
+	})
+	writeGolden(t, "share-post", "Share", http.MethodPost, "/api/v2/shares",
+		e.do(http.MethodPost, "/api/v2/shares", shareBody, write(withSession(cookie)), false))
+	writeGolden(t, "shares", "Shares", http.MethodGet, "/api/v2/shares",
+		e.do(http.MethodGet, "/api/v2/shares", "", withSession(cookie), false))
+	writeGolden(t, "share-test", "ShareTest", http.MethodPost, "/api/v2/shares/test",
+		e.do(http.MethodPost, "/api/v2/shares/test", shareBody, write(withSession(cookie)), false))
+	e.mounter.failOn("//offline/media", &share.MountError{
+		Reason: share.ReasonUnreachable, Message: "The share did not answer.",
+	})
+	offlineBody := mustJSON(t, map[string]any{
+		"address": "//offline/media", "username": "viewer", "password": "share-password",
+	})
+	writeGolden(t, "share-test-failed", "ShareTest", http.MethodPost, "/api/v2/shares/test",
+		e.do(http.MethodPost, "/api/v2/shares/test", offlineBody, write(withSession(cookie)), false))
+	e.mounter.heal()
+	writeGolden(t, "share-reconnect", "Share", http.MethodPost, "/api/v2/shares/1/reconnect",
+		e.do(http.MethodPost, "/api/v2/shares/1/reconnect", "", write(withSession(cookie)), false))
+	writeGolden(t, "share-delete", "none", http.MethodDelete, "/api/v2/shares/1",
+		e.do(http.MethodDelete, "/api/v2/shares/1", "", write(withSession(cookie)), false))
 
 	// The steps' cards (S2-1): page 07's form, from the registry.
 	writeGolden(t, "step-definitions", "StepDefinition[]", http.MethodGet, "/api/v2/step-definitions",

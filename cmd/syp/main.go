@@ -28,6 +28,7 @@ import (
 	"github.com/PeiceOfToast/shrink-your-shit/internal/media"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/safety"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/settings"
+	"github.com/PeiceOfToast/shrink-your-shit/internal/share"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/store"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/system"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/ui"
@@ -217,6 +218,9 @@ func run(dataDir, listen string) error {
 		DiskFree: fsx.FreeBytes,
 		// Try on one file (S2-5): the same engine as a job, with its own events that answer the
 		// page rather than going to the log.
+		// Shares (stage 3 item 7): the store, validation and API are here; the root helper's client
+		// lands in the next slice, so this build records a share honestly as not connected.
+		Shares: share.NewService(share.Open(db, access), share.Unavailable{}),
 		Try: func(ctx context.Context, f flow.Flow, file string) (flow.TryResult, error) {
 			// A sample is a real copy of the video (a 4K minute can be hundreds of MB), so it goes
 			// in the app's own data folder rather than the system temp, which is often a small

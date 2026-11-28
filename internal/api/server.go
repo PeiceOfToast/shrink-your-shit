@@ -22,6 +22,7 @@ import (
 	"github.com/PeiceOfToast/shrink-your-shit/internal/hw"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/jobs"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/library"
+	"github.com/PeiceOfToast/shrink-your-shit/internal/share"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/store"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/system"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/workers"
@@ -64,6 +65,9 @@ type Deps struct {
 	// Cards is the hardware detector's last finished pass, for the Workers page's card and encoders.
 	// nil means no card, as on a machine with none and in most tests.
 	Cards CardAnswer
+	// Shares is the SMB/NFS share service (stage 3 item 7): the store, validation, and the mount
+	// actions behind the Mounter. nil means a server without the shares group.
+	Shares *share.Service
 	// Now is the server's clock, which decides where "Done today" starts. nil means time.Now.
 	Now func() time.Time
 }
@@ -184,6 +188,13 @@ func New(version string) *Server {
 	s.mux.HandleFunc("DELETE /api/v2/libraries/{id}", s.deleteLibrary)
 	s.mux.HandleFunc("POST /api/v2/libraries/{id}/scan", s.scanLibrary)
 	s.mux.HandleFunc("POST /api/v2/libraries/scan", s.scanAllLibraries)
+
+	// Shares (stage 3 item 7): page 09's Add. The literal /test wins over the {id} routes.
+	s.mux.HandleFunc("GET /api/v2/shares", s.getShares)
+	s.mux.HandleFunc("POST /api/v2/shares", s.postShare)
+	s.mux.HandleFunc("POST /api/v2/shares/test", s.testShare)
+	s.mux.HandleFunc("POST /api/v2/shares/{id}/reconnect", s.reconnectShare)
+	s.mux.HandleFunc("DELETE /api/v2/shares/{id}", s.deleteShare)
 	// The steps' cards (S2-1): the flow editor's form, from the step registry.
 	s.mux.HandleFunc("GET /api/v2/step-definitions", s.getStepDefinitions)
 	// The bitrate ladder (S2-6): page 07's recommended numbers and the Quality slider's table.

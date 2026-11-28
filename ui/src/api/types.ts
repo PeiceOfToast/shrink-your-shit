@@ -117,6 +117,36 @@ export interface LibraryPatch {
   paused?: boolean;
 }
 
+// Shares (page 09, stage 3 item 7). The address decides the type; the form never asks.
+export type ShareType = "smb" | "nfs";
+
+export interface Share {
+  id: string;
+  name: string;
+  type: ShareType;
+  address: string;
+  username: string;
+  guest: boolean;
+  hasPassword: boolean;
+  connected: boolean;
+  // Where the helper mounted it.
+  point?: string;
+  // RFC 3339 UTC time of the last connection attempt.
+  since?: string;
+  // Why it is not connected, in the page's words.
+  reason?: string;
+}
+
+// GET /shares: the list, and how this computer mounts shares ("host" when it cannot).
+export interface Shares {
+  mode: "helper" | "host";
+  modeReason?: string;
+  items: Share[];
+}
+
+// POST /shares/test: {ok:true}, or a short code and the sentence to show.
+export type ShareTest = { ok: true } | { ok: false; reason: string; message: string };
+
 // GET /api/v2/overview, in pages/08 "Data and API" nesting. Sizes are whole bytes; times are RFC 3339 UTC.
 export interface Overview {
   freed: {

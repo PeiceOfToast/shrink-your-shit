@@ -118,7 +118,7 @@ func TestAnInstallAtSchemaSixUpgradesThroughSeven(t *testing.T) {
 		t.Fatalf("queue the old job: %v", err)
 	}
 
-	// Take the schema back to 6: remove what migrations 7 through 13 add, and say the database is
+	// Take the schema back to 6: remove what migrations 7 through 16 add, and say the database is
 	// at 6. All the data above stays, as it would on a real stage 1 install.
 	if err := db.Tx(ctx, func(tx *sql.Tx) error {
 		for _, s := range []string{
@@ -130,6 +130,9 @@ func TestAnInstallAtSchemaSixUpgradesThroughSeven(t *testing.T) {
 			`ALTER TABLE jobs DROP COLUMN failure_code`,
 			`DROP TABLE IF EXISTS app_settings`,
 			`DROP TABLE IF EXISTS workers`,
+			`DROP TABLE IF EXISTS shares`,
+			`ALTER TABLE libraries DROP COLUMN share_paused`,
+			`ALTER TABLE libraries DROP COLUMN share_down_at`,
 			`PRAGMA user_version = 6`,
 		} {
 			if _, err := tx.Exec(s); err != nil {
@@ -159,10 +162,10 @@ func TestAnInstallAtSchemaSixUpgradesThroughSeven(t *testing.T) {
 	if err := db.Read().QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	// The newest migration is 14 (the journal's kind, #877 M2); 13 is the workers (S3-4), 12 the app settings (S2-10c),
-	// 11 the failure code (S3-6a), 10 the replace journal, 9 the subtitles change (#854).
-	if version != 15 {
-		t.Errorf("schema version after the upgrade = %d, want 15", version)
+	// The newest migration is 16 (shares, S3-7); 15 and 14 are the journal's, 13 the workers (S3-4), 12 the app settings
+	// (S2-10c), 11 the failure code (S3-6a), 10 the replace journal, 9 the subtitles change (#854).
+	if version != 16 {
+		t.Errorf("schema version after the upgrade = %d, want 16", version)
 	}
 	if err := db.Read().QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'encoder_state'`).
 		Scan(&encoderState); err != nil {
@@ -305,13 +308,16 @@ func TestAnInstallAtSchemaNineUpgradesToThirteen(t *testing.T) {
 		t.Fatalf("add the library: %v", err)
 	}
 
-	// Take the schema back to 9: remove what migrations 10 through 13 add and say the database is at 9.
+	// Take the schema back to 9: remove what migrations 10 through 16 add and say the database is at 9.
 	if err := db.Tx(ctx, func(tx *sql.Tx) error {
 		for _, s := range []string{
 			`DROP TABLE IF EXISTS replace_journal`,
 			`ALTER TABLE jobs DROP COLUMN failure_code`,
 			`DROP TABLE IF EXISTS app_settings`,
 			`DROP TABLE IF EXISTS workers`,
+			`DROP TABLE IF EXISTS shares`,
+			`ALTER TABLE libraries DROP COLUMN share_paused`,
+			`ALTER TABLE libraries DROP COLUMN share_down_at`,
 			`PRAGMA user_version = 9`,
 		} {
 			if _, err := tx.Exec(s); err != nil {
@@ -340,8 +346,8 @@ func TestAnInstallAtSchemaNineUpgradesToThirteen(t *testing.T) {
 	if err := db.Read().QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 15 {
-		t.Errorf("schema version after the upgrade = %d, want 15", version)
+	if version != 16 {
+		t.Errorf("schema version after the upgrade = %d, want 16", version)
 	}
 	if err := db.Read().QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'replace_journal'`).
 		Scan(&journal); err != nil {
@@ -395,6 +401,9 @@ func TestAnInstallAtSchemaTwelveUpgradesToThirteen(t *testing.T) {
 			`ALTER TABLE replace_journal DROP COLUMN kind`,
 			`ALTER TABLE replace_journal DROP COLUMN trashed_at`,
 			`ALTER TABLE replace_journal DROP COLUMN left_at`,
+			`DROP TABLE IF EXISTS shares`,
+			`ALTER TABLE libraries DROP COLUMN share_paused`,
+			`ALTER TABLE libraries DROP COLUMN share_down_at`,
 			`PRAGMA user_version = 12`,
 		} {
 			if _, err := tx.Exec(s); err != nil {
@@ -423,8 +432,8 @@ func TestAnInstallAtSchemaTwelveUpgradesToThirteen(t *testing.T) {
 	if err := db.Read().QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 15 {
-		t.Errorf("schema version after the upgrade = %d, want 15", version)
+	if version != 16 {
+		t.Errorf("schema version after the upgrade = %d, want 16", version)
 	}
 	var workersTable int
 	if err := db.Read().QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'workers'`).
@@ -472,6 +481,9 @@ func TestAnInstallAtSchemaThirteenUpgradesThroughFourteen(t *testing.T) {
 			`ALTER TABLE replace_journal DROP COLUMN kind`,
 			`ALTER TABLE replace_journal DROP COLUMN trashed_at`,
 			`ALTER TABLE replace_journal DROP COLUMN left_at`,
+			`DROP TABLE IF EXISTS shares`,
+			`ALTER TABLE libraries DROP COLUMN share_paused`,
+			`ALTER TABLE libraries DROP COLUMN share_down_at`,
 			`PRAGMA user_version = 13`,
 			`INSERT INTO replace_journal (job_id, original, trash, staged, final, state,
 				orig_file_id, orig_size, orig_mtime, orig_ctime, orig_hash,
@@ -510,8 +522,8 @@ func TestAnInstallAtSchemaThirteenUpgradesThroughFourteen(t *testing.T) {
 	if err := db.Read().QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 15 {
-		t.Errorf("schema version after the upgrade = %d, want 15", version)
+	if version != 16 {
+		t.Errorf("schema version after the upgrade = %d, want 16", version)
 	}
 	rows, err := db.Read().Query(`SELECT job_id, kind FROM replace_journal ORDER BY job_id`)
 	if err != nil {
