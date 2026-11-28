@@ -109,9 +109,8 @@ func run(dataDir, listen string) error {
 			Source: "safety", Code: "replace.recover_failed", Message: err.Error()})
 	} else {
 		// A restore a crash left was finished now: its job's History says so (page 03), as a live restore does.
-		for _, job := range rep.Restored {
-			_ = bus.Emit(events.Event{JobID: job, Level: events.LevelInfo, Kind: events.KindRestored,
-				Source: "safety", Code: "replace.restored", Message: safety.RestoredSentence})
+		for _, ev := range recoveredRestoreEvents(rep.Restored) {
+			_ = bus.Emit(ev)
 		}
 		if rep.Attention > 0 {
 			_ = bus.Emit(events.Event{Level: events.LevelWarn, Kind: events.KindWarning,

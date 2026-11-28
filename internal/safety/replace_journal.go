@@ -63,8 +63,11 @@ type Row struct {
 	Staged   string
 	Final    string
 	State    string
-	Orig     Ident
-	New      Ident
+	// Kind is "replace" for a swap and "restore" for a restore (migration 14). Recovery reads it to tell a finished
+	// restore from a rolled-back replace, which can leave the same files behind (review M2).
+	Kind string
+	Orig Ident
+	New  Ident
 }
 
 // Begin writes the "moving" row before anything moves, and returns its id.
@@ -99,7 +102,7 @@ func (j *Journal) SetState(ctx context.Context, id int64, state string) error {
 
 // Moving lists the rows whose swap has not been settled, the ones recovery must decide.
 func (j *Journal) Moving(ctx context.Context) ([]Row, error) {
-	rows, err := j.db.Read().QueryContext(ctx, `SELECT id, job_id, original, trash, staged, final, state,
+	rows, err := j.db.Read().QueryContext(ctx, `SELECT id, job_id, original, trash, staged, final, state, kind,
 		orig_file_id, orig_size, orig_mtime, orig_ctime, orig_hash,
 		new_file_id, new_size, new_mtime, new_hash
 		FROM replace_journal WHERE state = 'moving' ORDER BY id`)
@@ -110,7 +113,7 @@ func (j *Journal) Moving(ctx context.Context) ([]Row, error) {
 	var out []Row
 	for rows.Next() {
 		var r Row
-		if err := rows.Scan(&r.ID, &r.JobID, &r.Original, &r.Trash, &r.Staged, &r.Final, &r.State,
+		if err := rows.Scan(&r.ID, &r.JobID, &r.Original, &r.Trash, &r.Staged, &r.Final, &r.State, &r.Kind,
 			&r.Orig.FileID, &r.Orig.Size, &r.Orig.MTime, &r.Orig.CTime, &r.Orig.Hash,
 			&r.New.FileID, &r.New.Size, &r.New.MTime, &r.New.Hash); err != nil {
 			return nil, err

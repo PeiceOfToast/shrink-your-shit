@@ -158,10 +158,10 @@ func TestAnInstallAtSchemaSixUpgradesThroughSeven(t *testing.T) {
 	if err := db.Read().QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	// The newest migration is 13 (the workers' settings, S3-4); 12 is the app settings (S2-10c), 11 the
-	// failure code (S3-6a), 10 the replace journal, 9 the subtitles change (#854).
-	if version != 13 {
-		t.Errorf("schema version after the upgrade = %d, want 13", version)
+	// The newest migration is 14 (the journal's kind, #877 M2); 13 is the workers (S3-4), 12 the app settings (S2-10c),
+	// 11 the failure code (S3-6a), 10 the replace journal, 9 the subtitles change (#854).
+	if version != 14 {
+		t.Errorf("schema version after the upgrade = %d, want 14", version)
 	}
 	if err := db.Read().QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'encoder_state'`).
 		Scan(&encoderState); err != nil {
@@ -339,8 +339,8 @@ func TestAnInstallAtSchemaNineUpgradesToThirteen(t *testing.T) {
 	if err := db.Read().QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 13 {
-		t.Errorf("schema version after the upgrade = %d, want 13", version)
+	if version != 14 {
+		t.Errorf("schema version after the upgrade = %d, want 14", version)
 	}
 	if err := db.Read().QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'replace_journal'`).
 		Scan(&journal); err != nil {
@@ -391,6 +391,7 @@ func TestAnInstallAtSchemaTwelveUpgradesToThirteen(t *testing.T) {
 	if err := db.Tx(ctx, func(tx *sql.Tx) error {
 		for _, s := range []string{
 			`DROP TABLE IF EXISTS workers`,
+			`ALTER TABLE replace_journal DROP COLUMN kind`,
 			`PRAGMA user_version = 12`,
 		} {
 			if _, err := tx.Exec(s); err != nil {
@@ -419,8 +420,8 @@ func TestAnInstallAtSchemaTwelveUpgradesToThirteen(t *testing.T) {
 	if err := db.Read().QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 13 {
-		t.Errorf("schema version after the upgrade = %d, want 13", version)
+	if version != 14 {
+		t.Errorf("schema version after the upgrade = %d, want 14", version)
 	}
 	var workersTable int
 	if err := db.Read().QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'workers'`).
