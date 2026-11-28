@@ -212,8 +212,10 @@ func SweepTrash(ctx context.Context, j *Journal, now time.Time, keepDays int) (T
 func (j *Journal) claim(ctx context.Context, id int64, from, to string) (bool, error) {
 	var moved bool
 	err := j.db.Tx(ctx, func(tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx, `UPDATE replace_journal SET state = ?, updated_at = ? WHERE id = ? AND state = ?`,
-			to, j.now().Unix(), id, from)
+		now := j.now().Unix()
+		args := append([]any{to, now}, stateTimesArgs(to, now)...)
+		res, err := tx.ExecContext(ctx, `UPDATE replace_journal SET state = ?, updated_at = ?, `+stateTimesSQL+`
+			WHERE id = ? AND state = ?`, append(args, id, from)...)
 		if err != nil {
 			return err
 		}

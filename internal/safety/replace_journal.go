@@ -92,17 +92,25 @@ func (j *Journal) Begin(ctx context.Context, r Row) (int64, error) {
 }
 
 // SetState moves a row to a state.
-// trashed_at is the first time the swap settled with the original in the trash (kept across a purge revert). left_at is
-// when the copy left the trash (purged, or restored), and a return to done clears it (migration 15).
+// stateTimesSQL sets the two trash times with a state change (migration 15): trashed_at is the first time a swap settled
+// with its original in the trash, and it is kept across a purge revert. left_at is when the copy left (purged or
+// restored), and a return to done clears it. Every state write goes through it: SetState and claim.
+const stateTimesSQL = `trashed_at = CASE WHEN ? = 'done' THEN COALESCE(trashed_at, ?) ELSE trashed_at END,
+		left_at = CASE WHEN ? IN ('purged', 'rolled_back') THEN COALESCE(left_at, ?)
+		               WHEN ? = 'done' THEN NULL ELSE left_at END`
+
+// stateTimesArgs are stateTimesSQL's five placeholders for a move to state at now.
+func stateTimesArgs(state string, now int64) []any {
+	return []any{state, now, state, now, state}
+}
+
+// SetState moves a row to a state.
 func (j *Journal) SetState(ctx context.Context, id int64, state string) error {
 	now := j.now().Unix()
 	return j.db.Tx(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, `UPDATE replace_journal SET state = ?, updated_at = ?,
-				trashed_at = CASE WHEN ? = 'done' THEN COALESCE(trashed_at, ?) ELSE trashed_at END,
-				left_at = CASE WHEN ? IN ('purged', 'rolled_back') THEN COALESCE(left_at, ?)
-				               WHEN ? = 'done' THEN NULL ELSE left_at END
-			WHERE id = ?`,
-			state, now, state, now, state, now, state, id)
+		args := append([]any{state, now}, stateTimesArgs(state, now)...)
+		_, err := tx.ExecContext(ctx, `UPDATE replace_journal SET state = ?, updated_at = ?, `+stateTimesSQL+`
+			WHERE id = ?`, append(args, id)...)
 		return err
 	})
 }

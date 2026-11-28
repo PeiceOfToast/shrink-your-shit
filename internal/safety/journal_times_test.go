@@ -5,6 +5,7 @@ package safety
 import (
 	"context"
 	"database/sql"
+	"os"
 	"testing"
 	"time"
 
@@ -15,19 +16,24 @@ var utc = time.UTC
 
 func day(d int, h int) time.Time { return time.Date(2026, 11, d, h, 0, 0, 0, utc) }
 
-// placeInTrash sets a swap's trashed_at, and left_at when left is non-nil, as the journal would have written them.
-func placeInTrash(t *testing.T, f swapFixture, id int64, trashed time.Time, left *time.Time) {
+// wantSaving is origBytes (27 bytes) minus smallNew (5 bytes): the saving the in-trash tests must see, not zero.
+const smallNew = "small"
+
+const wantSaving = 22
+
+// swapAt is a real swap at the given time: the journal's clock is set before Swap, so the row's entry time (trashed_at)
+// is written by the swap itself. The new file is smallNew unless content says otherwise.
+func swapAt(t *testing.T, content string, at time.Time) (swapFixture, int64) {
 	t.Helper()
-	var l sql.NullInt64
-	if left != nil {
-		l = sql.NullInt64{Int64: left.Unix(), Valid: true}
-	}
-	if err := f.j.db.Tx(context.Background(), func(tx *sql.Tx) error {
-		_, err := tx.Exec(`UPDATE replace_journal SET trashed_at = ?, left_at = ? WHERE id = ?`, trashed.Unix(), l, id)
-		return err
-	}); err != nil {
+	f := newSwapFixture(t, "")
+	f.j.now = func() time.Time { return at }
+	if err := os.WriteFile(f.staged, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := Swap(context.Background(), f.j, f.plan(7, 7)); err != nil {
+		t.Fatalf("swap: %v", err)
+	}
+	return f, rowIDFor(t, f)
 }
 
 // savingOf is the row's saving, original minus new, clamped at 0: what the journal holds for the trash.
@@ -63,26 +69,33 @@ func inTrash(t *testing.T, f swapFixture, from, to time.Time) []DaySaving {
 	return got
 }
 
-// A copy is counted on every day it is in the trash at the day's end.
+// The fixture must give the real saving, so a wrong figure cannot hide behind a clamp to zero.
+func requireSaving(t *testing.T, f swapFixture, id int64) {
+	t.Helper()
+	if got := savingOf(t, f, id); got != wantSaving {
+		t.Fatalf("the fixture's saving = %d, want %d (the tests need a nonzero figure)", got, wantSaving)
+	}
+}
+
+// A copy is counted on every day it is in the trash at the day's end: the saving, not zero.
 func TestInTrashSavingCountsACopyOnEachDayItIsIn(t *testing.T) {
-	f, id := doneSwap(t)
-	placeInTrash(t, f, id, day(10, 10), nil)
-	want := savingOf(t, f, id)
+	f, id := swapAt(t, smallNew, day(10, 10))
+	requireSaving(t, f, id)
 	got := inTrash(t, f, day(10, 0), day(12, 0))
 	for _, d := range []string{"2026-11-10", "2026-11-11", "2026-11-12"} {
-		if b := bytesOn(t, got, d); b != want {
-			t.Errorf("%s = %d, want %d", d, b, want)
+		if b := bytesOn(t, got, d); b != wantSaving {
+			t.Errorf("%s = %d, want %d", d, b, wantSaving)
 		}
 	}
 }
 
-// In and out on the same day: the copy is not in the trash at that day's end.
+// In and out on the same day: zero at that day's end, although the copy was in the trash during the day.
 func TestInTrashSavingInAndOutOnTheSameDayIsZeroAtTheEnd(t *testing.T) {
-	f, id := doneSwap(t)
-	placeInTrash(t, f, id, day(10, 9), nil)
+	f, id := swapAt(t, smallNew, day(10, 9))
+	requireSaving(t, f, id)
 	f.j.now = func() time.Time { return day(10, 17) }
-	if err := f.j.SetState(context.Background(), id, StateRolledBack); err != nil {
-		t.Fatal(err)
+	if err := Restore(context.Background(), f.j, id); err != nil {
+		t.Fatalf("restore: %v", err)
 	}
 	got := inTrash(t, f, day(10, 0), day(10, 0))
 	if b := bytesOn(t, got, "2026-11-10"); b != 0 {
@@ -90,17 +103,20 @@ func TestInTrashSavingInAndOutOnTheSameDayIsZeroAtTheEnd(t *testing.T) {
 	}
 }
 
-// A copy in on one day and out on the next counts on the first day only.
-func TestInTrashSavingAcrossDays(t *testing.T) {
-	f, id := doneSwap(t)
-	placeInTrash(t, f, id, day(10, 23), nil)
+// Purged on the 12th: counted on the 10th and 11th at the saving, then zero.
+func TestInTrashSavingPurgeLeavesTheTrash(t *testing.T) {
+	f, id := swapAt(t, smallNew, day(10, 23))
+	requireSaving(t, f, id)
 	f.j.now = func() time.Time { return day(12, 1) }
-	if err := f.j.SetState(context.Background(), id, StatePurged); err != nil {
+	rep, err := SweepTrash(context.Background(), f.j, time.Now().Add(8*24*time.Hour), 7)
+	if err != nil {
 		t.Fatal(err)
 	}
-	want := savingOf(t, f, id)
+	if rep.Purged != 1 {
+		t.Fatalf("purged = %d, want 1 (the sweep must purge the copy)", rep.Purged)
+	}
 	got := inTrash(t, f, day(10, 0), day(12, 0))
-	if bytesOn(t, got, "2026-11-10") != want || bytesOn(t, got, "2026-11-11") != want {
+	if bytesOn(t, got, "2026-11-10") != wantSaving || bytesOn(t, got, "2026-11-11") != wantSaving {
 		t.Errorf("the copy was in the trash at the end of 10 and 11: %v", got)
 	}
 	if b := bytesOn(t, got, "2026-11-12"); b != 0 {
@@ -108,35 +124,38 @@ func TestInTrashSavingAcrossDays(t *testing.T) {
 	}
 }
 
-// A restore is a copy leaving the trash too: it counts until the day it is restored.
+// Restored on the 11th: counted on the 10th, then zero.
 func TestInTrashSavingRestoreLeavesTheTrash(t *testing.T) {
-	f, id := doneSwap(t)
-	placeInTrash(t, f, id, day(10, 10), nil)
+	f, id := swapAt(t, smallNew, day(10, 10))
+	requireSaving(t, f, id)
 	f.j.now = func() time.Time { return day(11, 9) }
-	if err := f.j.SetState(context.Background(), id, StateRolledBack); err != nil {
-		t.Fatal(err)
+	if err := Restore(context.Background(), f.j, id); err != nil {
+		t.Fatalf("restore: %v", err)
 	}
-	want := savingOf(t, f, id)
 	got := inTrash(t, f, day(10, 0), day(11, 0))
-	if bytesOn(t, got, "2026-11-10") != want {
-		t.Errorf("2026-11-10 = %d, want %d", bytesOn(t, got, "2026-11-10"), want)
+	if b := bytesOn(t, got, "2026-11-10"); b != wantSaving {
+		t.Errorf("2026-11-10 = %d, want %d", b, wantSaving)
 	}
 	if b := bytesOn(t, got, "2026-11-11"); b != 0 {
 		t.Errorf("2026-11-11 = %d, want 0 after the restore", b)
 	}
 }
 
-// The M3 revert: a purged row that returns to done is in the trash again, and left_at is cleared.
+// The M3 revert, as after a crash: a purged row whose file stayed returns to done on recovery. left_at is cleared,
+// trashed_at keeps the first entry, and the copy counts in the trash again at the saving.
 func TestPurgeRevertClearsLeftAt(t *testing.T) {
-	f, id := doneSwap(t)
-	placeInTrash(t, f, id, day(10, 10), nil)
+	f, id := swapAt(t, smallNew, day(10, 10))
+	requireSaving(t, f, id)
 	f.j.now = func() time.Time { return day(11, 9) }
 	if err := f.j.SetState(context.Background(), id, StatePurged); err != nil {
 		t.Fatal(err)
 	}
 	f.j.now = func() time.Time { return day(12, 9) }
-	if err := f.j.SetState(context.Background(), id, StateDone); err != nil {
+	if _, err := Recover(context.Background(), f.j); err != nil {
 		t.Fatal(err)
+	}
+	if stateOf(t, f, id) != StateDone {
+		t.Fatalf("state = %s after recovery, want done", stateOf(t, f, id))
 	}
 	var left sql.NullInt64
 	var trashed int64
@@ -147,12 +166,34 @@ func TestPurgeRevertClearsLeftAt(t *testing.T) {
 		t.Errorf("left_at = %d after the revert, want NULL", left.Int64)
 	}
 	if trashed != day(10, 10).Unix() {
-		t.Errorf("trashed_at = %d, want the first entry %d (the revert keeps it)", trashed, day(10, 10).Unix())
+		t.Errorf("trashed_at = %d, want the first entry %d", trashed, day(10, 10).Unix())
 	}
-	want := savingOf(t, f, id)
-	got := inTrash(t, f, day(12, 0), day(12, 0))
-	if b := bytesOn(t, got, "2026-11-12"); b != want {
-		t.Errorf("2026-11-12 after the revert = %d, want %d", b, want)
+	got := inTrash(t, f, day(10, 0), day(12, 0))
+	if b := bytesOn(t, got, "2026-11-11"); b != wantSaving {
+		t.Errorf("2026-11-11 (purged that day) = %d, want %d: the revert puts it back in the trash", b, wantSaving)
+	}
+	if b := bytesOn(t, got, "2026-11-12"); b != wantSaving {
+		t.Errorf("2026-11-12 after the revert = %d, want %d", b, wantSaving)
+	}
+}
+
+// Clamp: a new file bigger than the original saves nothing, so the figure is zero by the clamp, not by a missing row.
+func TestInTrashSavingClampsANegativeSavingToZero(t *testing.T) {
+	big := make([]byte, 40)
+	for i := range big {
+		big[i] = 'x'
+	}
+	f, id := swapAt(t, string(big), day(10, 10))
+	var orig, now int64
+	if err := f.j.db.Read().QueryRow(`SELECT orig_size, new_size FROM replace_journal WHERE id = ?`, id).Scan(&orig, &now); err != nil {
+		t.Fatal(err)
+	}
+	if now <= orig {
+		t.Fatalf("new %d is not bigger than the original %d; the clamp test needs a bigger new file", now, orig)
+	}
+	got := inTrash(t, f, day(10, 0), day(10, 0))
+	if b := bytesOn(t, got, "2026-11-10"); b != 0 {
+		t.Errorf("2026-11-10 = %d, want 0: a negative saving clamps to zero", b)
 	}
 }
 
