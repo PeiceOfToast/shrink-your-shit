@@ -3,6 +3,7 @@ import { ATTENTION, OVERVIEW, SUMMARY } from "./fixtures/index.ts";
 import { JOBS } from "./fixtures/jobs.ts";
 import { jobDetail } from "./fixtures/jobDetail.ts";
 import { ApiError } from "./errors.ts";
+import { actionOutcome } from "./actionReply.ts";
 import { getForcedState, noLibrariesYet, respond } from "./mockState.ts";
 import { currentLibraries, reconnectShare } from "./mockLibraries.ts";
 import { workerName, workersSwitch } from "./mockWorkers.ts";
@@ -121,8 +122,9 @@ export function getJobs(params: JobsParams = {}): Promise<JobsPage> {
   });
 }
 
-// POST /api/v2/jobs/actions: {done, refused[{id, code, message}]}. Like the server, Move to top refuses a job that
-// isn't waiting (not_movable); nothing else is refused. Cancel, retry and top change the job the way the server does.
+// POST /api/v2/jobs/actions: {done, refused[{id, code, message}]}. Like the server, an id with no job is refused
+// (job_not_found) and Move to top refuses a job that isn't waiting (not_movable). Cancel, retry and top change the job
+// the way the server does.
 export function runJobsAction(action: "retry" | "cancel" | "top", ids: string[]): Promise<JobsActionDone> {
   return respond(() => {
     const done: string[] = [];
@@ -130,7 +132,7 @@ export function runJobsAction(action: "retry" | "cancel" | "top", ids: string[])
     for (const id of ids) {
       const i = JOBS.findIndex((j) => j.id === id);
       if (i < 0) {
-        done.push(id); // the mock has no not-found refusal
+        refused.push({ id, code: "job_not_found", message: "That job doesn't exist." });
         continue;
       }
       if (action === "top") {
@@ -181,7 +183,7 @@ export function runAction(method: string, path: string, body?: unknown): Promise
     if (!b || b.action !== "retry" || !Array.isArray(b.ids) || b.ids.length === 0) {
       return Promise.reject(new ApiError("bad_request", "Pick the jobs to retry."));
     }
-    return respond(() => ({}));
+    return runJobsAction("retry", b.ids as string[]).then(actionOutcome);
   }
   return Promise.reject(new ApiError("unknown_action", "That action isn't available here."));
 }

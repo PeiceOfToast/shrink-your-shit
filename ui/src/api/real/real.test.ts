@@ -7,7 +7,7 @@ import { convertAgain, getJobNeighbours, getJobs, runJobsAction } from "./jobs.t
 import { getLibraries, createLibrary, patchLibrary, deleteLibrary } from "./libraries.ts";
 import { getSettings, patchSettings } from "./settings.ts";
 import { getTrash, restoreTrash } from "./trash.ts";
-import { getAttention, getOverview } from "./overview.ts";
+import { getAttention, getOverview, runAction } from "./overview.ts";
 import { createDraft, deleteWorkflow, duplicateWorkflow, exportWorkflow, getFlow, getGuideAnswers, guidePreview, listWorkflows, publishFlow, putAnswers, putDraft, tryFlow, validateFlow } from "./workflows.ts";
 
 type Call = { url: string; init: RequestInit };
@@ -237,4 +237,30 @@ test("removing a library sends DELETE and returns ok", async () => {
   assert.deepEqual(await deleteLibrary("2"), { ok: true });
   assert.equal(calls[0].url, "/api/v2/libraries/2");
   assert.equal(calls[0].init.method, "DELETE");
+});
+
+test("a Needs attention action sends its own method, path and body once, under /api/v2", async () => {
+  const calls = stub(200, '{"line":"Retry started."}');
+  const out = await runAction("POST", "/api/v2/jobs/actions", { action: "retry", ids: ["j1", "j2"] });
+  assert.equal(calls[0].url, "/api/v2/jobs/actions");
+  assert.equal(calls[0].init.method, "POST");
+  assert.deepEqual(JSON.parse(String(calls[0].init.body)), { action: "retry", ids: ["j1", "j2"] });
+  assert.deepEqual(out, { line: "Retry started." });
+});
+
+test("an action with no line in its reply shows nothing", async () => {
+  stub(200, "null");
+  assert.deepEqual(await runAction("POST", "/api/v2/jobs/actions", { action: "retry", ids: [] }), {});
+});
+
+test("an action path outside /api/v2 is refused, and nothing is sent", async () => {
+  const calls = stub(200, "{}");
+  await assert.rejects(runAction("POST", "/jobs/actions", {}), (e: unknown) => e instanceof ApiError && e.code === "invalid_request");
+  assert.equal(calls.length, 0);
+});
+
+test("a Needs attention action where every item is refused shows the refusal, not done", async () => {
+  stub(200, JSON.stringify({ done: [], refused: [{ id: "j1", code: "job_busy", message: "Still running." }] }));
+  await assert.rejects(runAction("POST", "/api/v2/jobs/actions", { action: "retry", ids: ["j1"] }), (e: unknown) =>
+    e instanceof ApiError && e.code === "job_busy" && e.message === "Still running.");
 });
