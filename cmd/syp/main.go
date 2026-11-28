@@ -20,10 +20,9 @@ import (
 	"github.com/PeiceOfToast/shrink-your-shit/internal/flow"
 	_ "github.com/PeiceOfToast/shrink-your-shit/internal/flow/steps"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/fsx"
-	// The hardware detector's migration (7) is registered by this package's init. Nothing calls the
-	// detector until stage 3 item 3 wires it in, but the import must stay: without it a database
-	// that reached flow's migration 8 could never get 7.
-	_ "github.com/PeiceOfToast/shrink-your-shit/internal/hw"
+	// The hardware detector's migration (7) is registered by this package's init; the detector
+	// itself is wired below to choose a card for a job.
+	"github.com/PeiceOfToast/shrink-your-shit/internal/hw"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/jobs"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/library"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/media"
@@ -142,10 +141,31 @@ func run(dataDir, listen string) error {
 			Source: "safety", Code: "sidecar.recovered", Message: said})
 	}
 	// parallelJobs is the default a new worker starts with (page 11); it is read once, at start, and clamped to 1-8.
+	// The card detector: one background pass over the encoders this machine lists, with a device
+	// probe for each one it finds, so a job can choose a card rung only for the tests the card
+	// passed (L-HW-3, L-HW-9). A job that starts before the pass ends converts on the processor and
+	// says so in its log.
+	scratch := filepath.Join(dataDir, "tmp")
+	var cards *hw.Detector
+	var pick func(flow.Want) (flow.Attempt, error)
+	if err := os.MkdirAll(scratch, 0o700); err != nil {
+		_ = bus.Emit(events.Event{Level: events.LevelWarn, Kind: events.KindWarning,
+			Source: "hw", Code: "hw.no_temp",
+			Message: "The graphics card cannot be tested, so every job runs on the processor: " + err.Error()})
+	} else {
+		cards = hw.NewDetector(
+			media.MediaFuncs{ProbeFunc: media.Probe, RunFunc: media.Run, CaptureFunc: media.Capture},
+			scratch,
+			hw.Candidates(hw.ReadRenderNodes("/sys/class/drm", "/dev/dri")),
+			bus,
+		).WithDevices()
+		cards.Start(ctx)
+		pick = cardPicker(cards)
+	}
 	wk := worker.New(worker.Config{
 		Slots: startSlots(ctx, db), WorkerID: "local", DataDir: dataDir, Bus: bus,
 		Source: worker.Builtin{Queue: q, DB: db, Flows: flows},
-		Run:    flow.Run, Env: workerEnv(flows, bus, db),
+		Run:    flow.Run, Env: workerEnv(flows, bus, db, pick),
 	})
 	wctx, stopWorker := context.WithCancel(ctx)
 	workerDone := make(chan struct{})
@@ -184,7 +204,7 @@ func run(dataDir, listen string) error {
 			if err := os.MkdirAll(scratch, 0o700); err != nil {
 				return flow.TryResult{}, fmt.Errorf("make the try folder: %w", err)
 			}
-			return flow.Try(ctx, f, file, engineEnv(), scratch)
+			return flow.Try(ctx, f, file, engineEnv(pick), scratch)
 		},
 	})
 	fmt.Fprintln(os.Stderr, "syp serving on", ln.Addr())
@@ -331,21 +351,34 @@ func sweepTryFolder(ctx context.Context, dir string, started time.Time, warn fun
 	}
 }
 
-// workerEnv is what a real job runs with: the real media tools, the real safety steps, the processor encoder
-// until stage 2 adds the hardware picker, and the job events on the bus.
-// engineEnv is the world the flow engine runs in: the real media tools, the real safety check,
-// the processor picker and the clock. The worker adds its log and revision loader; a try adds
-// neither, so its events answer the page and nothing reaches a job's log.
-func engineEnv() flow.Env {
+// engineEnv is the world the flow engine runs in: the real media tools, the real safety check, the
+// card picker and the clock. The worker adds its log and revision loader; a try adds neither, so
+// its events answer the page and nothing reaches a job's log. A nil pick runs every job on the
+// processor, which is what a machine with no detector has.
+func engineEnv(pick func(flow.Want) (flow.Attempt, error)) flow.Env {
 	return flow.Env{
 		Media:  media.MediaFuncs{ProbeFunc: media.Probe, RunFunc: media.Run, CaptureFunc: media.Capture},
-		Safety: flow.RealSafety{}, Pick: flow.ProcessorPick,
+		Safety: flow.RealSafety{}, Pick: pick,
 		Now: time.Now, Sleep: time.Sleep, AppVersion: version,
 	}
 }
 
-func workerEnv(flows *flow.Store, bus *events.Bus, db *store.DB) flow.Env {
-	env := engineEnv()
+// cardPicker answers a job from the detector's last finished pass: the rungs the card's own tests
+// allow (L-HW-9). Before the first pass ends it answers "not yet", so the job converts on the
+// processor and its log says why.
+func cardPicker(cards *hw.Detector) func(flow.Want) (flow.Attempt, error) {
+	return func(want flow.Want) (flow.Attempt, error) {
+		ans, ok := cards.Current()
+		if !ok {
+			return flow.Attempt{Reason: "the graphics card has not been tested yet"}, nil
+		}
+		return flow.PickFromAnswer(ans, want), nil
+	}
+}
+
+// workerEnv is what a real job runs with: engineEnv and the job's own events on the bus.
+func workerEnv(flows *flow.Store, bus *events.Bus, db *store.DB, pick func(flow.Want) (flow.Attempt, error)) flow.Env {
+	env := engineEnv(pick)
 	env.Replacer = flow.RealReplacer{Journal: safety.NewJournal(db)}
 	env.LoadRevision = loadRevisionFor(flows, db)
 	env.Bus = bus
