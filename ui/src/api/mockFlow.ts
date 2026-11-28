@@ -1,11 +1,12 @@
 // Workflow flow calls for the mock (pages 06 and 07): the guide, the answers, the three-step flow, the check,
 // the recommended bitrates, saves, publish and the try. A session's edits live in memory, as the app's do.
-import type { Answers, BitrateLadder, Flow, FlowCheck, FlowProblem, FlowStep, GuideDoc, GuidePreview, StepDefinition, StepId, TryLine } from "./flowTypes.ts";
+import type { Answers, BitrateLadder, Flow, FlowCheck, FlowProblem, FlowStep, GuideDoc, GuidePreview, StepDefinition, StepId, TryLine, WorkflowDraft, WorkflowLines } from "./flowTypes.ts";
 import { STEP_DEFINITIONS } from "./fixtures/stepDefinitions.ts";
 import { ApiError } from "./errors.ts";
 import { respond } from "./mockState.ts";
 import { createWorkflowRow, peekWorkflowRow, updateWorkflowRow } from "./mockWorkflows.ts";
 import { languageName } from "../format/language.ts";
+import { keepOriginalsDaysNow } from "./mockSettings.ts";
 
 // The answers a new workflow starts from: the guide's defaults. They match internal/api/testdata/contract/guide.json
 // (body.defaults); guideDefaults.test.ts fails when they differ.
@@ -422,8 +423,42 @@ interface Doc {
   answers: Answers;
   rev: number;
   fitsGuided: boolean;
+  // The revision the library runs: set on publish. The panel's three lines describe it, not the draft.
+  published?: Flow;
 }
 const DOCS = new Map<string, Doc>();
+
+// The server's starter, "Shrink videos" (internal/flow/starters.go, as the contract golden workflow.json pins it): the
+// answers the guide opens on, and the flow they make, with the contract's keys only.
+const STARTER_ANSWERS: Answers = {
+  ...DEFAULT_ANSWERS,
+  quality: 3,
+  format: "hevc",
+  useGpu: false,
+  ifGpuFails: "cpu",
+  audio: "as_is",
+  allLanguages: true,
+  subtitles: "keep_all",
+  resolution: "keep",
+  original: "next_to_original",
+  fileType: "mkv",
+  nameSuffix: "shrunk",
+} as Answers;
+
+// The starter's own description (starters.go), kept with the workflow; the library row's text is not the flow's.
+const STARTER_DESCRIPTION = "Smaller HEVC files next to the originals.";
+
+function starterFlow(name: string): Flow {
+  return {
+    name,
+    description: STARTER_DESCRIPTION,
+    steps: [
+      { id: "video", type: "video.convert", version: 1, settings: { format: "hevc", ifGpuFails: "cpu", keepDolbyVision: false, preset: "normal", quality: 3, size: null, useGpu: false } },
+      { id: "audio", type: "audio.tracks", version: 1, settings: { allLanguages: true, channels: "source", format: "copy", subtitles: "keep_all" } },
+      { id: "save", type: "file.save", version: 1, settings: { container: "mkv", folder: "", nameSuffix: "shrunk", where: "next_to" } },
+    ],
+  };
+}
 
 function docFor(id: string): Doc {
   const hit = DOCS.get(id);
@@ -431,10 +466,11 @@ function docFor(id: string): Doc {
   const row = peekWorkflowRow(id);
   if (!row) throw new ApiError("workflow_not_found", "That workflow doesn't exist.");
   const doc: Doc = {
-    flow: answersToFlow(DEFAULT_ANSWERS, { name: row.name, description: row.description }),
-    answers: { ...DEFAULT_ANSWERS },
+    flow: starterFlow(row.name),
+    answers: { ...STARTER_ANSWERS },
     rev: 1,
     fitsGuided: row.fitsGuided,
+    published: row.state === "published" ? starterFlow(row.name) : undefined,
   };
   DOCS.set(id, doc);
   return doc;
@@ -491,11 +527,54 @@ export function putAnswers(id: string, answers: Answers, baseRev: number): Promi
 }
 
 // The editor's load: the flow and the draft's revision.
-export function getFlow(id: string): Promise<{ flow: Flow; rev: number; fitsGuided: boolean }> {
+export function getFlow(id: string): Promise<WorkflowDraft> {
   return respond(() => {
     const d = docFor(id);
-    return { flow: d.flow, rev: d.rev, fitsGuided: d.fitsGuided };
+    return { flow: d.flow, rev: d.rev, fitsGuided: d.fitsGuided, summary: linesFor(d.published, keepOriginalsDaysNow()) };
   });
+}
+
+// The library panel's three lines for the published revision, with the same sentences and rules as the server's
+// steps.WorkflowSentences. No published revision gives three empty lines.
+const EMPTY_LINES: WorkflowLines = { converts: "", leavesAlone: "", original: "" };
+const SLIDER = ["Smallest file", "Smaller", "Balanced", "Better quality", "Best quality"];
+const FOLDER_LATER = "Saving to a different folder comes in a later update; for now the new file is saved next to it.";
+
+export function linesFor(flow: Flow | undefined, keepDays: number): WorkflowLines {
+  if (!flow) return EMPTY_LINES;
+  const v = flow.steps.find((s) => s.type === "video.convert")?.settings;
+  const au = flow.steps.find((s) => s.type === "audio.tracks")?.settings;
+  const sv = flow.steps.find((s) => s.type === "file.save")?.settings;
+  if (!v || !sv) return EMPTY_LINES;
+  const fmt = FORMAT_LABEL[String(v.format)] ?? String(v.format);
+  const card = !v.useGpu
+    ? "on the processor"
+    : v.ifGpuFails === "stop"
+      ? "on the graphics card, and it stops if the card can't do the file"
+      : "on the graphics card, or the processor if the card can't do the file";
+  const parts = [`Converts video to ${fmt} at the ${SLIDER[Number(v.quality) - 1] ?? "Balanced"} setting, ${card}.`];
+  if (au) {
+    const codec = String(au.codec || au.format || "copy");
+    if (codec === "copy") {
+      parts.push("Keeps the audio as it is.");
+    } else {
+      const label = CODEC_LABEL[codec] ?? codec;
+      // A layout, a sample rate or loudness evening forces the conversion; then the "except" clause is left out.
+      const forced = au.loudnorm === true || au.sampleRate != null || (!!au.channels && au.channels !== "source");
+      parts.push(forced
+        ? `Converts audio to ${label}.`
+        : `Converts audio to ${label}, except tracks already in ${label} and lossy tracks already at or below the target bitrate.`);
+    }
+  }
+  const leaves = [`Leaves the video alone when it is already in ${fmt}.`];
+  if (v.hdr === "skip") leaves.push("Leaves HDR files alone.");
+  const where = String(sv.where);
+  const original = where === "replace"
+    ? (keepDays < 0 ? "" : `The original goes to the trash for ${keepDays === 1 ? "1 day" : `${keepDays} days`}.`)
+    : where === "folder"
+      ? FOLDER_LATER
+      : "The original stays next to the new file.";
+  return { converts: parts.join(" "), leavesAlone: leaves.join(" "), original };
 }
 
 // Save as a draft from the editor. A draft saved elsewhere since baseRev is refused (dev's changed_since).
@@ -525,6 +604,7 @@ export function publishFlow(id: string, flow: Flow): Promise<{ rev: number; publ
     }
     const d = docFor(id);
     d.flow = flow;
+    d.published = structuredClone(flow);
     d.fitsGuided = false;
     d.rev += 1;
     updateWorkflowRow(id, { state: "published", problemCount: 0, name: flow.name.trim() || peekWorkflowRow(id)!.name, description: flow.description, fitsGuided: false });

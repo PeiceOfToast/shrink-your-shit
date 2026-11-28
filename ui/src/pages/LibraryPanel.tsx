@@ -1,7 +1,7 @@
 import { clock } from "../format/time.ts";
 import { useEffect, useRef, useState } from "react";
 import { navigate, Link } from "../router.tsx";
-import { api, formatCount, formatGB, isReal, type LibraryDetail, type LibraryPatch, type Watch } from "../api/index.ts";
+import { api, formatCount, formatGB, type LibraryDetail, type LibraryPatch, type Watch } from "../api/index.ts";
 import { useApi } from "../api/useApi.ts";
 import { libraryStatus } from "../ui/libraryStatus.ts";
 import { useKeys } from "../ui/useKeys.ts";
@@ -38,8 +38,8 @@ export function LibraryPanel({ id, onChange }: { id: string; onChange?: () => vo
   const L = lib.data;
   const wfId = form?.workflowId ?? "";
   // The chosen workflow's three lines and its preview for this library.
-  // No server route gives the workflow's three summary sentences yet, so the real build shows none (the sample's text stays off it).
-  const sum = useApi(() => (wfId && !isReal("workflows") ? api.getWorkflow(wfId) : Promise.resolve(null)), [wfId]);
+  // The workflow's three lines come from its flow (GET /workflows/{id}); the block shows only when the server sends them.
+  const sum = useApi(() => (wfId ? api.getFlow(wfId) : Promise.resolve(null)), [wfId]);
   const prev = useApi(() => (wfId ? api.getPreview(id, wfId) : Promise.resolve(null)), [wfId, id]);
 
   useEffect(() => {
@@ -209,7 +209,7 @@ export function LibraryPanel({ id, onChange }: { id: string; onChange?: () => vo
                     <option key={w.id} value={w.id}>{w.name}</option>
                   ))}
                 </select>
-                {sum.data && (
+                {!!sum.data?.summary?.converts && (
                   <div className="wfsum">
                     <span>{sum.data.summary.converts}</span>
                     <span>{sum.data.summary.leavesAlone}</span>
