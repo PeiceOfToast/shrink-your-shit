@@ -36,6 +36,7 @@ button{font:inherit;cursor:pointer}
 .choices li.on .r{border-color:var(--accent);background:var(--accent);box-shadow:inset 0 0 0 3px var(--surface)}
 .choices b{font-weight:700}.choices .hint{display:block}
 .hint{color:var(--text2);font-size:13px}
+.hint a{text-decoration:underline}
 .sw{display:inline-flex;align-items:center;gap:10px;background:none;border:0;color:var(--text);padding:0;min-height:36px}
 .sw .k{width:40px;height:24px;border-radius:12px;background:var(--strong);position:relative;flex:none}.sw .k::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff}
 .sw .k.on{background:var(--accent)}.sw .k.on::after{left:19px}
