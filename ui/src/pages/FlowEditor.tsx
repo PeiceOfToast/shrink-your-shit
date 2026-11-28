@@ -8,6 +8,7 @@ import { qualityMeaning } from "../format/quality.ts";
 import { fileTypeHint } from "../format/fileType.ts";
 import { nameExample } from "../format/nameExample.ts";
 import { LanguageChips } from "./LanguageChips.tsx";
+import { publishFlowOnce } from "./flowPublish.ts";
 import { useTryFile } from "./useTryFile.ts";
 
 // Flow editor (07): the fixed walk Video → Audio → Save the result. Nothing is added or reordered.
@@ -170,8 +171,11 @@ function Editor({ id, initial }: { id: string; initial: Loaded }) {
     setBusy(true);
     setErr(null);
     try {
-      const useId = isNew ? (await api.createDraft({ name: flow.name, description: flow.description, flow })).id : draftId;
-      await api.publishFlow(useId, flow);
+      // A new workflow's draft is made once: a refused publish keeps it, so the retry publishes the same draft.
+      await publishFlowOnce(api, { isNew, draftId, flow, makeDraft: () => api.createDraft({ name: flow.name, description: flow.description, flow }) }, (id, created) => {
+        setDraftId(id);
+        setRev(created);
+      });
       navigate("/workflows");
     } catch (e) {
       setErr(toErr(e));
