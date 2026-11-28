@@ -1,5 +1,36 @@
 {
-  "body": [],
+  "body": [
+    {
+      "action": {
+        "body": {
+          "action": "retry",
+          "ids": [
+            "1"
+          ]
+        },
+        "label": "Retry",
+        "method": "POST",
+        "path": "/api/v2/jobs/actions"
+      },
+      "count": 1,
+      "id": "events-jobs",
+      "latestAt": "2026-03-15T11:57:00Z",
+      "level": "error",
+      "link": "/jobs?state=failed",
+      "means": "The new file was not written, so the original is still in place. Retry runs it again, or open the job to see why.",
+      "what": "f1.mkv failed"
+    },
+    {
+      "action": null,
+      "count": 1,
+      "id": "events-hw",
+      "latestAt": "2026-03-15T11:55:00Z",
+      "level": "error",
+      "link": "/settings/log?source=hw",
+      "means": "Files convert on the processor while it does, which is slower.",
+      "what": "This computer's graphics encoder kept failing"
+    }
+  ],
   "method": "GET",
   "path": "/api/v2/attention",
   "status": 200,
