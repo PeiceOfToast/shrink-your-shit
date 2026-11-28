@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, navigate } from "../router.tsx";
 import { clock } from "../format/time.ts";
-import { api, onSummaryChanged, type Job, type WorkerDetail, type WorkerLibrary } from "../api/index.ts";
+import { api, ApiError, onSummaryChanged, type Job, type WorkerDetail, type WorkerLibrary } from "../api/index.ts";
 import { useApi } from "../api/useApi.ts";
 import { JobRow } from "./Jobs.tsx";
-import { testFinished, waitUntil } from "./encoderTest.ts";
+import { disablesEncoderTest, testFinished, waitUntil } from "./encoderTest.ts";
 import { PauseDialog, RemoveDialog, StatePill, errorText } from "./workerParts.tsx";
 
 // One worker's page (pages/10-workers.md, the worker panel). Changed fields only go to the server on Save.
@@ -38,6 +38,8 @@ export function WorkerPage({ id }: { id: string }) {
   // The all-workers switch changes pausedGlobally here, so the page reads the worker again when it changes.
   useEffect(() => onSummaryChanged(worker.reload), [worker.reload]);
   const [saved, setSaved] = useState<Settings | null>(null);
+  // Set when this machine has no encoder detector (encoder_test_unavailable): the test stays off until the page reloads.
+  const [encodersOff, setEncodersOff] = useState(false);
   const [form, setForm] = useState<Settings | null>(null);
   const [libForm, setLibForm] = useState<Record<string, Lib>>({});
   const [libSaved, setLibSaved] = useState<Record<string, Lib>>({});
@@ -139,7 +141,14 @@ export function WorkerPage({ id }: { id: string }) {
   // The test answers a run id; the page reads the worker until that run has finished (its result is then on the worker).
   const testEncoders = () =>
     run(async () => {
-      const { runId } = await api.testEncoders(id);
+      let runId: string;
+      try {
+        ({ runId } = await api.testEncoders(id));
+      } catch (e) {
+        // The server's sentence still shows (run's catch); this machine can't test, so the button stays off until reload.
+        if (e instanceof ApiError && disablesEncoderTest(e.code)) setEncodersOff(true);
+        throw e;
+      }
       setMsg("Testing the encoders…");
       const finished = await waitUntil(async () => testFinished(await api.getWorker(id), runId), {
         tries: 30,
@@ -302,7 +311,7 @@ export function WorkerPage({ id }: { id: string }) {
               ))}
             </select>
             <div className="row">
-              <button type="button" className="btn sm" onClick={testEncoders} disabled={busy}>Test the encoders</button>
+              <button type="button" className="btn sm" onClick={testEncoders} disabled={busy || encodersOff}>Test the encoders</button>
             </div>
           </div>
           <div className="row" style={{ justifyContent: "flex-end" }}>
