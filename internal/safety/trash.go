@@ -247,6 +247,10 @@ var hookBeforeRestoreClaim = func(id int64) {}
 // hookRestoreStep is a test hook: it runs after each step of a restore, so a test can stop there.
 var hookRestoreStep = func(step int) {}
 
+// hookBeforeHoldingRemoval is a test hook: it runs after a restore recovery has verified the converted copy and before
+// that copy is checked again and removed, the window in which a share's rename shows its time.
+var hookBeforeHoldingRemoval = func() {}
+
 // Restore puts a replaced original back at its name and removes the converted file, journalled so a crash part way
 // is settled by Recover (L-SAFE-19). It never overwrites a name: a taken name is refused. Each refusal returns its
 // sentinel and changes nothing.
@@ -263,7 +267,9 @@ func Restore(ctx context.Context, j *Journal, id int64) error {
 		return ErrOriginalGone
 	}
 	hookBeforeRestoreClaim(id)
-	if !matches(r.Final, r.New) {
+	// The converted file, and the copy moved aside below, are judged by their content: a share's rename can move a
+	// file's observed mtime by a few milliseconds without the file changing. The original keeps the full identity.
+	if !sameContent(r.Final, r.New) {
 		return ErrConvertedChanged
 	}
 	// The converted file may sit at the original's own name (same extension); it is removed below, so only a
@@ -285,7 +291,7 @@ func Restore(ctx context.Context, j *Journal, id int64) error {
 	// It is identified before the move; a file that changed since the check is left where it is.
 	trashDir := filepath.Dir(r.Trash)
 	holding := holdingPath(trashDir, id, r.Final)
-	if !matches(r.Final, r.New) {
+	if !sameContent(r.Final, r.New) {
 		_ = j.SetState(ctx, id, StateDone)
 		return ErrConvertedChanged
 	}
@@ -323,7 +329,7 @@ func Restore(ctx context.Context, j *Journal, id int64) error {
 	}
 	// Step 4: the original is back and verified, so the converted copy is removed, and its folder with it. If that
 	// removal fails the original is still restored; the copy stays in the trash and nothing is lost (review N1).
-	if matches(holding, r.New) {
+	if sameContent(holding, r.New) {
 		_ = os.Remove(holding)
 	}
 	removeHoldingFolder(holding)
@@ -347,15 +353,17 @@ func settleRestore(r Row) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	// A file at the holding path that is not the converted file is never moved or removed (review G2).
-	if !matches(holding, r.New) {
+	// A file at the holding path that is not the converted file is never moved or removed (review G2). The holding
+	// copy got there by a rename, so it is judged by its content, like the converted file at its name.
+	if !sameContent(holding, r.New) {
 		return StateAttention, true
 	}
 	switch {
 	case matches(r.Original, r.Orig):
 		// The original is back at its name, so the restore reached its last step: the converted copy goes. The copy's
 		// identity is checked again just before the removal (review G2): a file that is not ours stays.
-		if !matches(holding, r.New) {
+		hookBeforeHoldingRemoval()
+		if !sameContent(holding, r.New) {
 			return StateAttention, true
 		}
 		if err := os.Remove(holding); err != nil {
@@ -379,7 +387,7 @@ func settleRestore(r Row) (string, bool) {
 // ours to touch: the row goes to attention, and holdingOf reports the path so the caller can refuse with the file
 // still in place (review G2). ok is false when there is nothing to settle at that path.
 func holdingOf(r Row) (string, bool) {
-	if matches(r.Final, r.New) {
+	if sameContent(r.Final, r.New) {
 		return "", false
 	}
 	holding := holdingPath(filepath.Dir(r.Trash), r.ID, r.Final)

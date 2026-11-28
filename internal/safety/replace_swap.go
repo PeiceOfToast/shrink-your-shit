@@ -62,6 +62,10 @@ var (
 	hookBeforeSettle  = func() {}
 )
 
+// hookAfterFinalMoved is a test hook that runs once the new file is at its name and before it is checked there, the
+// window in which a share's rename moves the file's observed mtime.
+var hookAfterFinalMoved = func() {}
+
 func crashPoint(step int) {
 	if crashHook != nil {
 		crashHook(step)
@@ -138,7 +142,10 @@ func Swap(ctx context.Context, j *Journal, p SwapPlan) (SwapResult, error) {
 	if err := fsx.RenameNoReplace(p.Staged, p.Final); err != nil {
 		return SwapResult{}, restoreOriginal(ctx, j, id, row, false, fmt.Errorf("%w: %v", ErrSwapFailed, err))
 	}
-	if !matches(p.Final, newID) {
+	hookAfterFinalMoved()
+	// The file was renamed into place, so it is checked by its content: on a share the client and the server can
+	// report the same file's mtime a few milliseconds apart after the rename.
+	if !sameContent(p.Final, newID) {
 		return SwapResult{}, restoreOriginal(ctx, j, id, row, true, ErrSwapFailed)
 	}
 	crashPoint(6)

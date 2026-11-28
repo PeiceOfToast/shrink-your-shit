@@ -94,6 +94,20 @@ func matches(path string, id Ident) bool {
 	return got.Size == id.Size && got.MTime == id.MTime && got.Hash == id.Hash
 }
 
+// sameContent reports whether the file at path holds the same bytes as id: the same size and sample hash. The time
+// is left out on purpose. A share's client keeps the timestamp it set when it wrote the file and reads the server's
+// own value back once the file is renamed, so a rename moves the mtime by a few milliseconds without the file
+// changing. "Is this the new file we placed?" is answered by what it holds, wherever its name says it is; "is this
+// the original?" keeps the full identity, mtime included, which is what tells a look-alike at the original's name
+// apart from the original.
+func sameContent(path string, id Ident) bool {
+	got, err := identify(path)
+	if err != nil {
+		return false
+	}
+	return got.Size == id.Size && got.Hash == id.Hash
+}
+
 // unchanged is the L-SAFE-5 check at swap time: the same file (identity), size, mtime and change time, with the
 // hard-link skip. A file that changed is kept, and nothing is swapped.
 func unchanged(path string, want Ident) error {

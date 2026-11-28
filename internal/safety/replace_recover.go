@@ -64,7 +64,8 @@ func Recover(ctx context.Context, j *Journal) (RecoverReport, error) {
 
 // settle decides what a row's files say, without moving anything.
 func settle(r Row) string {
-	newAtFinal := matches(r.Final, r.New)
+	// The new file reached its name by a rename, so it is judged by its content; the original keeps the full identity.
+	newAtFinal := sameContent(r.Final, r.New)
 	origInPlace := matches(r.Original, r.Orig)
 	origInTrash := matches(r.Trash, r.Orig)
 	switch {
