@@ -162,3 +162,86 @@ func TestContractOverview(t *testing.T) {
 	rec := e.do(http.MethodGet, "/api/v2/overview", "", map[string]string{"Cookie": cookie}, false)
 	writeGolden(t, "overview", "Overview", http.MethodGet, "/api/v2/overview", rec)
 }
+
+// #894 review: perDay is a whole number; 1 done in seven days is 0, 4 is 1.
+func TestOverviewPerDayIsRoundedPerDay(t *testing.T) {
+	e := newEnv(t, true)
+	cookie := e.setup().String()
+	now := time.Now().UnixMilli()
+	insertJob(t, e, "done", "smaller", now-20_000, now-10_000, 1000, 500, 1)
+	if got := num(overviewOf(t, e, cookie), "converted", "perDay"); got != 0 {
+		t.Errorf("1 done in 7 days: perDay = %v, want 0", got)
+	}
+	for i := int64(2); i <= 4; i++ {
+		insertJob(t, e, "done", "smaller", now-20_000, now-10_000, 1000, 500, i)
+	}
+	if got := num(overviewOf(t, e, cookie), "converted", "perDay"); got != 1 {
+		t.Errorf("4 done in 7 days: perDay = %v, want 1", got)
+	}
+}
+
+// #894 review: secPerGB divides by GB = 1e9 bytes, not GiB: 100 s over 2e9 bytes is 50.
+func TestOverviewSecPerGBIsPerDecimalGB(t *testing.T) {
+	e := newEnv(t, true)
+	cookie := e.setup().String()
+	now := time.Now().UnixMilli()
+	insertJob(t, e, "done", "smaller", now-100_000, now, 2_000_000_000, 1_000_000_000, 1)
+	if got := num(overviewOf(t, e, cookie), "avgShrink", "secPerGB"); got != 50 {
+		t.Errorf("secPerGB = %v, want 50 (100 s over 2 GB)", got)
+	}
+}
+
+// #894 review: avgShrink.pct reads the last seven local days, like secPerGB. An old saving of half does not count.
+func TestOverviewShrinkPctIsTheSevenDayWindow(t *testing.T) {
+	e := newEnv(t, true)
+	cookie := e.setup().String()
+	old := time.Now().Add(-30 * 24 * time.Hour).UnixMilli()
+	insertJob(t, e, "done", "smaller", old-20_000, old-10_000, 1000, 500, 1)
+	now := time.Now().UnixMilli()
+	insertJob(t, e, "done", "bigger_kept", now-20_000, now-10_000, 1000, 1000, 2)
+	if got := num(overviewOf(t, e, cookie), "avgShrink", "pct"); got != 0 {
+		t.Errorf("pct = %v, want 0 for the last 7 days (the old half saving is outside the window)", got)
+	}
+}
+
+// #894 review: after the first finished job, a day with nothing is 0 in every figure; only days before it are null.
+func TestOverviewSeriesZeroAfterTheFirstJob(t *testing.T) {
+	e := newEnv(t, true)
+	cookie := e.setup().String()
+	twoDaysAgo := time.Now().Add(-48 * time.Hour).UnixMilli()
+	insertJob(t, e, "done", "smaller", twoDaysAgo-20_000, twoDaysAgo-10_000, 1000, 600, 1)
+	m := overviewOf(t, e, cookie)
+	days := m["series"].(map[string]any)["days"].([]any)
+	firstDay := time.UnixMilli(twoDaysAgo).In(time.Local).Format("2006-01-02")
+	var sawFirst, sawLaterZero, sawEarlyNull bool
+	for _, d := range days {
+		dm := d.(map[string]any)
+		day := dm["day"].(string)
+		switch {
+		case day < firstDay:
+			sawEarlyNull = sawEarlyNull || dm["done"] == nil
+		case day == firstDay:
+			sawFirst = dm["done"] == float64(1)
+		default:
+			if dm["done"] == float64(0) && dm["freedBytes"] == float64(0) && dm["failed"] == float64(0) {
+				sawLaterZero = true
+			}
+		}
+	}
+	if !sawFirst || !sawLaterZero || !sawEarlyNull {
+		t.Errorf("series: first day ok=%v, later zero ok=%v, earlier null ok=%v", sawFirst, sawLaterZero, sawEarlyNull)
+	}
+}
+
+// #894 review: a done job whose output came out bigger frees nothing, and freedBytes never goes negative.
+func TestOverviewSavingIsClampedAtZero(t *testing.T) {
+	e := newEnv(t, true)
+	cookie := e.setup().String()
+	now := time.Now().UnixMilli()
+	insertJob(t, e, "done", "smaller", now-20_000, now-10_000, 1000, 1500, 1)
+	insertJob(t, e, "done", "smaller", now-20_000, now-10_000, 1000, 800, 2)
+	m := overviewOf(t, e, cookie)
+	if got := num(m, "freed", "totalBytes"); got != 200 {
+		t.Errorf("totalBytes = %v, want 200 (the bigger output adds nothing)", got)
+	}
+}
