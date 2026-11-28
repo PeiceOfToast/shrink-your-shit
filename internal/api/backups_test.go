@@ -129,8 +129,9 @@ func TestBackupDownloadIsTheCopy(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("download = %d", rec.Code)
 	}
-	if got := rec.Body.Bytes(); int64(len(got)) != b.SizeBytes || !strings.HasPrefix(string(got), "SQLite format 3\x00") {
-		t.Errorf("download is %d bytes (want %d) and does not start as a SQLite file", len(got), b.SizeBytes)
+	// The download is a copy without the secret rows, so its size can differ from the stored copy's; it must be a SQLite file.
+	if got := rec.Body.Bytes(); !strings.HasPrefix(string(got), "SQLite format 3\x00") {
+		t.Errorf("download (%d bytes, stored %d) does not start as a SQLite file", len(got), b.SizeBytes)
 	}
 	if cd := rec.Header().Get("Content-Disposition"); !strings.Contains(cd, "attachment") {
 		t.Errorf("Content-Disposition = %q", cd)

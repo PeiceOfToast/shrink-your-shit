@@ -99,6 +99,7 @@ type Server struct {
 	stopped   chan struct{}
 	closeOnce sync.Once
 	pingEvery time.Duration
+	restores  restoreBook
 }
 
 // New makes a server that answers 503 starting until Ready is called.
@@ -163,6 +164,8 @@ func New(version string) *Server {
 	s.mux.HandleFunc("GET /api/v2/attention", s.getAttention)
 	s.mux.HandleFunc("GET /api/v2/backups", s.getBackups)
 	s.mux.HandleFunc("POST /api/v2/backups", s.postBackup)
+	s.mux.HandleFunc("POST /api/v2/backups/preview", s.postBackupPreview)
+	s.mux.HandleFunc("POST /api/v2/backups/apply", s.postBackupApply)
 	s.mux.HandleFunc("DELETE /api/v2/backups/{id}", s.deleteBackup)
 	s.mux.HandleFunc("GET /api/v2/backups/{id}/download", s.downloadBackup)
 	s.mux.HandleFunc("GET /api/v2/trash", s.getTrash)

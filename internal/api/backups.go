@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/PeiceOfToast/shrink-your-shit/internal/settings"
@@ -158,7 +160,15 @@ func (s *Server) downloadBackup(w http.ResponseWriter, r *http.Request) {
 		internalError(w)
 		return
 	}
-	f, err := os.Open(path)
+	// The stored copy keeps the auth, tokens and sessions rows (it is the copy an upgrade rolls back to). A download is a
+	// copy with those rows removed, so the password hash and the token never leave the server.
+	tmp := filepath.Join(rs.DB.BackupFolder(), "download-"+strconv.FormatInt(time.Now().UnixNano(), 10)+".db")
+	if err := store.StripSecrets(r.Context(), path, tmp); err != nil {
+		internalError(w)
+		return
+	}
+	defer removeFile(tmp)
+	f, err := os.Open(tmp)
 	if err != nil {
 		internalError(w)
 		return
