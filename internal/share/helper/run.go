@@ -18,8 +18,9 @@ import (
 )
 
 // Options are the helper's fixed places. syp-mount.service passes none of them: they exist so the
-// same binary can be tested, and run as root by hand on a test computer, without touching the real
-// folders.
+// same binary can be tested, and run as root by hand on a test computer, against folders prepared
+// for it. The shares folder must sit in a chain owned by root and writable by nobody else, so a
+// temporary folder under the sticky /tmp is now refused.
 type Options struct {
 	Socket    string
 	Shares    string

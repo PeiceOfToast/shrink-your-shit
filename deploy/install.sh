@@ -37,6 +37,13 @@ FFMPEG_DIR=/opt/syp/ffmpeg
 DATA_DIR=/var/lib/syp
 BIN=/usr/local/bin/syp
 UNIT=/etc/systemd/system/syp.service
+# The root mount helper (S3-7): socket-activated, so it runs only while a share is being mounted.
+MOUNT_SOCKET=/run/syp/mount.sock
+MOUNT_SERVICE=/etc/systemd/system/syp-mount.service
+MOUNT_SOCKET_UNIT=/etc/systemd/system/syp-mount.socket
+HELPER_DIR=/var/lib/syp-helper
+# Outside $DATA_DIR on purpose: the app's user owns that folder and could swap anything inside it.
+SHARES_DIR=/var/lib/syp-shares
 PORT=8484
 
 say() { printf '%s\n' "$*"; }
@@ -81,9 +88,9 @@ fi
 
 say "shrink-your-shit installer: $PRETTY_NAME, $ARCH"
 if [ "$UPDATE" = yes ]; then
-  say "This is an update: the service stops, $DATA_DIR is copied to $DATA_DIR.bak-<time>, then the program and unit are replaced. Data is kept."
+  say "This is an update: the services stop, $DATA_DIR is copied to $DATA_DIR.bak-<time>, then the program and units are replaced. Data is kept."
 else
-  say "This is a first install: a user 'syp', $DATA_DIR, $BIN, $UNIT, and ffmpeg 8 in $FFMPEG_DIR."
+  say "This is a first install: a user 'syp', $DATA_DIR, $BIN, the units, the root mount helper's folders, and ffmpeg 8 in $FFMPEG_DIR."
 fi
 say "Downloads come from $BASE. Each one is checked against checksums.txt before it is used."
 
@@ -336,15 +343,26 @@ if [ "$UPDATE" = yes ]; then
     say "Stopping syp"
     systemctl stop syp
   fi
+  # The helper is socket-activated, so it is often not running; stop it when an old copy is.
+  if systemctl is-active --quiet syp-mount.service 2>/dev/null; then
+    say "Stopping the mount helper"
+    systemctl stop syp-mount.service
+  fi
   if [ -d "$DATA_DIR" ]; then
     stamp="$(date -u +%Y%m%dT%H%M%SZ)"
     say "Backing up $DATA_DIR to $DATA_DIR.bak-$stamp"
+    # The shares' mount points are not under here, so a copy never descends into a network folder.
     cp -a "$DATA_DIR" "$DATA_DIR.bak-$stamp"
   fi
 fi
 
 install -d -m 0750 -o syp -g syp "$DATA_DIR"
 chown -R syp:syp "$DATA_DIR"
+# The mount helper's folders. The shares' points are root's to write and the syp user's to read: kept
+# outside $DATA_DIR, whose owner can swap anything inside it, so the helper can trust the folder.
+install -d -m 0750 -o root -g syp "$SHARES_DIR"
+# The helper's own record folder, root's alone: a stale record can never unmount a hand mount.
+install -d -m 0700 -o root -g root "$HELPER_DIR"
 
 install -m 0755 -o root -g root "$WORK/syp" "$BIN.new"
 mv -f "$BIN.new" "$BIN"
@@ -368,9 +386,57 @@ ProtectSystem=full
 WantedBy=multi-user.target
 EOF
 mv -f "$UNIT.new" "$UNIT"
+
+# The root mount helper. systemd owns the socket (root:syp 0660), so the app's user can ask and nobody
+# else can; the service is socket-activated and runs as root because mounting is a privileged call. The
+# helper's own checks are the second gate (SO_PEERCRED: root or syp). No PrivateNetwork: cifs and nfs
+# are kernel mounts whose network belongs to the machine's namespace.
+cat > "$MOUNT_SOCKET_UNIT.new" <<EOF
+[Unit]
+Description=shrink-your-shit mount helper socket
+
+[Socket]
+ListenStream=$MOUNT_SOCKET
+SocketMode=0660
+SocketUser=root
+SocketGroup=syp
+RuntimeDirectory=syp
+# The app's user must be able to traverse /run/syp to reach the socket; the socket itself is 0660 root:syp.
+RuntimeDirectoryMode=0755
+RemoveOnStop=yes
+
+[Install]
+WantedBy=sockets.target
+EOF
+mv -f "$MOUNT_SOCKET_UNIT.new" "$MOUNT_SOCKET_UNIT"
+
+cat > "$MOUNT_SERVICE.new" <<EOF
+[Unit]
+Description=shrink-your-shit mount helper
+Requires=syp-mount.socket
+After=syp-mount.socket
+
+[Service]
+# No User=: root is the default, and mounting is a privileged call.
+ExecStart=$BIN helper
+# The mount programs resolve a share's host name over ordinary internet sockets (measured: with
+# AF_UNIX alone, getent hosts fails inside this unit); raw and packet sockets stay out.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+NoNewPrivileges=yes
+# No ProtectSystem=/ProtectHome=/ReadWritePaths= here. Each of them makes systemd give this unit a
+# private mount namespace, and a mount made there lives only in that namespace: measured on Debian 12,
+# the helper answered ok while the app saw an empty folder (the service's / is shared,slave). A mount
+# helper must act in the host's mount namespace, so path protection is not available to it.
+EOF
+mv -f "$MOUNT_SERVICE.new" "$MOUNT_SERVICE"
+
 systemctl daemon-reload
 systemctl enable syp >/dev/null
 systemctl restart syp
+# Restarting the socket also restarts a running helper (the service Requires it), so an update never
+# leaves an old helper answering on a replaced socket.
+systemctl enable syp-mount.socket >/dev/null
+systemctl restart syp-mount.socket
 
 say "Waiting for syp to answer"
 ok=no
