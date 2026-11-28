@@ -34,7 +34,7 @@ type Options struct {
 func DefaultOptions() Options {
 	return Options{
 		Socket:    "/run/syp/mount.sock",
-		Shares:    "/var/lib/syp/shares",
+		Shares:    "/var/lib/syp-shares",
 		Record:    "/var/lib/syp-helper",
 		RunDir:    "/run/syp",
 		MountBin:  "/bin/mount",
@@ -92,10 +92,15 @@ func Run(ctx context.Context, opts Options) error {
 	if err := os.Chown(root, 0, gid); err != nil {
 		return fmt.Errorf("the shares folder's owner: %w", err)
 	}
-	// Only root may write the shares folder, so the syp user can't swap a mount point for a link
-	// between the helper's check and the mount. MkdirAll leaves an existing folder's mode alone.
+	// Only root may write the shares folder, so the syp user can't put a link where a mount point will
+	// be. MkdirAll leaves an existing folder's mode alone.
 	if err := os.Chmod(root, 0o750); err != nil {
 		return fmt.Errorf("the shares folder's mode: %w", err)
+	}
+	// The chmod covers the folder; its parents must be root's alone too, or the syp user could swap
+	// the whole folder for a link (the reason it is not under the app's own /var/lib/syp).
+	if err := checkOwnedPath(root, 0); err != nil {
+		return fmt.Errorf("the shares folder can be swapped by another user: %w", err)
 	}
 	recordDir, err := makeDir(opts.Record, 0o700)
 	if err != nil {
