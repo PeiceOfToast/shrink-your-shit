@@ -279,6 +279,33 @@ func goldenCases() []goldenCase {
 			rung: c.rung,
 		})
 	}
+	// The speed choice on a card encoder of every codec: the card's own names, never SVT-AV1's
+	// numbers, which QSV refuses and NVENC reads upside down. AV1 gets both directions, because
+	// that is where the two scales disagree most.
+	for _, c := range []struct {
+		name   string
+		codec  Codec
+		preset string
+		rung   Rung
+	}{
+		{"qsv-h264-faster-mkv", CodecH264, "faster", cardRung(FamilyQSV, CodecH264, "")},
+		{"qsv-av1-faster-mkv", CodecAV1, "faster", cardRung(FamilyQSV, CodecAV1, "")},
+		{"qsv-av1-slower-mkv", CodecAV1, "slower", cardRung(FamilyQSV, CodecAV1, "")},
+		{"nvenc-h264-slower-mkv", CodecH264, "slower", cardRung(FamilyNVENC, CodecH264, "")},
+		{"nvenc-av1-faster-mkv", CodecAV1, "faster", cardRung(FamilyNVENC, CodecAV1, "")},
+		{"nvenc-av1-slower-mkv", CodecAV1, "slower", cardRung(FamilyNVENC, CodecAV1, "")},
+	} {
+		cases = append(cases, goldenCase{
+			name:    c.name,
+			summary: strings.ReplaceAll(c.name, "-", " "),
+			plan: Plan{
+				Video:     VideoPlan{Codec: c.codec, CRF: intp(22), Preset: c.preset, Quality: 3},
+				Container: ContainerMKV, Output: "out.mkv",
+			},
+			info: goldenInfo(8, "bt709"),
+			rung: c.rung,
+		})
+	}
 	return cases
 }
 

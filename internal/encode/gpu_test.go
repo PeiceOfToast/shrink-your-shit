@@ -356,8 +356,8 @@ func TestFullGPURefusesAChangeThatNeedsTheProcessor(t *testing.T) {
 		}{
 			{"frame rate", func() Plan { p := basePlan(CodecHEVC); p.Video.FPS = 30; return p }(), baseInfo()},
 			{"tone mapping", func() Plan { p := basePlan(CodecHEVC); p.Video.HDR = HDRTonemap; return p }(), hdr},
-			// Ten bits in and ten bits out: the depth guard sees no change, so only the tone-map
-			// guard refuses this one (review 872, FAIL 2).
+			// Ten bits in and ten bits out: the depth guard sees no change, so the tone-map guard
+			// is what has to refuse this one.
 			{"tone mapping at ten bits", func() Plan {
 				p := basePlan(CodecHEVC)
 				p.Video.HDR = HDRTonemap
@@ -546,4 +546,33 @@ func TestVAAPIPresetIsSaidOutLoud(t *testing.T) {
 	plan.Video.Preset = "normal"
 	res = buildOK(t, plan, baseInfo(), cardRung(FamilyVAAPI, CodecHEVC, renderNode))
 	wantNotes(t, res)
+}
+
+// TestCardAV1PresetIsTheCardsOwn: the processor's AV1 preset numbers are SVT-AV1's. QSV's AV1
+// preset is a different integer scale (8 is refused) and NVENC's runs the other way (8 is slower
+// than 4), so a card encoder gets its own names and "slower" is slower on every family.
+func TestCardAV1PresetIsTheCardsOwn(t *testing.T) {
+	plan := basePlan(CodecAV1)
+	for _, f := range []struct {
+		name string
+		rung Rung
+	}{
+		{"qsv", cardRung(FamilyQSV, CodecAV1, "")},
+		{"nvenc", cardRung(FamilyNVENC, CodecAV1, "")},
+	} {
+		for choice, want := range map[string]string{"faster": "fast", "normal": "medium", "slower": "slow"} {
+			plan.Video.Preset = choice
+			res := buildOK(t, plan, baseInfo(), f.rung)
+			if got, _ := flagValue(res.Argv, "-preset:v:0"); got != want {
+				t.Errorf("%s av1 %s: -preset = %q, want %q", f.name, choice, got, want)
+			}
+		}
+	}
+
+	// The processor keeps SVT-AV1's own numbers.
+	plan.Video.Preset = "faster"
+	res := buildOK(t, plan, baseInfo(), Rung{Encoder: "libsvtav1", Family: FamilyCPU, Decode: DecodeSoftware})
+	if got, _ := flagValue(res.Argv, "-preset:v:0"); got != "8" {
+		t.Errorf("processor av1 faster: -preset = %q, want 8", got)
+	}
 }

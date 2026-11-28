@@ -196,13 +196,19 @@ func CPUEncoder(codec Codec) (string, bool) {
 	return "", false
 }
 
-// presets maps the page's named choice to each encoder's own name. Every list has "slower"; the
-// AV1 numbers are SVT-AV1's.
+// presets maps the page's named choice to the processor encoder's own name. Every list has "slower";
+// the AV1 numbers are SVT-AV1's.
 var presets = map[Codec]map[string]string{
 	CodecHEVC: {"faster": "fast", "normal": "medium", "slower": "slow"},
 	CodecH264: {"faster": "fast", "normal": "medium", "slower": "slow"},
 	CodecAV1:  {"faster": "8", "normal": "6", "slower": "4"},
 }
+
+// cardPresets maps the page's named choice to a card encoder's own name. A card has no SVT-AV1
+// numbers: QSV's AV1 preset is a different integer scale and NVENC's runs the other way, so the
+// number SVT wants means the wrong speed or is refused outright. Every card encoder that takes a
+// preset takes these ordinary names (L-HW-10); VA-API takes none and says so instead.
+var cardPresets = map[string]string{"faster": "fast", "normal": "medium", "slower": "slow"}
 
 // tags is the container codec tag each encoder writes (L-HW-13).
 var tags = map[Codec]string{

@@ -419,7 +419,7 @@ func videoOptions(plan Plan, main media.VideoTrack, rung Rung, encoder string, r
 			return nil, fmt.Errorf("%w: CRF %d is outside 0..63", ErrInvalidPlan, crf)
 		}
 	}
-	preset, err := presetName(plan.Video.Codec, plan.Video.Preset)
+	preset, err := presetName(plan.Video.Codec, family, plan.Video.Preset)
 	if err != nil {
 		return nil, err
 	}
@@ -859,11 +859,15 @@ func frameRate(f float64) string {
 	return strconv.FormatFloat(f, 'f', -1, 64)
 }
 
-func presetName(codec Codec, choice string) (string, error) {
+func presetName(codec Codec, family Family, choice string) (string, error) {
 	if choice == "" {
 		choice = "normal"
 	}
-	name, ok := presets[codec][choice]
+	names := presets[codec]
+	if family == FamilyQSV || family == FamilyNVENC {
+		names = cardPresets
+	}
+	name, ok := names[choice]
 	if !ok {
 		return "", fmt.Errorf("%w: preset %q is not offered for %s", ErrInvalidPlan, choice, codec)
 	}

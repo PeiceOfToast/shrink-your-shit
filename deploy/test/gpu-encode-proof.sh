@@ -76,7 +76,6 @@ LOG_TMP=$(mktemp /tmp/syp-gpu-proof.XXXXXX)
 LOG="$SLICES/gpu-proof-$SAFE_GPU-$VMID-$STAMP.log"
 OUT_HOST="$SLICES/gpu-proof-$SAFE_GPU-$VMID-$STAMP-out"
 WORK=$(mktemp -d /tmp/syp-gpu-proof-work.XXXXXX)
-BASE=http://$IP:8484
 FAILURES=0
 CREATED=0
 ct_hostname="syp-test-s3-2-gpu-$(printf '%s' "$GPU" | tr -c 'A-Za-z0-9-' '-')"
@@ -86,7 +85,9 @@ pass() { say "PASS  $*"; }
 fail() { say "FAIL  $*"; FAILURES=$((FAILURES + 1)); }
 step() { say ""; say "== $*"; }
 SSH_OPTS="-i $KEY -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 -o LogLevel=ERROR"
-# shellcheck disable=SC2086
+# SSH_OPTS is a list of options and must split into words; the command is expanded here on purpose and run
+# remotely as one string.
+# shellcheck disable=SC2086,SC2029
 ct() { ssh $SSH_OPTS "root@$IP" "$@"; }
 
 finish() {
@@ -204,6 +205,8 @@ else
   fail "container did not answer ssh at $IP within 2 minutes"
   exit 1
 fi
+# The single quotes keep the remote shell's own $PRETTY_NAME from expanding here.
+# shellcheck disable=SC2016
 say "inside: $(ct '. /etc/os-release && echo "$PRETTY_NAME"')"
 say "cpu: $(ct "grep -m1 'model name' /proc/cpuinfo" | cut -d: -f2)"
 
@@ -221,6 +224,8 @@ step "The one-line install from the built artifacts"
 tar -C "$ART" -cf - install.sh checksums.txt syp-linux-amd64 \
   | ct 'mkdir -p /srv/syp-test && tar -C /srv/syp-test -xf -' 2>>"$LOG_TMP" \
   || { fail "copying the artifacts in failed"; exit 1; }
+# SSH_OPTS is a list of options and must split into words.
+# shellcheck disable=SC2086
 ssh -f $SSH_OPTS "root@$IP" 'cd /srv/syp-test && exec python3 -m http.server 18080 --bind 127.0.0.1 >/dev/null 2>&1' >/dev/null 2>&1 || true
 i=0
 while [ "$i" -lt 15 ]; do
@@ -287,7 +292,9 @@ fi
 if [ "$GPU" = intel ] && [ "$TEMPLATE" = debian13 ]; then
   step "Following the installer's non-free steps by hand"
   # The template's Components line is "contrib main", not "main", so non-free is appended to
-  # whatever is there; an older sources.list gets it appended to each deb line instead.
+  # whatever is there; an older sources.list gets it appended to each deb line instead. The single
+  # quotes keep every $ and \1 for the remote shell.
+  # shellcheck disable=SC2016
   ct 'f=/etc/apt/sources.list.d/debian.sources; if [ -f "$f" ]; then sed -i -E "s/^(Components: .*[^ ])$/\1 non-free/" "$f"; grep "^Components:" "$f"; else sed -i -E "s/^(deb .*[^ ])$/\1 non-free/" /etc/apt/sources.list; grep "^deb" /etc/apt/sources.list; fi' \
     || fail "could not add non-free to the apt sources"
   if ct 'export DEBIAN_FRONTEND=noninteractive; (apt-get update && apt-get install -y intel-media-va-driver-non-free) >/root/apt.log 2>&1'; then
