@@ -252,6 +252,15 @@ test("the log page sends its filters as the server reads them: level, source by 
   assert.deepEqual(page, golden("log.json"));
 });
 
+test("debug lines go out as detail=1, never detail=true (the server refuses true with a 400)", async () => {
+  const on = stub(200, JSON.stringify(golden("log.json")));
+  await getLog({ limit: 1, detail: true });
+  assert.equal(on[0].url, "/api/v2/log?limit=1&detail=1");
+  const off = stub(200, JSON.stringify(golden("log.json")));
+  await getLog({ limit: 1, detail: false });
+  assert.equal(off[0].url, "/api/v2/log?limit=1");
+});
+
 test("the log page with no filters asks for the bare path", async () => {
   const calls = stub(200, JSON.stringify(golden("log.json")));
   await getLog();
