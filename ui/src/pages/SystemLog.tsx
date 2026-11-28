@@ -4,7 +4,7 @@ import { useApi } from "../api/useApi.ts";
 import { clock, clockPrecise } from "../format/time.ts";
 import { Link, navigate, useLocation } from "../router.tsx";
 import { Icon } from "../ui/Icon.tsx";
-import { LEVEL_LABEL, addLiveLine, copyText, levelBadges, olderPageEnds, saveText, showLines, type LogLevelName } from "./logParts.ts";
+import { LEVEL_LABEL, addLiveLine, copyText, levelBadges, olderPageEnds, saveText, showLines, showLoadOlder, type LogLevelName } from "./logParts.ts";
 
 // The System log (page 12): every app-wide event, newest last. Filters live in the URL, so a link can open a filtered log.
 const LEVELS = [
@@ -360,7 +360,7 @@ export function SystemLog() {
 
       {log.data && items.length > 0 && (
         <div className="log syslog syslog-list" ref={listRef} onScroll={onScroll} aria-label="System log lines" role="log">
-          {hasMore && items.length > 0 && (
+          {showLoadOlder(hasMore, items.length) && (
             <button type="button" className="btn ghost sm" onClick={loadOlder}>
               Load older lines
             </button>

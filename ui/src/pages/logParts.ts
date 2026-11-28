@@ -92,3 +92,8 @@ export function olderPageEnds(page: LogEvent[]): boolean {
   return page.length === 0;
 }
 
+// The Load older button: there may be older lines (the last load was not empty), and the list has lines to hang it on.
+export function showLoadOlder(hasMore: boolean, shownCount: number): boolean {
+  return hasMore && shownCount > 0;
+}
+

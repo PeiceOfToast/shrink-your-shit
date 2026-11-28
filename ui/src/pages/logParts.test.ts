@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { JobStep, LogEvent, LogKind, LogLevel } from "../api/types.ts";
-import { addLiveLine, levelBadges, logsFromEvents, olderPageEnds, showLines } from "./logParts.ts";
+import { addLiveLine, levelBadges, logsFromEvents, olderPageEnds, showLines, showLoadOlder } from "./logParts.ts";
 import { readFileSync } from "node:fs";
 
 const steps: JobStep[] = [
@@ -213,5 +213,17 @@ test("Load older: a short folded page keeps the button; only an empty page ends 
   assert.ok(short.length < PAGE, "a folded page can be shorter than the page size");
   assert.equal(olderPageEnds(short), false);
   assert.equal(olderPageEnds([]), true);
+});
+
+test("the Load older button: a short folded first page shows it; hasMore=false hides it; no lines hides it", () => {
+  assert.equal(showLoadOlder(true, 3), true, "a short folded page keeps the button");
+  assert.equal(showLoadOlder(false, 3), false, "once an older load came back empty, it is hidden");
+  assert.equal(showLoadOlder(true, 0), false, "no lines to hang it on");
+});
+
+test("the page shows the Load older button through showLoadOlder (a revert to the folded-length guard is caught)", () => {
+  const src = readFileSync(new URL("./SystemLog.tsx", import.meta.url), "utf8");
+  assert.match(src, /\{showLoadOlder\(hasMore, items\.length\) && \(/);
+  assert.doesNotMatch(src, /base\.length >= api\.LOG_PAGE_SIZE/);
 });
 
