@@ -13,6 +13,7 @@ import type {
   SettingsPatch,
 } from "./types.ts";
 import { ApiError } from "./errors.ts";
+import { ENCODER_TEST_MS, startEncoderTest } from "./mockWorkers.ts";
 import { getForcedState, noLibrariesYet, respond } from "./mockState.ts";
 
 const clone = <T>(v: T): T => structuredClone(v);
@@ -414,15 +415,15 @@ let doctor: Doctor = {
   checks: [
     { id: "disk", label: "Disk space", status: "ok", detail: "412 GB free on the library disks.", hint: null, fix: null },
     { id: "tools", label: "Tools found", status: "ok", detail: "ffmpeg 7.1 and ffprobe are installed.", hint: null, fix: null },
-    { id: "gpu", label: "Graphics card", status: "absent", detail: "No graphics card found.", hint: "Files convert on the processor.", fix: null },
     {
-      id: "shares",
-      label: "Shares",
-      status: "bad",
-      detail: "NAS box has been unreachable since 22:10.",
-      hint: null,
-      fix: { label: "Reconnect the share", method: "POST", path: "/api/v2/shares/nas-box/reconnect" },
+      id: "gpu",
+      label: "Graphics card",
+      status: "warn",
+      detail: "The graphics card has not been tested yet.",
+      hint: "Files convert on the processor until the test ends.",
+      fix: { label: "Test the encoders", method: "POST", path: "/api/v2/workers/local/capabilities/test" },
     },
+    { id: "library-1", label: "Library Films", status: "ok", detail: "The folder /media/films is there and can be written.", hint: null, fix: null },
   ],
 };
 
@@ -439,14 +440,18 @@ export function getDoctor(retest = false): Promise<Doctor> {
   });
 }
 
-// Runs a check's fix (the path comes from the check's own fix.path). The mock repairs the share it names.
+// Runs a check's fix (the path comes from the check's own fix.path). The encoder test starts a run and finishes it after
+// a moment, as the server does; the graphics card check then passes.
 export function runHealthFix(path: string): Promise<Doctor> {
-  return respond(() => {
-    if (path.endsWith("/reconnect")) {
-      doctor = { ...doctor, checks: doctor.checks.map((c) => (c.id === "shares" ? { ...c, status: "ok", detail: "NAS box is reachable.", fix: null } : c)) };
-    }
-    return clone(doctor);
-  });
+  const enc = /^\/api\/v2\/workers\/([^/]+)\/capabilities\/test$/.exec(path);
+  if (enc) {
+    startEncoderTest(enc[1]);
+    return new Promise<void>((done) => setTimeout(done, ENCODER_TEST_MS + 50)).then(() => {
+      doctor = { ...doctor, checks: doctor.checks.map((c) => (c.id === "gpu" ? { ...c, status: "ok", detail: "The graphics card passed its test.", hint: null, fix: null } : c)) };
+      return clone(doctor);
+    });
+  }
+  return respond(() => clone(doctor));
 }
 
 // True when a check is failing. The shell's red dot reads this.

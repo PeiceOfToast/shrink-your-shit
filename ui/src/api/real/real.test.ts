@@ -1,11 +1,12 @@
 // The real client's request paths and bodies, with a stubbed fetch (no server). Every call carries X-SYP: 1 and same-origin.
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { request } from "../http.ts";
 import { ApiError } from "../errors.ts";
 import { convertAgain, getJobNeighbours, getJobs, runJobsAction } from "./jobs.ts";
 import { getLibraries, createLibrary, patchLibrary, deleteLibrary } from "./libraries.ts";
-import { getSettings, patchSettings } from "./settings.ts";
+import { getSettings, patchSettings, getDoctor, runHealthFix } from "./settings.ts";
 import { getTrash, restoreTrash } from "./trash.ts";
 import { getAttention, getOverview, runAction } from "./overview.ts";
 import { createDraft, deleteWorkflow, duplicateWorkflow, exportWorkflow, getFlow, getGuideAnswers, guidePreview, listWorkflows, publishFlow, putAnswers, putDraft, tryFlow, validateFlow } from "./workflows.ts";
@@ -263,4 +264,52 @@ test("a Needs attention action where every item is refused shows the refusal, no
   stub(200, JSON.stringify({ done: [], refused: [{ id: "j1", code: "job_busy", message: "Still running." }] }));
   await assert.rejects(runAction("POST", "/api/v2/jobs/actions", { action: "retry", ids: ["j1"] }), (e: unknown) =>
     e instanceof ApiError && e.code === "job_busy" && e.message === "Still running.");
+});
+
+// Settings > Health against the server: the checks, and a check's fix. The encoder test's fix waits for its run on the
+// worker, then reads the checks again (retest), so the page shows the result, not the run's answer.
+const doctorBody = () => JSON.parse(readFileSync(new URL("../../../../internal/api/testdata/contract/doctor.json", import.meta.url), "utf8")).body;
+
+// A fetch that answers each request from its own queue, and records the calls in order.
+function route(map: Record<string, { status: number; body: string }[]>): { url: string; method: string }[] {
+  const calls: { url: string; method: string }[] = [];
+  globalThis.fetch = (async (url: string, init: RequestInit) => {
+    const key = `${init.method ?? "GET"} ${url}`;
+    calls.push({ url, method: init.method ?? "GET" });
+    const next = map[key]?.shift();
+    if (!next) throw new Error(`no answer queued for ${key}`);
+    return new Response(next.body, { status: next.status, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+  return calls;
+}
+
+test("the checks are read from /doctor, and run again with retest=1", async () => {
+  const calls = route({ "GET /api/v2/doctor": [{ status: 200, body: JSON.stringify(doctorBody()) }], "GET /api/v2/doctor?retest=1": [{ status: 200, body: JSON.stringify(doctorBody()) }] });
+  assert.deepEqual(await getDoctor(), doctorBody());
+  assert.equal(calls[0].url, "/api/v2/doctor");
+  assert.deepEqual(await getDoctor(true), doctorBody());
+  assert.equal(calls[1].url, "/api/v2/doctor?retest=1");
+});
+
+test("the encoder fix waits for its run on the worker, then answers the checks again", async () => {
+  const calls = route({
+    "POST /api/v2/workers/local/capabilities/test": [{ status: 200, body: '{"runId":"r1"}' }],
+    "GET /api/v2/workers/local": [{ status: 200, body: '{"id":"local","test":{"runId":"r1","running":false,"finishedAt":"2026-11-28T07:30:00Z"}}' }],
+    "GET /api/v2/doctor?retest=1": [{ status: 200, body: JSON.stringify(doctorBody()) }],
+  });
+  assert.deepEqual(await runHealthFix("/api/v2/workers/local/capabilities/test"), doctorBody());
+  assert.deepEqual(calls.map((c) => `${c.method} ${c.url}`), [
+    "POST /api/v2/workers/local/capabilities/test",
+    "GET /api/v2/workers/local",
+    "GET /api/v2/doctor?retest=1",
+  ]);
+});
+
+test("a fix the server refuses shows the server's message, and nothing else is read", async () => {
+  const calls = route({
+    "POST /api/v2/workers/local/capabilities/test": [{ status: 409, body: JSON.stringify({ error: { code: "worker_busy", message: "A worker is starting. Try again in a moment." } }) }],
+  });
+  await assert.rejects(runHealthFix("/api/v2/workers/local/capabilities/test"), (e: unknown) =>
+    e instanceof ApiError && e.code === "worker_busy" && e.message === "A worker is starting. Try again in a moment.");
+  assert.equal(calls.length, 1);
 });
