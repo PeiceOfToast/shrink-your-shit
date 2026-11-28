@@ -54,3 +54,15 @@ export function logsFromEvents(steps: JobStep[], events: LogEvent[]): LogStep[] 
   }
   return out.slice(0, Math.min(block + 1, out.length));
 }
+
+// The live lines the page adds. The server folds a repeated line into the newest row (its seq moves up, and its repeat says
+// how many times and from when). A folded line that matches a line already shown replaces that line, so it shows once.
+export function addLiveLine(lines: LogEvent[], e: LogEvent): LogEvent[] {
+  if (e.repeat) {
+    const at = lines.findIndex(
+      (l) => l.seq !== e.seq && l.message === e.message && l.source === e.source && (l.ts === e.repeat!.firstAt || l.repeat?.firstAt === e.repeat!.firstAt),
+    );
+    if (at >= 0) return lines.map((l, i) => (i === at ? e : l));
+  }
+  return [...lines, e];
+}

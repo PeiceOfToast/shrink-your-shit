@@ -2,7 +2,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { JobStep, LogEvent, LogKind, LogLevel } from "../api/types.ts";
-import { logsFromEvents } from "./logParts.ts";
+import { addLiveLine, logsFromEvents } from "./logParts.ts";
+import { readFileSync } from "node:fs";
 
 const steps: JobStep[] = [
   { index: 1, name: "Video", outcome: "done", durationMs: 0 },
@@ -118,4 +119,30 @@ test("a run that failed in step 1 of 3 shows step 1 alone, with its lines after 
   assert.deepEqual(out.map((s) => s.name), ["Video"]);
   assert.deepEqual(out[0].lines.map((l) => l.text), ["queued", "Starting sample.mp4", "Could not read the video", "Check the file and try again"]);
   assert.equal(out[0].decision, "Decision one");
+});
+
+// Follow: a folded repeat replaces the line it folds, so the page shows it once.
+const liveEv = (seq: number, ts: string, message: string, repeat?: { count: number; firstAt: string; lastAt: string }) =>
+  ({ seq, ts, level: "info", kind: "note", source: "Scanner", message, jobId: null, libraryId: null, workerId: null, ...(repeat ? { repeat } : {}) }) as LogEvent;
+
+test("a folded repeat replaces the line it folds (same message, the first time) instead of adding a second", () => {
+  const first = liveEv(3, "2026-11-28T07:00:00Z", "sign-in refused");
+  const folded = liveEv(4, "2026-11-28T07:00:09Z", "sign-in refused", { count: 2, firstAt: "2026-11-28T07:00:00Z", lastAt: "2026-11-28T07:00:09Z" });
+  const out = addLiveLine([first], folded);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].seq, 4);
+  assert.equal(out[0].repeat?.count, 2);
+});
+
+test("a new line, or one with no repeat, is added after the lines shown", () => {
+  const a = liveEv(1, "2026-11-28T07:00:00Z", "one");
+  const b = liveEv(2, "2026-11-28T07:00:01Z", "two");
+  assert.deepEqual(addLiveLine([a], b).map((l) => l.seq), [1, 2]);
+  const other = liveEv(5, "2026-11-28T07:00:05Z", "sign-in refused", { count: 2, firstAt: "2026-11-28T07:00:00Z", lastAt: "2026-11-28T07:00:05Z" });
+  assert.deepEqual(addLiveLine([a], other).map((l) => l.seq), [1, 5], "a repeat of a different line is added");
+});
+
+test("the page adds live lines with the helper, so a fold replaces its line", () => {
+  const page = readFileSync(new URL("./SystemLog.tsx", import.meta.url), "utf8");
+  assert.match(page, /setLive\(\(l\) => addLiveLine\(l, e\)\)/);
 });
