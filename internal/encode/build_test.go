@@ -305,17 +305,21 @@ func TestBuildDolbyVision(t *testing.T) {
 	}
 }
 
-func TestBuildRefusesAGPURung(t *testing.T) {
-	for _, family := range []Family{FamilyQSV, FamilyNVENC, FamilyVAAPI, FamilyAMF} {
-		rung := Rung{Encoder: "hevc_qsv", Family: family}
-		if _, err := Build(basePlan(CodecHEVC), baseInfo(), rung); !errors.Is(err, ErrRungNotBuilt) {
-			t.Errorf("%s: error = %v, want ErrRungNotBuilt", family, err)
-		}
+// TestBuildRefusesAFamilyItCannotWrite: AMD's AMF encoders and an unknown family name are rungs
+// this stage does not build, and a rung whose encoder name is another family's is a plan error —
+// the card families themselves are built and tested in gpu_test.go.
+func TestBuildRefusesAFamilyItCannotWrite(t *testing.T) {
+	if _, err := Build(basePlan(CodecHEVC), baseInfo(), Rung{Encoder: "hevc_amf", Family: FamilyAMF}); !errors.Is(err, ErrRungNotBuilt) {
+		t.Errorf("amf: error = %v, want ErrRungNotBuilt", err)
 	}
-	rung := cpuRung(CodecHEVC)
-	rung.Decode = DecodeHardware
-	if _, err := Build(basePlan(CodecHEVC), baseInfo(), rung); !errors.Is(err, ErrRungNotBuilt) {
-		t.Errorf("hardware decode: error = %v, want ErrRungNotBuilt", err)
+	if _, err := Build(basePlan(CodecHEVC), baseInfo(), Rung{Family: Family("vulkan")}); !errors.Is(err, ErrInvalidPlan) {
+		t.Errorf("unknown family: error = %v, want ErrInvalidPlan", err)
+	}
+	if _, err := Build(basePlan(CodecHEVC), baseInfo(), Rung{Encoder: "hevc_qsv", Family: FamilyNVENC}); !errors.Is(err, ErrInvalidPlan) {
+		t.Errorf("mismatched encoder: error = %v, want ErrInvalidPlan", err)
+	}
+	if _, err := Build(basePlan(CodecHEVC), baseInfo(), Rung{Family: FamilyQSV, Decode: "cuda"}); !errors.Is(err, ErrInvalidPlan) {
+		t.Errorf("unknown decode: error = %v, want ErrInvalidPlan", err)
 	}
 }
 

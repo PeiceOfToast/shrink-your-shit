@@ -144,6 +144,168 @@ func goldenCases() []goldenCase {
 		info: goldenInfo(10, "smpte2084"),
 		rung: cpuRung(CodecHEVC),
 	})
+
+	// Card rungs (S3-2): every family × codec × depth × scale a record's probe can report, for the
+	// hybrid path (the processor decodes, the card encodes). Only 8-bit and 10-bit SDR here: a
+	// record whose 10-bit or HDR probe failed never offers those rungs, which is hw.Pick's rule.
+	// The plan's slider position is the flow's normal (3), so L-HW-12's QSV HEVC offset shows.
+	for _, f := range cardFamilies {
+		for _, codec := range codecs {
+			for _, depth := range []struct {
+				name string
+				info media.Info
+			}{
+				{"8", goldenInfo(8, "bt709")},
+				{"10sdr", goldenInfo(10, "bt709")},
+			} {
+				for _, scale := range scales {
+					cases = append(cases, goldenCase{
+						name:    strings.Join([]string{f.name, codec.name, depth.name, scale.name, "mkv"}, "-"),
+						summary: strings.Join([]string{f.name, codec.name, depth.name, scale.name, "mkv"}, " "),
+						plan: Plan{
+							Video: VideoPlan{
+								Codec: codec.codec, CRF: intp(22), Preset: "normal", Quality: 3, Scale: scale.scale,
+							},
+							Container: ContainerMKV,
+							Output:    "out.mkv",
+						},
+						info: depth.info,
+						rung: cardRung(f.family, codec.codec, f.device),
+					})
+				}
+			}
+		}
+	}
+	// HDR on a card: the color description is written as for the processor, and the card's own
+	// encoder carries the metadata — the probe is what proves it survives.
+	for _, f := range cardFamilies {
+		for _, hdr := range []struct {
+			name     string
+			transfer string
+		}{
+			{"hdr10", "smpte2084"}, {"hlg", "arib-std-b67"},
+		} {
+			cases = append(cases, goldenCase{
+				name:    f.name + "-hevc-" + hdr.name + "-none-mkv",
+				summary: f.name + " hevc " + hdr.name + " none mkv",
+				plan: Plan{
+					Video:     VideoPlan{Codec: CodecHEVC, CRF: intp(22), Preset: "normal", Quality: 3},
+					Container: ContainerMKV, Output: "out.mkv",
+				},
+				info: goldenInfo(10, hdr.transfer),
+				rung: cardRung(f.family, CodecHEVC, f.device),
+			})
+		}
+	}
+	// The full GPU pipeline (L-HW-11): the card decodes and encodes, and nothing is uploaded. Only
+	// QSV and VA-API have it, and only without frame rate, tone mapping or a depth change.
+	for _, f := range cardFamilies[0:2] {
+		for _, depth := range []struct {
+			name string
+			info media.Info
+		}{
+			{"8", goldenInfo(8, "bt709")},
+			{"10sdr", goldenInfo(10, "bt709")},
+		} {
+			for _, scale := range []struct {
+				name  string
+				scale Scale
+			}{
+				{"none", Scale{}}, {"720", Scale{Height: 720}},
+			} {
+				cases = append(cases, goldenCase{
+					name:    f.name + "-full-hevc-" + depth.name + "-" + scale.name + "-mkv",
+					summary: f.name + " full hevc " + depth.name + " " + scale.name + " mkv",
+					plan: Plan{
+						Video: VideoPlan{
+							Codec: CodecHEVC, CRF: intp(22), Preset: "normal", Quality: 3, Scale: scale.scale,
+						},
+						Container: ContainerMKV, Output: "out.mkv",
+					},
+					info: depth.info,
+					rung: fullRung(f.family, CodecHEVC, f.device),
+				})
+			}
+		}
+	}
+	// Tone mapping runs on the processor, so these are hybrid rungs wherever the flow picks one.
+	for _, f := range cardFamilies {
+		cases = append(cases, goldenCase{
+			name:    f.name + "-hevc-tonemap-mkv",
+			summary: f.name + " hevc tonemap mkv",
+			plan: Plan{
+				Video:     VideoPlan{Codec: CodecHEVC, CRF: intp(22), Preset: "normal", Quality: 3, HDR: HDRTonemap},
+				Container: ContainerMKV, Output: "out.mkv",
+			},
+			info: goldenInfo(10, "smpte2084"),
+			rung: cardRung(f.family, CodecHEVC, f.device),
+		})
+	}
+	// L-HW-12's measured offsets at each slider position, on QSV's HEVC encoder.
+	for quality := 1; quality <= 5; quality++ {
+		cases = append(cases, goldenCase{
+			name:    "qsv-hevc-quality-" + strconv.Itoa(quality),
+			summary: "qsv hevc quality " + strconv.Itoa(quality),
+			plan: Plan{
+				Video:     VideoPlan{Codec: CodecHEVC, CRF: intp(22), Preset: "normal", Quality: quality},
+				Container: ContainerMKV, Output: "out.mkv",
+			},
+			info: goldenInfo(8, "bt709"),
+			rung: cardRung(FamilyQSV, CodecHEVC, ""),
+		})
+	}
+	// The speed choice per family: written as -preset on the two that have one, and a note on
+	// VA-API, which does not (L-HW-13).
+	for _, c := range []struct {
+		name string
+		rung Rung
+	}{
+		{"qsv-hevc-faster-mkv", cardRung(FamilyQSV, CodecHEVC, "")},
+		{"nvenc-hevc-slower-mkv", cardRung(FamilyNVENC, CodecHEVC, "")},
+		{"vaapi-hevc-faster-mkv", cardRung(FamilyVAAPI, CodecHEVC, renderNode)},
+	} {
+		preset := "faster"
+		if strings.Contains(c.name, "slower") {
+			preset = "slower"
+		}
+		cases = append(cases, goldenCase{
+			name:    c.name,
+			summary: strings.ReplaceAll(c.name, "-", " "),
+			plan: Plan{
+				Video:     VideoPlan{Codec: CodecHEVC, CRF: intp(22), Preset: preset, Quality: 3},
+				Container: ContainerMKV, Output: "out.mkv",
+			},
+			info: goldenInfo(8, "bt709"),
+			rung: c.rung,
+		})
+	}
+	// The speed choice on a card encoder of every codec: the card's own names, never SVT-AV1's
+	// numbers, which QSV refuses and NVENC reads upside down. AV1 gets both directions, because
+	// that is where the two scales disagree most.
+	for _, c := range []struct {
+		name   string
+		codec  Codec
+		preset string
+		rung   Rung
+	}{
+		{"qsv-h264-faster-mkv", CodecH264, "faster", cardRung(FamilyQSV, CodecH264, "")},
+		{"qsv-av1-faster-mkv", CodecAV1, "faster", cardRung(FamilyQSV, CodecAV1, "")},
+		{"qsv-av1-slower-mkv", CodecAV1, "slower", cardRung(FamilyQSV, CodecAV1, "")},
+		{"nvenc-h264-slower-mkv", CodecH264, "slower", cardRung(FamilyNVENC, CodecH264, "")},
+		{"nvenc-av1-faster-mkv", CodecAV1, "faster", cardRung(FamilyNVENC, CodecAV1, "")},
+		{"nvenc-av1-slower-mkv", CodecAV1, "slower", cardRung(FamilyNVENC, CodecAV1, "")},
+	} {
+		cases = append(cases, goldenCase{
+			name:    c.name,
+			summary: strings.ReplaceAll(c.name, "-", " "),
+			plan: Plan{
+				Video:     VideoPlan{Codec: c.codec, CRF: intp(22), Preset: c.preset, Quality: 3},
+				Container: ContainerMKV, Output: "out.mkv",
+			},
+			info: goldenInfo(8, "bt709"),
+			rung: c.rung,
+		})
+	}
 	return cases
 }
 

@@ -4,6 +4,7 @@ package encode
 
 import (
 	"errors"
+	"strconv"
 )
 
 // The four ways Build can refuse or stop. Callers use errors.Is, and the message is a sentence
@@ -105,7 +106,10 @@ type VideoPlan struct {
 	// Preset is the named choice "faster", "normal" or "slower"; empty means normal. Build maps
 	// it per encoder (L-HW-13).
 	Preset string
-	Scale  Scale
+	// Quality is the Quality slider's position (1..5) the CRF came from. It is only read for
+	// L-HW-12's measured card offsets; 0 means the plan does not say.
+	Quality int
+	Scale   Scale
 	// FPS is the output frame rate; zero keeps the source's.
 	FPS      float64
 	BitDepth BitDepth
@@ -192,17 +196,66 @@ func CPUEncoder(codec Codec) (string, bool) {
 	return "", false
 }
 
-// presets maps the page's named choice to each encoder's own name. Every list has "slower"; the
-// AV1 numbers are SVT-AV1's.
+// presets maps the page's named choice to the processor encoder's own name. Every list has "slower";
+// the AV1 numbers are SVT-AV1's.
 var presets = map[Codec]map[string]string{
 	CodecHEVC: {"faster": "fast", "normal": "medium", "slower": "slow"},
 	CodecH264: {"faster": "fast", "normal": "medium", "slower": "slow"},
 	CodecAV1:  {"faster": "8", "normal": "6", "slower": "4"},
 }
 
+// cardPresets maps the page's named choice to a card encoder's own name. A card has no SVT-AV1
+// numbers: QSV's AV1 preset is a different integer scale and NVENC's runs the other way, so the
+// number SVT wants means the wrong speed or is refused outright. Every card encoder that takes a
+// preset takes these ordinary names (L-HW-10); VA-API takes none and says so instead.
+var cardPresets = map[string]string{"faster": "fast", "normal": "medium", "slower": "slow"}
+
 // tags is the container codec tag each encoder writes (L-HW-13).
 var tags = map[Codec]string{
 	CodecHEVC: "hvc1",
 	CodecH264: "avc1",
 	CodecAV1:  "av01",
+}
+
+// CardEncoder is a card family's encoder name for a codec: hevc_qsv, h264_vaapi, av1_nvenc and so
+// on (L-HW-10). A family or codec it does not name is not a GPU rung. Whether the card really has
+// the encoder is the probe's question (internal/hw); this is only the name to ask for.
+func CardEncoder(family Family, codec Codec) (string, bool) {
+	var suffix string
+	switch family {
+	case FamilyQSV:
+		suffix = "qsv"
+	case FamilyVAAPI:
+		suffix = "vaapi"
+	case FamilyNVENC:
+		suffix = "nvenc"
+	default:
+		return "", false
+	}
+	switch codec {
+	case CodecHEVC, CodecH264, CodecAV1:
+		return string(codec) + "_" + suffix, true
+	}
+	return "", false
+}
+
+// cardQualityOffsets is L-HW-12's measured table: how far a card encoder's quality number moves
+// from the processor's CRF at each Quality slider position. Only QSV's HEVC encoder was measured;
+// every other family and format keeps the CRF as it is.
+var cardQualityOffsets = map[string]map[string]int{
+	"qsv": {"1": -2, "2": -2, "3": -1, "4": -1, "5": -1},
+}
+
+// CardQualityOffsets is L-HW-12's table, for the editor's ladder, which shows the numbers it will
+// write. The returned table is shared: callers must not change it.
+func CardQualityOffsets() map[string]map[string]int { return cardQualityOffsets }
+
+// cardQualityOffset is what qualityArgs adds to the CRF for a card rung. The measurements are QSV
+// HEVC's alone; another family or format uses the CRF as it is, and a plan that does not say which
+// slider position its CRF came from (0) gets no offset.
+func cardQualityOffset(family Family, codec Codec, quality int) int {
+	if family != FamilyQSV || codec != CodecHEVC || quality < 1 || quality > 5 {
+		return 0
+	}
+	return cardQualityOffsets["qsv"][strconv.Itoa(quality)]
 }

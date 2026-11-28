@@ -2,6 +2,8 @@
 
 package flow
 
+import "github.com/PeiceOfToast/shrink-your-shit/internal/encode"
+
 // The bitrate ladder is page 07's one recommended-numbers table: the Mb/s a level asks for at each
 // output size, format and level, plus the Quality slider's numbers and the offsets that turn them
 // into a file's CRF. The editor reads it from GET /api/v2/bitrate-ladder and the engine reads the
@@ -112,7 +114,9 @@ var ladder = BitrateLadder{
 		"2160": 1, "1440": 0, "1080": 0, "720": -1, "sd": -1,
 	},
 	ResolutionRow: map[string]string{"2160": "2160", "1080": "1080", "720": "720", "480": "sd"},
-	CardOffsets:   map[string]map[string]int{"qsv": {"1": -2, "2": -2, "3": -1, "4": -1, "5": -1}},
+	// The same L-HW-12 table the encoder applies: one source, so the number the editor shows is
+	// the number the CRF gets.
+	CardOffsets: encode.CardQualityOffsets(),
 }
 
 // Ladder returns page 07's recommended numbers. Callers must not change the value they get back:
