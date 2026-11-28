@@ -82,21 +82,6 @@ type RunInput struct {
 	StageBase string
 }
 
-// Want is the codec the runner must be able to encode.
-type Want struct {
-	Codec encode.Codec
-}
-
-// ProcessorPick is stage 1's encoder choice: the processor encoder for the codec, software decode.
-// Stage 2 replaces it with hw.Pick.
-func ProcessorPick(want Want) (encode.Rung, error) {
-	encoder, ok := encode.CPUEncoder(want.Codec)
-	if !ok {
-		return encode.Rung{}, fmt.Errorf("no processor encoder for %s", want.Codec)
-	}
-	return encode.Rung{Encoder: encoder, Family: encode.FamilyCPU, Decode: encode.DecodeSoftware}, nil
-}
-
 // recheckLook is how long a run waits before looking again at a file that changed since it was
 // scanned: long enough for a copy that just ended to settle, short enough not to hold a worker.
 const recheckLook = time.Second
@@ -225,43 +210,10 @@ func (e *engine) run(ctx context.Context) (res Result) {
 		plan.SidecarDir = staged.Folder
 	}
 
-	// 5. Build the command.
-	rung, err := e.pick(plan)
-	if err != nil {
-		return fatal("encoder.unavailable", err.Error(), "", NextEncoder)
-	}
-	built, err := encode.Build(plan, info, rung)
-	if err != nil {
-		if errors.Is(err, encode.ErrSkip) {
-			return skip("encode.skip", err.Error())
-		}
-		return fatal("encode.plan_failed", err.Error(), e.encodeOwner(decisions), NextFixWorkflow)
-	}
-	// A stream the file type cannot hold is left out of the output, and the note says which and
-	// why. Some of this is invisible to the check: Audio copies a track, so the flow's container
-	// rule sees "copy" and passes, while the source's own codec is one the file type refuses. The
-	// job log shows the plain sentence instead of dropping the track silently.
-	for _, note := range built.Notes {
-		e.emit(events.Event{Kind: events.KindWarning, Level: events.LevelWarn, Message: note})
-	}
-	argv := append([]string{"ffmpeg"}, built.Argv...)
-	// Build always ends the command with the plan's destination; the run writes the staged file.
-	if argv[len(argv)-1] != plan.Output {
-		return fatal("encode.plan_failed", "the command does not end in the output path", e.encodeOwner(decisions), NextFixWorkflow)
-	}
-	argv[len(argv)-1] = staged.Path
-	e.command(argv)
-
-	run, err := e.env.Media.Run(ctx, argv, e.env.Progress)
-	e.writeRaw(run)
-	if res = ctxStop(ctx); res.Outcome != "" {
+	// 5. Convert. Inside one attempt the file goes down the ladder — the full pipeline, then the
+	// hybrid, then the processor — and never back up (L-HW-5).
+	if res := e.convert(ctx, plan, info, decisions, staged); res.Outcome != "" {
 		return res
-	}
-	if err != nil {
-		return Result{
-			Outcome: OutcomeFatal, Reason: "encode.failed", Message: err.Error(),
-			FailedStep: e.encodeOwner(decisions), NextAction: NextRetryLog, KeyLines: run.KeyLines,
-		}
 	}
 
 	// 6. Check the result against the source (§7.1 checks 1-3 in stage 1).
@@ -529,14 +481,6 @@ func (e *engine) plan(ctx context.Context, rev Revision, info media.Info) (Decis
 			decision.Reason, decision.Label, dur, decision.Detail)
 	}
 	return d, plan, Result{}
-}
-
-// pick chooses this attempt's encoder. Nil means stage 1's processor picker.
-func (e *engine) pick(plan encode.Plan) (encode.Rung, error) {
-	if e.env.Pick == nil {
-		return ProcessorPick(Want{Codec: plan.Video.Codec})
-	}
-	return e.env.Pick(Want{Codec: plan.Video.Codec})
 }
 
 // encodeOwner is the step that owns the encoder: the video step, or the audio step when only the
