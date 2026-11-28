@@ -122,7 +122,7 @@ export function App() {
       page = sampleOnly() ? <Placeholder title="Workers" note="Not built yet. This screen isn't connected to the server yet; it comes in a later batch." /> : <WorkerPage id={route.id} />;
       break;
     case "systemLog":
-      page = sampleOnly() ? <Placeholder title="System log" note="Not built yet. This screen isn't connected to the server yet; it comes in a later batch." back={{ to: "/settings", label: "Back to Settings" }} /> : <SystemLog />;
+      page = sampleOnly("log") ? <Placeholder title="System log" note="Not built yet. This screen isn't connected to the server yet; it comes in a later batch." back={{ to: "/settings", label: "Back to Settings" }} /> : <SystemLog />;
       break;
     case "settings":
       page = <SettingsPage section={route.section} />;

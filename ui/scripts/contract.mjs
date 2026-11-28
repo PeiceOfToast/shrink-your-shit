@@ -42,6 +42,11 @@ files.forEach((f, i) => {
   }
   const base = String(golden.type ?? "").replace(/\[\]$/, "");
   const suffix = String(golden.type ?? "").slice(base.length);
+  // A built-in primitive (the sources list is a string array): checked as it is, with no type to import.
+  if (["string", "number", "boolean"].includes(base)) {
+    body.push(`export const c${i}: ${base}${suffix} = ${JSON.stringify(golden.body, null, 2)};`);
+    return;
+  }
   const ns = typesNames.has(base) ? "T" : flowNames.has(base) ? "F" : null;
   if (!ns) {
     problems.push(`${f}: type "${golden.type}" is not exported from types.ts or flowTypes.ts`);

@@ -13,7 +13,7 @@ test("SampleBanner shows only when sampleOnly says so (not inverted)", () => {
 test("Workers, a worker, and System log are the Not built yet placeholder while sample data is shown", () => {
   const app = src("../app.tsx");
   assert.equal((app.match(/sampleOnly\(\) \? <Placeholder title="Workers"/g) ?? []).length, 2);
-  assert.match(app, /sampleOnly\(\) \? <Placeholder title="System log"/);
+  assert.match(app, /sampleOnly\("log"\) \? <Placeholder title="System log"/);
 });
 
 test("Settings > Access says Not built yet while sample data is shown, with no token or password form", () => {

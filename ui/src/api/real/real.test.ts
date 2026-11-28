@@ -1,10 +1,12 @@
 // The real client's request paths and bodies, with a stubbed fetch (no server). Every call carries X-SYP: 1 and same-origin.
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { mock, test } from "node:test";
 import { request } from "../http.ts";
 import { ApiError } from "../errors.ts";
 import { convertAgain, getJobNeighbours, getJobs, runJobsAction } from "./jobs.ts";
 import { getLibraries, createLibrary, patchLibrary, deleteLibrary } from "./libraries.ts";
+import { getLog, getLogSources, getLogDownload, markLogSeen, subscribeAppEvents } from "./log.ts";
+import { readFileSync } from "node:fs";
 import { getSettings, patchSettings } from "./settings.ts";
 import { getTrash, restoreTrash } from "./trash.ts";
 import { getAttention, getOverview } from "./overview.ts";
@@ -237,4 +239,117 @@ test("removing a library sends DELETE and returns ok", async () => {
   assert.deepEqual(await deleteLibrary("2"), { ok: true });
   assert.equal(calls[0].url, "/api/v2/libraries/2");
   assert.equal(calls[0].init.method, "DELETE");
+});
+
+// The System log: the request's parameters and paths, and the replies (the goldens' bodies, read from the contract testdata).
+const golden = (name: string) => JSON.parse(readFileSync(new URL(`../../../../internal/api/testdata/contract/${name}`, import.meta.url), "utf8")).body;
+
+test("the log page sends its filters as the server reads them: level, source by display name, before, limit", async () => {
+  const calls = stub(200, JSON.stringify(golden("log.json")));
+  const page = await getLog({ level: "warn", source: "Web", before: 12, limit: 20 });
+  assert.equal(calls[0].url, "/api/v2/log?level=warn&source=Web&before=12&limit=20");
+  assert.equal(calls[0].init.method, "GET");
+  assert.deepEqual(page, golden("log.json"));
+});
+
+test("debug lines go out as detail=1, never detail=true (the server refuses true with a 400)", async () => {
+  const on = stub(200, JSON.stringify(golden("log.json")));
+  await getLog({ limit: 1, detail: true });
+  assert.equal(on[0].url, "/api/v2/log?limit=1&detail=1");
+  const off = stub(200, JSON.stringify(golden("log.json")));
+  await getLog({ limit: 1, detail: false });
+  assert.equal(off[0].url, "/api/v2/log?limit=1");
+});
+
+test("the log page with no filters asks for the bare path", async () => {
+  const calls = stub(200, JSON.stringify(golden("log.json")));
+  await getLog();
+  assert.equal(calls[0].url, "/api/v2/log");
+});
+
+test("the log's sources are the names the server lists", async () => {
+  const calls = stub(200, JSON.stringify(golden("log-sources.json")));
+  assert.deepEqual(await getLogSources(), golden("log-sources.json"));
+  assert.equal(calls[0].url, "/api/v2/log/sources");
+});
+
+test("the log download is the plain text the server sends, with the same filters", async () => {
+  const calls = stub(200, "2026-11-28 06:00 scan started\n", "text/plain");
+  assert.equal(await getLogDownload({ level: "error" }), "2026-11-28 06:00 scan started\n");
+  assert.equal(calls[0].url, "/api/v2/log/download?level=error");
+});
+
+test("marking the log seen posts the seq and answers the seen seq, as the golden does", async () => {
+  const calls = stub(200, JSON.stringify(golden("log-seen.json")));
+  const out = await markLogSeen(3);
+  assert.equal(calls[0].url, "/api/v2/log/seen");
+  assert.equal(calls[0].init.method, "POST");
+  assert.deepEqual(JSON.parse(String(calls[0].init.body)), { seq: 3 });
+  assert.deepEqual(out, golden("log-seen.json"));
+});
+
+// Follow: the page polls the log every 4 s (fake timers here). Lines are oldest first; the first poll only remembers.
+const logItem = (seq: number) => ({ seq, ts: "2026-11-28T07:30:00Z", level: "info", kind: "note", source: "Web", message: `line ${seq}`, jobId: null, libraryId: null, workerId: null });
+const logPage = (seqs: number[]) => JSON.stringify({ counts: { info: seqs.length, warn: 0, error: 0 }, items: seqs.map(logItem) });
+const settle = async () => {
+  for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+};
+
+test("Follow: the first poll remembers the newest line, later polls emit only newer lines in order, and unsubscribing stops the polling", async () => {
+  const replies = [logPage([1, 2, 3]), logPage([1, 2, 3, 5, 4])];
+  const calls: string[] = [];
+  globalThis.fetch = (async (url: string) => {
+    calls.push(url);
+    const body = replies[Math.min(calls.length - 1, replies.length - 1)];
+    return new Response(body, { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+  mock.timers.enable({ apis: ["setInterval"] });
+  try {
+    const got: number[] = [];
+    const off = subscribeAppEvents((e) => got.push(e.seq));
+    await settle();
+    assert.deepEqual(got, [], "the first poll emits nothing");
+    assert.equal(calls[0], "/api/v2/log?limit=50&detail=1");
+    mock.timers.tick(4000);
+    await settle();
+    assert.deepEqual(got, [4, 5], "later polls emit only the newer lines, oldest first");
+    off();
+    const polls = calls.length;
+    mock.timers.tick(12000);
+    await settle();
+    assert.equal(calls.length, polls, "unsubscribing stops the polling");
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test("Follow: a failed poll is skipped, and the next poll emits what it missed", async () => {
+  const replies: (string | Error)[] = [logPage([1]), new Error("network down"), logPage([1, 2])];
+  let n = 0;
+  globalThis.fetch = (async () => {
+    const r = replies[Math.min(n++, replies.length - 1)];
+    if (r instanceof Error) throw r;
+    return new Response(r, { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+  mock.timers.enable({ apis: ["setInterval"] });
+  try {
+    const got: number[] = [];
+    const off = subscribeAppEvents((e) => got.push(e.seq));
+    await settle();
+    mock.timers.tick(4000);
+    await settle();
+    assert.deepEqual(got, [], "the failed poll emits nothing and is not an error");
+    mock.timers.tick(4000);
+    await settle();
+    assert.deepEqual(got, [2]);
+    off();
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test("the log download sends the debug switch as detail=1", async () => {
+  const calls = stub(200, "line\n", "text/plain");
+  assert.equal(await getLogDownload({ detail: true }), "line\n");
+  assert.equal(calls[0].url, "/api/v2/log/download?detail=1");
 });

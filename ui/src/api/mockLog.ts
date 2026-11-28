@@ -1,5 +1,5 @@
 // The mock System log (page 12 "Data and API"). Lines are the app-wide events of system/logging.md §3.
-import type { LogEvent, LogKind, LogLevel, LogPage, LogParams } from "./types.ts";
+import type { LogEvent, LogKind, LogLevel, LogPage, LogParams, LogSeen } from "./types.ts";
 import { noLibrariesYet, onForcedStateChange, respond } from "./mockState.ts";
 import { minsAgo } from "./fixtures/clock.ts";
 import { clockPrecise } from "../format/time.ts";
@@ -169,11 +169,11 @@ let seenSeq = START_SEEN;
 export function getSeenSeq(): number {
   return seenSeq;
 }
-export function markLogSeen(seq: number): Promise<{ ok: true }> {
+export function markLogSeen(seq: number): Promise<LogSeen> {
   return respond(() => {
     seenSeq = Math.max(seenSeq, seq);
     notifySummaryChanged();
-    return { ok: true as const };
+    return { seenSeq };
   });
 }
 
