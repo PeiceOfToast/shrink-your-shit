@@ -28,18 +28,34 @@ const (
 	logFoldWindow  = 10 * time.Minute
 )
 
-// logSources is the fixed list the page filters by. A new worker is added here when the workers land (#896).
-var logSources = []logSource{
-	{Source: "Scanner", Label: "Scanner"},
-	{Source: "Web", Label: "Web"},
-	{Source: "Updates", Label: "Updates"},
-	{Source: "Notifications", Label: "Notifications"},
-	{Source: "Health check", Label: "Health check"},
+// logSources is the list the page's source filter offers, in the names a person reads. A line's source is shown as its
+// display name, and the filter matches the stored names behind it. A new worker is added here when the workers land (#896).
+var logSources = []string{"Scanner", "Web", "Updates", "Notifications", "Health check"}
+
+// storedToDisplay maps a stored source (the lowercase names the emitters write today) to the name the page shows.
+// A stored name with no entry is shown as it is.
+var storedToDisplay = map[string]string{
+	"library":  "Scanner",
+	"safety":   "Scanner",
+	"settings": "Web",
 }
 
-type logSource struct {
-	Source string `json:"source"`
-	Label  string `json:"label"`
+func displayOf(stored string) string {
+	if d, ok := storedToDisplay[stored]; ok {
+		return d
+	}
+	return stored
+}
+
+// storedFor is every stored source that shows as display, plus display itself.
+func storedFor(display string) []string {
+	out := []string{display}
+	for stored, d := range storedToDisplay {
+		if d == display {
+			out = append(out, stored)
+		}
+	}
+	return out
 }
 
 // appLine is one app-wide line. Seq is the row id; before, since and seen all use it.
@@ -50,6 +66,7 @@ type appLine struct {
 	Kind      string     `json:"kind"`
 	Source    string     `json:"source"`
 	Message   string     `json:"message"`
+	JobID     *string    `json:"jobId"`
 	LibraryID *string    `json:"libraryId"`
 	WorkerID  *string    `json:"workerId"`
 	Repeat    *logRepeat `json:"repeat,omitempty"`
@@ -92,8 +109,11 @@ type logQuery struct {
 func logFilter(w http.ResponseWriter, r *http.Request) (logQuery, bool) {
 	q := r.URL.Query()
 	var out logQuery
-	f := events.Filter{AppOnly: true, Source: q.Get("source"), Library: q.Get("library"), Worker: q.Get("worker"), Text: q.Get("q")}
-	for field, v := range map[string]string{"source": f.Source, "library": f.Library, "worker": f.Worker} {
+	f := events.Filter{AppOnly: true, Library: q.Get("library"), Worker: q.Get("worker"), Text: q.Get("q")}
+	if src := q.Get("source"); src != "" {
+		f.Sources = storedFor(src)
+	}
+	for field, v := range map[string]string{"source": q.Get("source"), "library": f.Library, "worker": f.Worker} {
 		if len(v) > 64 {
 			writeError(w, http.StatusBadRequest, "invalid_setting", "Keep this filter under 64 characters.", field, 0)
 			return out, false
@@ -108,17 +128,18 @@ func logFilter(w http.ResponseWriter, r *http.Request) (logQuery, bool) {
 		writeError(w, http.StatusBadRequest, "invalid_setting", "Use detail=1 to show debug lines, or leave it out.", "detail", 0)
 		return out, false
 	}
+	// Empty is every level but debug (info and up). A named level is exactly that level, as the page's tabs are.
 	switch q.Get("level") {
 	case "":
 		if detail != "1" {
 			f.MinLevel = events.LevelInfo
 		}
 	case "info":
-		f.MinLevel = events.LevelInfo
+		f.Level = events.LevelInfo
 	case "warn":
-		f.MinLevel = events.LevelWarn
+		f.Level = events.LevelWarn
 	case "error":
-		f.MinLevel = events.LevelError
+		f.Level = events.LevelError
 	default:
 		writeError(w, http.StatusBadRequest, "invalid_setting", "Pick info, warnings or errors.", "level", 0)
 		return out, false
@@ -236,12 +257,12 @@ func foldRepeats(evs []events.Event) []appLine {
 
 func lineOf(e events.Event) appLine {
 	return appLine{
-		Seq: e.RowID, TS: timeJSON2(e.TS), Level: string(e.Level), Kind: string(e.Kind), Source: e.Source,
-		Message: e.Message, LibraryID: strOrNil(e.LibraryID), WorkerID: strOrNil(e.WorkerID),
+		Seq: e.RowID, TS: timeJSON2(e.TS), Level: string(e.Level), Kind: string(e.Kind), Source: displayOf(e.Source),
+		Message: e.Message, JobID: idOrNil(e.JobID), LibraryID: strOrNil(e.LibraryID), WorkerID: strOrNil(e.WorkerID),
 	}
 }
 
-// getLogSources is GET /api/v2/log/sources: the fixed list the source filter offers.
+// getLogSources is GET /api/v2/log/sources: the names the source filter offers, as a string array.
 func (s *Server) getLogSources(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, logSources)
 }
@@ -282,7 +303,7 @@ func (s *Server) logDownload(w http.ResponseWriter, r *http.Request) {
 	sort.SliceStable(all, func(i, j int) bool { return all[i].TS.Before(all[j].TS) })
 	var b strings.Builder
 	for _, e := range all {
-		fmt.Fprintf(&b, "%s  %-5s  %s  %s\n", e.TS.Format("2006-01-02 15:04:05.000"), strings.ToUpper(string(e.Level)), e.Source, e.Message)
+		fmt.Fprintf(&b, "%s  %-5s  %s  %s\n", e.TS.Format("2006-01-02 15:04:05.000"), strings.ToUpper(string(e.Level)), displayOf(e.Source), e.Message)
 	}
 	if truncated {
 		fmt.Fprintf(&b, "Download stopped at %d lines. Narrow the filters to get the rest.\n", logDownloadMax)

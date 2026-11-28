@@ -177,6 +177,10 @@ type Filter struct {
 	Library    string
 	Worker     string
 	Text       string
+	// Level is an exact level (the page's Warnings tab lists only warnings). Sources, when set, matches any of the
+	// stored source values, so one display name can cover several.
+	Level   Level
+	Sources []string
 }
 
 func (f Filter) match(e Event) bool {

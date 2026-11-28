@@ -139,8 +139,11 @@ func TestLogDetailGateAndLevelFilter(t *testing.T) {
 	if m := messages(getLog(t, e, "/api/v2/log?detail=1")); len(m) != 3 {
 		t.Errorf("detail=1 items = %v, want the three stored lines", m)
 	}
-	if m := messages(getLog(t, e, "/api/v2/log?level=warn")); strings.Join(m, "|") != "error line|warn line" {
-		t.Errorf("level=warn items = %v, want warnings and errors", m)
+	if m := messages(getLog(t, e, "/api/v2/log?level=warn")); strings.Join(m, "|") != "warn line" {
+		t.Errorf("level=warn items = %v, want the warning only (an exact level, as the tab)", m)
+	}
+	if m := messages(getLog(t, e, "/api/v2/log")); strings.Join(m, "|") != "error line|warn line|info line" {
+		t.Errorf("empty level items = %v, want info, warnings and errors", m)
 	}
 	if m := messages(getLog(t, e, "/api/v2/log?level=error")); strings.Join(m, "|") != "error line" {
 		t.Errorf("level=error items = %v, want the error only", m)
@@ -226,6 +229,25 @@ func TestLogFoldsRepeats(t *testing.T) {
 	}
 }
 
+// A stored source shows as its display name, and the source filter matches the stored names behind that name.
+func TestLogSourceNamesMatchTheFilter(t *testing.T) {
+	e := newEnv(t, true)
+	seedLog(t, e,
+		events.Event{Source: "library", Level: events.LevelInfo, Message: "scan done", TS: logT0},
+		events.Event{Source: "settings", Level: events.LevelInfo, Message: "setting saved", TS: logT0.Add(time.Minute)},
+	)
+	got := getLog(t, e, "/api/v2/log")
+	if len(got.Items) != 2 || got.Items[1].Source != "Scanner" || got.Items[0].Source != "Web" {
+		t.Fatalf("items = %+v, want the library line shown as Scanner and the settings line as Web", got.Items)
+	}
+	if m := messages(getLog(t, e, "/api/v2/log?source=Scanner")); strings.Join(m, "|") != "scan done" {
+		t.Errorf("source=Scanner = %v, want the library line", m)
+	}
+	if m := messages(getLog(t, e, "/api/v2/log?source=Web")); strings.Join(m, "|") != "setting saved" {
+		t.Errorf("source=Web = %v, want the settings line", m)
+	}
+}
+
 func TestLogSources(t *testing.T) {
 	e := newEnv(t, true)
 	seedLog(t, e)
@@ -233,13 +255,13 @@ func TestLogSources(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET sources = %d", rec.Code)
 	}
-	var list []logSource
+	var list []string
 	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil {
 		t.Fatal(err)
 	}
 	have := map[string]bool{}
 	for _, s := range list {
-		have[s.Source] = true
+		have[s] = true
 	}
 	for _, want := range []string{"Scanner", "Web", "Updates", "Notifications", "Health check"} {
 		if !have[want] {

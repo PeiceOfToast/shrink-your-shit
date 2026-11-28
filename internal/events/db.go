@@ -271,6 +271,17 @@ func (b *Bus) where(f Filter, withLevel bool) ([]string, []any, error) {
 	if f.Attempt != 0 {
 		add("attempt = ?", f.Attempt)
 	}
+	if withLevel && f.Level != "" {
+		add("level = ?", string(f.Level))
+	}
+	if len(f.Sources) > 0 {
+		marks := strings.TrimSuffix(strings.Repeat("?, ", len(f.Sources)), ", ")
+		var vals []any
+		for _, v := range f.Sources {
+			vals = append(vals, v)
+		}
+		add("source IN ("+marks+")", vals...)
+	}
 	if withLevel && f.MinLevel != "" {
 		levels := levelsAtLeast(f.MinLevel)
 		if len(levels) == 0 {
@@ -322,6 +333,7 @@ func (b *Bus) Counts(ctx context.Context, f Filter) (map[Level]int, error) {
 		return nil, errors.New("events: no database is open for queries")
 	}
 	f.MinLevel = ""
+	f.Level = ""
 	where, args, err := b.where(f, false)
 	if err != nil {
 		return nil, err

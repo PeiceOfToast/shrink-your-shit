@@ -11,7 +11,7 @@ import (
 )
 
 // The System log goldens (page 12). The lines carry fixed times, so the goldens do not move with the date. The UI's
-// types.ts names the types AppLogPage, LogSource and LogSeen.
+// types.ts names the types AppLogPage and LogSeen; the sources are a string array.
 func TestContractLogGoldens(t *testing.T) {
 	e := newEnv(t, true)
 	seedLog(t, e,
@@ -28,7 +28,7 @@ func TestContractLogGoldens(t *testing.T) {
 	writeGolden(t, "log", "AppLogPage", "GET", "/api/v2/log", rec)
 
 	rec = e.do("GET", "/api/v2/log/sources", "", logHeaders(), false)
-	writeGolden(t, "log-sources", "LogSource[]", "GET", "/api/v2/log/sources", rec)
+	writeGolden(t, "log-sources", "string[]", "GET", "/api/v2/log/sources", rec)
 
 	seq := getLog(t, e, "/api/v2/log?level=error").Items[0].Seq
 	rec = e.do("POST", "/api/v2/log/seen", `{"seq":`+itoa(seq)+`}`, logHeaders(), false)

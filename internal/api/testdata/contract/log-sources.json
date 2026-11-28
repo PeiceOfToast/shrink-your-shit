@@ -1,28 +1,13 @@
 {
   "body": [
-    {
-      "label": "Scanner",
-      "source": "Scanner"
-    },
-    {
-      "label": "Web",
-      "source": "Web"
-    },
-    {
-      "label": "Updates",
-      "source": "Updates"
-    },
-    {
-      "label": "Notifications",
-      "source": "Notifications"
-    },
-    {
-      "label": "Health check",
-      "source": "Health check"
-    }
+    "Scanner",
+    "Web",
+    "Updates",
+    "Notifications",
+    "Health check"
   ],
   "method": "GET",
   "path": "/api/v2/log/sources",
   "status": 200,
-  "type": "LogSource[]"
+  "type": "string[]"
 }
