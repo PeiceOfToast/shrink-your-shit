@@ -125,6 +125,10 @@ trap 'exit 130' INT TERM
 
 # --- what the container installs ------------------------------------------------------------------
 step "The installer to test"
+# The code this log proves: the commit the script itself is checked out at, and the version stamped
+# into the binary being installed. A log without them cannot be matched to a diff later.
+COMMIT=$(git -C "$(dirname "$0")/../.." rev-parse HEAD 2>/dev/null || echo unknown)
+say "commit: $COMMIT"
 ART="${SYP_ARTIFACTS:-}"
 if [ -n "$ART" ]; then
   say "using the prepared folder $ART"
@@ -138,6 +142,9 @@ if [ -n "$ART" ]; then
   fi
   pass "artifacts have syp-linux-amd64, install.sh and checksums.txt"
   say "syp-linux-amd64 sha256: $(sha256sum "$ART/syp-linux-amd64" | cut -d' ' -f1)"
+  # The binary's own -X main.version, so the log names what the installer installed. A copy built for
+  # another architecture (or not runnable here) still leaves the commit line above.
+  say "binary version: $("$ART/syp-linux-amd64" version 2>/dev/null || echo unknown)"
 else
   say "the published release, the exact one-liner with no SYP_BASE_URL:"
   say "  $ONE_LINER"
@@ -326,6 +333,16 @@ case " $raf " in
     esac ;;
   *) fail "RestrictAddressFamilies has no AF_INET, so a share's host name cannot be resolved: '$raf'" ;;
 esac
+# The hardening that narrows the helper without giving it a namespace. The namespace equality below is
+# what fails if someone adds an option that makes one.
+for prop in ProtectHostname RestrictRealtime LockPersonality ProtectClock; do
+  val=$(ct "systemctl show -p $prop --value syp-mount.service" 2>/dev/null || true)
+  if [ "$val" = yes ]; then
+    pass "the unit sets $prop=yes"
+  else
+    fail "the unit's $prop is '$val', wanted 'yes'"
+  fi
+done
 # The helper must refuse a shares folder under the app's data folder: /var/lib/syp belongs to syp, so
 # syp could swap a folder inside it between the helper's check and its mkdir, chown or mount.
 ct '/usr/local/bin/syp helper -shares /var/lib/syp/shares' >"$WORK/refuse.out" 2>&1 && refuse_rc=0 || refuse_rc=$?
@@ -389,8 +406,10 @@ else
   fail "/run/syp is '$run', not '750 root syp'"
 fi
 # The helper must act in the host's mount namespace. systemd gives a unit a private one as soon as it
-# has ProtectSystem=, ProtectHome= or ReadWritePaths=, and a mount made there is invisible to the app
-# (measured on Debian 12: the helper answered ok and the app saw an empty folder).
+# has ProtectSystem=, ProtectHome= or ReadWritePaths=, with / a slave of the host's, so a mount made
+# there would stay there. This check is the guard against one being added back.
+# The expansion happens in the container, not here.
+# shellcheck disable=SC2016
 helper_ns=$(ct 'readlink /proc/$(systemctl show -p MainPID --value syp-mount.service)/ns/mnt' 2>/dev/null || true)
 host_ns=$(ct 'readlink /proc/1/ns/mnt' 2>/dev/null || true)
 if [ -n "$helper_ns" ] && [ "$helper_ns" = "$host_ns" ]; then

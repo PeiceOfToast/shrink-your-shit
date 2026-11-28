@@ -423,10 +423,18 @@ ExecStart=$BIN helper
 # AF_UNIX alone, getent hosts fails inside this unit); raw and packet sockets stay out.
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 NoNewPrivileges=yes
+# Hardening that narrows the helper without a mount namespace of its own: ProtectHostname (a UTS
+# namespace with a fixed host name), RestrictRealtime and LockPersonality (seccomp) and ProtectClock
+# (which takes CAP_SYS_TIME away). Measured on Debian 12 (systemd 252), all four set: the unit's
+# /proc/self/ns/mnt is PID 1's, and its SMB and NFS mounts reach the app.
+ProtectHostname=yes
+RestrictRealtime=yes
+LockPersonality=yes
+ProtectClock=yes
 # No ProtectSystem=/ProtectHome=/ReadWritePaths= here. Each of them makes systemd give this unit a
-# private mount namespace, and a mount made there lives only in that namespace: measured on Debian 12,
-# the helper answered ok while the app saw an empty folder (the service's / is shared,slave). A mount
-# helper must act in the host's mount namespace, so path protection is not available to it.
+# private mount namespace whose / is a slave of the host's, and a mount made there stays in it: the
+# host, syp.service and every other reader of the share would not see it. A mount helper must act in
+# the host's mount namespace, so path protection is not available to it.
 EOF
 mv -f "$MOUNT_SERVICE.new" "$MOUNT_SERVICE"
 
@@ -437,6 +445,13 @@ systemctl restart syp
 # leaves an old helper answering on a replaced socket.
 systemctl enable syp-mount.socket >/dev/null
 systemctl restart syp-mount.socket
+# A socket unit that did not come up would otherwise install "successfully", and only the app's share
+# error would show it. The socket listens, so the service itself is started by its first request.
+if ! systemctl is-active --quiet syp-mount.socket; then
+  say "syp-mount.socket did not come up. The last 30 log lines:"
+  journalctl -u syp-mount.socket -n 30 --no-pager || true
+  exit 1
+fi
 
 say "Waiting for syp to answer"
 ok=no
