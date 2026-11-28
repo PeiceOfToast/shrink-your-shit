@@ -1,10 +1,12 @@
 // The real client's request paths and bodies, with a stubbed fetch (no server). Every call carries X-SYP: 1 and same-origin.
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { request } from "../http.ts";
 import { ApiError } from "../errors.ts";
 import { convertAgain, getJobNeighbours, getJobs, runJobsAction } from "./jobs.ts";
-import { getLibraries, createLibrary, patchLibrary, deleteLibrary } from "./libraries.ts";
+import { getLibraries, createLibrary, patchLibrary, deleteLibrary, getPreview } from "./libraries.ts";
+import { PREVIEW } from "../fixtures/libraries.ts";
 import { getSettings, patchSettings } from "./settings.ts";
 import { getTrash, restoreTrash } from "./trash.ts";
 import { getAttention, getOverview } from "./overview.ts";
@@ -237,4 +239,20 @@ test("removing a library sends DELETE and returns ok", async () => {
   assert.deepEqual(await deleteLibrary("2"), { ok: true });
   assert.equal(calls[0].url, "/api/v2/libraries/2");
   assert.equal(calls[0].init.method, "DELETE");
+});
+
+// The library preview: the server's preview of a workflow on a library, against the golden (type Preview).
+test("the library preview is read from its path with the workflow, and has the golden's shape", async () => {
+  const golden = JSON.parse(readFileSync(new URL("../../../../internal/api/testdata/contract/library-preview.json", import.meta.url), "utf8")).body;
+  const calls = stub(200, JSON.stringify(golden));
+  const out = await getPreview("2", "wf-1");
+  assert.equal(calls[0].url, "/api/v2/libraries/2/preview?workflowId=wf-1");
+  assert.equal(calls[0].init.method, "GET");
+  assert.deepEqual(out, golden);
+});
+
+test("the sample preview's skipped reasons are the server's reason codes", () => {
+  const codes = new Set(["nothing_to_do", "plan_failed", "workflow_missing", "unknown"]);
+  const fixtures = [...Object.values(PREVIEW)];
+  for (const p of fixtures) for (const s of p.skipped) assert.ok(codes.has(s.reason), s.reason);
 });
