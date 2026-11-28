@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -181,7 +182,11 @@ func TestContractGoldens(t *testing.T) {
 		e.do(http.MethodGet, "/api/v2/summary", "", withSession(cookie), false), dir)
 	writeGolden(t, "attention", "Attention[]", http.MethodGet, "/api/v2/attention",
 		e.do(http.MethodGet, "/api/v2/attention", "", withSession(cookie), false), dir)
-	// The health check (page 11): the checks over the test's clock, at a library folder the golden normalizes.
+	// The health check (page 11): the checks over the test's clock, at a library folder the golden normalizes. The
+	// first pass is run here because the route only answers once there is a result.
+	if e.doctor != nil {
+		e.doctor.Run(context.Background())
+	}
 	writeGolden(t, "doctor", "Doctor", http.MethodGet, "/api/v2/doctor",
 		e.do(http.MethodGet, "/api/v2/doctor", "", withSession(cookie), false), dir)
 

@@ -5,8 +5,10 @@ package api
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -52,7 +54,7 @@ func TestDoctorRouteServesTheChecks(t *testing.T) {
 	lib := t.TempDir()
 	cookie := cookieNamed(t, e.do(http.MethodPost, "/api/v2/setup",
 		setupWith(t, map[string]any{"name": "Films", "path": lib}), write(nil), false), sessionCookie)
-	got := e.getDoctor(t, "/api/v2/doctor", cookie)
+	got := e.getDoctor(t, "/api/v2/doctor?retest=1", cookie)
 	if got.RanAt != "2026-11-27T04:00:00Z" {
 		t.Errorf("ranAt = %q, want the server clock's 2026-11-27T04:00:00Z", got.RanAt)
 	}
@@ -82,7 +84,7 @@ func TestDoctorRouteServesTheChecks(t *testing.T) {
 func TestDoctorServesTheLastRunAndRetests(t *testing.T) {
 	e := newEnv(t, true)
 	cookie := e.setup()
-	first := e.getDoctor(t, "/api/v2/doctor", cookie)
+	first := e.getDoctor(t, "/api/v2/doctor?retest=1", cookie)
 	e.clock.Advance(time.Minute)
 	second := e.getDoctor(t, "/api/v2/doctor", cookie)
 	if second.RanAt != first.RanAt {
@@ -108,8 +110,8 @@ func TestDoctorStatusChangeWritesOneHealthEvent(t *testing.T) {
 	})
 	e.ready()
 	cookie := e.setup()
-	e.getDoctor(t, "/api/v2/doctor", cookie) // all ok: nothing to say
-	e.getDoctor(t, "/api/v2/doctor", cookie) // still the last run: nothing to say
+	e.getDoctor(t, "/api/v2/doctor?retest=1", cookie) // all ok: nothing to say
+	e.getDoctor(t, "/api/v2/doctor", cookie)          // still the last run: nothing to say
 	free = 3 << 30
 	e.getDoctor(t, "/api/v2/doctor?retest=1", cookie) // the disk failed: one line
 	e.getDoctor(t, "/api/v2/doctor?retest=1", cookie) // unchanged: still one
@@ -123,6 +125,81 @@ func TestDoctorStatusChangeWritesOneHealthEvent(t *testing.T) {
 	}
 	if ev := evs[0]; ev.Code != "health.failed" || ev.Kind != events.KindWarning || ev.Level != events.LevelWarn {
 		t.Errorf("event = %+v, want a health.failed warning", ev)
+	}
+}
+
+// TestDoctorIsStartingUntilTheFirstRun: the server answers requests before its health check's first pass ends, so
+// GET /doctor says it is still starting rather than serving an empty list.
+func TestDoctorIsStartingUntilTheFirstRun(t *testing.T) {
+	e := newEnv(t, true)
+	e.ready()
+	cookie := e.setup()
+	rec := e.do(http.MethodGet, "/api/v2/doctor", "", withSession(cookie), false)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("GET /doctor before the first run = %d %s, want 503 starting", rec.Code, rec.Body)
+	}
+	e.doctor.Run(context.Background())
+	got := e.getDoctor(t, "/api/v2/doctor", cookie)
+	if got.RanAt != "2026-11-27T04:00:00Z" {
+		t.Errorf("ranAt after the first run = %q, want the server clock's 2026-11-27T04:00:00Z", got.RanAt)
+	}
+}
+
+// TestDoctorAnswersWhileTheChecksRun: GET /doctor serves the last run while a pass is waiting on a check, rather
+// than holding the request until the pass ends.
+func TestDoctorAnswersWhileTheChecksRun(t *testing.T) {
+	e := newEnv(t, false)
+	var slow atomic.Bool
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	e.doctor = system.NewDoctor(system.Sources{
+		Now:        e.clock.Now,
+		DataDir:    e.dir,
+		DiskFree:   func(string) (uint64, error) { return 400 << 30, nil },
+		LowSpaceGB: func() int { return 10 },
+		Tools: func(context.Context) (string, string, error) {
+			if slow.Load() {
+				select {
+				case started <- struct{}{}:
+				default:
+				}
+				<-release
+			}
+			return "7.0.2", "7.0.2", nil
+		},
+	})
+	e.ready()
+	cookie := e.setup()
+	first := e.getDoctor(t, "/api/v2/doctor?retest=1", cookie)
+	slow.Store(true)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		e.doctor.Report(context.Background(), true)
+	}()
+	defer func() {
+		close(release)
+		<-done
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the retest never reached the tools check")
+	}
+	served := make(chan *httptest.ResponseRecorder, 1)
+	go func() { served <- e.do(http.MethodGet, "/api/v2/doctor", "", withSession(cookie), false) }()
+	select {
+	case rec := <-served:
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /doctor during a pass = %d %s, want the last run", rec.Code, rec.Body)
+		}
+		var got doctorJSON
+		decodeInto(t, rec, &got)
+		if got.RanAt != first.RanAt {
+			t.Errorf("ranAt during a pass = %q, want the last run's %q", got.RanAt, first.RanAt)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("GET /doctor waited for the pass that is still running")
 	}
 }
 
@@ -153,7 +230,7 @@ func TestDoctorLibraryFolderIsChecked(t *testing.T) {
 	if err := os.RemoveAll(lib); err != nil {
 		t.Fatal(err)
 	}
-	got := e.getDoctor(t, "/api/v2/doctor", cookie)
+	got := e.getDoctor(t, "/api/v2/doctor?retest=1", cookie)
 	var found bool
 	for _, c := range got.Checks {
 		if c.ID == "library-1" {

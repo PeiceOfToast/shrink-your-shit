@@ -86,16 +86,33 @@ const LowSpaceDefault = 10
 // Every is how often the checks run after the start's first run. A variable so a test can shorten it.
 var Every = 5 * time.Minute
 
+// LibraryEvery is how often the library folders are checked. A folder check writes a small file into the person's
+// media, so it runs once an hour rather than with every pass (and on ?retest=1). A variable so a test can shorten it.
+var LibraryEvery = time.Hour
+
+// LibraryTimeout is how long one library folder gets to answer before the check calls it a problem. A folder on a
+// share that has gone away can hold a read for a long time; the pass must not wait with it. A variable so a test
+// can shorten it.
+var LibraryTimeout = 10 * time.Second
+
+// checkLibrary is one folder's check, a variable so a test can make one hang.
+var checkLibrary = libraryCheck
+
 // The fix for the graphics card check: page 10's Test the encoders, which starts the pass whose result the check
 // reports. Its POST answers the run's id, not a doctor: a page asks GET /doctor once the run has finished.
 var testEncoders = &Fix{Label: "Test the encoders", Method: "POST", Path: "/api/v2/workers/local/capabilities/test"}
 
 // Doctor is the app's health check (page 11): the checks it runs on itself and their last answer.
 type Doctor struct {
-	src  Sources
-	mu   sync.Mutex
-	last Result
-	ran  bool
+	src Sources
+	// runMu lets one pass run at a time; a pass holds it while it reads the machine, not while a report is served.
+	runMu sync.Mutex
+	// mu guards the last run and the library checks kept from it.
+	mu     sync.Mutex
+	last   Result
+	ran    bool
+	libs   []Check
+	libsAt time.Time
 }
 
 // NewDoctor makes the health check. now nil is time.Now.
@@ -106,10 +123,11 @@ func NewDoctor(src Sources) *Doctor {
 	return &Doctor{src: src}
 }
 
-// Start runs the checks now, then every Every until ctx ends.
+// Start runs the checks in the background now, then every Every until ctx ends. It returns at once: the checks read
+// the machine (a library folder on a share can be slow to answer) and the API must not wait for the first pass.
 func (d *Doctor) Start(ctx context.Context) {
-	d.Run(ctx)
 	go func() {
+		d.Run(ctx)
 		t := time.NewTicker(Every)
 		defer t.Stop()
 		for {
@@ -123,39 +141,55 @@ func (d *Doctor) Start(ctx context.Context) {
 	}()
 }
 
-// Report is GET /doctor: the last run, or a run now when retest is asked for or nothing has run yet.
-func (d *Doctor) Report(ctx context.Context, retest bool) Result {
+// Report is GET /doctor: the last run, and whether there has been one yet. retest runs the checks now instead, with
+// the library folders too. A plain report takes the state lock only for a moment, so it answers while a pass runs.
+func (d *Doctor) Report(ctx context.Context, retest bool) (Result, bool) {
+	if retest {
+		return d.run(ctx, true), true
+	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if d.ran && !retest {
-		return d.last
-	}
-	return d.run(ctx)
+	return d.last, d.ran
 }
 
 // Run checks the app now and keeps the answer as the last run.
-func (d *Doctor) Run(ctx context.Context) Result {
+func (d *Doctor) Run(ctx context.Context) Result { return d.run(ctx, false) }
+
+// run is one pass of every check. The checks run outside every lock, so a pass that is waiting on a share neither
+// holds up a report nor a retest; the answer is swapped in under the state lock. A check whose status changed since
+// the last run is said once in the system log (source health), and only a change: the log records what happened, not
+// every run. The library folders are checked on their own hourly schedule unless withLibs asks for them now.
+func (d *Doctor) run(ctx context.Context, withLibs bool) Result {
+	d.runMu.Lock()
+	defer d.runMu.Unlock()
+
 	d.mu.Lock()
-	defer d.mu.Unlock()
-	return d.run(ctx)
-}
+	cached, libsAt := d.libs, d.libsAt
+	d.mu.Unlock()
 
-// run is one pass of every check; the caller holds d.mu. A check whose status changed since the last run is said
-// once in the system log (source health), and only a change: the log records what happened, not every run.
-func (d *Doctor) run(ctx context.Context) Result {
-	res := Result{RanAt: d.src.Now().UTC(), Checks: d.checks(ctx)}
-	d.say(d.last, res, d.ran)
-	d.last, d.ran = res, true
-	return res
-}
-
-// checks runs every check that has a source, in the page's order.
-func (d *Doctor) checks(ctx context.Context) []Check {
+	now := d.src.Now().UTC()
 	out := []Check{d.disk(), d.tools(ctx), d.cards()}
+	var libs []Check
+	fresh := false
 	if d.src.Libraries != nil {
-		out = append(out, d.libraries(ctx)...)
+		libs = cached
+		if withLibs || libsAt.IsZero() || !now.Before(libsAt.Add(LibraryEvery)) {
+			libs, fresh = d.libraries(ctx), true
+		}
+		out = append(out, libs...)
 	}
-	return out
+	res := Result{RanAt: now, Checks: out}
+
+	d.mu.Lock()
+	was, ran := d.last, d.ran
+	d.last, d.ran = res, true
+	if fresh {
+		d.libs, d.libsAt = libs, now
+	}
+	d.mu.Unlock()
+
+	d.say(was, res, ran)
+	return res
 }
 
 // disk checks that the data folder can be written and that its disk has room for another file.
@@ -236,14 +270,34 @@ func (d *Doctor) libraries(ctx context.Context) []Check {
 	}
 	out := make([]Check, 0, len(libs))
 	for _, lib := range libs {
-		out = append(out, libraryCheck(lib))
+		out = append(out, folderCheckWithin(lib, LibraryTimeout))
 	}
 	return out
 }
 
+// folderCheckWithin is one library folder's check, given until timeout to answer. The check reads a folder the OS may
+// hold in a way that does not end (a share that has gone away), so it runs beside a timer: an answer that is late is
+// a problem, not a pass that waits.
+func folderCheckWithin(lib Library, timeout time.Duration) Check {
+	done := make(chan Check, 1)
+	go func() { done <- checkLibrary(lib) }()
+	select {
+	case c := <-done:
+		return c
+	case <-time.After(timeout):
+		return badCheck(folderCheck(lib), "The folder "+lib.Path+" did not answer in time.",
+			"Check the drive is connected, then run the check again.")
+	}
+}
+
+// folderCheck is the check for one library folder before it is run.
+func folderCheck(lib Library) Check {
+	return Check{ID: fmt.Sprintf("library-%d", lib.ID), Label: "Library " + lib.Name}
+}
+
 // libraryCheck is one library folder's answer.
 func libraryCheck(lib Library) Check {
-	c := Check{ID: fmt.Sprintf("library-%d", lib.ID), Label: "Library " + lib.Name}
+	c := folderCheck(lib)
 	fi, err := os.Stat(lib.Path)
 	if err != nil {
 		return badCheck(c, "The folder "+lib.Path+" can't be reached: "+err.Error()+".",

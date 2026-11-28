@@ -68,7 +68,7 @@ func statuses(res Result) map[string]Status {
 // TestDoctorEveryCheckOK: with a real tool, room on disk, a library folder and a tested card, every check is ok.
 func TestDoctorEveryCheckOK(t *testing.T) {
 	src, _ := healthy(t)
-	res := NewDoctor(src).Report(context.Background(), false)
+	res := NewDoctor(src).Run(context.Background())
 	got := statuses(res)
 	want := map[string]Status{"disk": OK, "tools": OK, "gpu": OK, "library-1": OK}
 	for id, status := range want {
@@ -136,7 +136,7 @@ func TestDoctorSaysWhatIsWrong(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			src, _ := healthy(t)
 			tc.fix(&src)
-			res := NewDoctor(src).Report(context.Background(), false)
+			res := NewDoctor(src).Run(context.Background())
 			c := find(res, tc.id)
 			if c == nil {
 				t.Fatalf("no %s check in %+v", tc.id, res.Checks)
@@ -203,8 +203,8 @@ func TestDoctorFirstRunSaysWhatIsWrong(t *testing.T) {
 	}
 }
 
-// TestDoctorServesTheLastRunUntilRetested: a plain read is the last run, even as time passes; ?retest=1 runs every
-// check again.
+// TestDoctorServesTheLastRunUntilRetested: before the first run a plain read says it has nothing yet; after it, a
+// plain read is the last run even as time passes; ?retest=1 runs every check again.
 func TestDoctorServesTheLastRunUntilRetested(t *testing.T) {
 	src, _ := healthy(t)
 	now := src.Now()
@@ -216,18 +216,21 @@ func TestDoctorServesTheLastRunUntilRetested(t *testing.T) {
 	src.Now = func() time.Time { return now }
 	d := NewDoctor(src)
 	ctx := context.Background()
-	first := d.Report(ctx, false)
+	if _, ok := d.Report(ctx, false); ok {
+		t.Fatal("a plain read before the first run said it had a result")
+	}
+	first := d.Run(ctx)
 	if calls != 1 {
-		t.Fatalf("the first read ran the tools check %d times, want once", calls)
+		t.Fatalf("the first run ran the tools check %d times, want once", calls)
 	}
 	now = now.Add(time.Minute)
-	second := d.Report(ctx, false)
-	if calls != 1 || !second.RanAt.Equal(first.RanAt) {
+	second, ok := d.Report(ctx, false)
+	if !ok || calls != 1 || !second.RanAt.Equal(first.RanAt) {
 		t.Errorf("a second read ran again (calls=%d, ranAt=%v), want the last run's %v", calls, second.RanAt, first.RanAt)
 	}
-	third := d.Report(ctx, true)
-	if calls != 2 {
-		t.Errorf("retest ran the tools check %d times, want twice", calls)
+	third, ok := d.Report(ctx, true)
+	if !ok || calls != 2 {
+		t.Errorf("retest = (%v, %v) with %d tools calls, want a result after running them twice", third.RanAt, ok, calls)
 	}
 	if !third.RanAt.Equal(now) {
 		t.Errorf("retest ranAt = %v, want %v", third.RanAt, now)
@@ -237,7 +240,7 @@ func TestDoctorServesTheLastRunUntilRetested(t *testing.T) {
 // TestDoctorWithoutASourceIsAbsent: a check with nothing behind it is listed as absent rather than claiming the
 // machine is fine, and it has no fix of its own.
 func TestDoctorWithoutASourceIsAbsent(t *testing.T) {
-	res := NewDoctor(Sources{}).Report(context.Background(), false)
+	res := NewDoctor(Sources{}).Run(context.Background())
 	if got := statuses(res); got["disk"] != Absent || got["tools"] != Absent || got["gpu"] != Absent {
 		t.Errorf("statuses = %v, want disk, tools and gpu absent", got)
 	}
@@ -255,7 +258,7 @@ func TestDoctorWithoutASourceIsAbsent(t *testing.T) {
 // no route of their own carry no button.
 func TestDoctorFixOnlyWhereARouteExists(t *testing.T) {
 	src, _ := healthy(t)
-	res := NewDoctor(src).Report(context.Background(), false)
+	res := NewDoctor(src).Run(context.Background())
 	for _, c := range res.Checks {
 		if c.ID != "gpu" {
 			if c.Fix != nil {
@@ -270,7 +273,8 @@ func TestDoctorFixOnlyWhereARouteExists(t *testing.T) {
 	}
 }
 
-// TestDoctorStartRunsNowAndOnASchedule: Start checks once at once, then again on the interval, until ctx ends.
+// TestDoctorStartRunsNowAndOnASchedule: Start checks straight away in the background, then again on the interval,
+// until ctx ends.
 func TestDoctorStartRunsNowAndOnASchedule(t *testing.T) {
 	old := Every
 	Every = 5 * time.Millisecond
@@ -284,15 +288,155 @@ func TestDoctorStartRunsNowAndOnASchedule(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	NewDoctor(src).Start(ctx)
-	if runs.Load() != 1 {
-		t.Fatalf("Start ran the checks %d times, want the start's run first", runs.Load())
-	}
 	deadline := time.Now().Add(2 * time.Second)
+	// Start returns before its first pass ends, so the first run is waited for rather than assumed done.
 	for runs.Load() < 2 {
 		if time.Now().After(deadline) {
-			t.Fatalf("the schedule ran the checks %d times, want more than once", runs.Load())
+			t.Fatalf("the schedule ran the checks %d times, want the start's run and more", runs.Load())
 		}
 		time.Sleep(time.Millisecond)
+	}
+}
+
+// hangingLibrary makes every library check wait until release is closed, and reports when one has started.
+func hangingLibrary(t *testing.T, entered, release chan struct{}) {
+	t.Helper()
+	old := checkLibrary
+	checkLibrary = func(lib Library) Check {
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+		<-release
+		return old(lib)
+	}
+	t.Cleanup(func() { checkLibrary = old })
+}
+
+// TestDoctorStartDoesNotWaitForTheFirstRun: a library folder that does not answer must not hold up the start of the
+// app: Start returns at once and the checks answer later.
+func TestDoctorStartDoesNotWaitForTheFirstRun(t *testing.T) {
+	old := LibraryTimeout
+	LibraryTimeout = time.Hour
+	defer func() { LibraryTimeout = old }()
+	release := make(chan struct{})
+	defer close(release)
+	hangingLibrary(t, make(chan struct{}, 1), release)
+	src, _ := healthy(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	started := make(chan struct{})
+	go func() {
+		NewDoctor(src).Start(ctx)
+		close(started)
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Error("Start waited for a library that does not answer, want it to return at once")
+	}
+}
+
+// TestDoctorReportAnswersDuringARun: GET /doctor is answered while a pass is still waiting on a folder: it serves
+// the last run rather than queueing behind the pass.
+func TestDoctorReportAnswersDuringARun(t *testing.T) {
+	src, _ := healthy(t)
+	d := NewDoctor(src)
+	ctx := context.Background()
+	first := d.Run(ctx)
+
+	// A retest runs now and forces the library folders, so it is the pass that is waiting on the folder.
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	hangingLibrary(t, entered, release)
+	retestDone := make(chan struct{})
+	go func() {
+		defer close(retestDone)
+		d.Report(ctx, true)
+	}()
+	defer func() {
+		close(release)
+		<-retestDone
+	}()
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the retest never reached the library check")
+	}
+
+	type answer struct {
+		res Result
+		ok  bool
+	}
+	served := make(chan answer, 1)
+	go func() {
+		res, ok := d.Report(ctx, false)
+		served <- answer{res, ok}
+	}()
+	select {
+	case a := <-served:
+		if !a.ok || !a.res.RanAt.Equal(first.RanAt) {
+			t.Errorf("a read during a run = (%v, %v), want the last run's %v", a.res.RanAt, a.ok, first.RanAt)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("a read waited for the pass that is waiting on a folder")
+	}
+}
+
+// TestDoctorLibraryThatDoesNotAnswerIsBad: a folder that does not answer within its time is a problem, not a pass
+// that waits for it.
+func TestDoctorLibraryThatDoesNotAnswerIsBad(t *testing.T) {
+	old := LibraryTimeout
+	LibraryTimeout = 20 * time.Millisecond
+	defer func() { LibraryTimeout = old }()
+	release := make(chan struct{})
+	defer close(release)
+	hangingLibrary(t, make(chan struct{}, 1), release)
+	src, _ := healthy(t)
+	res := NewDoctor(src).Run(context.Background())
+	c := find(res, "library-1")
+	if c == nil {
+		t.Fatalf("no library-1 check in %+v", res.Checks)
+	}
+	if c.Status != Bad || !strings.Contains(c.Detail, "did not answer in time") {
+		t.Errorf("library-1 = %q %q, want bad with 'did not answer in time'", c.Status, c.Detail)
+	}
+}
+
+// TestDoctorLibrariesWaitTheirHour: the folder check writes into the person's media, so it runs on its own hourly
+// schedule; the other checks keep their five minutes, and a retest asks for the folders too.
+func TestDoctorLibrariesWaitTheirHour(t *testing.T) {
+	src, _ := healthy(t)
+	now := src.Now()
+	src.Now = func() time.Time { return now }
+	var checks int
+	src.Libraries = func(context.Context) ([]Library, error) {
+		checks++
+		return []Library{{ID: 1, Name: "Films", Path: t.TempDir()}}, nil
+	}
+	d := NewDoctor(src)
+	ctx := context.Background()
+	d.Run(ctx)
+	if checks != 1 {
+		t.Fatalf("the first run checked the folders %d times, want once", checks)
+	}
+	now = now.Add(5 * time.Minute)
+	res := d.Run(ctx)
+	if checks != 1 {
+		t.Errorf("a pass 5 minutes later checked the folders %d times, want the kept answer", checks)
+	}
+	if c := find(res, "library-1"); c == nil || c.Status != OK {
+		t.Errorf("the kept library check is missing from the pass: %+v", res.Checks)
+	}
+	now = now.Add(time.Hour)
+	d.Run(ctx)
+	if checks != 2 {
+		t.Errorf("an hour later the folders were checked %d times, want once more", checks)
+	}
+	now = now.Add(5 * time.Minute)
+	d.Report(ctx, true)
+	if checks != 3 {
+		t.Errorf("a retest left the folders checked %d times, want them checked again", checks)
 	}
 }
 
