@@ -66,3 +66,8 @@ export function addLiveLine(lines: LogEvent[], e: LogEvent): LogEvent[] {
   }
   return [...lines, e];
 }
+
+// What the page shows: the loaded lines, with the live lines folded in (a fold of a loaded line replaces it).
+export function showLines(loaded: LogEvent[], live: LogEvent[]): LogEvent[] {
+  return live.reduce(addLiveLine, loaded);
+}

@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { JobStep, LogEvent, LogKind, LogLevel } from "../api/types.ts";
-import { addLiveLine, logsFromEvents } from "./logParts.ts";
+import { addLiveLine, logsFromEvents, showLines } from "./logParts.ts";
 import { readFileSync } from "node:fs";
 
 const steps: JobStep[] = [
@@ -145,4 +145,12 @@ test("a new line, or one with no repeat, is added after the lines shown", () => 
 test("the page adds live lines with the helper, so a fold replaces its line", () => {
   const page = readFileSync(new URL("./SystemLog.tsx", import.meta.url), "utf8");
   assert.match(page, /setLive\(\(l\) => addLiveLine\(l, e\)\)/);
+});
+
+test("a fold of a line from the initial load replaces that line on the page, not a second copy", () => {
+  const loaded = [liveEv(2, "2026-11-28T06:59:00Z", "scan started"), liveEv(3, "2026-11-28T07:00:00Z", "sign-in refused")];
+  const fold = liveEv(4, "2026-11-28T07:00:09Z", "sign-in refused", { count: 2, firstAt: "2026-11-28T07:00:00Z", lastAt: "2026-11-28T07:00:09Z" });
+  const shown = showLines(loaded, [fold]);
+  assert.deepEqual(shown.map((l) => l.seq), [2, 4]);
+  assert.equal(shown[1].repeat?.count, 2);
 });
