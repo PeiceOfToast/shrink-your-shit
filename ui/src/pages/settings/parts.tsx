@@ -40,7 +40,7 @@ export function Row({
 }: {
   id?: string;
   label: string;
-  hint?: string;
+  hint?: ReactNode;
   field?: string;
   problem?: FieldProblem | null;
   children: ReactNode;
