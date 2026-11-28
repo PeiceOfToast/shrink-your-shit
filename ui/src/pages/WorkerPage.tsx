@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, navigate } from "../router.tsx";
 import { clock } from "../format/time.ts";
-import { api, onSummaryChanged, type Job, type WorkerDetail, type WorkerLibrary } from "../api/index.ts";
+import { api, ApiError, onSummaryChanged, type Job, type WorkerDetail, type WorkerLibrary } from "../api/index.ts";
 import { useApi } from "../api/useApi.ts";
 import { JobRow } from "./Jobs.tsx";
 import { PauseDialog, RemoveDialog, StatePill, errorText } from "./workerParts.tsx";
@@ -30,6 +30,9 @@ const settingsOf = (w: WorkerDetail): Settings => ({
   encoder: w.primaryEncoder ?? "auto",
 });
 
+// The worker's own settings: a refusal of one of these is shown under its field.
+const SETTING_FIELDS = ["slots", "gpuSlots", "hours", "primaryEncoder"];
+
 export function WorkerPage({ id }: { id: string }) {
   const worker = useApi(() => api.getWorker(id), [id]);
   const libs = useApi(() => api.getLibraries(), []);
@@ -44,6 +47,8 @@ export function WorkerPage({ id }: { id: string }) {
   const [dialog, setDialog] = useState<"pause" | "remove" | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // A refusal of one of the worker's own settings shows under that field, as Settings does; anything else stays in err.
+  const [fieldErr, setFieldErr] = useState<{ field: string; message: string } | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   // Which Save was just done, so "Saved." shows beside that Save button.
   const [savedWhere, setSavedWhere] = useState<"settings" | "libs" | null>(null);
@@ -79,13 +84,15 @@ export function WorkerPage({ id }: { id: string }) {
   const run = async (fn: () => Promise<unknown>, after?: () => void) => {
     setBusy(true);
     setErr(null);
+    setFieldErr(null);
     setMsg(null);
     setSavedWhere(null);
     try {
       await fn();
       after?.();
     } catch (e) {
-      setErr(errorText(e));
+      if (e instanceof ApiError && e.field && SETTING_FIELDS.includes(e.field)) setFieldErr({ field: e.field, message: e.message });
+      else setErr(errorText(e));
     } finally {
       setBusy(false);
     }
@@ -230,6 +237,7 @@ export function WorkerPage({ id }: { id: string }) {
               value={form.slots}
               onChange={(e) => setForm({ ...form, slots: Number(e.target.value) })}
             />
+            {fieldErr?.field === "slots" && <p className="bad" role="alert">{fieldErr.message}</p>}
           </div>
           <div className="field">
             <label className="lbl" htmlFor="w-gpu">Graphics slots</label>
@@ -243,6 +251,7 @@ export function WorkerPage({ id }: { id: string }) {
               onChange={(e) => setForm({ ...form, gpuSlots: Number(e.target.value) })}
               disabled={!w.gpu}
             />
+            {fieldErr?.field === "gpuSlots" && <p className="bad" role="alert">{fieldErr.message}</p>}
             {w.gpu ? (
               <div className="hint">
                 <span className="mono">{w.gpu.name}</span>
@@ -284,6 +293,7 @@ export function WorkerPage({ id }: { id: string }) {
                 <div className="hint">From later than To runs overnight, such as 22:00 to 06:00.</div>
               </>
             )}
+            {fieldErr?.field === "hours" && <p className="bad" role="alert">{fieldErr.message}</p>}
           </div>
           <div className="field">
             <label className="lbl" htmlFor="w-enc">Graphics card or processor</label>
@@ -295,6 +305,7 @@ export function WorkerPage({ id }: { id: string }) {
             <div className="row">
               <button type="button" className="btn sm" onClick={testEncoders} disabled={busy}>Test the encoders</button>
             </div>
+            {fieldErr?.field === "primaryEncoder" && <p className="bad" role="alert">{fieldErr.message}</p>}
           </div>
           <div className="row" style={{ justifyContent: "flex-end" }}>
             {savedWhere === "settings" && <span className="muted sm" role="status">Saved.</span>}

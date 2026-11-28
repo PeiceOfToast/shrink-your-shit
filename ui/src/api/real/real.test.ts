@@ -5,6 +5,7 @@ import { request } from "../http.ts";
 import { ApiError } from "../errors.ts";
 import { convertAgain, getJobNeighbours, getJobs, runJobsAction } from "./jobs.ts";
 import { getLibraries, createLibrary, patchLibrary, deleteLibrary } from "./libraries.ts";
+import { getWorkers, getWorker, patchWorker, pauseWorker, resumeWorker, removeWorker, createPairing, waitForJoinRequest, allowJoinRequest, denyJoinRequest, testWorkerPath, waitForPathTest, testEncoders, drainAllWorkers, startAllWorkers } from "./workers.ts";
 import { getSettings, patchSettings } from "./settings.ts";
 import { getTrash, restoreTrash } from "./trash.ts";
 import { getAttention, getOverview } from "./overview.ts";
@@ -237,4 +238,50 @@ test("removing a library sends DELETE and returns ok", async () => {
   assert.deepEqual(await deleteLibrary("2"), { ok: true });
   assert.equal(calls[0].url, "/api/v2/libraries/2");
   assert.equal(calls[0].init.method, "DELETE");
+});
+
+test("the workers list and one worker are GETs of their paths", async () => {
+  const calls = stub(200, "[]");
+  assert.deepEqual(await getWorkers(), []);
+  assert.equal(calls[0].url, "/api/v2/workers");
+  assert.equal(calls[0].init.method, "GET");
+  stub(200, "{}");
+  await getWorker("local");
+});
+
+test("saving a worker's settings sends PATCH with only the changed fields, and returns the worker", async () => {
+  const calls = stub(200, JSON.stringify({ id: "local", slots: 2 }));
+  const out = await patchWorker("local", { slots: 2, hours: { from: "22:00", to: "06:00" } });
+  assert.equal(calls[0].url, "/api/v2/workers/local");
+  assert.equal(calls[0].init.method, "PATCH");
+  assert.deepEqual(JSON.parse(String(calls[0].init.body)), { slots: 2, hours: { from: "22:00", to: "06:00" } });
+  assert.equal(out.slots, 2);
+});
+
+test("a worker setting the server refuses shows the server's sentence on its field", async () => {
+  stub(400, JSON.stringify({ error: { code: "invalid_setting", message: "Files at once is at least 1.", field: "slots" } }));
+  await assert.rejects(patchWorker("local", { slots: 0 }), (e: unknown) =>
+    e instanceof ApiError && e.code === "invalid_setting" && e.field === "slots" && e.message === "Files at once is at least 1.");
+});
+
+test("worker actions the server has no route for say so, and send nothing", async () => {
+  const cases: [string, () => Promise<unknown>, string][] = [
+    ["pause", () => pauseWorker("local", false), "Pausing a worker isn't connected yet."],
+    ["resume", () => resumeWorker("local"), "Resuming a worker isn't connected yet."],
+    ["remove", () => removeWorker("local"), "Removing a worker isn't connected yet."],
+    ["pairing", () => createPairing(), "Adding a worker isn't connected yet."],
+    ["join wait", () => waitForJoinRequest("p1"), "Adding a worker isn't connected yet."],
+    ["join allow", () => allowJoinRequest("r1"), "Adding a worker isn't connected yet."],
+    ["join deny", () => denyJoinRequest("r1"), "Adding a worker isn't connected yet."],
+    ["folder test", () => testWorkerPath("local", "1"), "Testing a worker's folder isn't connected yet."],
+    ["folder test wait", () => waitForPathTest("local", "1"), "Testing a worker's folder isn't connected yet."],
+    ["encoder test", () => testEncoders("local"), "Testing the encoders isn't connected yet."],
+    ["pause all", () => drainAllWorkers(), "Pausing all workers isn't connected yet."],
+    ["start all", () => startAllWorkers(), "Starting all workers isn't connected yet."],
+  ];
+  for (const [name, call, message] of cases) {
+    const calls = stub(200, "{}");
+    await assert.rejects(call(), { code: "not_yet", message }, name);
+    assert.equal(calls.length, 0, name);
+  }
 });
