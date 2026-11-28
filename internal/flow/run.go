@@ -198,7 +198,9 @@ func (e *engine) run(ctx context.Context) (res Result) {
 		// A subtitle file name taken already stops the run now, before anything is written: the
 		// person moves or renames that file and retries (L-AUD-25).
 		for _, x := range extracts {
-			if p := encode.SrtName(plan.Output, x.Part); exists(p) {
+			// A replace may write over a subtitle file of ours: it is trashed before it is placed (below). Any other
+			// file of that name still refuses, as it always has.
+			if p := encode.SrtName(plan.Output, x.Part); exists(p) && !(e.replace && e.ownSubtitle(p)) {
 				return Result{Outcome: OutcomeFatal, Reason: "save.srt_exists", Message: srtTaken(p),
 					FailedStep: "save", NextAction: "retry"}
 			}
@@ -317,6 +319,11 @@ func (e *engine) run(ctx context.Context) (res Result) {
 	// leaves one of ours unaccounted for (L-AUD-25).
 	if res = ctxStop(ctx); res.Outcome != "" {
 		return res
+	}
+	if e.replace {
+		if res = e.trashOwnSubtitles(plan, extracts); res.Outcome != "" {
+			return res
+		}
 	}
 	sidecars, res := e.placeSidecars(plan, extracts, staged)
 	if res.Outcome != "" {
@@ -982,6 +989,54 @@ func fatal(code, message, step, next string) Result {
 func ctxStop(ctx context.Context) Result {
 	if ctx.Err() != nil {
 		return cancelled()
+	}
+	return Result{}
+}
+
+// ownSubtitle reports whether a file at path is a subtitle file this app recorded (ours). A store that cannot say
+// refuses the check, so the file is not treated as ours.
+func (e *engine) ownSubtitle(path string) bool {
+	if e.env.Sidecars == nil {
+		return false
+	}
+	recs, err := e.env.Sidecars.Sidecars()
+	if err != nil {
+		return false
+	}
+	for _, c := range recs {
+		if c.Path == path {
+			return true
+		}
+	}
+	return false
+}
+
+// trashOwnSubtitles moves an earlier subtitle file of ours that a replace would write over into the library's trash
+// and forgets its record, so the new file's subtitles can take the name. Nothing is deleted (review of S2-10b).
+func (e *engine) trashOwnSubtitles(plan encode.Plan, extracts []encode.StreamPlan) Result {
+	if e.env.Sidecars == nil {
+		return Result{}
+	}
+	recs, err := e.env.Sidecars.Sidecars()
+	if err != nil {
+		return fatal("subtitle.record_failed", "The subtitle records could not be read, so nothing was changed. ("+err.Error()+")", "save", "retry")
+	}
+	for _, x := range extracts {
+		p := encode.SrtName(plan.Output, x.Part)
+		if !exists(p) {
+			continue
+		}
+		for _, c := range recs {
+			if c.Path != p {
+				continue
+			}
+			if _, err := safety.TrashSidecar(filepath.Dir(p), c.JobID, p); err != nil {
+				return fatal("replace.subtitle_trash_failed",
+					"An earlier subtitle file of this app could not be moved to the trash, so nothing was changed. ("+err.Error()+")",
+					"save", "retry")
+			}
+			_ = e.env.Sidecars.DropSidecar(c.JobID, p)
+		}
 	}
 	return Result{}
 }

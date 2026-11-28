@@ -4,6 +4,8 @@ package flow_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -192,5 +194,65 @@ func TestRunReplaceRecordUnsettledKeepsTheSubtitles(t *testing.T) {
 	}
 	if len(journal.finished) != 1 || journal.finished[0] != 42 {
 		t.Errorf("finished = %v, want the job finished", journal.finished)
+	}
+}
+
+// TestRunReplaceTrashesAnEarlierSubtitleOfOurs: a subtitle file of ours that the replace would write over is moved to
+// the trash, the new subtitles take its name, and its record is dropped (the .srt rule of S2-10b).
+func TestRunReplaceTrashesAnEarlierSubtitleOfOurs(t *testing.T) {
+	root, src, info, rev := srtRun(t)
+	rev = setReplace(t, rev)
+	earlier := filepath.Join(root, "clip.eng.srt")
+	if err := os.WriteFile(earlier, []byte("EDITED-BY-HAND"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte("EARLIER"))
+	journal := &fakeJournal{recs: []safety.Sidecar{{JobID: 7, Path: earlier, Bytes: 7, Hash: hex.EncodeToString(sum[:])}}}
+	m := &srtWriting{Media: &fake.Media{Probes: map[string]media.Info{src: info}}}
+	sf := &fakeSafety{verify: safety.Verdict{OK: true}}
+	env := newEnv(m, sf, &recorder{}, rev, nil)
+	env.Replacer = &fakeReplacer{}
+	env.Sidecars = journal
+	res := flow.Run(context.Background(), runInput(t, root, src), env)
+	if res.Outcome != flow.OutcomeSmaller {
+		t.Fatalf("result = %+v, want smaller", res)
+	}
+	if b, err := os.ReadFile(filepath.Join(root, ".syp-trash", "clip.eng.7.srt")); err != nil || string(b) != "EDITED-BY-HAND" {
+		t.Errorf("the earlier subtitle in the trash = %q (%v), want it kept there", b, err)
+	}
+	if b, err := os.ReadFile(earlier); err != nil || string(b) == "EDITED-BY-HAND" {
+		t.Errorf("clip.eng.srt = %q (%v), want the new subtitles at its name", b, err)
+	}
+	found := false
+	for _, p := range journal.dropped {
+		if p == earlier {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("dropped = %v, want the earlier record dropped", journal.dropped)
+	}
+}
+
+// TestRunReplaceRefusesAForeignSubtitle: a subtitle file with no record of ours is never moved or replaced; the run
+// refuses with save.srt_exists, as before.
+func TestRunReplaceRefusesAForeignSubtitle(t *testing.T) {
+	root, src, info, rev := srtRun(t)
+	rev = setReplace(t, rev)
+	foreign := filepath.Join(root, "clip.eng.srt")
+	if err := os.WriteFile(foreign, []byte("SOMEONE ELSE"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := &srtWriting{Media: &fake.Media{Probes: map[string]media.Info{src: info}}}
+	sf := &fakeSafety{verify: safety.Verdict{OK: true}}
+	env := newEnv(m, sf, &recorder{}, rev, nil)
+	env.Replacer = &fakeReplacer{}
+	env.Sidecars = &fakeJournal{}
+	res := flow.Run(context.Background(), runInput(t, root, src), env)
+	if res.Outcome != flow.OutcomeFatal || res.Reason != "save.srt_exists" {
+		t.Fatalf("result = %+v, want the taken-name refusal", res)
+	}
+	if b, _ := os.ReadFile(foreign); string(b) != "SOMEONE ELSE" {
+		t.Errorf("the foreign subtitle = %q, want it untouched", b)
 	}
 }
