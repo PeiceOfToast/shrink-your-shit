@@ -155,6 +155,7 @@ func TestAttentionGroupsFailedJobsIntoOneRow(t *testing.T) {
 // keeps the warn tone. Each source is a row of its own, and an event older than the window is not in it.
 func TestAttentionLevelIsTheHighestInTheGroup(t *testing.T) {
 	e := newEnv(t, true)
+	useWallClock(e)
 	cookie := e.setup()
 	now := time.Now().Truncate(time.Second)
 	for _, ev := range []events.Event{
