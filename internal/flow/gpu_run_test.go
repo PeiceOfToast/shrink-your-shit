@@ -15,6 +15,7 @@ import (
 	"github.com/PeiceOfToast/shrink-your-shit/internal/encode"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/events"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/flow"
+	"github.com/PeiceOfToast/shrink-your-shit/internal/hw"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/media"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/media/fake"
 	"github.com/PeiceOfToast/shrink-your-shit/internal/safety"
@@ -45,6 +46,16 @@ func pickRungs(rungs ...encode.Rung) func(flow.Want) (flow.Attempt, error) {
 // pickReason is a picker that offers no card and says why.
 func pickReason(reason string) func(flow.Want) (flow.Attempt, error) {
 	return func(flow.Want) (flow.Attempt, error) { return flow.Attempt{Reason: reason}, nil }
+}
+
+// qsvPicker is the real worker's picker over a detected card that passed its tests: whether a job is
+// offered the card is hw.Pick's decision, not the test's.
+func qsvPicker() func(flow.Want) (flow.Attempt, error) {
+	ans := hw.Answer{Devices: []hw.DeviceRecord{{
+		Candidate: hw.Candidate{Encoder: "hevc_qsv", Family: encode.FamilyQSV, Codec: "hevc"},
+		Decode:    true, Scale: true,
+	}}}
+	return func(w flow.Want) (flow.Attempt, error) { return flow.PickFromAnswer(ans, w), nil }
 }
 
 // failRun is an encode that ended with these key lines. `has no usable` etc. are left to the
@@ -422,6 +433,91 @@ func TestACardRungBuildRefusesIsSkipped(t *testing.T) {
 	}
 	if got := strings.Join(said(bus, events.KindWarning), "\n"); !strings.Contains(got, "cannot run this file") {
 		t.Errorf("warnings = %q, want the note about the skipped rung", got)
+	}
+}
+
+// TestABitrateJobConvertsOnTheProcessor: a set bitrate is not built for the card encoders yet
+// (L-HW-10), so the picker refuses the card and the processor converts the file. This must not fail
+// the job: the processor is the encoder that honours the number the person chose (B1, #880).
+func TestABitrateJobConvertsOnTheProcessor(t *testing.T) {
+	vbr := `{"format":"hevc","quality":3,"useGpu":true,"ifGpuFails":"cpu","rateControl":"vbr","bitrateLevel":"custom","avgMbps":4,"maxMbps":6}`
+	res, m, _, bus := ladderRun(t, vbr, qsvPicker(), []fake.RunScript{{}})
+	if res.Outcome != flow.OutcomeSmaller {
+		t.Fatalf("outcome = %q (%s: %s), want the processor to convert it", res.Outcome, res.Reason, res.Message)
+	}
+	if n := len(m.Argvs()); n != 1 || !strings.Contains(strings.Join(m.Argvs()[0], " "), "libx265") {
+		t.Fatalf("ran %v, want one encode on the processor", m.Argvs())
+	}
+	want := "Converting on the processor: a set bitrate isn't built for the graphics card yet."
+	if got := said(bus, events.KindWarning); len(got) != 1 || got[0] != want {
+		t.Errorf("warnings = %q, want %q", got, want)
+	}
+}
+
+// TestABitrateJobStopsWhenTheStepDoes: the same bitrate under ifGpuFails: stop stops with the plain
+// reason and leaves the original alone, rather than failing with plan wording (B1, #880).
+func TestABitrateJobStopsWhenTheStepDoes(t *testing.T) {
+	vbrStop := `{"format":"hevc","quality":3,"useGpu":true,"ifGpuFails":"stop","rateControl":"vbr","bitrateLevel":"custom","avgMbps":4,"maxMbps":6}`
+	res, m, sf, _ := ladderRun(t, vbrStop, qsvPicker(), nil)
+	if res.Outcome != flow.OutcomeFatal || res.Reason != "encode.gpu_unavailable" {
+		t.Fatalf("result = %+v, want the no-card stop", res)
+	}
+	want := "No graphics card can convert this file: a set bitrate isn't built for the graphics card yet. " +
+		"This step stops instead of using the processor, so the original was left as it is."
+	if res.Message != want {
+		t.Errorf("message = %q, want %q", res.Message, want)
+	}
+	if n := len(m.Argvs()); n != 0 {
+		t.Errorf("ran %d encodes, want none", n)
+	}
+	if sf.placedTo != "" {
+		t.Errorf("placed the new file at %q; want the original left as it is", sf.placedTo)
+	}
+}
+
+// TestACardRungBuildHasNoFlagsForFallsBack: the picker refuses a set bitrate, but a card rung that
+// still reaches Build is the ladder's safety net: it is skipped with a note, never fatal.
+func TestACardRungBuildHasNoFlagsForFallsBack(t *testing.T) {
+	vbr := `{"format":"hevc","quality":3,"useGpu":true,"ifGpuFails":"cpu","rateControl":"vbr","bitrateLevel":"custom","avgMbps":4,"maxMbps":6}`
+	res, m, _, bus := ladderRun(t, vbr, pickRungs(hybridRung()), []fake.RunScript{{}})
+	if res.Outcome != flow.OutcomeSmaller {
+		t.Fatalf("outcome = %q (%s: %s), want the processor to convert it", res.Outcome, res.Reason, res.Message)
+	}
+	if n := len(m.Argvs()); n != 1 || !strings.Contains(strings.Join(m.Argvs()[0], " "), "libx265") {
+		t.Fatalf("ran %v, want one encode on the processor", m.Argvs())
+	}
+	want := "The graphics card's hevc_qsv cannot do this yet (a bitrate on a qsv card); the next rung converts it."
+	if got := said(bus, events.KindWarning); len(got) != 1 || got[0] != want {
+		t.Errorf("warnings = %q, want %q", got, want)
+	}
+}
+
+// TestStopModeWithoutAPickerSaysThereIsNoCard: a worker with no detector at all is the same answer
+// as one whose picker found no card, not the generic "no encoder could convert" (N2, #880).
+func TestStopModeWithoutAPickerSaysThereIsNoCard(t *testing.T) {
+	root, src, info := libraryFile(t, "clip.mkv", "h264")
+	wantPath := filepath.Join(root, "clip-shrunk.mkv")
+	m := &fake.Media{Probes: map[string]media.Info{src: info, wantPath: info}}
+	sf := &fakeSafety{verify: safety.Verdict{OK: true}}
+	bus := &recorder{}
+	rev := starterFlow(t)
+	rev.Steps[0].Settings = json.RawMessage(`{"format":"hevc","quality":3,"useGpu":true,"ifGpuFails":"stop"}`)
+	env := newEnv(m, sf, bus, rev, &bytes.Buffer{})
+	env.Pick = nil // a worker whose detector could not be built
+	res := flow.Run(context.Background(), runInput(t, root, src), env)
+	if res.Outcome != flow.OutcomeFatal || res.Reason != "encode.gpu_unavailable" {
+		t.Fatalf("result = %+v, want the no-card stop", res)
+	}
+	want := "No graphics card can convert this file: no graphics card detector is running. " +
+		"This step stops instead of using the processor, so the original was left as it is."
+	if res.Message != want {
+		t.Errorf("message = %q, want %q", res.Message, want)
+	}
+	if n := len(m.Argvs()); n != 0 {
+		t.Errorf("ran %d encodes, want none", n)
+	}
+	if sf.placedTo != "" {
+		t.Errorf("placed the new file at %q; want the original left as it is", sf.placedTo)
 	}
 }
 

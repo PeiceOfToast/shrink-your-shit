@@ -31,6 +31,10 @@ type Want struct {
 	// FullOK is true when nothing in the plan needs the processor's frames: no frame-rate change,
 	// no tone map, no bit-depth change.
 	FullOK bool
+	// Bitrate is true when the plan carries a set bitrate rather than a quality slider. The card
+	// encoders cannot follow one yet (L-HW-10 is quality-only), so such a job converts on the
+	// processor.
+	Bitrate bool
 }
 
 // Attempt is a picker's answer: the rungs to try in order (L-HW-5), the line the job log shows for

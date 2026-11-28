@@ -19,6 +19,9 @@ type Need struct {
 	// tone map, and no bit-depth change. Whether the full pipeline is offered also waits on the card
 	// probe's decode and scale (L-HW-11).
 	FullOK bool
+	// Bitrate is true when the plan carries a set bitrate. The card families' bitrate flags are not
+	// part of this stage (L-HW-10 is quality-only), so no card can take such a job.
+	Bitrate bool
 }
 
 // Attempt is the rungs to try for one job, in order (L-HW-5), with the line the job log shows for the
@@ -50,8 +53,14 @@ func ProductName(f encode.Family) string {
 // probe wrote for the encoders it found (L-HW-9). A card rung is offered only for a test the card
 // passed: its codec's test encode, its ten-bit encode when the output is ten-bit, its HDR probe when
 // the source's mastering data must survive, and, for the full pipeline, a decode and scale that both
-// passed (L-HW-11).
+// passed (L-HW-11). A job with a set bitrate is never offered a card rung: that is what the processor
+// is for until the card families' bitrate flags arrive (L-HW-10).
 func Pick(inv Inventory, devices []DeviceRecord, need Need) Attempt {
+	if need.Bitrate {
+		// L-HW-10 is quality-only for now: the card encoders cannot follow a set bitrate, and the
+		// processor honours the number the person chose.
+		return Attempt{Reason: "a set bitrate isn't built for the graphics card yet"}
+	}
 	var failed []string
 	for _, d := range devices {
 		if d.Codec != string(need.Codec) {

@@ -46,6 +46,24 @@ func available(d DeviceRecord) Verdict {
 	return Verdict{Candidate: d.Candidate, Available: true}
 }
 
+// A set bitrate is not built for the cards yet (L-HW-10), so no card is offered for it whatever its
+// probes passed; the processor is the encoder that honours the chosen number (B1, #880).
+func TestPickRefusesTheCardForABitrate(t *testing.T) {
+	d := device(encode.FamilyQSV, "hevc", nil)
+	got := Pick(Inventory{Verdicts: []Verdict{available(d)}}, []DeviceRecord{d}, Need{Codec: encode.CodecHEVC, FullOK: true, Bitrate: true})
+	if len(got.Rungs) != 0 || got.Line != "" {
+		t.Fatalf("Pick(bitrate) = %+v, want no card rungs", got)
+	}
+	if got.Reason != "a set bitrate isn't built for the graphics card yet" {
+		t.Errorf("reason = %q, want the bitrate sentence", got.Reason)
+	}
+	// The same card is still offered without the bitrate: the refusal is the plan's, not the card's.
+	plain := Pick(Inventory{Verdicts: []Verdict{available(d)}}, []DeviceRecord{d}, Need{Codec: encode.CodecHEVC, FullOK: true})
+	if len(plain.Rungs) == 0 {
+		t.Error("Pick(no bitrate) offered no rungs; want the card")
+	}
+}
+
 // The full pipeline is offered only for a card whose decode and scale both passed (L-HW-11, the
 // lead's 11-28 ruling on #872).
 func TestPickFullPipelineOnlyWhenDecodeAndScalePassed(t *testing.T) {
