@@ -179,3 +179,10 @@ test("the system log page builds its lines with showLines (a source check)", asy
   assert.match(src, /showLines\(\[\.\.\.older, \.\.\.base\], live\)/);
 });
 
+test("an older live fold does not replace a newer fold the page already holds", () => {
+  // A reload holds the fold at seq 6 (count 4); a late live fold of the same run is seq 5 (count 3) and must not win.
+  const newer = liveEv(6, "2026-11-28T07:00:15Z", "sign-in refused", { count: 4, firstAt: "2026-11-28T07:00:00Z", lastAt: "2026-11-28T07:00:15Z" });
+  const older = liveEv(5, "2026-11-28T07:00:12Z", "sign-in refused", { count: 3, firstAt: "2026-11-28T07:00:00Z", lastAt: "2026-11-28T07:00:12Z" });
+  assert.deepEqual(showLines([newer], [older]), [newer]);
+});
+

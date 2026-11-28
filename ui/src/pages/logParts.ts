@@ -62,7 +62,8 @@ export function addLiveLine(lines: LogEvent[], e: LogEvent): LogEvent[] {
     const at = lines.findIndex(
       (l) => l.seq !== e.seq && l.message === e.message && l.source === e.source && (l.ts === e.repeat!.firstAt || l.repeat?.firstAt === e.repeat!.firstAt),
     );
-    if (at >= 0) return lines.map((l, i) => (i === at ? e : l));
+    // A late live fold of the same run is older than a fold the page already holds: the newer one stays.
+    if (at >= 0) return lines[at].seq > e.seq ? lines : lines.map((l, i) => (i === at ? e : l));
   }
   return [...lines, e];
 }
