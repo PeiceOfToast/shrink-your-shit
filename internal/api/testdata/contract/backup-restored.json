@@ -1,6 +1,12 @@
 {
   "body": {
-    "keptNotInBackup": [],
+    "keptNotInBackup": [
+      {
+        "id": "7",
+        "name": "Kept library",
+        "type": "library"
+      }
+    ],
     "restored": {
       "connections": 0,
       "jobs": 0,

@@ -579,7 +579,7 @@ export interface BackupPreview {
   previewId: string;
   createdAt: string;
   appVersion: string;
-  contents: { settings: boolean; workflows: number; libraries: number; shares: number; connections: number; jobs: number };
+  contents: BackupContents;
   warnings: string[];
 }
 
@@ -602,7 +602,7 @@ export interface BackupContents {
 // A library or workflow the live set-up has and the backup does not. A restore keeps it and lists it.
 export interface BackupKept {
   type: "library" | "workflow";
-  id: number;
+  id: string;
   name: string;
 }
 

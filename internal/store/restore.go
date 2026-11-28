@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -41,7 +42,7 @@ type Contents struct {
 // Kept is a library or workflow the live set-up has and the backup does not. It is kept, and listed.
 type Kept struct {
 	Type string `json:"type"`
-	ID   int64  `json:"id"`
+	ID   string `json:"id"`
 	Name string `json:"name"`
 }
 
@@ -297,10 +298,12 @@ func keptRows(ctx context.Context, tx *sql.Tx, table, typ string) ([]Kept, error
 	defer rows.Close()
 	var out []Kept
 	for rows.Next() {
+		var id int64
 		var k Kept
-		if err := rows.Scan(&k.ID, &k.Name); err != nil {
+		if err := rows.Scan(&id, &k.Name); err != nil {
 			return nil, err
 		}
+		k.ID = strconv.FormatInt(id, 10)
 		k.Type = typ
 		out = append(out, k)
 	}

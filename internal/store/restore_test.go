@@ -105,7 +105,7 @@ func TestRestoreBringsBackTheSetUpAndKeepsWhatTheBackupLacks(t *testing.T) {
 	if !rep.Restored.Settings || rep.Restored.Libraries != 1 {
 		t.Errorf("restored = %+v", rep.Restored)
 	}
-	if len(rep.KeptNotInBackup) != 1 || rep.KeptNotInBackup[0].ID != 2 || rep.KeptNotInBackup[0].Type != "library" {
+	if len(rep.KeptNotInBackup) != 1 || rep.KeptNotInBackup[0].ID != "2" || rep.KeptNotInBackup[0].Type != "library" {
 		t.Errorf("kept = %+v, want library 2 listed", rep.KeptNotInBackup)
 	}
 	if got := libraryNameOf(t, db, 2); got != "Live only" {
