@@ -155,12 +155,31 @@ func TestOverviewTrashFromTheJournal(t *testing.T) {
 	}
 }
 
-// The contract golden for ui-shop's Dashboard: the shape of an empty install's overview (S3-8a).
+// The contract golden for ui-shop's Dashboard: the shape of an empty install's overview (S3-8a). The clock is fixed at
+// local noon so the golden's day labels are the same on every day and in every time zone; otherwise every test run
+// after midnight rewrites it and the merge gate's clean-status check fails.
 func TestContractOverview(t *testing.T) {
 	e := newEnv(t, true)
 	cookie := e.setup().String()
+	d := e.deps()
+	d.Now = func() time.Time { return time.Date(2026, 11, 27, 12, 0, 0, 0, time.Local) }
+	e.srv.Ready(d)
 	rec := e.do(http.MethodGet, "/api/v2/overview", "", map[string]string{"Cookie": cookie}, false)
 	writeGolden(t, "overview", "Overview", http.MethodGet, "/api/v2/overview", rec)
+}
+
+// TestOverviewReadsTheServerClock: the overview's days come from the server's clock, not the wall clock, so a test can
+// fix it and the same request gives the same days on any day.
+func TestOverviewReadsTheServerClock(t *testing.T) {
+	e := newEnv(t, true)
+	cookie := e.setup().String()
+	d := e.deps()
+	d.Now = func() time.Time { return time.Date(2026, 3, 15, 12, 0, 0, 0, time.Local) }
+	e.srv.Ready(d)
+	days := overviewOf(t, e, cookie)["series"].(map[string]any)["days"].([]any)
+	if last := days[len(days)-1].(map[string]any)["day"]; last != "2026-03-15" {
+		t.Errorf("last series day = %v, want 2026-03-15 (the server clock's day)", last)
+	}
 }
 
 // #894 review: perDay is a whole number; 1 done in seven days is 0, 4 is 1.

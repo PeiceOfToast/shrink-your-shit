@@ -29,6 +29,14 @@
     "series": {
       "days": [
         {
+          "day": "2026-10-29",
+          "done": null,
+          "failed": null,
+          "freedBytes": null,
+          "skipped": null,
+          "trashBytes": null
+        },
+        {
           "day": "2026-10-30",
           "done": null,
           "failed": null,
@@ -254,14 +262,6 @@
         },
         {
           "day": "2026-11-27",
-          "done": null,
-          "failed": null,
-          "freedBytes": null,
-          "skipped": null,
-          "trashBytes": null
-        },
-        {
-          "day": "2026-11-28",
           "done": null,
           "failed": null,
           "freedBytes": null,

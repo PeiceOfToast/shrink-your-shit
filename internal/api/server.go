@@ -57,6 +57,17 @@ type Deps struct {
 	// Try is flow.Try with the real media and safety behind it (S2-5): the flow run on one file,
 	// bounded, with nothing kept. A test swaps in a double.
 	Try func(ctx context.Context, f flow.Flow, file string) (flow.TryResult, error)
+	// Now is the server's clock, for the answers that name a day or a window. nil means time.Now; a test
+	// fixes it so a golden that names days is the same on every day.
+	Now func() time.Time
+}
+
+// now is the clock the routes read: the wired clock, or time.Now when the server has none.
+func (s *Server) now(rs *Deps) time.Time {
+	if rs != nil && rs.Now != nil {
+		return rs.Now()
+	}
+	return time.Now()
 }
 
 // Workflows is flow.Store as the api uses it.
