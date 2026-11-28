@@ -262,3 +262,11 @@ test("the page shows the Load older button through showLoadOlder (a revert to th
   assert.doesNotMatch(src, /base\.length >= api\.LOG_PAGE_SIZE/);
 });
 
+test("Load older pages by the paging cursor, not the first row's seq (a fold's seq is its newest line)", () => {
+  const src = readFileSync(new URL("./SystemLog.tsx", import.meta.url), "utf8");
+  assert.match(src, /const before = pagingCursor\(olderCursor, log\.data\?\.nextBefore\);/);
+  assert.match(src, /api\.getLog\(\{ \.\.\.paramsFor\(\), before, limit: api\.LOG_PAGE_SIZE \}\)/);
+  assert.doesNotMatch(src, /before: oldest/);
+  assert.doesNotMatch(src, /items\[0\]\?\.seq;\s*if \(oldest/);
+});
+
