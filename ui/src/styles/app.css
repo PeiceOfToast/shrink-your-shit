@@ -88,6 +88,8 @@ pre.cmd{margin:8px 0 14px;padding:12px 14px;border:1px solid var(--border);borde
 .librow-field .inp::placeholder{font-family:var(--sans)}
 /* A disabled button shows as disabled: the page's own background, muted text and border, no opacity. */
 .btn:disabled,.btn.dis{cursor:not-allowed;background:var(--bg);color:var(--strong);border-color:var(--border)}
+/* A disabled field shows as disabled, the same way as a button: the page's background, muted text and border. */
+.inp:disabled,.sel:disabled{cursor:not-allowed;background:var(--bg);color:var(--text2);border-color:var(--border)}
 .librow-act{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .librow-msg{grid-column:2;font-size:13px}
 .librow-msg span{display:block}

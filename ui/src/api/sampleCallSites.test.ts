@@ -10,9 +10,9 @@ test("SampleBanner shows only when sampleOnly says so (not inverted)", () => {
   assert.match(src("../ui/SampleBanner.tsx"), /if \(!sampleOnly\(group\)\) return null;/);
 });
 
-test("Workers, a worker, and System log are the Not built yet placeholder while sample data is shown", () => {
+test("Workers and a worker are the Not built yet placeholder while the workers group is off; System log while sample data is shown", () => {
   const app = src("../app.tsx");
-  assert.equal((app.match(/sampleOnly\(\) \? <Placeholder title="Workers"/g) ?? []).length, 2);
+  assert.equal((app.match(/sampleOnly\("workers"\) \? <Placeholder title="Workers"/g) ?? []).length, 2);
   assert.match(app, /sampleOnly\(\) \? <Placeholder title="System log"/);
 });
 

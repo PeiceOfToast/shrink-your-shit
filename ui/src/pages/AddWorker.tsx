@@ -65,7 +65,12 @@ export function AddWorker({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="ovb">
-          {pair.error && !pair.data && <p className="bad">Can't create the command. <button type="button" className="btn ghost sm" onClick={pair.reload}>Try now</button></p>}
+          {pair.error && !pair.data && (pair.code === "not_yet" ? (
+            // The server has no route for adding a worker yet: say so, and offer no retry that cannot succeed.
+            <p className="bad">{pair.error}</p>
+          ) : (
+            <p className="bad">Can't create the command. <button type="button" className="btn ghost sm" onClick={pair.reload}>Try now</button></p>
+          ))}
           {pair.loading && !pair.data && <span className="skel" style={{ height: 80 }} />}
           {pair.data && (
             <>
