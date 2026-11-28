@@ -104,7 +104,7 @@ func wantInvalid(t *testing.T, e *env, path, field string) {
 
 // The list is app-wide only, oldest first (the newest page, new lines last), with the counts for the whole filter; a job
 // line is not in it.
-func TestLogListsAppLinesNewestFirstWithCounts(t *testing.T) {
+func TestLogListsAppLinesOldestFirstWithCounts(t *testing.T) {
 	e := newEnv(t, true)
 	seedLog(t, e,
 		events.Event{Source: "Scanner", Level: events.LevelInfo, Message: "scan started", TS: logT0},
