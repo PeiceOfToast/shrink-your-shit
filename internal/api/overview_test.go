@@ -81,6 +81,7 @@ func wireJobs(t *testing.T, e *env) {
 // Seeded jobs: all-time and today's savings, the 24-hour counts, the failed percent, and a running job.
 func TestOverviewCountsFromTheJobRows(t *testing.T) {
 	e := newEnv(t, true)
+	useWallClock(e)
 	cookie := e.setup().String()
 	wireJobs(t, e)
 	now := time.Now()
@@ -114,6 +115,7 @@ func TestOverviewCountsFromTheJobRows(t *testing.T) {
 // Local day: a job that finished a minute before local midnight counts toward yesterday, not today.
 func TestOverviewLocalDayBoundary(t *testing.T) {
 	e := newEnv(t, true)
+	useWallClock(e)
 	cookie := e.setup().String()
 	midnight := time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day(), 0, 0, 0, 0, time.Local)
 	yesterdayLate := midnight.Add(-time.Minute).UnixMilli()
@@ -185,6 +187,7 @@ func TestOverviewReadsTheServerClock(t *testing.T) {
 // #894 review: perDay is a whole number; 1 done in seven days is 0, 4 is 1.
 func TestOverviewPerDayIsRoundedPerDay(t *testing.T) {
 	e := newEnv(t, true)
+	useWallClock(e)
 	cookie := e.setup().String()
 	now := time.Now().UnixMilli()
 	insertJob(t, e, "done", "smaller", now-20_000, now-10_000, 1000, 500, 1)
@@ -269,6 +272,7 @@ func TestOverviewSavingIsClampedAtZero(t *testing.T) {
 // is in it; one finished just before that midnight is out, even though it is within 168 hours of now.
 func TestOverviewWindowStartsAtLocalMidnightSixDaysBack(t *testing.T) {
 	e := newEnv(t, true)
+	useWallClock(e)
 	cookie := e.setup().String()
 	now := time.Now()
 	start := time.Date(now.Year(), now.Month(), now.Day()-6, 0, 0, 0, 0, time.Local)
@@ -279,4 +283,12 @@ func TestOverviewWindowStartsAtLocalMidnightSixDaysBack(t *testing.T) {
 	if got := num(overviewOf(t, e, cookie), "avgShrink", "pct"); got != 50 {
 		t.Errorf("pct = %v, want 50: only the job inside the local-day window counts", got)
 	}
+}
+
+// useWallClock moves the env's clock to the wall clock, for a test that seeds its rows at time.Now(): the server then
+// reads the same day as the rows (the env's default clock is fixed for the goldens).
+func useWallClock(e *env) {
+	e.clock.mu.Lock()
+	e.clock.now = time.Now()
+	e.clock.mu.Unlock()
 }
