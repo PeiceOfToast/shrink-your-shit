@@ -103,7 +103,7 @@ func (s *Server) getOverview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	now := time.Now()
+	now := rs.now()
 	nowMS := now.UnixMilli()
 	todayStr := now.In(time.Local).Format("2006-01-02")
 	rows, err := finishedRows(ctx, rs.DB)
