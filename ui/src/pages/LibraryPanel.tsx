@@ -151,7 +151,7 @@ export function LibraryPanel({ id, onChange }: { id: string; onChange?: () => vo
         </div>
 
         <div className="ovb">
-          <SampleBanner text="the workflow preview and reconnecting a share aren't connected yet." />
+          <SampleBanner text="reconnecting a share isn't connected yet." />
           {err && <p className="err" role="alert">{err}</p>}
           {lib.error && !L && (
             <p className="bad">
@@ -220,6 +220,7 @@ export function LibraryPanel({ id, onChange }: { id: string; onChange?: () => vo
                     With this workflow: {formatCount(prev.data.wouldConvert)} of {formatCount(prev.data.total)} would be converted
                   </span>
                 )}
+                {prev.error && <span className="hint">Couldn&apos;t work out the preview: {prev.error}</span>}
                 <div className="row">
                   {form.workflowId && <Link to={`/workflows/${form.workflowId}`}>Edit this workflow</Link>}
                   <Link to="/workflows/new">New workflow</Link>

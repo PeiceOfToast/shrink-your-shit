@@ -22,9 +22,9 @@ export const WORKFLOW_SUMMARY: Record<string, WorkflowSummary["summary"]> = {
 
 // Preview counts per workflow (draft: "702 of 1,108 would be converted (2.4 TB); 406 left alone.").
 export const PREVIEW: Record<string, { wouldConvert: number; total: number; skipped: { reason: string; count: number }[] }> = {
-  "shrink-videos": { wouldConvert: 702, total: 1108, skipped: [{ reason: "under_1_gb_or_sample", count: 406 }] },
-  "keep-surround": { wouldConvert: 737, total: 1108, skipped: [{ reason: "already_hevc", count: 371 }] },
-  "shrink-anime": { wouldConvert: 702, total: 1108, skipped: [{ reason: "under_300_mb_or_opening", count: 406 }] },
+  "shrink-videos": { wouldConvert: 702, total: 1108, skipped: [{ reason: "nothing_to_do", count: 406 }] },
+  "keep-surround": { wouldConvert: 737, total: 1108, skipped: [{ reason: "nothing_to_do", count: 371 }] },
+  "shrink-anime": { wouldConvert: 702, total: 1108, skipped: [{ reason: "nothing_to_do", count: 406 }] },
 };
 
 // The folder browser on this server (a-side-panel.html tree). note is what the draft shows beside the folder.
