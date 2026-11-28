@@ -518,3 +518,27 @@ func TestRecoverReportsAFinishedRestoreWhoseRecordWasNotWritten(t *testing.T) {
 		t.Errorf("state = %s, want rolled_back", stateOf(t, f, id))
 	}
 }
+
+// M3, a different file: the trash path holds another file (another identity), not the original. Recovery leaves the
+// row purged and the file as it is.
+func TestRecoverLeavesAPurgedRowWhoseTrashPathHoldsAnotherFile(t *testing.T) {
+	f, id := doneSwap(t)
+	r, _, _ := f.j.Entry(context.Background(), id)
+	other := []byte("ANOTHER-FILE-NOT-THE-ORIGINAL")
+	if err := os.WriteFile(r.Trash, other, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.j.SetState(context.Background(), id, StatePurged); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Recover(context.Background(), f.j); err != nil {
+		t.Fatal(err)
+	}
+	if stateOf(t, f, id) != StatePurged {
+		t.Errorf("state = %s, want purged: the trash path holds another file", stateOf(t, f, id))
+	}
+	got, err := os.ReadFile(r.Trash)
+	if err != nil || string(got) != string(other) {
+		t.Errorf("the other file at the trash path was touched: %q, %v", got, err)
+	}
+}
